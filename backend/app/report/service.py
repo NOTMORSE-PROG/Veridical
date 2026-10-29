@@ -952,6 +952,10 @@ def _to_escalated_out(
         reason=item.reason,
         review_reason=item.review_reason,
         unverified_evidence=item.unverified_evidence,
+        reason_codes=[
+            code for code in item.detail.get("reason_codes") or [] if isinstance(code, str)
+        ]
+        or None,
         injection_suspected=item.injection_suspected,
         injection_matched_snippet=item.injection_matched_snippet,
         levels=[RubricLevelOut(**lvl) for lvl in item.levels] if item.levels else None,

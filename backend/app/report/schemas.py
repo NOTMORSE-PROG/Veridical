@@ -497,6 +497,9 @@ class EscalatedItemOut(BaseModel):
     # merged into a verified `evidence` list (no real anchor exists for an
     # unverified quote); rendered under its own "could not verify" label.
     unverified_evidence: list[str] | None = None
+    # BUG-515: why the AI left this criterion ungraded, as stable codes
+    # ("evidence_not_located", "evidence_already_used"); None when not recorded.
+    reason_codes: list[str] | None = None
     # BUG-045: True when the batch's document text matched a pattern for
     # language addressed at a grader/system/AI — `review_reason` is already
     # "injection_suspected" in that case, but the UI needs the actual

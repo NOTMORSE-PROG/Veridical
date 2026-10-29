@@ -48,3 +48,23 @@ async def test_a_quote_missing_from_the_source_is_coded_as_not_located():
     )
     assert result.outcome == ResultOutcome.escalated
     assert result.detail["reason_codes"] == ["evidence_not_located"]
+
+
+def test_the_escalated_criterion_card_carries_the_codes():
+    from app.checks.escalation import EscalatedItem
+    from app.report.service import _to_escalated_out
+
+    item = EscalatedItem(
+        check_result_id=1,
+        criterion_id=2,
+        criterion_text="Design",
+        weight=1.0,
+        agreement=0.0,
+        votes=[None, None],
+        reason="Every quoted piece of evidence for this criterion was already used.",
+        detail={"reason_codes": ["evidence_already_used"]},
+        review_reason="low_confidence",
+    )
+    assert _to_escalated_out(item).reason_codes == ["evidence_already_used"]
+    older = EscalatedItem(**{**item.__dict__, "detail": {}})
+    assert _to_escalated_out(older).reason_codes is None

@@ -706,6 +706,8 @@ export interface EscalatedItemOut {
    * picker instead of Pass/Fail. Null/absent for an ordinary pass/fail
    * criterion, unchanged from before this ticket. */
   levels?: RubricLevel[] | null;
+  /** BUG-515: "evidence_not_located" | "evidence_already_used". */
+  reason_codes?: string[] | null;
 }
 
 export type EscalationResolution =
