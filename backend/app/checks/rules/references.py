@@ -8,7 +8,14 @@ from dataclasses import asdict
 
 from app.checks.rules import RuleContext, RuleOutcome, RuleSpec, register_rule
 from app.checks.rules.bounds import Bound, extract_bound
-from app.checks.rules.keywords import contains_any, current_keywords, full_text, load_keywords
+from app.checks.rules.keywords import (
+    claim_text,
+    contains_any,
+    current_keywords,
+    full_text,
+    load_keywords,
+)
+from app.checks.rules.numerals import normalize_numerals
 from app.messages import REFERENCE_LIST_UNASSESSABLE
 from app.models.enums import ResultOutcome
 
@@ -35,7 +42,7 @@ _REFERENCE_NOUN_NEARBY = re.compile(
 
 
 def _matches_reference_count(criterion) -> bool:
-    text = full_text(criterion)
+    text = normalize_numerals(claim_text(criterion))
     return (
         contains_any(text, current_keywords().reference_nouns) and extract_bound(text) is not None
     )
@@ -73,7 +80,9 @@ def _bound_is_about_references(bound: Bound, text: str) -> bool:
 
 
 def _run_reference_count(criterion, ctx: RuleContext) -> RuleOutcome:
-    text = full_text(criterion)
+    # The bound comes from the same wording the complete-claim grammar
+    # accepted, never from a restating evidence sentence.
+    text = normalize_numerals(claim_text(criterion))
     bound = extract_bound(text)
     if bound is None:
         return RuleOutcome(

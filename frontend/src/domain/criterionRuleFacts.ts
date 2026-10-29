@@ -34,6 +34,18 @@ export function criterionRuleFacts(raw: unknown): RuleFactsPresentation | undefi
         : [fill(COPY.references, { count: v.actual_count }), fill(COPY.references_bound, { bound }), COPY.references_scope];
       return { paragraphs, headings: [] };
     }
+    case "section_word_count": {
+      const b = record(v.expected) ? v.expected : undefined;
+      if (!count(v.actual_words) || v.actual_words === 0 || !count(v.excluded_lines) || !text(v.section_title) || !text(v.counted_until)
+        || !b || !finite(b.low) || b.low < 0 || typeof b.kind !== "string" || !["min", "max", "exact", "range"].includes(b.kind)) return;
+      if (b.kind === "range" ? !finite(b.high) || b.high < b.low : b.high != null) return;
+      const bound = fill(COPY[`bound_${b.kind}` as "bound_min" | "bound_max" | "bound_exact" | "bound_range"], b);
+      return {
+        paragraphs: [fill(COPY.words, { count: v.actual_words, section_title: v.section_title, counted_until: v.counted_until }),
+          fill(COPY.words_bound, { bound }), fill(COPY.words_scope, { excluded_lines: v.excluded_lines })],
+        headings: [],
+      };
+    }
     case "table_formatting_presence":
       if (!count(v.total_tables) || v.total_tables === 0 || !count(v.captioned) || v.captioned > v.total_tables) return;
       return { paragraphs: [fill(COPY.captions, v), COPY.captions_scope], headings: [] };

@@ -7,7 +7,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from app.checks.rules.grammar import alternatives, compile_pattern, expand, read_grammar, strings
-from app.checks.rules.keywords import full_text
+from app.checks.rules.keywords import claim_text
 
 _DEFAULT_FILE = Path(__file__).parent / "data" / "presence_rule_grammar.json"
 PRESENCE_SCOPE_VERSION = "v1"
@@ -31,7 +31,7 @@ def is_presence_claim(criterion, target: str | None, *, grammar=None) -> bool:
         raise ValueError("The heading-presence capability grammar is empty.")
     if not isinstance(target, str) or not target.strip():
         return False
-    text = " ".join(full_text(criterion).split())
+    text = " ".join(claim_text(criterion).split())
     values = {"subjects": subjects, "target": re.escape(target)}
     return any(compile_pattern(expand(pattern, values)).fullmatch(text) for pattern in patterns)
 

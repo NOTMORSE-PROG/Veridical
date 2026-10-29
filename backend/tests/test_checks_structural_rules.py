@@ -10,6 +10,7 @@ import pytest
 
 from app.checks.rules import ReferenceInventory, RuleContext, get_rule, registered_rules
 from app.checks.rules.bounds import extract_bound, to_points
+from app.checks.rules.claim_scope import WORD_COUNT_RULE_ID
 from app.checks.rules.geometry import RULE_ID as MARGINS_RULE_ID
 from app.checks.rules.pages import RULE_ID as PAGE_LIMIT_RULE_ID
 from app.checks.rules.references import CITATION_STYLE_RULE_ID, REFERENCE_COUNT_RULE_ID
@@ -69,9 +70,10 @@ def _ctx(
 # --- registry shape -----------------------------------------------------------
 
 
-def test_all_seven_rule_families_are_registered():
+def test_all_eight_rule_families_are_registered():
     ids = {spec.rule_id for spec in registered_rules()}
     assert ids == {
+        WORD_COUNT_RULE_ID,
         MARGINS_RULE_ID,
         PAGE_LIMIT_RULE_ID,
         REFERENCE_COUNT_RULE_ID,

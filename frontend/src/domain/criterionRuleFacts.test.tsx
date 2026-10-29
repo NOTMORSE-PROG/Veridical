@@ -22,6 +22,10 @@ it.each([
   [{ rule_id: "margins_spacing", checked_pages_or_sections: 3 }, "The saved margin check covered 3 pages or document sections."],
   [{ rule_id: "margins_spacing", side: "left", actual_pts: 50.25 }, "Recorded left margin: 50.25 points."],
   [{ rule_id: "citation_style_sniff", threshold_relation: "below" }, "The saved pattern comparison was below its recorded threshold."],
+  [{ rule_id: "section_word_count", section_title: "ABSTRACT", counted_until: "\"CHAPTER 1\"", actual_words: 243, excluded_lines: 1, expected: { kind: "max", low: 250 } },
+    "Recorded word count: 243 words, counted after the heading \"ABSTRACT\" and before \"CHAPTER 1\"."],
+  [{ rule_id: "section_word_count", section_title: "ABSTRACT", counted_until: "the end of the document", actual_words: 160, excluded_lines: 0, expected: { kind: "range", low: 150, high: 250 } },
+    "Requirement used by this check: between 150 and 250, inclusive words."],
 ])("renders only the saved narrow observation %#", (raw, expected) => {
   expect(criterionRuleFacts(raw)?.paragraphs).toContain(expected);
 });
@@ -30,6 +34,9 @@ it.each([
   { rule_id: "page_limit", actual_count: true, expected: { kind: "max", low: 100 } },
   { rule_id: "page_limit", actual_count: 0, expected: { kind: "max", low: 100 } },
   { rule_id: "page_limit", actual_count: 10, expected: { kind: "range", low: 9 } },
+  { rule_id: "section_word_count", section_title: "ABSTRACT", counted_until: "x", actual_words: 0, excluded_lines: 0, expected: { kind: "max", low: 250 } },
+  { rule_id: "section_word_count", section_title: " ", counted_until: "x", actual_words: 9, excluded_lines: 0, expected: { kind: "max", low: 250 } },
+  { rule_id: "section_word_count", section_title: "ABSTRACT", counted_until: "x", actual_words: 9, excluded_lines: -1, expected: { kind: "max", low: 250 } },
   { rule_id: "page_limit", actual_count: 10, expected: { kind: "max", low: Infinity } },
   { rule_id: "section_order", checked_sections: ["A", " "] },
   { rule_id: "table_formatting_presence", total_tables: 1, captioned: 2 },

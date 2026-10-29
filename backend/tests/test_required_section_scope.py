@@ -12,7 +12,9 @@ from tests.test_checks_structural_rules import FakeCriterion, _ctx, _tree
 @pytest.mark.parametrize(
     "text",
     [
-        "Manuscript contains an abstract of at most 250 words",
+        # BUG-498: the plain word limit is now settled completely by
+        # `section_word_count`; an added qualifier keeps it compound.
+        "Manuscript contains an abstract of at most 250 words in the past tense",
         "The Abstract must clearly explain the contribution",
         "The manuscript must not include an Abstract",
         "Include an Abstract only if requested",

@@ -74,6 +74,22 @@ class CountFacts(_Facts):
         return self
 
 
+class WordCountFacts(_Facts):
+    rule_id: Literal["section_word_count"]
+    section_title: str
+    counted_until: str
+    actual_words: int = Field(gt=0)
+    excluded_lines: int = Field(ge=0)
+    expected: SavedBound
+
+    @field_validator("section_title", "counted_until")
+    @classmethod
+    def nonblank(cls, value):
+        if not value.strip():
+            raise ValueError("The counted span is unnamed.")
+        return value
+
+
 class CaptionFacts(_Facts):
     rule_id: Literal["table_formatting_presence"]
     total_tables: int = Field(gt=0)
@@ -109,7 +125,13 @@ class CitationPatternFacts(_Facts):
 
 
 RuleFacts = Annotated[
-    HeadingFacts | OrderFacts | CountFacts | CaptionFacts | MarginFacts | CitationPatternFacts,
+    HeadingFacts
+    | OrderFacts
+    | CountFacts
+    | WordCountFacts
+    | CaptionFacts
+    | MarginFacts
+    | CitationPatternFacts,
     Field(discriminator="rule_id"),
 ]
 _ADAPTER = TypeAdapter(RuleFacts)
@@ -184,6 +206,19 @@ def project_rule_facts(
                 if isinstance(expected, dict)
                 else None
             )
+        elif rule == "section_word_count":
+            expected = detail.get("expected")
+            candidate.update(
+                {
+                    key: detail.get(key)
+                    for key in ("section_title", "counted_until", "actual_words", "excluded_lines")
+                },
+                expected=(
+                    {key: expected[key] for key in ("kind", "low", "high") if key in expected}
+                    if isinstance(expected, dict)
+                    else None
+                ),
+            )
         elif rule == "table_formatting_presence":
             candidate.update(
                 total_tables=detail.get("total_tables"), captioned=detail.get("captioned")
@@ -213,9 +248,13 @@ def project_rule_facts(
         else:
             return None
         projected = _ADAPTER.validate_python(candidate)
-        if isinstance(projected, CountFacts) and original in {"passed", "failed"}:
+        if isinstance(projected, CountFacts | WordCountFacts) and original in {"passed", "failed"}:
             bound = projected.expected
-            actual = projected.actual_count
+            actual = (
+                projected.actual_count
+                if isinstance(projected, CountFacts)
+                else projected.actual_words
+            )
             within = (
                 actual >= bound.low
                 if bound.kind == "min"
@@ -265,6 +304,19 @@ def rule_facts_presentation(facts: RuleFacts) -> tuple[list[str], list[str]]:
         if family == "references":
             lines.append(copy["references_scope"])
         return lines, []
+    if isinstance(facts, WordCountFacts):
+        bound = copy["bound_" + facts.expected.kind].format(
+            low=number(facts.expected.low), high=number(facts.expected.high)
+        )
+        return [
+            copy["words"].format(
+                count=facts.actual_words,
+                section_title=facts.section_title,
+                counted_until=facts.counted_until,
+            ),
+            copy["words_bound"].format(bound=bound),
+            copy["words_scope"].format(excluded_lines=facts.excluded_lines),
+        ], []
     if isinstance(facts, CaptionFacts):
         return [
             copy["captions"].format(captioned=facts.captioned, total_tables=facts.total_tables),

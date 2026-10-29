@@ -366,6 +366,16 @@ class Settings(BaseSettings):
     # Share of tables that must carry a caption before the table-
     # formatting rule passes.
     structural_table_caption_min_ratio: float = 0.8
+    # A section word count that misses its stated limit by no more than this
+    # many words is escalated, not failed: word-count tools disagree on
+    # hyphenated terms, numerals and keyword lines.
+    structural_word_count_tolerance_words: int = Field(default=5, ge=0)
+    # A counted section spanning more pages than this means its end could
+    # not be confirmed; the rule escalates rather than count into the next.
+    structural_word_count_max_span_pages: int = Field(default=3, ge=1)
+    # A section title may wrap over at most this many extracted lines when the
+    # word-count rule locates its heading on the page.
+    structural_word_count_heading_max_lines: int = Field(default=3, ge=1)
 
     # --- Tier-0 signal layer (V-016, D-011 shadow mode) ----------------------
     # Flesch Reading Ease band a graduate-level capstone chapter is expected

@@ -1,0 +1,33 @@
+{
+  "_comment": [
+    "Words a parsed 'evidence needed' sentence may use to say HOW a reader",
+    "checks a criterion (the rubric parser's own contract: one sentence on",
+    "what a reader would look at) without adding to WHAT is required.",
+    "Complete-claim rules treat such evidence as a restatement only when every",
+    "word is the criterion's own, part of a whole section name, or listed in",
+    "'words'. 'comparison_words' may appear only when the evidence states the",
+    "same bound as the criterion (same kind, same numbers). Quantifiers such as",
+    "'all' or 'only' are deliberately absent: they can add a requirement. Any",
+    "other word keeps the evidence in the claim, so the rule abstains and the",
+    "criterion is graded with instructor review instead."
+  ],
+  "words": [
+    "a", "an", "the", "this", "these", "that", "its", "it",
+    "reader", "readers", "instructor", "reviewer", "would", "will", "should", "can", "must",
+    "look", "looks", "looking", "at", "check", "checks", "checking", "verify", "verifies",
+    "verifying", "confirm", "confirms", "confirming", "count", "counts", "counting",
+    "review", "reviews", "reviewing", "examine", "examines", "examining", "inspect",
+    "inspects", "inspecting", "read", "reads", "reading", "locate", "locates", "find",
+    "finds", "see", "sees", "ensure", "ensures", "make", "sure", "determine", "determines",
+    "whether", "if", "to", "of", "in", "on", "for", "and", "or", "by", "from", "with",
+    "there", "is", "are", "be", "has", "have", "does", "do",
+    "number", "total", "length", "entry", "entries", "item", "items", "list", "lists",
+    "listed", "section", "sections", "heading", "headings", "part", "page", "pages",
+    "manuscript", "document", "paper", "end", "beginning", "start", "back", "front",
+    "word", "words", "present", "included", "includes", "contains", "contain", "provided"
+  ],
+  "comparison_words": [
+    "not", "no", "more", "than", "less", "fewer", "least", "most", "maximum", "minimum",
+    "exceed", "exceeds", "within", "limit", "up", "between", "exactly", "under", "over"
+  ]
+}

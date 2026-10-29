@@ -1,0 +1,14 @@
+{
+  "_comment": [
+    "Section word-count rule (F3.2). A line matching one of these patterns",
+    "(an abstract's keyword or index-terms label, with or without a colon or",
+    "dash) ends the counted prose: it and every later line in the section,",
+    "including a keyword list that wraps onto more lines, are not counted. The",
+    "result records how many lines were left out. Data, not code (charter",
+    "rule 7)."
+  ],
+  "end_of_prose_patterns": [
+    "^\\s*key\\s*-?\\s*words?\\b",
+    "^\\s*index\\s+terms\\b"
+  ]
+}

@@ -66,4 +66,14 @@ async def build_rule_context(
             native_source.state in {"complete", "not_applicable"}
             and not native_source.unlocated_occurrences
         ),
+        blocks=tuple(extraction.blocks),
+        unreliable_pages=frozenset(
+            entry.page for entry in extraction.reading_order or () if entry.status != "ordered"
+        ),
+        word_count_tolerance_words=settings.structural_word_count_tolerance_words,
+        word_count_max_span_pages=settings.structural_word_count_max_span_pages,
+        word_count_heading_max_lines=settings.structural_word_count_heading_max_lines,
+        heading_max_chars=settings.ingest_heading_max_chars,
+        heading_bold_ratio_min=settings.ingest_bold_ratio_min,
+        heading_size_delta=settings.ingest_heading_size_delta,
     )

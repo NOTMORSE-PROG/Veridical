@@ -315,6 +315,7 @@ export type CriterionRuleFacts =
   | { rule_id: "required_section_present"; target: string; matched_title?: string | null }
   | { rule_id: "section_order"; checked_sections: string[] }
   | { rule_id: "page_limit" | "reference_count_min_max"; actual_count: number; expected: { kind: "min" | "max" | "exact" | "range"; low: number; high?: number | null } }
+  | { rule_id: "section_word_count"; section_title: string; counted_until: string; actual_words: number; excluded_lines: number; expected: { kind: "min" | "max" | "exact" | "range"; low: number; high?: number | null } }
   | { rule_id: "table_formatting_presence"; total_tables: number; captioned: number }
   | { rule_id: "margins_spacing"; checked_pages_or_sections?: number | null; side?: "left" | "top" | "right" | "bottom" | null; actual_pts?: number | null }
   | { rule_id: "citation_style_sniff"; threshold_relation: "met" | "below" };

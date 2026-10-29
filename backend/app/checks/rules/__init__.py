@@ -12,11 +12,17 @@ convention as `app/ingest/patterns.py`.
 """
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
 
-from app.ingest.schemas import PageGeometry, SectionTree, TableBlock
+from app.ingest.schemas import PageGeometry, SectionTree, TableBlock, TextBlock
 from app.models.enums import ResultOutcome
+
+
+def _settings():
+    from app.config import get_settings
+
+    return get_settings()
 
 
 class CriterionLike(Protocol):
@@ -95,6 +101,23 @@ class RuleContext:
     native_math_source_detail: dict | None = None
     source_identity_verified: bool = True
     section_order_witnesses_verified: bool = True
+    # Section word counts (rules/word_counts.py): the ordered source lines,
+    # the pages whose reading order ingestion could not settle, and the
+    # configured limits (defaults read from Settings, never restated here).
+    blocks: tuple[TextBlock, ...] = ()
+    unreliable_pages: frozenset[int] = frozenset()
+    word_count_tolerance_words: int = field(
+        default_factory=lambda: _settings().structural_word_count_tolerance_words
+    )
+    word_count_max_span_pages: int = field(
+        default_factory=lambda: _settings().structural_word_count_max_span_pages
+    )
+    word_count_heading_max_lines: int = field(
+        default_factory=lambda: _settings().structural_word_count_heading_max_lines
+    )
+    heading_max_chars: int = field(default_factory=lambda: _settings().ingest_heading_max_chars)
+    heading_bold_ratio_min: float = field(default_factory=lambda: _settings().ingest_bold_ratio_min)
+    heading_size_delta: float = field(default_factory=lambda: _settings().ingest_heading_size_delta)
 
 
 @dataclass(frozen=True)
@@ -196,7 +219,7 @@ def _load_default_rules() -> None:
     that ordering."""
     import importlib
 
-    for module_name in ("geometry", "pages", "references", "tables", "sections"):
+    for module_name in ("geometry", "pages", "references", "tables", "word_counts", "sections"):
         importlib.import_module(f"app.checks.rules.{module_name}")
 
 

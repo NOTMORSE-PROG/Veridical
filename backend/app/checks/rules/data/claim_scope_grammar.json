@@ -1,9 +1,10 @@
 {
-  "_comment": "A named-section claim may reach only a family whose complete supported scope matches. Empty allowed set means abstain, never unrestricted.",
+  "_comment": "A named-section claim may reach only a family whose complete supported scope matches. Empty allowed set means abstain, never unrestricted. Word-count claims bind exactly one named section ({{target}}, from the ingest heading vocabulary); spelled-out numbers are normalized before matching (rules/numerals.py).",
   "document_subjects": ["manuscript", "document", "paper", "report", "thesis", "dissertation", "submission"],
   "reference_subjects": ["references", "bibliography", "reference list"],
   "reference_units": ["reference", "references", "citation", "citations", "source", "sources"],
   "count_adjectives": ["major"],
+  "word_units": ["word", "words"],
   "number": "[0-9]+(?:\\.[0-9]+)?",
   "bound": "(?:(?:at least|minimum(?: of)?|no (?:less|fewer) than|not less than|at most|maximum(?: of)?|no more than|not (?:exceed|more than)|must not exceed|up to|exactly)\\s+{{number}}|(?:>=|<=)\\s*{{number}}|(?:between|from)\\s+{{number}}\\s+(?:and|to)\\s+{{number}}|{{number}})",
   "citation_patterns": [
@@ -13,5 +14,10 @@
     "{{bound}}\\s+(?:(?:{{adjectives}})\\s+)?(?:{{units}})[.!]?",
     "(?:(?:the|this)\\s+)?(?:{{documents}}|{{references}})\\s+(?:(?:must|shall|should)\\s+)?(?:include|contain|have|has|includes|contains)\\s+{{bound}}\\s+(?:(?:{{adjectives}})\\s+)?(?:{{units}})[.!]?",
     "(?:(?:the|this)\\s+)?(?:{{references}})\\s*:\\s*{{bound}}\\s+(?:(?:{{adjectives}})\\s+)?(?:{{units}})[.!]?"
+  ],
+  "word_count_patterns": [
+    "(?:(?:the|this|an?)\\s+)?{{target}}(?:\\s+section)?\\s+(?:(?:must|shall|should)\\s+)?(?:(?:be|have|has|contain|contains|include|includes)\\s+)?(?:(?:a\\s+)?length\\s+of\\s+)?{{bound}}\\s+(?:{{word_units}})(?:\\s+(?:long|in length))?[.!]?",
+    "(?:(?:the|this)\\s+)?(?:{{documents}})\\s+(?:(?:must|shall|should)\\s+)?(?:include|contain|have|has|includes|contains)\\s+(?:an?|the)\\s+{{target}}(?:\\s+section)?\\s+(?:of|with)\\s+{{bound}}\\s+(?:{{word_units}})[.!]?",
+    "(?:(?:the|this)\\s+)?{{target}}(?:\\s+section)?\\s*(?::|-|\\u2013)\\s*{{bound}}\\s+(?:{{word_units}})[.!]?"
   ]
 }

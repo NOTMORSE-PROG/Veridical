@@ -22,7 +22,9 @@ from tests.test_pipeline_machine_live import session_factory as session_factory
 pytestmark = pytest.mark.skipif(
     "DATABASE_URL" not in os.environ, reason="owned PostgreSQL required"
 )
-COMPOUND = "Manuscript contains an abstract of at most 250 words"
+# Still compound after BUG-498: the word-count rule covers "an abstract of at
+# most 250 words" completely, but no rule covers the added tense qualifier.
+COMPOUND = "Manuscript contains an abstract of at most 250 words in the past tense"
 PAGES = "The PDF manuscript contains at least one page"
 
 

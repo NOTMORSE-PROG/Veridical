@@ -5,6 +5,7 @@ data, never a hardcoded branch)."""
 import json
 import re
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 
 _DEFAULT_FILE = Path(__file__).parent / "data" / "structural_keywords.json"
@@ -68,3 +69,75 @@ def full_text(criterion) -> str:
     instructor's stated evidence is as much "what the criterion means" as
     its headline text."""
     return f"{criterion.text} {criterion.evidence or ''}"
+
+
+_METHOD_FILE = Path(__file__).parent / "data" / "evidence_method_vocabulary.json"
+_TOKEN = re.compile(r"[a-z0-9]+(?:['-][a-z0-9]+)*")
+# Anything that is neither a word character nor whitespace nor plain sentence
+# punctuation (comparison symbols, percent signs) can carry a requirement.
+_SYMBOL = re.compile(r"[^\w\s.,;:'\"()-]")
+
+
+@lru_cache
+def _vocabulary(path: Path = _METHOD_FILE) -> tuple[frozenset[str], frozenset[str]]:
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    return (
+        frozenset(word.lower() for word in raw["words"]),
+        frozenset(word.lower() for word in raw["comparison_words"]),
+    )
+
+
+def _without_section_names(text: str) -> str:
+    """Remove whole section names only ("the reference list", "works
+    cited"); their single words alone are not method vocabulary."""
+    from app.checks.rules.sections import section_names
+
+    lowered = text.lower()
+    for name in sorted(section_names(), key=len, reverse=True):
+        lowered = re.sub(rf"\b{re.escape(name)}\b", " ", lowered)
+    return lowered
+
+
+def evidence_restates_text(criterion) -> bool:
+    """True when the evidence sentence only says how a reader checks the
+    criterion: no comparison symbol; every number is the text's own; every
+    word is the text's own, part of a whole section name, or packaged method
+    vocabulary; and comparison words appear only when the evidence states
+    exactly the text's own bound. Absent evidence trivially restates."""
+    from app.checks.rules.bounds import extract_bound
+    from app.checks.rules.numerals import normalize_numerals
+
+    evidence = (getattr(criterion, "evidence", None) or "").strip()
+    if not evidence:
+        return True
+    if _SYMBOL.search(evidence):
+        return False
+    text = normalize_numerals(criterion.text)
+    normalized_evidence = normalize_numerals(evidence)
+    text_tokens = set(_TOKEN.findall(text.lower()))
+    evidence_tokens = _TOKEN.findall(_without_section_names(normalized_evidence))
+    method, comparison = _vocabulary()
+    if comparison & set(evidence_tokens):
+        stated, required = extract_bound(normalized_evidence), extract_bound(text)
+        if (
+            stated is None
+            or required is None
+            or (stated.kind, stated.low, stated.high)
+            != (required.kind, required.low, required.high)
+        ):
+            return False
+    allowed = text_tokens | method | comparison
+    return all(
+        token in text_tokens if token[0].isdigit() else token in allowed
+        for token in evidence_tokens
+    )
+
+
+def claim_text(criterion) -> str:
+    """The wording a complete-claim grammar must cover, and the only wording
+    a rule may read its requirement from: the criterion text alone when its
+    evidence only restates it, otherwise text + evidence (so an added
+    condition still leaves the claim incomplete)."""
+    if evidence_restates_text(criterion):
+        return criterion.text
+    return full_text(criterion)

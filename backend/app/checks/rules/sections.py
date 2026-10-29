@@ -33,6 +33,15 @@ def _current_heading_patterns() -> HeadingPatterns:
     return load_patterns(configured) if configured is not None else _HEADING_PATTERNS
 
 
+def section_names() -> frozenset[str]:
+    """Every whole section name ingestion recognizes, so an evidence sentence
+    that names where to look ("the reference list", "the abstract section")
+    is not mistaken for an added requirement."""
+    patterns = _current_heading_patterns()
+    names = patterns.unnumbered_sections | patterns.reference_titles | patterns.toc_titles
+    return frozenset(name.lower() for name in names)
+
+
 def walk_sections(tree: SectionTree) -> Iterator[SectionNode]:
     """Depth-first, document-reading order — reused by V-017's semantic
     context builder to slice section text spans, not just by this rule."""
@@ -53,9 +62,11 @@ def identify_target_section(criterion) -> str | None:
     patterns = _current_heading_patterns()
     text = full_text(criterion)
     lowered = text.lower()
-    for synonym in patterns.unnumbered_sections:
-        if synonym in lowered:
-            return synonym
+    # Deterministic across processes (the vocabulary is a frozenset): the
+    # earliest-mentioned section wins, then the longest name.
+    mentioned = [synonym for synonym in patterns.unnumbered_sections if synonym in lowered]
+    if mentioned:
+        return min(mentioned, key=lambda synonym: (lowered.find(synonym), -len(synonym), synonym))
     chapter_match = patterns.chapter.search(text)
     if chapter_match:
         return f"chapter {chapter_match.group('num')}".lower()
