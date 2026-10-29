@@ -290,9 +290,9 @@ async def _to_flag_out(
         or (result.kind.value == "originality_reuse" and has_stored_pair and passage_pair is None),
         citation_source_key=_citation_source_key(detail),
         confirmed_citation_source=flag.confirmed_citation_source,
-        finding_confirmed=bool(flag.finding_confirmed),
-        finding_confirm_note=flag.finding_confirm_note,
-        finding_confirmed_at=flag.finding_confirmed_at,
+        finding_confirmed=bool(getattr(flag, "finding_confirmed", False)),
+        finding_confirm_note=getattr(flag, "finding_confirm_note", None),
+        finding_confirmed_at=getattr(flag, "finding_confirmed_at", None),
         **cited_work(flag.detail or {}, flag.evidence_excerpt),
     )
 
