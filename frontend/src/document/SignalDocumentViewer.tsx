@@ -205,7 +205,7 @@ function ReviewQueue({ findings, regions, sourceAvailability, report, collection
   );
 }
 
-function SelectedFinding({ comparisonHost, comparisonVisible, finding, total, locationFlagId, region, sourceAvailability, sourceAnchor, previous, next, collection, outsideFilter, filterPosition, filterTotal, onAll, onPrevious, onNext, onLocation, onExplore, fullWidth, onReadingChange, onRecordReady, onStatementSource, activeStatement, onRevealSource }: {
+function SelectedFinding({ comparisonHost, comparisonVisible, finding, total, locationFlagId, region, sourceAvailability, sourceAnchor, previous, next, collection, outsideFilter, filterPosition, filterTotal, onAll, onPrevious, onNext, onLocation, onExplore, fullWidth, singlePane, onReadingChange, onRecordReady, onStatementSource, activeStatement, onRevealSource }: {
   comparisonHost?: HTMLElement | null;
   comparisonVisible?: boolean;
   finding: ReviewFinding; total: number; locationFlagId: number; region: FlagRegionOut | null;
@@ -278,11 +278,12 @@ function SelectedFinding({ comparisonHost, comparisonVisible, finding, total, lo
     {detail && query.isError && <Alert title="These details could not be refreshed" tone="warning"><p>Showing the last loaded record. Check its source before drawing a conclusion.</p><Button variant="quiet" onClick={() => { void query.refetch(); }}>Try again</Button></Alert>}
     {query.isPending && !detail ? <div role="status" aria-live="polite" aria-busy={query.fetchStatus === "fetching"} className="signal-desk-loading"><span>{query.fetchStatus === "paused" ? "Waiting to load" : "Loading"} {optional ? "comparison lead record" : `Finding ${finding.number}`}.</span><i /><i /></div>
       : !detail ? <Alert title={optional ? "Comparison lead details could not be loaded" : "Finding details could not be loaded"} tone="error" role="alert"><p>The manuscript and review queue are still available. Try loading this record again.</p><Button variant="secondary" onClick={() => { if (document.hasFocus()) headingRef.current?.focus({ preventScroll: true }); void query.refetch(); }}>Try again</Button></Alert>
-        : <SelectedFindingEvidence comparisonHost={comparisonHost} comparisonVisible={comparisonVisible} finding={finding} flag={detail} current={!query.isError && query.fetchStatus === "idle"} locationFlagId={locationFlagId} region={region} sourceAvailability={sourceAvailability} sourceAnchor={sourceAnchor} onLocation={onLocation} onExplore={onExplore} fullWidth={fullWidth} canExpand={pairReady !== null} onReadManuscript={() => onReadingChange(false)} onExpand={() => onReadingChange(true)} onStatementSource={onStatementSource} activeStatement={activeStatement} />}
+        : <SelectedFindingEvidence comparisonHost={comparisonHost} comparisonVisible={comparisonVisible} finding={finding} flag={detail} current={!query.isError && query.fetchStatus === "idle"} locationFlagId={locationFlagId} region={region} sourceAvailability={sourceAvailability} sourceAnchor={sourceAnchor} onLocation={onLocation} onExplore={onExplore} fullWidth={fullWidth} canExpand={pairReady !== null} onReadManuscript={() => onReadingChange(false)} onExpand={() => onReadingChange(true)} onStatementSource={onStatementSource} activeStatement={activeStatement} showPageSources={singlePane} />}
   </article>;
 }
 
-function SelectedFindingEvidence({ comparisonHost, comparisonVisible, finding, flag, current, locationFlagId, region, sourceAvailability, sourceAnchor, onLocation, onExplore, fullWidth, canExpand, onExpand, onReadManuscript, onStatementSource, activeStatement }: {
+function SelectedFindingEvidence({ comparisonHost, comparisonVisible, finding, flag, current, locationFlagId, region, sourceAvailability, sourceAnchor, onLocation, onExplore, fullWidth, canExpand, onExpand, onReadManuscript, onStatementSource, activeStatement, showPageSources }: {
+  showPageSources: boolean;
   comparisonHost?: HTMLElement | null;
   comparisonVisible?: boolean;
   finding: ReviewFinding; flag: FlagOut; locationFlagId: number; region: FlagRegionOut | null;
@@ -328,7 +329,7 @@ function SelectedFindingEvidence({ comparisonHost, comparisonVisible, finding, f
         {!(fullWidth && canExpand) && <AgreementComparison flag={flag} findingNumber={finding.number} onSource={onStatementSource} activeRole={activeStatement} />}
         <CitationComparison flag={flag} />
         <CitationSourceLinks flag={flag} />
-        {!(fullWidth && canExpand) && <RecordedFindingSources flag={flag} current={current} />}
+        {showPageSources && !(fullWidth && canExpand) && <RecordedFindingSources flag={flag} current={current} />}
         {flag.ai_verdict_summary === "orphan_in_text_citation" ? <p className="signal-field-hint">The saved check did not link this citation to a reference-list entry. A matching entry is not available for side-by-side comparison.</p> : !citationMetadata && !comparative && !pValueFinding && flag.check_kind !== "internal_agreement" && <p className="signal-field-hint">This check evaluates one manuscript location. A second passage does not apply.</p>}
       </section>}
       {!wholeComparisonWithoutPair && <p className="signal-document-precision-note"><strong>{precision.label}</strong>. {precision.helper} Recorded location: <span>{instructorAnchor(sourceAnchor ?? flag.page_anchor)}</span>.</p>}

@@ -38,7 +38,7 @@ it("keeps a consequential unlocated input limit visible without opening nested l
   expect(screen.getByText(/does not establish that the remaining text and tables could be used safely/)).toBeVisible();
   expect(screen.getByText("Source scope and locations").closest("details")).not.toHaveAttribute("open");
   expect(screen.queryByRole("link", { hidden: true })).not.toBeInTheDocument();
-  expect(screen.queryByText(/Statistical forensics|criterion.*unassessed/i)).not.toBeInTheDocument();
+  expect(screen.queryByText(/Statistical checks|criterion.*unassessed/i)).not.toBeInTheDocument();
 });
 it("groups physical multiplicity for display and gives distinct locations unique action slots", () => {
   show({ ...zero, n_native_equations_unassessed: 3, native_math_excluded_paragraphs: [7, 9],

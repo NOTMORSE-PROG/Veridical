@@ -16,7 +16,7 @@ export function nativeMathCoverageItem(status: IntegrityCheckStatusOut, checkRun
   if (status.native_math_excluded_paragraphs?.length) subIssues.push("Text and table content affected by native Word equations was also excluded from these checks.");
   return {
     key: status.check_kind,
-    label: `Statistical forensics · ${partial ? "Partially assessed" : "Not assessed"}`,
+    label: `Statistical checks · ${partial ? "Partially assessed" : "Not assessed"}`,
     detail: knownPositive ? partial
       ? "The results cover supported statistical statements from readable text and tables. Native Word equations remain unassessed. This limit is not a statistical error."
       : "No supported statistical statements were available from the text and tables used by this check. Native Word equations remain unassessed. This does not mean the manuscript contains no statistics."
