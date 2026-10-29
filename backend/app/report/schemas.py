@@ -189,6 +189,9 @@ class IntegrityCheckStatusOut(BaseModel):
     # The 1-based pages behind that count, so an instructor can find them;
     # None where the saved check did not record them.
     source_pages_unassessed: list[int] | None = None
+    # F7: pages left out of the comparison because the reference list's end
+    # could not be found (from the list's start to the end of the document).
+    pages_not_compared: list[int] | None = None
     n_claim_support_unassessed: int = 0
     reference_list_page: int | None = None
     analysis_coverage: Literal["complete", "partial", "unsupported"] | None = None

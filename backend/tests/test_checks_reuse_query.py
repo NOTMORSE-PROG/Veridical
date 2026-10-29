@@ -1628,3 +1628,20 @@ async def test_existing_result_guard_finds_the_completed_run(session_factory):
             {"id": manuscript_id},
         )
     assert count == 0  # V-077: a check never writes into the corpus
+
+
+async def test_pages_after_an_unclear_reference_list_are_named_not_passed(session_factory):
+    """Comparison leaves out everything from a reference list whose end could
+    not be found; the result says which pages instead of reading as passed."""
+    from tests.test_ingest_reference_boundaries import unclear_end_manuscript
+
+    manuscript_id, run_id = await _seed_manuscript_and_run(
+        session_factory, group_label="Unclear end"
+    )
+    async with session_factory() as session:
+        result = await _run_with_saved_source(
+            session, manuscript_id, run_id, unclear_end_manuscript(), get_settings()
+        )
+    assert result.outcome == ResultOutcome.escalated
+    assert result.detail["coverage_reason"] == "reference_end_unclear"
+    assert result.detail["pages_not_compared"] == [2, 3, 4]

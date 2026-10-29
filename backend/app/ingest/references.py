@@ -56,6 +56,10 @@ _URL = re.compile(r"https?://\S+")
 _REFERENCE_LOCATION_UNKNOWN = frozenset(
     {"ambiguous_reference_heading", "invalid_source_line_inventory"}
 )
+# Selection issues that leave the bibliography's end unknown. A later pass can
+# still shorten such a span, so text-only callers leave out everything from the
+# bibliography onward instead of trusting where the span stops.
+_REFERENCE_END_UNCLEAR = frozenset({"ambiguous_reference_end", "ambiguous_reference_end_style"})
 # Sentence split that survives "CMO No. 15" / "Vol. 3": only a period
 # followed by whitespace and a capital or opening paren starts a new part.
 # "arXiv" is the one common venue that starts lowercase (APA preprint
@@ -399,11 +403,11 @@ def non_reference_blocks(
     """Exact complement of bibliography/furniture intervals, not object identity.
 
     A caller that only needs text known to lie outside the bibliography may
-    pass `ambiguous_entries_ok`. Then a bibliography whose entries or end are
-    ambiguous, but whose region is known, is left out as that whole region
-    (which runs to the end of its scope when the end is unclear) instead of
-    the result being empty. An unknown bibliography location still returns
-    nothing.
+    pass `ambiguous_entries_ok`. Then a bibliography whose entries are
+    ambiguous is left out as its whole region, and one whose end is unclear is
+    left out together with everything after it, instead of the result being
+    empty. `reference_pages_not_assessed` names those pages. An unknown
+    bibliography location still returns nothing.
     """
     selection = selection or select_references(result, patterns)
     if selection.issues and not (
@@ -420,11 +424,16 @@ def non_reference_blocks(
         excluded.setdefault(fragment.source_block_index, []).append(
             (fragment.source_start, fragment.source_end)
         )
+    cut = _unclear_end_cut(selection)
     body = []
     for index, block in enumerate(result.blocks):
         if block.is_furniture or not block.text:
             continue
+        if cut is not None and index > cut[0]:
+            continue
         intervals = list(excluded.get(index, []))
+        if cut is not None and index == cut[0]:
+            intervals.append((cut[1], len(block.text)))
         intervals.extend(
             (line.start, line.end) for line in block.source_lines or [] if line.is_furniture
         )
@@ -446,6 +455,34 @@ def non_reference_blocks(
         if block.text[start:].strip():
             body.append(slicer.slice(start, len(block.text)))
     return body
+
+
+def _unclear_end_cut(selection: ReferenceSelection) -> tuple[int, int] | None:
+    """Where the bibliography starts, when its end is unknown."""
+    if not set(selection.issues) & _REFERENCE_END_UNCLEAR or not selection.span:
+        return None
+    first = min(
+        selection.span,
+        key=lambda fragment: (fragment.source_block_index, fragment.source_start),
+    )
+    return first.source_block_index, first.source_start
+
+
+def reference_pages_not_assessed(
+    result: ExtractionResult, selection: ReferenceSelection
+) -> list[int]:
+    """Pages text-only callers skip because the bibliography's end is unclear:
+    from where the reference list starts to the end of the document."""
+    cut = _unclear_end_cut(selection)
+    if cut is None or result.anchor_kind != "page":
+        return []
+    return sorted(
+        {
+            block.page
+            for block in result.blocks[cut[0] :]
+            if block.page is not None and not block.is_furniture and block.text.strip()
+        }
+    )
 
 
 def reference_section_page(result: ExtractionResult, patterns: HeadingPatterns) -> int | None:
@@ -1286,14 +1323,29 @@ def _first_line_box(block: TextBlock) -> Bbox | None:
     return lines[0].bbox if lines else block.bbox
 
 
+def _label_number(text: str) -> tuple[str, int | None]:
+    """The style ("[]", "." or ")") and number of a standalone label."""
+    stripped = text.strip()
+    if stripped.startswith("["):
+        return "[]", _parse_reference_number(stripped[1:-1])
+    return stripped[-1], _parse_reference_number(stripped[:-1])
+
+
+def _one_column(boxes: list[Bbox]) -> bool:
+    """Every box spans a common x position, so they stand in one column."""
+    return max(box[0] for box in boxes) < min(box[2] for box in boxes)
+
+
 def _pair_detached_labels(span: list[TextBlock]) -> list[list[TextBlock]] | None:
     """Rebuild entries from a labels column printed beside a text column.
 
-    Each label belongs to the one text block whose first printed line holds
-    the label's vertical centre on the same page. Text blocks that start no
-    entry continue the entry before them. Anything else (a label with no
-    text on its line, two labels on one line, text before the first label)
-    means the entries cannot be trusted, and None is returned.
+    Each label belongs to the one text block to its right whose first printed
+    line holds the label's vertical centre on the same page. Text blocks that
+    start no entry continue the entry before them. The labels must stand in
+    one column, the text in one column to their right, and the labels must be
+    of one style and strictly ascending. Anything else (a label with no text
+    on its line, two labels on one line, text before the first label, a
+    second column) means the entries cannot be trusted, and None is returned.
     """
     labels: list[TextBlock] = []
     texts: list[TextBlock] = []
@@ -1304,6 +1356,17 @@ def _pair_detached_labels(span: list[TextBlock]) -> list[list[TextBlock]] | None
             labels.append(block)
         elif block.text.strip():
             texts.append(block)
+    if not labels or not texts:
+        return None
+    label_boxes = [_first_line_box(label) for label in labels]
+    text_boxes = [_first_line_box(text) for text in texts]
+    labels_right_edge = min(box[2] for box in label_boxes)
+    if (
+        not _one_column(label_boxes)
+        or not _one_column(text_boxes)
+        or any(box[0] < labels_right_edge for box in text_boxes)
+    ):
+        return None
     starts: dict[int, TextBlock] = {}
     for label in labels:
         box = _first_line_box(label)
@@ -1326,7 +1389,14 @@ def _pair_detached_labels(span: list[TextBlock]) -> list[list[TextBlock]] | None
             groups[-1].append(text)
         else:
             return None
-    return groups if len(groups) == len(labels) else None
+    if len(groups) != len(labels):
+        return None
+    numbered = [_label_number(group[0].text) for group in groups]
+    styles = {style for style, _number in numbered}
+    numbers = [number for _style, number in numbered]
+    if len(styles) != 1 or None in numbers or numbers != sorted(set(numbers)):
+        return None
+    return groups
 
 
 def _bibliography_continues(span: list[TextBlock]) -> bool:

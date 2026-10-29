@@ -730,6 +730,10 @@ async def report_out_for_check_run(
             n_linkage_unassessed=detail.get("n_linkage_unassessed", 0),
             n_source_pages_unassessed=detail.get("n_source_pages_unassessed", 0),
             source_pages_unassessed=source_pages_unassessed(detail),
+            pages_not_compared=[
+                page for page in detail.get("pages_not_compared") or [] if isinstance(page, int)
+            ]
+            or None,
             n_claim_support_unassessed=detail.get("n_claim_support_unassessed", 0),
             statistical_notation_unassessed=_statistical_notation_state(detail)
             if row.kind == CheckKind.statistical_forensics

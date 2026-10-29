@@ -35,7 +35,7 @@ from app.config import Settings
 from app.findings.policy import reuse_reason
 from app.ingest.analytical_source import analytical_source
 from app.ingest.patterns import load_patterns
-from app.ingest.references import select_references
+from app.ingest.references import reference_pages_not_assessed, select_references
 from app.ingest.schemas import ExtractionResult
 from app.models.enums import CheckKind, FlagSeverity, ResultOutcome
 from app.models.run import CheckResult, Flag
@@ -328,6 +328,9 @@ async def run_originality_reuse_check(
     source = analytical_source(extraction)
     selection = select_references(extraction, load_patterns(settings.ingest_patterns_file))
     membership_partial = bool(selection.membership_issues)
+    # When the reference list's end is unclear, the comparison leaves out
+    # everything from the list onward; say which pages instead of passing.
+    pages_not_compared = reference_pages_not_assessed(extraction, selection)
     # BUG-152: off the event loop -- this runs the local model2vec encoder
     # over every chapter plus the whole document, real CPU work with no
     # I/O, on the single Render worker that also serves every other
@@ -354,11 +357,17 @@ async def run_originality_reuse_check(
             criterion_id=None,
             kind=CheckKind.originality_reuse,
             outcome=ResultOutcome.escalated
-            if source.limited or membership_partial
+            if source.limited or membership_partial or pages_not_compared
             else (ResultOutcome.passed if has_resubmission else ResultOutcome.not_applicable),
             detail={
                 **source.detail(),
                 "reference_membership_issues": list(selection.membership_issues),
+                "pages_not_compared": pages_not_compared,
+                **(
+                    {"coverage_reason": "reference_end_unclear"}
+                    if pages_not_compared and not membership_partial
+                    else {}
+                ),
                 **(
                     {
                         "coverage_reason": "reference_membership_partial",
@@ -540,7 +549,7 @@ async def run_originality_reuse_check(
         criterion_id=None,
         kind=CheckKind.originality_reuse,
         outcome=ResultOutcome.escalated
-        if native_limited or membership_partial
+        if native_limited or membership_partial or pages_not_compared
         else (ResultOutcome.not_applicable if no_comparisons else ResultOutcome.passed),
         detail={
             **source.detail(),
@@ -551,7 +560,10 @@ async def run_originality_reuse_check(
             if native_limited
             else "reference_membership_partial"
             if membership_partial
+            else "reference_end_unclear"
+            if pages_not_compared
             else ("no_comparison_archive" if no_comparisons else None),
+            "pages_not_compared": pages_not_compared,
             "comparison_ran": True,
             "archive_size_n": query_result.archive_size_n,
             # V-077: what this count measured. Results written before D-028

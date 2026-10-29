@@ -5,8 +5,11 @@ import pytest
 from app.ingest.patterns import load_patterns
 from app.ingest.references import (
     ReferenceSelection,
+    _bibliography_continues,
     extract_references,
     non_reference_blocks,
+    reference_entry_locations,
+    reference_pages_not_assessed,
     select_references,
 )
 from app.ingest.schemas import ExtractionResult, SectionNode, SectionTree, TextBlock
@@ -219,8 +222,9 @@ def test_labels_read_apart_from_their_entries_refuse_the_reference_list():
 
 def _two_column_bibliography(*, second_label_y=90):
     def block(text, x, top, bottom, *, size=10, bold=0):
+        width = 18 if text.startswith("[") else 300
         return TextBlock(
-            page=1, bbox=(x, top, x + 300, bottom), text=text, max_font_size=size, bold_ratio=bold
+            page=1, bbox=(x, top, x + width, bottom), text=text, max_font_size=size, bold_ratio=bold
         )
 
     blocks = [
@@ -256,3 +260,194 @@ def test_a_label_with_no_entry_on_its_line_refuses_the_pairing():
     result = _two_column_bibliography(second_label_y=150)
     assert "detached_reference_labels" in select_references(result, load_patterns()).issues
     assert extract_references(result, load_patterns()) == []
+
+
+APPENDIX_B_REFERENCES = [
+    "Cruz, M. (2021). Mobile queueing for barangay health centers. Journal of Examples, 7(1), 1-9.",
+    "Lim, K. (2020). Appointment reminders and no-show rates. Journal of Examples, 6(3), 22-30.",
+]
+CHAPTER_TEXT = "The clinic booking system was evaluated with twenty staff members over six weeks. "
+
+
+def unclear_end_manuscript():
+    """The outline lists the appendices but not the hand-bolded REFERENCES,
+    one entry cannot be parsed, and Appendix B prints more entries."""
+    spec = [
+        (1, "CHAPTER 1", 16, 1),
+        (1, CHAPTER_TEXT * 12, 11, 0),
+        (2, "REFERENCES", 16, 1),
+        (2, "Department of Health. Clinic appointment guidelines. Manila: DOH Press", 11, 0),
+        (
+            2,
+            "Santos, A. (2022). Measuring appointment no-shows. Journal of Examples, 5(1), 3-8.",
+            11,
+            0,
+        ),
+        (3, "APPENDIX A", 16, 1),
+        (3, "The client letter of intent is reproduced on the next page for the panel.", 11, 0),
+        (4, "APPENDIX B", 16, 1),
+        (4, APPENDIX_B_REFERENCES[0], 11, 0),
+        (4, APPENDIX_B_REFERENCES[1], 11, 0),
+    ]
+    blocks = [
+        TextBlock(
+            page=page,
+            bbox=(72, 100 + index * 30, 540, 120 + index * 30),
+            text=text,
+            max_font_size=size,
+            bold_ratio=bold,
+        )
+        for index, (page, text, size, bold) in enumerate(spec)
+    ]
+    nodes = [
+        SectionNode(title="CHAPTER 1", page=1, level=1),
+        SectionNode(title="APPENDIX A", page=3, level=1),
+        SectionNode(title="APPENDIX B", page=4, level=1),
+    ]
+    return ExtractionResult(
+        page_count=4,
+        anchor_kind="page",
+        image_only=False,
+        text_chars=sum(len(b.text) for b in blocks),
+        blocks=blocks,
+        images=[],
+        section_tree=SectionTree(source="embedded_toc", nodes=nodes),
+    )
+
+
+def test_an_unclear_end_leaves_out_everything_from_the_reference_list_onward():
+    result = unclear_end_manuscript()
+    patterns = load_patterns()
+    selection = select_references(result, patterns)
+    assert "ambiguous_reference_end" in selection.issues
+    kept = "\n".join(
+        b.text for b in non_reference_blocks(result, patterns, ambiguous_entries_ok=True)
+    )
+    assert CHAPTER_TEXT.strip() in kept
+    assert not any(reference[:30] in kept for reference in APPENDIX_B_REFERENCES)
+    assert "letter of intent" not in kept
+    assert reference_pages_not_assessed(result, selection) == [2, 3, 4]
+
+
+def test_a_clear_reference_list_leaves_no_pages_unassessed():
+    result = body_and_restarted_bibliography()
+    selection = select_references(result, load_patterns())
+    assert reference_pages_not_assessed(result, selection) == []
+
+
+def _paired(*rows, page=1):
+    """Blocks of (text, x0, top) on one page under a References heading."""
+    blocks = [
+        TextBlock(
+            page=page, bbox=(10, 0, 300, 20), text="References", max_font_size=24, bold_ratio=1
+        )
+    ]
+    for text, x0, top in rows:
+        width = 18 if text.startswith("[") else 400
+        blocks.append(
+            TextBlock(
+                page=page,
+                bbox=(x0, top, x0 + width, top + 12),
+                text=text,
+                max_font_size=10,
+                bold_ratio=0,
+            )
+        )
+    return ExtractionResult(
+        page_count=1,
+        anchor_kind="page",
+        image_only=False,
+        text_chars=sum(len(b.text) for b in blocks),
+        blocks=blocks,
+        images=[],
+        section_tree=SectionTree(source="none", nodes=[]),
+    )
+
+
+REYES_ENTRY = "Reyes, J. Booking queues in rural clinics. Journal of Examples, 2024."
+SANTOS_ENTRY = "Santos, A. Measuring appointment no-shows. Health IT Notes, 2023."
+CRUZ_ENTRY = "Cruz, M. Mobile queueing for barangay health centers. Notes, 2021."
+
+
+@pytest.mark.parametrize(
+    "rows",
+    [
+        # A repeated label.
+        [
+            ("[1]", 78, 30),
+            ("[2]", 78, 60),
+            ("[2]", 78, 90),
+            (REYES_ENTRY, 108, 30),
+            (SANTOS_ENTRY, 108, 60),
+            (CRUZ_ENTRY, 108, 90),
+        ],
+        # Labels in two columns.
+        [
+            ("[1]", 78, 30),
+            ("[2]", 78, 60),
+            ("[3]", 320, 30),
+            ("[4]", 320, 60),
+            (REYES_ENTRY[:30], 108, 30),
+            (SANTOS_ENTRY[:30], 108, 60),
+            (CRUZ_ENTRY[:30], 350, 30),
+            (REYES_ENTRY[30:], 350, 60),
+        ],
+        # Labels in two columns beside a single text column.
+        [
+            ("[1]", 20, 30),
+            ("[2]", 20, 60),
+            ("[3]", 78, 90),
+            (REYES_ENTRY, 108, 30),
+            (SANTOS_ENTRY, 108, 60),
+            (CRUZ_ENTRY, 108, 90),
+        ],
+        # One label on the line of two text blocks.
+        [
+            ("[1]", 78, 30),
+            ("[2]", 78, 60),
+            (REYES_ENTRY[:30], 108, 28),
+            (SANTOS_ENTRY[:30], 108, 32),
+            (CRUZ_ENTRY, 108, 60),
+        ],
+        # Text before the first label.
+        [
+            ("[1]", 78, 30),
+            ("[2]", 78, 60),
+            (CRUZ_ENTRY, 108, 10),
+            (REYES_ENTRY, 108, 30),
+            (SANTOS_ENTRY, 108, 60),
+        ],
+    ],
+)
+def test_untrustworthy_label_layouts_refuse_the_list(rows):
+    result = _paired(*rows)
+    assert "detached_reference_labels" in select_references(result, load_patterns()).issues
+    assert extract_references(result, load_patterns()) == []
+
+
+def test_a_paired_entry_keeps_its_printed_number():
+    result = _paired(
+        ("[1]", 78, 30), ("[2]", 78, 60), (REYES_ENTRY, 108, 30), (SANTOS_ENTRY, 108, 60)
+    )
+    locations = reference_entry_locations(result, load_patterns())
+    assert [location.printed_number for location in locations] == [1, 2]
+
+
+def test_an_identifier_tail_after_an_end_heading_is_not_more_bibliography():
+    tail = [TextBlock(page=1, text="7534015.", max_font_size=10, bold_ratio=0)]
+    assert not _bibliography_continues(tail)
+    label = [TextBlock(page=1, text="12.", max_font_size=10, bold_ratio=0)]
+    assert _bibliography_continues(label)
+
+
+def test_word_paragraphs_that_hold_only_a_label_refuse_the_list():
+    result = bibliography()
+    result.anchor_kind = "paragraph"
+    result.page_count = 0
+    result.section_tree.source = "styles"
+    for index, block in enumerate(result.blocks):
+        block.page, block.bbox, block.paragraph = None, None, index
+    result.section_tree.nodes[0].page = None
+    result.section_tree.nodes[0].paragraph = 3
+    result.blocks[1].text, result.blocks[2].text = "[1]", "[2]"
+    assert "detached_reference_labels" in select_references(result, load_patterns()).issues
