@@ -9030,4 +9030,33 @@
   }
   .signal-theme main :is(p, li, dd, td, blockquote, figcaption, .signal-field-hint) > a:not([class]):hover,
   .signal-citation-source-links a:hover { color: var(--color-signal-link-hover); }
+  /* V-089: bulk confirm or dismiss. */
+  .signal-bulk-bar {
+    /* Stays in view at the bottom of the screen while findings are selected. */
+    position: fixed;
+    inset-block-end: var(--signal-space-4);
+    inset-inline-start: 50%;
+    transform: translateX(-50%);
+    inline-size: min(calc(100% - 2 * var(--signal-space-5)), var(--signal-prose-width));
+    z-index: var(--signal-z-popover);
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    display: grid;
+    gap: var(--signal-space-2);
+    margin-block: var(--signal-space-4);
+    box-shadow: var(--signal-shadow-raised);
+    border: var(--signal-border-hairline) solid var(--color-signal-border-strong);
+    border-radius: var(--signal-radius-panel);
+    background: var(--color-signal-surface);
+    padding: var(--signal-space-3) var(--signal-space-4);
+  }
+  .signal-bulk-bar p { margin: 0; }
+  .signal-bulk-bar > .signal-control-cluster { grid-column: 2; grid-row: 1 / span 2; }
+  /* Room below the list so the fixed bar never covers the last finding. */
+  body:has(.signal-bulk-bar) .signal-integrity-review-body { padding-block-end: calc(2 * var(--signal-space-12)); }
+  .signal-bulk-check { display: inline-flex; align-items: center; min-block-size: var(--signal-control-height); min-inline-size: var(--signal-control-height); justify-content: center; }
+  .signal-bulk-check input { inline-size: var(--signal-space-4); block-size: var(--signal-space-4); accent-color: var(--color-signal-link); }
+  .signal-bulk-select { margin-block-start: var(--signal-space-2); }
+  .signal-bulk-result { margin: 0 0 var(--signal-space-4); font-weight: var(--signal-weight-semibold); }
+  .signal-bulk-dialog__list { max-block-size: var(--signal-passage-inspector-max-height); overflow: auto; margin: 0; padding-inline-start: var(--signal-space-5); }
 }

@@ -68,3 +68,11 @@ export const SHARE_EXPIRY_OPTIONS = [
   { value: "90d", label: "90 days", days: 90 },
   { value: "none", label: "No expiry", days: null },
 ] as const;
+
+// V-089: one bulk confirm or dismiss. The server enforces its own limits
+// (FLAG_BULK_RESOLVE_MAX_FLAGS / _MAX_TEXT_CHARS); these mirror its defaults
+// so the screen can say so before anything is sent.
+export const BULK_RESOLVE_MAX_LOCATIONS = 200;
+export const BULK_RESOLVE_MAX_TEXT_CHARS = 2000;
+// How many selected findings the confirmation dialog lists by name.
+export const BULK_RESOLVE_LISTED_FINDINGS = 8;
