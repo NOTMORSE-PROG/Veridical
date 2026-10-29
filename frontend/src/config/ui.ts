@@ -32,6 +32,9 @@ export const WORKSPACE_STEPS_MAX_PINNED_SHARE = 0.34;
 // Long review lists are split into pages of this size rather than one scroll.
 export const LIST_PAGE_SIZE = { findings: 8, imageReadings: 6 } as const;
 export const PASSWORD_MIN_LENGTH = 8;
+// A failed upload part waits this long times its attempt number before it is
+// sent again; the retry count comes from the server.
+export const UPLOAD_PART_RETRY_DELAY_MS = 1000;
 export const LIBRARY_SEARCH_DEBOUNCE_MS = 400;
 // V-077: how often an own Library record that is still being read refreshes
 // its status, and the most own pending uploads listed above the collection.

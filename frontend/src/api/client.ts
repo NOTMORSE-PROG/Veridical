@@ -105,6 +105,34 @@ export const api = {
       credentials: "omit", redirect: "error" });
     if (!response.ok) throw new ApiError(response.status, "upload_transport", "The file transfer did not finish. Retry this upload to check its saved status.");
   },
+  // Streams a file as the raw request body to the API. XMLHttpRequest is
+  // the browser API that reports upload progress; the percent stays below
+  // 100 until the server confirms the stored file.
+  putBody: <T>(path: string, file: File, headers: Record<string, string>, onProgress?: (percent: number) => void): Promise<T> =>
+    new Promise<T>((resolve, reject) => {
+      const request = new XMLHttpRequest();
+      request.open("PUT", `${BASE_URL}${path}`);
+      request.withCredentials = true;
+      for (const [name, value] of Object.entries(headers)) request.setRequestHeader(name, value);
+      request.setRequestHeader("Content-Type", "application/octet-stream");
+      request.upload.onprogress = (event) => {
+        if (event.lengthComputable && onProgress) onProgress(Math.min(99, Math.floor((event.loaded / event.total) * 100)));
+      };
+      request.onload = () => {
+        let body: unknown = null;
+        try { body = JSON.parse(request.responseText); } catch { body = null; }
+        if (request.status >= 200 && request.status < 300) {
+          onProgress?.(100);
+          resolve(body as T);
+          return;
+        }
+        const error = (body as { error?: { code?: string; message?: string } } | null)?.error;
+        reject(new ApiError(request.status, error?.code ?? "upload_transport",
+          error?.message ?? "The file transfer did not finish. Retry this upload to check its saved status."));
+      };
+      request.onerror = () => reject(new ApiError(0, "upload_transport", "The file transfer did not finish. Retry this upload to check its saved status."));
+      request.send(file);
+    }),
   getPublic: <T>(path: string, options?: Pick<RequestInit, "signal">): Promise<T> => request<T>(path, { ...options, credentials: "omit" }),
   get: <T>(path: string, options?: Pick<RequestInit, "signal">): Promise<T> => request<T>(path, options),
   getBlob: (path: string, options?: Pick<RequestInit, "signal">): Promise<Blob> => requestBlob(path, options),
