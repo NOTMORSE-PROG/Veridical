@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_instructor, get_upload_instructor
 from app.config import get_settings
-from app.db import DbInt, get_session
+from app.db import DbInt, DbText, get_session
 from app.errors import FormatAIConfigurationError
 from app.llm import LLMNotConfiguredError, get_llm_client_for
 from app.models.instructor import Instructor
@@ -144,7 +144,7 @@ async def upload_rubric(
     file: UploadFile,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_upload_instructor)],
-    title: str = "Untitled rubric",
+    title: DbText = "Untitled rubric",
     family_id: uuid.UUID | None = None,
 ) -> RubricOut:
     async def chunks():

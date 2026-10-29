@@ -6,7 +6,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.config import get_settings
-from app.db import DbInt
+from app.db import DbInt, DbText
 from app.ingest.schemas import FigureReading
 from app.library.passage_indexing import LibraryPassageIndexingSummary
 from app.report.rule_facts import RuleFacts
@@ -469,7 +469,7 @@ class PublicReportOut(BaseModel):
 class DecisionIn(BaseModel):
     expected_revision: DbInt = Field(strict=True, ge=0)
     decision: Literal["approved", "returned", "rejected"]
-    note: str | None = None
+    note: DbText | None = None
 
 
 class ReopenIn(BaseModel):
@@ -478,7 +478,7 @@ class ReopenIn(BaseModel):
     # BUG-095) -- undoing a decision is exactly the kind of action this
     # project's own audit-trail philosophy (V-024) says must explain
     # itself.
-    reason: str = Field(min_length=1)
+    reason: DbText = Field(min_length=1)
 
     # BUG-105: the identical defect BUG-096 fixed for ResolveEscalationIn
     # -- min_length=1 let a single character satisfy a field whose own
@@ -553,7 +553,7 @@ class ResolveEscalationIn(BaseModel):
     # criterion — requires `level` below.
     resolution: Literal["accept_majority", "mark_pass", "mark_fail", "needs_document", "mark_level"]
     # Ordinary pending grades may omit comments; keep a string in the record.
-    reason: str = ""
+    reason: DbText = ""
     # V-069 AC4: required (and only meaningful) when resolution is
     # "mark_level" — the level's own ordinal, matched against the
     # criterion's own scale server-side (never trusted as a name/points

@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_upload_instructor
 from app.config import get_settings
-from app.db import DbInt, get_session
+from app.db import DbInt, DbText, get_session
 from app.errors import (
     ConflictError,
     DocumentPreparationBusyError,
@@ -270,8 +270,8 @@ class StartCheck(BaseModel):
 
 class BeginUpload(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    attempt_id: str
-    filename: str = Field(min_length=1, max_length=255)
+    attempt_id: DbText
+    filename: DbText = Field(min_length=1, max_length=255)
     size: DbInt = Field(gt=0)
     # V-090: start a check with this rubric as soon as the manuscript is ready.
     start_check: StartCheck | None = None
@@ -496,7 +496,7 @@ async def begin_upload(
 
 @router.put("/manuscripts/uploads/{attempt_id}/body")
 async def relay_upload_body(
-    attempt_id: str,
+    attempt_id: DbText,
     request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_upload_instructor)],
@@ -555,7 +555,7 @@ async def relay_upload_body(
 
 @router.post("/manuscripts/uploads/{attempt_id}/file")
 async def relay_upload(
-    attempt_id: str,
+    attempt_id: DbText,
     file: UploadFile,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_upload_instructor)],
@@ -617,7 +617,7 @@ async def relay_upload(
 
 @router.post("/manuscripts/uploads/{attempt_id}/complete")
 async def complete_upload(
-    attempt_id: str,
+    attempt_id: DbText,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_upload_instructor)],
 ):
@@ -743,7 +743,7 @@ async def list_uploads(
 
 @router.get("/manuscripts/uploads/{attempt_id}")
 async def upload_status(
-    attempt_id: str,
+    attempt_id: DbText,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_upload_instructor)],
 ):

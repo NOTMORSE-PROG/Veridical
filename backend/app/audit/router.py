@@ -11,7 +11,7 @@ from app.audit.schemas import AuditLogDetail, PaginatedAuditLog
 from app.audit.service import get_audit_log_detail, list_audit_log
 from app.auth.dependencies import get_current_instructor
 from app.config import get_settings
-from app.db import DbInt, get_session
+from app.db import DbInt, DbText, get_session
 from app.models.instructor import Instructor
 
 router = APIRouter(prefix="/audit", tags=["audit"])
@@ -27,8 +27,8 @@ async def list_audit_log_route(
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
     check_run_id: DbInt | None = None,
-    event_type: str | None = None,
-    event_type_prefix: str | None = None,
+    event_type: DbText | None = None,
+    event_type_prefix: DbText | None = None,
     date_from: datetime | None = None,
     date_to: datetime | None = None,
     page: Annotated[DbInt, Query(ge=1, le=_AUDIT_LIST_MAX_PAGE)] = 1,

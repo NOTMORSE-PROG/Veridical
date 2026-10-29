@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_instructor
 from app.config import get_settings
-from app.db import DbInt, get_session
+from app.db import DbInt, DbText, get_session
 from app.models.instructor import Instructor
 from app.report.evidence_service import (
     EvidenceManifestOut,
@@ -69,7 +69,7 @@ async def revoke_share_link_route(
 
 @router.get("/shared/{token}/report", response_model=SharedReportOut)
 async def get_shared_report_route(
-    token: str,
+    token: DbText,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> SharedReportOut:
     return await get_shared_report(session, token)
@@ -77,7 +77,7 @@ async def get_shared_report_route(
 
 @router.get("/shared/{token}/evidence", response_model=EvidenceManifestOut)
 async def get_shared_evidence_manifest_route(
-    token: str,
+    token: DbText,
     response: Response,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> EvidenceManifestOut:
@@ -88,9 +88,9 @@ async def get_shared_evidence_manifest_route(
 
 @router.get("/shared/{token}/evidence/{reference_id}/page", response_model=EvidencePageOut)
 async def get_shared_evidence_page_route(
-    token: str,
-    reference_id: Annotated[str, Path(pattern=r"^[a-f0-9]{64}$")],
-    snapshot_id: Annotated[str, Query(pattern=r"^[a-f0-9]{64}$")],
+    token: DbText,
+    reference_id: Annotated[DbText, Path(pattern=r"^[a-f0-9]{64}$")],
+    snapshot_id: Annotated[DbText, Query(pattern=r"^[a-f0-9]{64}$")],
     response: Response,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> EvidencePageOut:

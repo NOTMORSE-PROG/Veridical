@@ -17,6 +17,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from app.db import DbText
 from app.library.passage_indexing import PassageIndexingOut
 from app.models.enums import LibraryEntrySource, LibraryEntryStatus
 
@@ -88,22 +89,22 @@ class LibrarySubmissionIn(BaseModel):
     """Optional metadata sent with one submitted file. Blank title, team name
     and authors are proposed from the title page and stay editable."""
 
-    title: str | None = Field(default=None, max_length=500)
-    team_name: str | None = Field(default=None, max_length=200)
-    authors: list[str] = Field(default_factory=list)
-    program: str | None = Field(default=None, max_length=50)
-    school_year: str | None = Field(default=None, max_length=20)
+    title: DbText | None = Field(default=None, max_length=500)
+    team_name: DbText | None = Field(default=None, max_length=200)
+    authors: list[DbText] = Field(default_factory=list)
+    program: DbText | None = Field(default=None, max_length=50)
+    school_year: DbText | None = Field(default=None, max_length=20)
 
 
 class LibraryEntryUpdate(BaseModel):
     """PATCH semantics: only fields present in the body change; an empty
     string or null clears a field."""
 
-    title: str | None = Field(default=None, max_length=500)
-    team_name: str | None = Field(default=None, max_length=200)
-    authors: list[str] | None = None
-    program: str | None = Field(default=None, max_length=50)
-    school_year: str | None = Field(default=None, max_length=20)
+    title: DbText | None = Field(default=None, max_length=500)
+    team_name: DbText | None = Field(default=None, max_length=200)
+    authors: list[DbText] | None = None
+    program: DbText | None = Field(default=None, max_length=50)
+    school_year: DbText | None = Field(default=None, max_length=20)
 
 
 class LibraryDecisionIn(BaseModel):

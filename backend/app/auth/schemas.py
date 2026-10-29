@@ -2,18 +2,20 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
+from app.db import DbText
+
 
 class LoginRequest(BaseModel):
-    email: str
-    password: str
+    email: DbText
+    password: DbText
 
 
 class ChangePasswordIn(BaseModel):
-    current_password: str
+    current_password: DbText
     # 8 = OWASP's own minimum baseline (same security-engineering-constant
     # class as security.py's hasher params, not a business threshold an
     # instructor would ever configure -- see that module's own docstring).
-    new_password: str = Field(min_length=8)
+    new_password: DbText = Field(min_length=8)
 
 
 class InstructorOut(BaseModel):

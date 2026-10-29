@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app import messages
 from app.auth.dependencies import get_current_instructor, get_upload_instructor
 from app.config import get_settings
-from app.db import DbInt, get_session
+from app.db import DbInt, DbText, get_session
 from app.groups.selection import SelectGroupRequest, SelectGroupResponse, select_saved_group
 from app.groups.service import DEFAULT_GROUP_LABEL, program_name_for
 from app.ingest.schemas import (
@@ -62,8 +62,8 @@ async def ingest_manuscript_upload(
     # The query param is still accepted for one release so an in-flight
     # client isn't broken mid-deploy; the form field wins when both are
     # sent, since it's the one that doesn't leak group identity into logs.
-    group_label: Annotated[str | None, Form()] = None,
-    group_label_query: Annotated[str | None, Query(alias="group_label")] = None,
+    group_label: Annotated[DbText | None, Form()] = None,
+    group_label_query: Annotated[DbText | None, Query(alias="group_label")] = None,
 ) -> IngestSummary:
     resolved_group_label = group_label or group_label_query or DEFAULT_GROUP_LABEL
 
@@ -202,14 +202,14 @@ async def list_manuscripts_route(
     page_size: Annotated[DbInt, Query(ge=1, le=_MANUSCRIPT_LIST_MAX_PAGE_SIZE)] = (
         _MANUSCRIPT_LIST_DEFAULT_PAGE_SIZE
     ),
-    q: str | None = None,
+    q: DbText | None = None,
     status: ManuscriptQueueStatus | None = None,
     needs_review: bool | None = None,
-    group: str | None = None,
+    group: DbText | None = None,
     # V-062 (AC5): filters to manuscripts whose group has this program.
     # `UNSET_PROGRAM_FILTER` ("__unset__") asks for manuscripts with no
     # program set instead -- a real filter state, not an unreachable one.
-    program: str | None = None,
+    program: DbText | None = None,
     sort: ManuscriptSort = ManuscriptSort.newest,
 ) -> PaginatedManuscripts:
     return await list_manuscripts(

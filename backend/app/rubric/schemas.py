@@ -8,7 +8,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-from app.db import DbInt
+from app.db import DbInt, DbText
 
 
 class ParsedLevel(BaseModel):
@@ -19,8 +19,8 @@ class ParsedLevel(BaseModel):
     source could weight its top rung higher than its ordinal position)."""
 
     level: DbInt = Field(ge=1)
-    name: str = Field(min_length=1)
-    descriptor: str = Field(min_length=1)
+    name: DbText = Field(min_length=1)
+    descriptor: DbText = Field(min_length=1)
     points: float = Field(ge=0)
 
     @field_validator("name", "descriptor")
@@ -146,8 +146,8 @@ class CriterionIn(BaseModel):
 
     id: DbInt | None = None
     type: Literal["structural", "semantic", "not_assessable"]
-    text: str = Field(min_length=1)
-    evidence: str | None = None
+    text: DbText = Field(min_length=1)
+    evidence: DbText | None = None
     weight: float = Field(gt=0)
     # V-069: round-tripped, never hand-edited on this screen in this
     # ticket (no AC requires per-level editing UI) — the instructor's

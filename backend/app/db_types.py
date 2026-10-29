@@ -7,9 +7,12 @@ of packages installed, so neither asyncpg nor SQLAlchemy is there to import.
 
 from typing import Annotated
 
+from pydantic import AfterValidator
+from pydantic_core import PydanticCustomError
+
 from app.config import BIGINT_MAX, BIGINT_MIN
 
-__all__ = ["BIGINT_MAX", "BIGINT_MIN", "DbInt"]
+__all__ = ["BIGINT_MAX", "BIGINT_MIN", "TEXT_NOT_STORABLE", "DbInt", "DbText"]
 
 # Every id, page and revision we look up fits in BIGINT, so a request integer
 # outside it cannot match anything. asyncpg refuses to send such a value at
@@ -51,3 +54,21 @@ class _FitsBigint:
 
 
 DbInt = Annotated[int, _FitsBigint]
+
+# PostgreSQL text and JSONB cannot hold U+0000, and request text carrying it
+# used to reach asyncpg and fail with a 500 (BUG-537). Request text typed
+# DbText is refused with a 422 naming the field instead. (Lone surrogates are
+# already refused by pydantic's own str validation.)
+TEXT_NOT_STORABLE = (
+    "This text contains a hidden character that cannot be saved, often from text "
+    "copied out of a PDF. Remove it and try again."
+)
+
+
+def _storable_text(value: str) -> str:
+    if "\x00" in value:
+        raise PydanticCustomError("text_not_storable", TEXT_NOT_STORABLE)
+    return value
+
+
+DbText = Annotated[str, AfterValidator(_storable_text)]
