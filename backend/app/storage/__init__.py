@@ -264,15 +264,13 @@ class R2Storage:
 
     def list_parts(self, key: str, upload_id: str) -> list[dict]:
         self._require_scope(key)
-        parts, marker = [], 0
+        parts, params = [], {"Bucket": self._bucket, "Key": key, "UploadId": upload_id}
         while True:
-            page = self._client.list_parts(
-                Bucket=self._bucket, Key=key, UploadId=upload_id, PartNumberMarker=marker
-            )
+            page = self._client.list_parts(**params)
             parts.extend(page.get("Parts", []))
             if not page.get("IsTruncated"):
                 return parts
-            marker = page["NextPartNumberMarker"]
+            params["PartNumberMarker"] = page["NextPartNumberMarker"]
 
     def complete_multipart(self, key: str, upload_id: str, parts: list[dict]) -> None:
         self._require_scope(key)
