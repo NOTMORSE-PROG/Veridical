@@ -8932,4 +8932,32 @@
   .signal-finding-confirm h3, .signal-finding-confirm p, .signal-finding-confirmed p { margin: 0; }
   .signal-finding-confirm textarea { inline-size: 100%; }
   .signal-finding-confirm > .signal-button { justify-self: start; }
+  /* V-090: uploads tray, visible on every signed-in page. */
+  .signal-upload-tray {
+    position: fixed;
+    inset-block-end: var(--signal-space-5);
+    inset-inline-end: var(--signal-space-5);
+    z-index: var(--signal-z-popover);
+    display: grid;
+    gap: var(--signal-space-3);
+    inline-size: var(--signal-settings-column-min);
+    max-inline-size: calc(100% - var(--signal-space-10));
+    max-block-size: var(--signal-shared-preview-max-height);
+    overflow: auto;
+    border: var(--signal-border-hairline) solid var(--color-signal-border-strong);
+    border-radius: var(--signal-radius-panel);
+    background: var(--color-signal-surface);
+    box-shadow: var(--signal-shadow-floating);
+    padding: var(--signal-space-4);
+  }
+  .signal-upload-tray__title { margin: 0; font-size: var(--signal-type-body); }
+  .signal-upload-tray ul { display: grid; gap: var(--signal-space-3); margin: 0; padding: 0; list-style: none; }
+  .signal-upload-tray__item { display: grid; gap: var(--signal-space-2); border-block-start: var(--signal-border-hairline) solid var(--color-signal-border); padding-block-start: var(--signal-space-3); }
+  .signal-upload-tray__name { display: flex; justify-content: space-between; gap: var(--signal-space-3); min-inline-size: 0; }
+  .signal-upload-tray__name strong { overflow-wrap: anywhere; }
+  .signal-upload-tray__name span { color: var(--color-signal-ink-muted); white-space: nowrap; }
+  .signal-upload-tray__state { margin: 0; }
+  .signal-upload-tray__item[data-phase="failed"] .signal-upload-tray__state { color: var(--color-signal-not-ready-text); }
+  .signal-upload-tray progress { inline-size: 100%; accent-color: var(--color-signal-link); }
+  .signal-upload-tray__actions { display: flex; flex-wrap: wrap; gap: var(--signal-space-2); }
 }

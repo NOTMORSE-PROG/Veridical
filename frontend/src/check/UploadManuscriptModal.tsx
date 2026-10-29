@@ -28,6 +28,8 @@ import { formatFileSize } from "../domain/fileSize";
 import { Button } from "../ui/Button";
 import { GroupAssignmentFields } from "./GroupAssignmentFields";
 import { useIngestManuscript } from "./useCheckRun";
+import { useBackgroundUploads } from "../upload/BackgroundUploads";
+import { BACKGROUND_UPLOAD_MIN_BYTES } from "../config/ui";
 
 function formatUploadDate(value: string): string {
   return new Date(value).toLocaleString(undefined, {
@@ -90,6 +92,7 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
   const [groupResolved, setGroupResolved] = useState(false);
   const [actionsTarget, setActionsTarget] = useState<HTMLDivElement | null>(null);
   const ingest = useIngestManuscript();
+  const background = useBackgroundUploads();
   const queryClient = useQueryClient();
   const resetIngest = ingest.reset;
   const scope = useUploadScope();
@@ -167,6 +170,12 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
     }
     if (sending.current || scopeStatus !== "ready" || !isScopeCurrent()) return;
     if (unknownFiles.length > 0 && !confirmed) { setConfirming(true); return; }
+    if (background && file.size >= BACKGROUND_UPLOAD_MIN_BYTES) {
+      setConfirming(false);
+      background.start(file);
+      onClose();
+      return;
+    }
     const attempt = scope.capture();
     const submittedFile = file;
     setConfirming(false);
