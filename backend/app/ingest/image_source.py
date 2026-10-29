@@ -1,6 +1,8 @@
 """Pure source-image selection and native rasterization (F1); no model or DB imports."""
 
 import hashlib
+from bisect import bisect_right
+from collections import Counter, defaultdict
 from pathlib import Path
 
 import pymupdf
@@ -65,31 +67,46 @@ def _crop(file_path: Path, image: ImageBlock, settings: Settings) -> bytes:
         release_native_cache()
 
 
-def _caption(result, image, patterns, settings):
+def _caption_index(result):
+    """Images per page/paragraph and blocks by page/paragraph, built once.
+
+    A long manuscript can hold tens of thousands of image fragments (charts
+    drawn as tiles); looking each one's neighbours up by rescanning every
+    image made figure preparation quadratic and stalled ingestion."""
+    by_page, by_paragraph = defaultdict(list), defaultdict(list)
+    for block in result.blocks:
+        by_page[block.page].append(block)
+        if block.paragraph is not None:
+            by_paragraph[block.paragraph].append(block)
+    return (
+        Counter(item.page for item in result.images),
+        Counter(item.paragraph for item in result.images),
+        sorted({item.paragraph for item in result.images if item.paragraph is not None}),
+        by_page,
+        by_paragraph,
+    )
+
+
+def _caption(result, image, patterns, settings, index=None):
+    per_page, per_paragraph, image_paragraphs, by_page, by_paragraph = index or _caption_index(
+        result
+    )
     if image.paragraph is not None:
-        if sum(item.paragraph == image.paragraph for item in result.images) != 1:
+        if per_paragraph[image.paragraph] != 1:
             return None, None
-        next_image = min(
-            (
-                item.paragraph
-                for item in result.images
-                if item.paragraph is not None and item.paragraph > image.paragraph
-            ),
-            default=None,
-        )
+        position = bisect_right(image_paragraphs, image.paragraph)
+        last = image.paragraph + settings.ingest_figure_caption_lookahead
+        if position < len(image_paragraphs):
+            last = min(last, image_paragraphs[position] - 1)
         blocks = [
-            b
-            for b in result.blocks
-            if b.paragraph is not None
-            and (next_image is None or b.paragraph < next_image)
-            and image.paragraph
-            <= b.paragraph
-            <= image.paragraph + settings.ingest_figure_caption_lookahead
+            block
+            for paragraph in range(image.paragraph, last + 1)
+            for block in by_paragraph.get(paragraph, ())
         ]
     else:
-        if sum(item.page == image.page for item in result.images) != 1:
+        if per_page[image.page] != 1:
             return None, None
-        blocks = [b for b in result.blocks if b.page == image.page]
+        blocks = by_page.get(image.page, [])
     captions = [b for b in blocks if patterns.caption.match(b.text.strip())]
     # Page proximity alone cannot attach one of several captions to a crop.
     if len(captions) != 1:
@@ -102,8 +119,9 @@ def _caption(result, image, patterns, settings):
 def prepare_figures(result, patterns, settings, *, enabled=True):
     eligible = []
     priority = _priority_page_ranges(result.section_tree.nodes, patterns)
+    caption_index = _caption_index(result)
     for index, image in enumerate(result.images):
-        caption, anchor = _caption(result, image, patterns, settings)
+        caption, anchor = _caption(result, image, patterns, settings, caption_index)
         supported = image.docx_source is not None or (
             image.page is not None
             and image.bbox is not None
@@ -115,9 +133,10 @@ def prepare_figures(result, patterns, settings, *, enabled=True):
         if enabled and settings.ingest_figure_reading_enabled and supported and useful:
             eligible.append(index)
     selected = eligible[: settings.ingest_figure_max_images]
+    selected_set, eligible_set = set(selected), set(eligible)
     result.figure_readings = []
     for index, image in enumerate(result.images):
-        caption, anchor = _caption(result, image, patterns, settings)
+        caption, anchor = _caption(result, image, patterns, settings, caption_index)
         result.figure_readings.append(
             FigureReading(
                 image_index=index,
@@ -128,9 +147,9 @@ def prepare_figures(result, patterns, settings, *, enabled=True):
                 else None,
                 status="not_selected",
                 reason="not_attempted"
-                if index in selected
+                if index in selected_set
                 else "selection_limit"
-                if index in eligible
+                if index in eligible_set
                 else "not_requested"
                 if not enabled or not settings.ingest_figure_reading_enabled
                 else "source_or_relevance_unavailable",
