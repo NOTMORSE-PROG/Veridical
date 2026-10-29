@@ -1,0 +1,11 @@
+{
+  "_comment": [
+    "Compatibility ligatures that PDF text extraction keeps from typeset",
+    "manuscripts (e.g. 'Eﬀectiveness') and that the bundled report fonts do",
+    "not draw. When no bundled face covers one, the export draws its Unicode",
+    "compatibility (NFKC) letters instead ('ff'). Display only: the saved",
+    "evidence text is unchanged. Listed explicitly because NFKC is not safe in",
+    "general (it would draw a superscript 2 as a plain 2)."
+  ],
+  "code_points": ["FB00", "FB01", "FB02", "FB03", "FB04", "FB05", "FB06"]
+}

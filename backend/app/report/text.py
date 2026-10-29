@@ -56,6 +56,17 @@ def clusters(text: str):
         yield cluster
 
 
+@lru_cache(maxsize=1)
+def _display_decompositions() -> dict[str, str]:
+    """Allowlisted compatibility characters drawn as their NFKC letters only
+    when no bundled face covers them (data/display_decompositions.json)."""
+    raw = json.loads(
+        (Path(__file__).parent / "data" / "display_decompositions.json").read_text("utf-8")
+    )
+    characters = (chr(int(code, 16)) for code in raw["code_points"])
+    return {char: unicodedata.normalize("NFKC", char) for char in characters}
+
+
 @lru_cache
 def _font_capabilities(font_name):
     return next(
@@ -120,9 +131,11 @@ def text_runs(text: str, font_name: str):
         # unshaped renderer visibly misplaces them, so do not deliver that PDF.
         if any(unicodedata.category(character).startswith("M") for character in cluster):
             raise ReportExportUnavailableError()
-        candidate = next(
-            (face for face in [font_name, *fallbacks] if _supports(face, cluster)), None
-        )
+        faces = [font_name, *fallbacks]
+        candidate = next((face for face in faces if _supports(face, cluster)), None)
+        if candidate is None and cluster in _display_decompositions():
+            cluster = _display_decompositions()[cluster]
+            candidate = next((face for face in faces if _supports(face, cluster)), None)
         if candidate is None:
             raise ReportExportUnavailableError()
         if selected is not None and candidate != selected:
