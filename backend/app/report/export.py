@@ -1778,13 +1778,17 @@ def _build_report_pdf(data: ReportExportData, image_path) -> bytes:
                     else "Source location unavailable"
                 )
                 key = anchor, item.reason
-                image_locations[key] = image_locations.get(key, 0) + 1
-            for (anchor, image_reason), count in image_locations.items():
+                count, pieces = image_locations.get(key, (0, 0))
+                image_locations[key] = count + 1, pieces + item.piece_count
+            for (anchor, image_reason), (count, pieces) in image_locations.items():
                 label = _image_coverage_labels().get(image_reason, "Image content unassessed")
                 occurrences = "image occurrence" if count == 1 else "image occurrences"
+                # Merged images still say how many pieces they hold, so a page
+                # of tiles never reads as one small picture (BUG-532).
+                made_of = f", made of {pieces:,} touching pieces" if pieces > count else ""
                 flow.append(
                     Paragraph(
-                        escape(f"{anchor}: {label} ({count} {occurrences})."),
+                        escape(f"{anchor}: {label} ({count} {occurrences}{made_of})."),
                         styles["caption"],
                     )
                 )

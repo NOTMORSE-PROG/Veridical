@@ -165,6 +165,8 @@ class ImageAssessmentLocationOut(BaseModel):
     page: int | None = Field(default=None, gt=0)
     paragraph: int | None = Field(default=None, ge=0)
     reason: str
+    # Touching PDF pieces prepared as this one image (BUG-532); 1 when unmerged.
+    piece_count: int = Field(default=1, ge=1)
 
 
 class NativeMathAssessmentLocationOut(BaseModel):

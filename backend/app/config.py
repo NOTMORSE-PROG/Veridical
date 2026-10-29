@@ -1074,6 +1074,15 @@ class Settings(BaseSettings):
     # near 28 MiB, 44x above the largest real thesis. Not an `ingest_` name on
     # purpose: those settings travel in the signed helper job contract.
     preparation_max_image_fragments: int = Field(default=5000, ge=1)
+    # PDF image pieces on one page whose boxes touch or overlap (within the
+    # tolerance, in points) are one picture -- a tiled scan, a chart cut into
+    # strips, icons around a diagram -- and are prepared as one image that
+    # records its piece count. Measured on the real test theses: a 66,933-piece
+    # thesis becomes 213 images (tiles sit 0-0.5 pt apart); three normal theses
+    # merge nothing at 0-2 pt. Not `ingest_` names: a helper that predates
+    # these settings would refuse every job that carried them.
+    preparation_merge_touching_image_pieces: bool = True
+    preparation_image_piece_merge_tolerance_pts: float = Field(default=1.0, ge=0, le=36)
     # V-090 upload tray: finished attempts stay listed this long so a reload
     # can show what happened; the list is capped for one screen.
     direct_upload_tray_window_seconds: int = Field(default=86400, ge=60)
