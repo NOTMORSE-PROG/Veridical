@@ -111,8 +111,9 @@ def test_a_model_in_use_is_never_released_under_its_caller():
 
     class _SlowModel(_FakeModel):
         def encode(self, texts):
-            entered.set()
-            finish.wait(5)
+            if texts == ["ab"]:
+                entered.set()
+                finish.wait(5)
             return super().encode(texts)
 
     with patch("model2vec.StaticModel.from_pretrained", side_effect=_SlowModel) as load:
@@ -134,21 +135,19 @@ def test_the_idle_timer_never_releases_a_model_that_is_being_used():
 
     class _SlowModel(_FakeModel):
         def encode(self, texts):
-            entered.set()
-            finish.wait(5)
+            if texts == ["slow"]:
+                entered.set()
+                finish.wait(5)
             return super().encode(texts)
 
     with patch("model2vec.StaticModel.from_pretrained", side_effect=_SlowModel) as load:
-        # A short first use arms the timer; a slow second use is still running
-        # when it fires.
-        finish.set()
-        embeddings.embed_texts(["a"], _settings(0.05))
-        worker = threading.Thread(target=embeddings.embed_texts, args=(["ab"], _settings(0.05)))
-        finish.clear()
-        entered.clear()
+        # A slow caller is mid-encode; a quick second caller then arms the idle
+        # timer, which fires (several times) while the slow one is still running.
+        worker = threading.Thread(target=embeddings.embed_texts, args=(["slow"], _settings(0.05)))
         worker.start()
         assert entered.wait(5)
-        time.sleep(0.3)
+        embeddings.embed_texts(["a"], _settings(0.05))
+        time.sleep(0.4)
         assert embeddings.embedding_model_loaded()
         finish.set()
         worker.join(5)
