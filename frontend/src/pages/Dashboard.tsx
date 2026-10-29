@@ -508,9 +508,6 @@ function ReviewDesk({
               />
               <Button type="submit" variant="secondary">Search</Button>
             </div>
-            <p id="review-desk-search-help" className="signal-filter-help">
-              Only manuscripts in {queueTitle} are searched. Change queues to find other uploads.
-            </p>
           </form>
           <div className="signal-filter-field">
             <label htmlFor="review-desk-program">Program</label>
@@ -550,6 +547,9 @@ function ReviewDesk({
               Clear filters
             </Button>
           )}
+          <p id="review-desk-search-help" className="signal-filter-help">
+            Only manuscripts in {queueTitle} are searched. Change queues to find other uploads.
+          </p>
         </div>
 
         {loading && (

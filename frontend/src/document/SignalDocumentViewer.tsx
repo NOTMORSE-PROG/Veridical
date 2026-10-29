@@ -151,7 +151,7 @@ function ReviewQueue({ findings, regions, sourceAvailability, report, collection
           <Button variant="secondary" onClick={() => onDecision("criteria")}>Review criteria</Button>
         </section>
       )}
-      {findings.length === 0 && !showComparisons && collection.state === "success" && !collection.snapshot?.total && <section><h2>No recorded evidence items</h2><p>This check has no integrity findings or comparison leads. Review assessment limits and readiness before recording your decision.</p></section>}
+      {findings.length === 0 && !showComparisons && collection.state === "success" && !collection.snapshot?.total && <section className="signal-document-queue-empty"><h2>No recorded evidence items</h2><p>This check has no integrity findings or comparison leads. Review assessment limits and readiness before recording your decision.</p></section>}
       {findings.length > 0 && (
         <div className="signal-document-inspector__heading"><h2>{collection.lastLoaded ? "Last loaded integrity findings" : "Integrity findings"}</h2></div>
       )}
@@ -1041,14 +1041,14 @@ export function SignalDocumentViewerPage() {
                 </div>
               </div>
               <aside ref={inspectorRef} tabIndex={-1} id="review-panel" role="tabpanel" aria-labelledby="review-tab" data-active={activeTab === "review"} className="signal-document-inspector">
-                {!isExploring && !isDecision && <>
+                {!isExploring && !isDecision && <div className="signal-document-module-overview">
                   <IntegrityModuleNavigation selected={selectedModule} controls="workspace-module-records" modules={reportQuery.data?.integrity_modules}
                     counts={new Map(["internal_agreement", "citation_integrity", "statistical_forensics", "originality_reuse"].map(kind => [kind, flags?.filter(flag => flag.check_kind === kind).length ?? 0]))}
                     onSelect={kind => updateTask(next => { next.set("module", kind); ["finding", "flag", "location", "reading", "anchor", "view", "pane", "lead_view", "lead_return", "lead_visible"].forEach(key => next.delete(key)); })} />
                   <IntegrityModuleSummary kind={selectedModule} />
                   {selectedModule === "statistical_forensics" && reportQuery.data && <StatisticalCheckScope scope={reportQuery.data.statistical_check_scope} />}
                   {selectedModule === "originality_reuse" && reportQuery.data && <OriginalityScope scope={reportQuery.data.originality_scope} showAddAction />}
-                </>}
+                </div>}
                 <div id="workspace-module-records">
                 {isExploring ? <ReuseExplorePanel showBack={false} flags={flags} flagsFetching={flagsQuery.isFetching} flagsError={flagsQuery.isError} flagsSucceeded={flagsQuery.isSuccess} onRetryFlags={() => flagsQuery.refetch()} onSelectFlag={selectFinding} onBack={showQueue} includeReferenceList={includeReferenceList} includeBlockQuote={includeBlockQuote} onToggleReferenceList={(value) => setToggle("ref", value)} onToggleBlockQuote={(value) => setToggle("quote", value)} excludedMatchesQuery={excludedMatchesQuery} expandedMatchId={expandedMatchId} onExpandMatch={setMatch} />
                   : isDecision ? <ReadinessDecision checkRunId={id} report={reportQuery.data} pending={reportQuery.isPending} error={reportQuery.error} retrying={reportQuery.fetchStatus === "fetching"} onRetry={() => reportQuery.refetch()} onBack={showQueue} sourceTarget={criterionSourceTarget} onOpenSource={openCriterionSource} onOpenEvidenceSource={openRecordedCriterionSource}

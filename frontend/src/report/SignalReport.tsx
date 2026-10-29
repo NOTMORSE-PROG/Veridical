@@ -209,8 +209,10 @@ export function SignalReportPage() {
           <ReportAssessmentContext notices={reportAssessmentNotices(report, "report")} />
           <div className="signal-review-workflow">
             <nav className="signal-report-jumps" aria-label="Report review order">{REPORT_STEPS.map((item, index) => <Link key={item.id} to={jumpTo(item.target)} aria-current={step === item.id ? "step" : undefined} onClick={focusReportJumpTarget}><span>{index + 1}</span>{item.label}</Link>)}</nav>
-            <h2 className="signal-review-workflow__heading">Step {stepIndex + 1} of {REPORT_STEPS.length}: {REPORT_STEPS[stepIndex].label}</h2>
-            <p className="signal-review-workflow__progress">{Math.max(0, report.results.length - report.pending_review_count)} of {report.results.length} criteria recorded</p>
+            <div className="signal-review-workflow__status">
+              <h2 className="signal-review-workflow__heading">Step {stepIndex + 1} of {REPORT_STEPS.length}: {REPORT_STEPS[stepIndex].label}</h2>
+              <p className="signal-review-workflow__progress">{Math.max(0, report.results.length - report.pending_review_count)} of {report.results.length} criteria recorded</p>
+            </div>
           <SavedJudgmentAccess checkRunId={report.check_run_id} hideEmpty />
           <div hidden={step !== "criteria"}><SignalEscalatedPanel checkRunId={report.check_run_id} focused assessmentContextExternal savedAccessExternal /></div>
           <div hidden={step !== "findings"}>

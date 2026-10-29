@@ -1199,8 +1199,10 @@
 
   .signal-filters {
     display: flex;
+    flex-wrap: wrap;
     align-items: end;
     gap: var(--signal-space-4);
+    row-gap: var(--signal-space-2);
     border-block-end: var(--signal-border-hairline) solid var(--color-signal-border);
     padding: var(--signal-space-4) var(--signal-space-6);
     background: var(--color-signal-surface-muted);
@@ -1229,7 +1231,8 @@
   }
 
   .signal-filter-help {
-    margin: var(--signal-space-2) 0 0;
+    flex-basis: 100%;
+    margin: 0;
     color: var(--color-signal-ink-secondary);
     font-size: var(--signal-type-meta);
     line-height: var(--signal-line-meta);
@@ -1237,7 +1240,8 @@
 
   .signal-filters input,
   .signal-filters select {
-    min-height: var(--signal-control-height);
+    min-height: var(--signal-control-height-coarse);
+    min-inline-size: 0;
     width: 100%;
     border: var(--signal-border-emphasis) solid var(--color-signal-border-strong);
     border-radius: var(--signal-radius-control);
@@ -2594,6 +2598,14 @@
   .signal-report-hero .signal-report-task-actions a { color: var(--color-signal-brand); }
   .signal-report-hero .signal-report-task-actions a:hover { color: var(--color-signal-brand-hover); }
   .signal-review-workflow { display: grid; gap: var(--signal-space-5); min-inline-size: 0; }
+  .signal-review-workflow__status {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--signal-space-2) var(--signal-space-4);
+    min-inline-size: 0;
+  }
   .signal-review-workflow__heading,
   .signal-review-workflow__progress { margin: 0; }
   .signal-review-workflow .signal-report-jumps [aria-current="step"] {
@@ -4753,6 +4765,17 @@
 
   .signal-document-inspector {
     background: var(--color-signal-surface);
+  }
+
+  .signal-document-module-overview {
+    display: grid;
+    gap: var(--signal-space-4);
+    min-inline-size: 0;
+    padding: var(--signal-space-5);
+  }
+
+  .signal-document-inspector .signal-document-module-overview > :is(.signal-integrity-modules, .signal-integrity-module-summary) {
+    margin: 0;
   }
 
   .signal-document-analysis {
