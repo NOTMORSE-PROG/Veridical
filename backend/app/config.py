@@ -675,6 +675,7 @@ class Settings(BaseSettings):
     forensics_sprite_max_iterations: int = Field(default=2000, ge=1)
     forensics_sprite_row_timeout_seconds: float = Field(default=3.0, gt=0, allow_inf_nan=False)
     forensics_sprite_check_timeout_seconds: float = Field(default=9.0, gt=0, allow_inf_nan=False)
+    forensics_sprite_math_threads: int = Field(default=1, ge=1)
     forensics_sprite_random_seed: int = Field(default=0, ge=0, le=4294967295)
     forensics_sprite_init_method: Literal["minvar", "maxvar"] = "minvar"
 

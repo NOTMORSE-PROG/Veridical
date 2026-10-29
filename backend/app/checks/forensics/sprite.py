@@ -3,6 +3,7 @@
 import hashlib
 import json
 import math
+import os
 import subprocess
 import sys
 import time
@@ -75,6 +76,15 @@ def _search(row: SpriteRow, settings: Settings, timeout: float) -> dict:
         "init_method": settings.forensics_sprite_init_method,
         "max_iter": settings.forensics_sprite_max_iterations,
     }
+    started = time.monotonic()
+    worker_env = os.environ.copy()
+    for variable in (
+        "OPENBLAS_NUM_THREADS",
+        "OMP_NUM_THREADS",
+        "MKL_NUM_THREADS",
+        "NUMEXPR_NUM_THREADS",
+    ):
+        worker_env[variable] = str(settings.forensics_sprite_math_threads)
     try:
         result = subprocess.run(
             [sys.executable, "-m", "app.checks.forensics.sprite_worker"],
@@ -84,11 +94,17 @@ def _search(row: SpriteRow, settings: Settings, timeout: float) -> dict:
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             timeout=timeout,
+            env=worker_env,
             check=False,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     except subprocess.TimeoutExpired:
-        return {"state": "deadline_reached"}
+        return {
+            "state": "deadline_reached",
+            "worker_elapsed_seconds": time.monotonic() - started,
+            "worker_timeout_seconds": timeout,
+            "math_threads": settings.forensics_sprite_math_threads,
+        }
     except OSError:
         return {"state": "worker_unavailable"}
     if result.returncode:
@@ -108,6 +124,10 @@ def _search(row: SpriteRow, settings: Settings, timeout: float) -> dict:
         "seed": response["seed"],
         "init_method": settings.forensics_sprite_init_method,
         "max_iterations": settings.forensics_sprite_max_iterations,
+        "math_threads": settings.forensics_sprite_math_threads,
+        "worker_elapsed_seconds": time.monotonic() - started,
+        "worker_startup_seconds": response.get("worker_startup_seconds"),
+        "worker_search_seconds": response.get("worker_search_seconds"),
     }
     if response.get("status") != "candidate_found":
         state = response.get("status")
@@ -168,6 +188,12 @@ def evaluate_sprite(extraction: ExtractionResult, settings: Settings | None = No
     return {
         "version": "sprite_pipeline_v1",
         "library": "pysprite",
+        "limits": {
+            "math_threads": settings.forensics_sprite_math_threads,
+            "row_timeout_seconds": settings.forensics_sprite_row_timeout_seconds,
+            "check_timeout_seconds": settings.forensics_sprite_check_timeout_seconds,
+            "max_iterations": settings.forensics_sprite_max_iterations,
+        },
         "input_policy_version": policy["version"],
         "input_policy_sha256": hashlib.sha256(
             json.dumps(policy, sort_keys=True).encode()

@@ -1037,6 +1037,12 @@ async def run_citation_integrity_check(
         if policy_unavailable
         else "citation_metadata_comparison_unassessed"
         if comparison_unassessed
+        else "reference_search_identity_unconfirmed"
+        if any(
+            record.get("reason")
+            in {"title_search_identity_unconfirmed", "book_search_identity_unconfirmed"}
+            for record in verification_records
+        )
         else "reference_metadata_insufficient"
         if metadata_unassessed
         else "author_year_citation_parse_unassessed"

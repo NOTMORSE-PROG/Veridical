@@ -79,6 +79,7 @@ function baseIntegrityCoverageItem(status: IntegrityCheckStatusOut, manuscriptId
     reference_source_projection_unbound: "Reference checks could not establish complete, source-bound coverage of the reference list. Reference lookups and claim support remain unassessed.",
     citation_metadata_comparison_unassessed: "Some reference titles could not be compared reliably because of ambiguous formatting, case or missing metadata. Those comparisons and their claim support remain unassessed.",
     source_reading_order_unresolved: "Some pages could not be read reliably. This check was not assessed; this is not a finding against the paper.",
+    reference_search_identity_unconfirmed: "External search results could not be confirmed as the cited sources. These references remain unverified. A search result alone does not establish source identity or claim support.",
     reference_metadata_insufficient: "Some references are visible in the paper, but their author, title, or date could not be read reliably. They have not been verified.",
     reference_list_unavailable: "The reference list could not be separated reliably. This does not mean references are missing from the paper.",
     author_year_citation_parse_unassessed: "Some citations could not be linked reliably to their references. No conclusion is made about those links.",

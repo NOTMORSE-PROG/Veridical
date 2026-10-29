@@ -361,3 +361,37 @@ def test_invalid_rows_share_the_admission_budget_and_tail_counts_stay_honest():
     assert len(result["rows"]) == 3
     assert result["rows"][2]["reason"] == "input_admission_budget_reached"
     assert result["rows"][2]["cells"] == {}
+
+
+def test_child_scientific_thread_limit_does_not_change_parent_environment(monkeypatch):
+    import os
+
+    monkeypatch.setenv("OPENBLAS_NUM_THREADS", "12")
+    response = {
+        "status": "candidate_found",
+        "seed": 0,
+        "library_version": "test-control",
+        "distribution": [3] * 10,
+        "worker_startup_seconds": 0.2,
+        "worker_search_seconds": 0.01,
+    }
+    with patch(
+        "app.checks.forensics.sprite.subprocess.run",
+        return_value=SimpleNamespace(returncode=0, stdout=json.dumps(response)),
+    ) as run:
+        result = evaluate_sprite(
+            extraction(), Settings(_env_file=None, forensics_sprite_math_threads=1)
+        )
+    assert os.environ["OPENBLAS_NUM_THREADS"] == "12"
+    child = run.call_args.kwargs["env"]
+    for key in (
+        "OPENBLAS_NUM_THREADS",
+        "OMP_NUM_THREADS",
+        "MKL_NUM_THREADS",
+        "NUMEXPR_NUM_THREADS",
+    ):
+        assert child[key] == "1"
+    assert result["compatible_rows"] == 1
+    assert result["rows"][0]["worker_startup_seconds"] == 0.2
+    assert result["rows"][0]["worker_search_seconds"] == 0.01
+    assert result["limits"]["math_threads"] == 1

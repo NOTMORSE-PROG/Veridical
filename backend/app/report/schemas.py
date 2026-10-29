@@ -127,6 +127,7 @@ COVERAGE_REASONS = frozenset(
         "numeric_citation_scan_limit",
         "reference_list_unavailable",
         "reference_membership_partial",
+        "reference_search_identity_unconfirmed",
         "statement_extraction_unassessed",
         "claim_support_unavailable",
         "statement_roles_unverified",

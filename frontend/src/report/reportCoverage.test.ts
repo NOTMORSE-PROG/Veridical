@@ -119,3 +119,10 @@ describe("recorded reference attempt quantities", () => {
     expect(item({ n_reference_metadata_attempted: 0 }).subIssues?.join(" ")).toContain("0 reference checks attempted");
   });
 });
+
+
+it("distinguishes unconfirmed search identity from unread source metadata", () => {
+  const row = item({ assessment_scope: null, coverage_reason: "reference_search_identity_unconfirmed" });
+  expect(row.detail).toContain("could not be confirmed as the cited sources");
+  expect(row.detail).not.toContain("could not be read");
+});
