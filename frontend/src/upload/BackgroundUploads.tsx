@@ -190,8 +190,11 @@ export function BackgroundUploadsProvider({ children }: { children: ReactNode })
       if (!owner.isCurrent()) return;
       const dismissed = readDismissed(actorId);
       // A file still waiting for its bytes is being sent by another tab, or
-      // was abandoned; this tab cannot tell which, so it shows neither.
-      const shown = statuses.filter((status) => status.status !== "pending" && !dismissed.has(status.attempt_id));
+      // was abandoned; this tab cannot tell which, so it shows neither. An
+      // expired upload never reached the server (it timed out, or a newer
+      // upload of the same file replaced it), so there is nothing to open.
+      const shown = statuses.filter((status) => status.status !== "pending" && status.status !== "expired"
+        && !dismissed.has(status.attempt_id));
       setUploads((current) => {
         const known = new Set(current.map((item) => item.attemptId).filter(Boolean));
         const added = shown.filter((status) => !known.has(status.attempt_id)).map((status): BackgroundUpload => ({

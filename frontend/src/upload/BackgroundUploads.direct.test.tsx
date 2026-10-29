@@ -106,6 +106,7 @@ describe("background uploads that start their check on the server", () => {
       { attempt_id: "a1", status: "done", filename: "earlier.pdf", size: 40 * 1024 * 1024, result: RECEIPT, check_run_id: null, ...POLLING },
       { attempt_id: "a2", status: "processing", filename: "preparing.pdf", size: 90 * 1024 * 1024, ...POLLING },
       { attempt_id: "a3", status: "pending", filename: "unsent.pdf", size: 1024, ...POLLING },
+      { attempt_id: "a4", status: "expired", filename: "replaced.pdf", size: 1024, error: "A newer upload of this file replaced this attempt.", ...POLLING },
     ];
     serve((path) => path === "/manuscripts/uploads?active=true" ? listed
       : path === "/manuscripts/uploads/a2" ? { attempt_id: "a2", status: "done", result: { ...RECEIPT, manuscript_id: 43 }, check_run_id: 9, ...POLLING }
@@ -114,6 +115,7 @@ describe("background uploads that start their check on the server", () => {
     const tray = await screen.findByRole("complementary", { name: "Uploads in progress" });
     expect(tray).toHaveTextContent("earlier.pdf");
     expect(tray).not.toHaveTextContent("unsent.pdf");
+    expect(tray).not.toHaveTextContent("replaced.pdf");
     expect(await screen.findByText("Ready. The check has started.")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Open the check" })).toHaveAttribute("href", "/checks/9");
     fireEvent.click(screen.getByRole("button", { name: "Dismiss earlier.pdf" }));
