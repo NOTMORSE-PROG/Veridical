@@ -14,7 +14,7 @@ from uuid import UUID, uuid4
 from botocore.exceptions import ClientError
 from fastapi import APIRouter, Depends, Header, Request, UploadFile
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from sqlalchemy import and_, case, func, select, text, update
+from sqlalchemy import and_, case, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_upload_instructor
@@ -31,6 +31,7 @@ from app.ingest.service import clean_original_filename
 from app.ingest.source_digest import HashingWriter, record_file_sha256
 from app.models.instructor import Instructor
 from app.models.manuscript import Manuscript
+from app.models.rubric import Rubric
 from app.models.upload_attempt import UploadAttempt
 from app.ratelimit import enforce_action_rate_limit
 from app.storage import R2Storage, get_storage, namespaced_storage_key
@@ -262,11 +263,18 @@ async def _relay_transfer(storage, source, key, directory: Path):
         raise
 
 
+class StartCheck(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    rubric_id: int = Field(gt=0)
+
+
 class BeginUpload(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     attempt_id: str
     filename: str = Field(min_length=1, max_length=255)
     size: int = Field(gt=0)
+    # V-090: start a check with this rubric as soon as the manuscript is ready.
+    start_check: StartCheck | None = None
 
     @field_validator("attempt_id")
     @classmethod
@@ -313,7 +321,28 @@ def status_response(attempt):
         "transport": attempt.upload_transport,
         "poll_after_ms": settings.direct_upload_poll_seconds * 1000,
         "poll_timeout_ms": settings.direct_upload_lease_seconds * 1000,
+        "filename": attempt.filename,
+        "size": attempt.source_bytes,
+        "created_at": attempt.created_at.isoformat() if attempt.created_at else None,
+        "check_run_id": attempt.check_run_id,
+        "check_start_error": attempt.check_start_error,
+        # Preparation does not report page-level progress yet; never invented.
+        "progress": None,
     }
+
+
+async def _checkable_rubric(session, instructor_id: int, rubric_id: int) -> None:
+    # Same refusals as starting a check by hand, made before any byte moves.
+    rubric = await session.scalar(
+        select(Rubric).where(Rubric.id == rubric_id, Rubric.instructor_id == instructor_id)
+    )
+    if rubric is None:
+        raise NotFoundError(f"No rubric with id {rubric_id}.")
+    if not rubric.is_active:
+        raise ConflictError(
+            "Only a confirmed, active rubric version can be used to start a check. "
+            "Confirm it on the rubric review screen first."
+        )
 
 
 @router.post("/manuscripts/uploads")
@@ -326,6 +355,9 @@ async def begin_upload(
     settings = enabled_settings()
     capabilities = _capabilities(transports)
     enforce_action_rate_limit(settings, "manuscript_ingest", instructor.id)
+    if body.start_check is not None:
+        enforce_action_rate_limit(settings, "check_run", instructor.id)
+        await _checkable_rubric(session, instructor.id, body.start_check.rubric_id)
     if body.size > settings.direct_manuscript_upload_max_mb * 1024 * 1024:
         raise FileTooLargeError(
             f"Choose a manuscript no larger than {settings.direct_manuscript_upload_max_mb} MB."
@@ -418,6 +450,7 @@ async def begin_upload(
             ),
             status="pending",
             expires_at=now + timedelta(seconds=settings.direct_upload_url_ttl_seconds),
+            start_rubric_id=body.start_check.rubric_id if body.start_check else None,
         )
         if attempt.upload_transport == "r2" and PARTS in capabilities:
             attempt.multipart_part_bytes = settings.direct_upload_part_mb * 1024 * 1024
@@ -655,6 +688,54 @@ def _complete_parts(storage, attempt) -> None:
             return
         raise
     storage.complete_multipart(attempt.staging_key, attempt.multipart_upload_id, parts)
+
+
+@router.get("/manuscripts/uploads")
+async def list_uploads(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    instructor: Annotated[Instructor, Depends(get_upload_instructor)],
+    active: bool = True,
+):
+    """V-090 tray restore: this instructor's uploads still in progress, plus
+    those that finished recently, newest first."""
+    settings = enabled_settings()
+    now = datetime.now(UTC)
+    recent = UploadAttempt.created_at >= now - timedelta(
+        seconds=settings.direct_upload_tray_window_seconds
+    )
+    in_progress = or_(
+        UploadAttempt.status.in_(("queued", "processing")),
+        and_(UploadAttempt.status == "pending", UploadAttempt.expires_at > now),
+    )
+    rows = await session.scalars(
+        select(UploadAttempt)
+        .where(
+            UploadAttempt.instructor_id == instructor.id,
+            in_progress if active else or_(in_progress, recent),
+        )
+        .order_by(UploadAttempt.created_at.desc())
+        .limit(settings.direct_upload_tray_max_items)
+    )
+    if active:
+        # Finished uploads from the tray window stay visible after a reload.
+        finished = await session.scalars(
+            select(UploadAttempt)
+            .where(
+                UploadAttempt.instructor_id == instructor.id,
+                UploadAttempt.status.in_(("done", "failed", "expired")),
+                recent,
+            )
+            .order_by(UploadAttempt.created_at.desc())
+            .limit(settings.direct_upload_tray_max_items)
+        )
+        attempts = sorted(
+            {a.id: a for a in [*rows, *finished]}.values(),
+            key=lambda a: a.created_at,
+            reverse=True,
+        )[: settings.direct_upload_tray_max_items]
+    else:
+        attempts = list(rows)
+    return [status_response(attempt) for attempt in attempts]
 
 
 @router.get("/manuscripts/uploads/{attempt_id}")

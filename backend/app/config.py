@@ -1045,6 +1045,10 @@ class Settings(BaseSettings):
     direct_upload_relay_idle_seconds: float = Field(default=60, gt=0)
     # Whole-file SHA-256 results reused while the file is unchanged on disk.
     source_digest_memo_entries: int = Field(default=64, ge=1)
+    # V-090 upload tray: finished attempts stay listed this long so a reload
+    # can show what happened; the list is capped for one screen.
+    direct_upload_tray_window_seconds: int = Field(default=86400, ge=60)
+    direct_upload_tray_max_items: int = Field(default=20, ge=1, le=200)
     direct_upload_pending_per_instructor: int = Field(default=3, gt=0)
     direct_upload_pending_global: int = Field(default=12, gt=0)
     direct_upload_lease_seconds: int = Field(default=1800, ge=600)

@@ -641,7 +641,9 @@ def wired(scratch_url, tmp_path, monkeypatch):
         return tc
 
     opened = []
-    yield SimpleNamespace(client=client, store=store, instructor_id=instructor_id, db=db)
+    yield SimpleNamespace(
+        client=client, store=store, instructor_id=instructor_id, db=db, scratch_url=scratch_url
+    )
     for tc in opened:
         tc.__exit__(None, None, None)
     db._engine = None

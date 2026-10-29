@@ -19,6 +19,7 @@ from app.ingest.service import StagedSource, _ingest_upload
 from app.models.enums import IngestFailureReason, IngestStatus
 from app.models.manuscript import Manuscript
 from app.models.upload_attempt import UploadAttempt
+from app.pipeline.service import create_check_run
 from app.storage import get_storage
 
 _logger = logging.getLogger(__name__)
@@ -110,6 +111,18 @@ async def _retire_interrupted(session):
     await session.commit()
 
 
+async def _start_requested_check(session, instructor_id, manuscript_id, rubric_id):
+    """V-090: start the check the instructor asked for, exactly as a manual
+    start would. A refusal never undoes the finished upload; it is kept on the
+    attempt for the tray to show."""
+    try:
+        check_run = await create_check_run(session, instructor_id, manuscript_id, rubric_id)
+    except VeridicalError as exc:
+        await session.rollback()
+        return None, str(exc)
+    return check_run.id, None
+
+
 async def process_next_upload(settings):
     with preparation_scope(settings) as lease:
         return await _process_next_upload(settings, lease)
@@ -134,6 +147,7 @@ async def _process_next_upload(settings, lease):
         )
         await session.commit()
         attempt_id, lease_id = attempt.id, attempt.lease_id
+        instructor_id, start_rubric_id = attempt.instructor_id, attempt.start_rubric_id
         heartbeat = asyncio.create_task(_heartbeat(attempt_id, lease_id, settings))
         try:
             # The staged object is copied inside storage for the durable
@@ -160,6 +174,12 @@ async def _process_next_upload(settings, lease):
                 staged=staged,
             )
             receipt = ingestion_receipt(*values).model_dump(mode="json")
+            manuscript_id = values[0].id
+            check_run_id = check_start_error = None
+            if start_rubric_id is not None:
+                check_run_id, check_start_error = await _start_requested_check(
+                    session, instructor_id, manuscript_id, start_rubric_id
+                )
             await session.execute(
                 update(UploadAttempt)
                 .where(
@@ -167,7 +187,14 @@ async def _process_next_upload(settings, lease):
                     UploadAttempt.lease_id == lease_id,
                     UploadAttempt.status == "processing",
                 )
-                .values(status="done", response=receipt, error=None, lease_until=None)
+                .values(
+                    status="done",
+                    response=receipt,
+                    error=None,
+                    lease_until=None,
+                    check_run_id=check_run_id,
+                    check_start_error=check_start_error,
+                )
             )
             await session.commit()
         except Exception as exc:

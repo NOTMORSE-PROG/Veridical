@@ -24,6 +24,15 @@ class UploadAttempt(Base):
     # can never re-cut parts that are already stored.
     multipart_upload_id: Mapped[str | None] = mapped_column(String(1024))
     multipart_part_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    # V-090: a background upload may ask the server to start its check once
+    # the manuscript is ready; the outcome is kept on the attempt.
+    start_rubric_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("rubric.id", ondelete="SET NULL")
+    )
+    check_run_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("check_run.id", ondelete="SET NULL")
+    )
+    check_start_error: Mapped[str | None] = mapped_column(Text)
     staging_deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     status: Mapped[str] = mapped_column(String(24), index=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
