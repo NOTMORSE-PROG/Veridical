@@ -71,7 +71,11 @@ def _compute_forensics_findings(extraction: ExtractionResult) -> _ForensicsCompu
     p_flags = evaluate_p_recalc(
         inferential,
         full_text,
-        tail_context_complete=not source.limited and not tail_context_limited,
+        # A one-tailed declaration on an unread page must not make a correct
+        # p-value look like a decision error.
+        tail_context_complete=(
+            not source.limited and not tail_context_limited and not extraction.unread_pages
+        ),
         unassessed_stats=unassessed_stats,
     )
     unassessed_ids = {id(stat) for stat in unassessed_stats}

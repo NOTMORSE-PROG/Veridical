@@ -5,8 +5,8 @@ import type { CriterionResultOut } from "../api/types";
 export const AUTOMATIC_GRADE_COPY = {
   agreed: "Graded automatically: {agreeing} of {passes} grading passes chose this grade.",
   middle_of_three: "Graded automatically: the three grading passes disagreed, so the middle level was used.",
-  lower_of_two: "Graded automatically: the deciding pass could not be checked against the manuscript, so the lower of the two checked grades was used.",
-  single_verified_pass: "Graded automatically: only one grading pass quoted the manuscript in a way that could be checked, so its grade was used.",
+  lower_of_two: "Graded automatically: two grading passes disagreed and no third pass settled it with quotes VERIDICAL could check, so the lower of the two grades was used.",
+  single_verified_pass: "Graded automatically: only one grading pass settled on a grade with quotes VERIDICAL could check, so its grade was used.",
   caution: "Evidence check not confirmed: {reason}",
   allRecorded: "Every criterion has a recorded outcome. Automatic grades are listed under Read saved grades, where Change grade sets a different level. Continue to the integrity signals.",
   confirmUnchanged: "Recording this decision also confirms the {count} automatic grade(s) you did not change.",

@@ -41,7 +41,12 @@ from app.checks.semantic import (
 )
 from app.checks.signals import compute_shadow_signals, shadow_signals_as_detail
 from app.checks.source_quality import source_limitation_detail, unread_page_scope
-from app.checks.support import apply_support, check_support_available, context_limitation
+from app.checks.support import (
+    adverse_rating,
+    apply_support,
+    check_support_available,
+    context_limitation,
+)
 from app.config import Settings, get_settings
 from app.errors import ApiDownError
 from app.ingest.schemas import ExtractionResult
@@ -591,7 +596,13 @@ async def vote_batch(
         VotedCriterion(
             v.criterion,
             v.vote,
-            *apply_support(v.outcome, v.detail, support[v.criterion.id], decide=decide),
+            *apply_support(
+                v.outcome,
+                v.detail,
+                support[v.criterion.id],
+                decide=decide,
+                adverse=adverse_rating(v.criterion, v.outcome, v.detail),
+            ),
         )
         if v.criterion.id in support
         else v

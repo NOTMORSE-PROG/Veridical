@@ -50,6 +50,7 @@ from app.checks.router import RouteDecision, apply_routing, decode_routing_plan,
 from app.checks.rules.context import build_rule_context
 from app.checks.semantic import record_ungraded
 from app.checks.source_quality import (
+    SOURCE_READING_ORDER_UNRESOLVED,
     unread_page_scope,
     unread_pages_detail,
     without_unread_pages,
@@ -753,6 +754,16 @@ async def _degrade_pending_semantic(
     return len(pending)
 
 
+def _may_lack_unread_note(result: CheckResult | None) -> bool:
+    detail = (result.detail or {}) if result is not None else {}
+    return (
+        result is not None
+        and isinstance(detail, dict)
+        and "unread_pages" not in detail
+        and detail.get("coverage_reason") != SOURCE_READING_ORDER_UNRESOLVED
+    )
+
+
 async def _record_unread_pages(
     session: AsyncSession, check_run_id: int, result: CheckResult, pages: list[int]
 ) -> None:
@@ -797,9 +808,14 @@ async def _run_integrity_stage(
     # sometimes-durable-storage-backed read) is pure waste on the one path
     # most likely to be under load. Same `if pending:` guard
     # `_run_semantic_stage` already uses above.
+    existing = (agreement_existing, citation_existing, forensics_existing, reuse_existing)
+    # A check saved just before a crash may still lack its unread-pages note;
+    # a resumed stage re-derives the scope to finish it (the rare extra read
+    # BUG-152 otherwise avoids).
+    unannotated = [result for result in existing if _may_lack_unread_note(result)]
     extraction = None
     unread_pages: list[int] = []
-    if None in (agreement_existing, citation_existing, forensics_existing, reuse_existing):
+    if None in existing or unannotated:
         extraction = await load_raw_store_async(settings, manuscript.id)
         extraction = bind_analytical_source(extraction, manuscript.content_hash)
         unread_pages = unread_page_scope(extraction, settings.analysis_unread_pages_max_ratio) or []
@@ -807,6 +823,8 @@ async def _run_integrity_stage(
             # Check the pages whose reading order is established instead of
             # none at all; each check records the pages it left out.
             extraction = without_unread_pages(extraction, unread_pages)
+            for result in unannotated:
+                await _record_unread_pages(session, check_run.id, result, unread_pages)
 
     if agreement_existing is None:
         agreement_result = await run_internal_agreement_check(

@@ -232,6 +232,10 @@ async def check_support(
         "source_scope": batch.label,
         "source_obligation_policy": SOURCE_SCOPE_POLICY_VERSION,
     }
+    unread = (getattr(batch, "source_coverage", None) or {}).get("unread_pages")
+    if unread:
+        # Pages the grader never saw: their content cannot show a weakness.
+        task["source_unread_pages"] = unread
     # One replacement prevents source strings resembling template slots from
     # being interpolated. JSON escaping keeps supplied data structurally separate.
     prompt = _PROMPT.read_text(encoding="utf-8").replace(
@@ -333,18 +337,30 @@ async def check_support_available(batch: Any, candidates: list, llm: Any, **cont
         }
 
 
+def adverse_rating(criterion: Any, outcome: ResultOutcome, detail: dict[str, Any]) -> bool:
+    """A failing rating, or the lowest level of the criterion's own scale."""
+    if outcome == ResultOutcome.failed:
+        return True
+    level = detail.get("level")
+    ordinals = [int(item["level"]) for item in getattr(criterion, "levels", None) or []]
+    return isinstance(level, dict) and bool(ordinals) and level.get("ordinal") == min(ordinals)
+
+
 def apply_support(
     outcome: ResultOutcome,
     detail: dict[str, Any],
     support: dict[str, Any],
     *,
     decide: bool = False,
+    adverse: bool = False,
 ) -> tuple[ResultOutcome, dict[str, Any]]:
     """Keep location-verified passages, but remove any withheld accepted rating.
 
     `decide` (GRADING_DECISION_POLICY): an unconfirmed support check keeps
     the verified-evidence rating and records the check's reason as a
-    disclosed caution instead; a support outage is still not a rating."""
+    disclosed caution instead. It still withholds an `adverse` rating (a
+    claim of weakness needs evidence of the weakness), evidence that cannot
+    show the criterion at all, and any rating during a support outage."""
     updated = {**detail, "support_check": support}
     if support["status"] == "supported":
         updated["support_basis"] = support["reason"]
@@ -353,6 +369,8 @@ def apply_support(
         return outcome, updated
     if (
         decide
+        and not adverse
+        and support.get("scope_guard") != "required_body_evidence_unconfirmed"
         and support.get("failure_outcome") != ResultOutcome.api_down.value
         and outcome in (ResultOutcome.passed, ResultOutcome.failed)
     ):

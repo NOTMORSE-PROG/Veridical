@@ -24,6 +24,7 @@ from app.checks.escalation import (
     list_escalated,
     resolve_escalation,
 )
+from app.checks.levels import normalize_verdict
 from app.checks.reuse.embed import PassageEmbedding, compute_passage_embeddings, split_context
 from app.checks.reuse.query import (
     canonical_library_copies,
@@ -374,7 +375,11 @@ def _automatic_grade(result: CheckResult, detail: dict, resolution: object) -> d
     return {
         "decision_basis": basis if basis in _DECISION_BASES else None,
         "support_caution": caution if isinstance(caution, str) and caution.strip() else None,
-        "agreeing_passes": sum(vote == verdict for vote in real) if real and verdict else None,
+        "agreeing_passes": sum(
+            normalize_verdict(vote) == normalize_verdict(verdict) for vote in real
+        )
+        if real and verdict
+        else None,
         "grading_passes": len(real) or None,
     }
 
