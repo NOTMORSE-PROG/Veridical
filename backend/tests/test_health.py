@@ -20,6 +20,25 @@ def test_health_reports_ok_when_db_reachable(monkeypatch):
     assert body["db"] == "ok"
 
 
+def test_health_reports_the_deployed_commit(monkeypatch):
+    """BUG-418: production must say which build it is serving, so a backend
+    that silently stopped deploying fails the smoke test instead of hiding."""
+    from app.config import get_settings
+
+    async def fake_check(dsn, timeout=5.0):
+        return True, "ok"
+
+    monkeypatch.setattr(db, "check_connectivity", fake_check)
+    monkeypatch.setenv("RENDER_GIT_COMMIT", "abc123def456")
+    get_settings.cache_clear()
+    try:
+        with TestClient(app) as client:
+            body = client.get("/health").json()
+    finally:
+        get_settings.cache_clear()
+    assert body["commit"] == "abc123def456"
+
+
 def test_health_stays_200_and_honest_when_db_down(monkeypatch):
     """Failure taxonomy (TESTING.md §5): a down dependency is reported as
 

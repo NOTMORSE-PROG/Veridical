@@ -21,14 +21,36 @@ jobs:
       API_URL: ${{ vars.PROD_API_URL || 'https://veridical-api.onrender.com' }}
       WEB_URL: ${{ vars.PROD_WEB_URL || 'https://veridical-app.vercel.app' }}
     steps:
-      - name: Backend health (allows for cold start, ~43s measured worst case)
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Backend health (allows for cold start, 84s measured 2026-10-13)
+        # A free-tier wake-up took 84s on 2026-10-13 and the old 60s budget
+        # failed the scheduled run three times over; 150s per attempt fits.
         run: |
-          body="$(curl -sS --retry 2 --retry-delay 5 --max-time 60 "$API_URL/health")"
+          body="$(curl -sS --retry 2 --retry-delay 10 --max-time 150 "$API_URL/health")"
           echo "$body"
           echo "$body" | grep -q '"status":"ok"' || {
             echo "::error::Backend health check failed at $API_URL/health"
             exit 1
           }
+      - name: Backend serves the latest backend commit (BUG-418)
+        # Render once silently stopped deploying for weeks while every other
+        # check stayed green. Compare the build production reports with the
+        # latest commit on main that touched backend/; a build with an
+        # identical backend/ tree counts as current. Right after a push this
+        # fails until CI's deploy-backend job finishes.
+        run: |
+          expected="$(git log -1 --format=%H -- backend)"
+          live="$(curl -sS --max-time 150 "$API_URL/health" | jq -r '.commit // empty')"
+          echo "expected $expected, production ${live:-unknown}"
+          [ "$live" = "$expected" ] && exit 0
+          if [ -n "$live" ] && git cat-file -e "$live^{commit}" 2>/dev/null             && [ "$(git rev-parse "$live:backend")" = "$(git rev-parse "$expected:backend")" ]; then
+            echo "production backend tree matches $expected"
+            exit 0
+          fi
+          echo "::error::Production backend is not the latest backend commit (expected $expected, got ${live:-unknown})"
+          exit 1
       - name: Frontend reachable
         run: |
           code="$(curl -sS -o /dev/null -w '%{http_code}' --retry 2 --retry-delay 5 --max-time 60 "$WEB_URL")"

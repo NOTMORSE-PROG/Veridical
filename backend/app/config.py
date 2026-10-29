@@ -9,7 +9,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -22,6 +22,13 @@ class Settings(BaseSettings):
     )
 
     veridical_env: str = "dev"
+    # BUG-418: the commit this process was built from, reported on /health so a
+    # stale production backend is visible (CI deploy and the production smoke
+    # test compare it with main). Render sets RENDER_GIT_COMMIT on every build;
+    # DEPLOYED_COMMIT overrides it elsewhere. Empty when unknown (local dev).
+    deployed_commit: str = Field(
+        default="", validation_alias=AliasChoices("DEPLOYED_COMMIT", "RENDER_GIT_COMMIT")
+    )
     # VERIDICAL_FAKE_LLM=1 swaps the Gemini client for the fixture-backed
     # stub so the whole pipeline runs with zero API keys and zero quota burn.
     veridical_fake_llm: bool = False

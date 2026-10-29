@@ -330,4 +330,6 @@ async def health() -> dict:
         "db": db_detail,
         "fake_llm": settings.veridical_fake_llm,
         "env": settings.veridical_env,
+        # BUG-418: which build is serving, so a stale deploy fails a visible check.
+        "commit": settings.deployed_commit or None,
     }
