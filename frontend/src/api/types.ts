@@ -410,7 +410,14 @@ export interface CriterionResultOut extends ResultRowCommon {
 /** BUG-044 fix: the public, unauthenticated adviser view's per-criterion
  * row. Deliberately does NOT extend `CriterionResultOut` or declare a
  * `resolution` field -- see `ResultRowCommon`'s own comment. */
-export type PublicCriterionResultOut = ResultRowCommon;
+export interface PublicCriterionResultOut extends ResultRowCommon {
+  /** V-087: how an automatic grade was chosen, for the adviser view. Null when
+   * the instructor set the grade; absent from older shared reports. */
+  decision_basis?: CriterionResultOut["decision_basis"];
+  support_caution?: string | null;
+  agreeing_passes?: number | null;
+  grading_passes?: number | null;
+}
 
 // BUG-049: "fake" (fixture data, no real Gemini call), "real", or "unknown"
 // (a row/run that predates this field). BUG-219 reuses this exact
