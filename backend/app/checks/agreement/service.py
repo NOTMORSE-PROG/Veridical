@@ -3,10 +3,10 @@ pairing, into one `check_result` + real `Flag` rows — same shape as
 `app.checks.forensics.service.run_statistical_forensics_check` (F6's
 assembly), applied to F4.
 
-**Applicability gate**: a manuscript with no intent AND no outcome
-statements at all gets `outcome=not_applicable` — N/A is not "passed"
-(charter rule 9), never a silently-clean check_run when there was nothing
-to check. Extracted roles are not yet independently established as this
+**Recognition coverage**: zero extracted candidates leaves applicability
+unassessed. Lexical recognition cannot establish that objectives/results
+are absent, so it cannot support missing-statement conclusions.
+Extracted roles are not yet independently established as this
 study's own objectives/results, so comparisons remain escalated review
 leads, never readiness deductions. Quota/API/parse failures remain distinct
 outcomes with their actual skip counts.
@@ -61,10 +61,12 @@ async def run_internal_agreement_check(
             check_run_id=check_run_id,
             criterion_id=None,
             kind=CheckKind.internal_agreement,
-            outcome=ResultOutcome.escalated if source.limited else ResultOutcome.not_applicable,
+            outcome=ResultOutcome.escalated,
             detail={
                 **source.detail(),
-                **({"coverage_reason": "native_math_source_incomplete"} if source.limited else {}),
+                "coverage_reason": "native_math_source_incomplete"
+                if source.limited
+                else "statement_extraction_unassessed",
                 "n_intents": 0,
                 "n_outcomes": 0,
                 "n_flags": 0,
@@ -72,7 +74,9 @@ async def run_internal_agreement_check(
                     "No objective/finding-style statements were detected in the available source. "
                     "Native Word source coverage is incomplete; this does not establish absence."
                     if source.limited
-                    else "No objective/finding-style statements were detected in this manuscript."
+                    else "The detector did not identify objective/result candidates to compare. "
+                    "This does not establish that objectives or results are absent. "
+                    "Review the manuscript directly."
                 ),
             },
         )
@@ -102,7 +106,7 @@ async def run_internal_agreement_check(
         outcomes,
         check_run_id=check_run_id,
         settings=settings,
-        allow_absence_leads=not source.limited,
+        allow_absence_leads=False,
     )
 
     # BUG-073: a check that skipped even one candidate pair did NOT fully
@@ -133,7 +137,7 @@ async def run_internal_agreement_check(
         outcome=outcome,
         detail={
             **source.detail(),
-            "absence_leads_withheld": source.limited,
+            "absence_leads_withheld": True,
             "n_intents": len(intents),
             "coverage_reason": "statement_roles_unverified",
             "reason": (

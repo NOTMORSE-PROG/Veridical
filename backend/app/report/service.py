@@ -370,6 +370,27 @@ def _statistical_notation_state(detail: dict | None) -> bool | None:
     return value
 
 
+def _reference_metadata_attempts(detail: dict) -> int | None:
+    """Project a recorded quantity; absent/incomplete history stays unknown."""
+    explicit = detail.get("n_reference_metadata_attempted")
+    if type(explicit) is int and explicit >= 0:
+        return explicit
+    total = detail.get("n_references")
+    rows = detail.get("reference_metadata_coverage")
+    if type(total) is not int or total < 0 or not isinstance(rows, list) or len(rows) != total:
+        return None
+    if any(
+        not isinstance(row, dict)
+        or type(row.get("reference_order_index")) is not int
+        or type(row.get("lookup_attempted")) is not bool
+        for row in rows
+    ):
+        return None
+    if {row["reference_order_index"] for row in rows} != set(range(total)):
+        return None
+    return sum(row["lookup_attempted"] for row in rows)
+
+
 def _integrity_skip_count(kind: CheckKind, detail: dict[str, Any] | None, cause: str) -> int:
     """BUG-125: F4's own `detail` (agreement/service.py) keys skip counts
     `n_skipped_{cause}`; F5's (citations/verify.py) scopes the same three
@@ -674,7 +695,7 @@ async def report_out_for_check_run(
                 "available_text_and_reference_metadata",
             }
             else None,
-            n_reference_metadata_attempted=detail.get("n_reference_metadata_attempted", 0),
+            n_reference_metadata_attempted=_reference_metadata_attempts(detail),
             n_metadata_api_down=detail.get("n_metadata_api_down", 0),
             n_images_unassessed=detail.get("n_images_unassessed", 0),
             n_image_occurrences_omitted=detail.get("n_image_occurrences_omitted", 0),

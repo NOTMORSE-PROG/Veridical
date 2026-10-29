@@ -108,5 +108,15 @@
     "do not cover",
     "will not include",
     "does not include"
+  ],
+  "intent_construction_patterns": [
+    "\\b(?:objective|aim|goal|purpose)s?\\s+(?:is|are|was|were)\\s+to\\b"
+  ],
+  "outcome_prose_enabled": true,
+  "outcome_prose_patterns": [
+    "\\b(?:achieved|attained|reduced|increased|decreased|improved|measured|recorded|observed|demonstrated|performed|yielded|implemented|supported|rejected)\\b"
+  ],
+  "outcome_heading_exclusion_patterns": [
+    "\\b(?:prior|previous|earlier|related|cited)\\b"
   ]
 }

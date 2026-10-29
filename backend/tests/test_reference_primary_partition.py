@@ -89,6 +89,7 @@ async def test_primary_metadata_runs_without_linkage_or_absence_claims(monkeypat
     extraction = source(secondary=True)
     result, rows, provider, support = await run(monkeypatch, extraction, persisted(extraction))
     assert provider.await_count == 2
+    assert result.detail["n_reference_metadata_attempted"] == 2
     support.assert_not_called()
     assert result.detail["reference_inventory_status"] == "bound"
     assert result.detail["reference_membership_status"] == "partial"

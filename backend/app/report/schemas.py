@@ -126,6 +126,8 @@ COVERAGE_REASONS = frozenset(
         "numeric_citation_style_unassessed",
         "numeric_citation_scan_limit",
         "reference_list_unavailable",
+        "reference_membership_partial",
+        "statement_extraction_unassessed",
         "claim_support_unavailable",
         "statement_roles_unverified",
         "image_content_unassessed",
@@ -185,7 +187,7 @@ class IntegrityCheckStatusOut(BaseModel):
         ]
         | None
     ) = None
-    n_reference_metadata_attempted: int = 0
+    n_reference_metadata_attempted: int | None = None
     n_metadata_api_down: int = 0
     n_images_unassessed: int = 0
     n_image_occurrences_omitted: int = 0

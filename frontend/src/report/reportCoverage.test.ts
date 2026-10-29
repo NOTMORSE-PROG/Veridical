@@ -107,3 +107,15 @@ describe("partial source coverage", () => {
     expect(row.sources?.[0].to).toBe("/report/3/document?anchor=page%202&coverage=images");
   });
 });
+
+
+describe("recorded reference attempt quantities", () => {
+  it.each([null, undefined])("keeps %s attempt count unknown", count => {
+    const row = item({ n_reference_metadata_attempted: count });
+    expect(row.subIssues?.join(" ")).toContain("was not recorded");
+    expect(row.subIssues?.join(" ")).not.toContain("0 reference checks attempted");
+  });
+  it("retains a recorded zero separately from unavailable history", () => {
+    expect(item({ n_reference_metadata_attempted: 0 }).subIssues?.join(" ")).toContain("0 reference checks attempted");
+  });
+});

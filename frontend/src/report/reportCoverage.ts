@@ -61,7 +61,9 @@ function baseIntegrityCoverageItem(status: IntegrityCheckStatusOut, manuscriptId
         ? "Reference details were checked where possible. Citation matching across the manuscript was not assessed."
         : "Reference entries were retained, but their details could not be checked. Citation matching across the manuscript was not assessed.",
       subIssues: [
-        `${status.n_reference_metadata_attempted ?? 0} reference checks attempted. This does not mean every source was verified.`,
+        status.n_reference_metadata_attempted == null
+          ? "The number of attempted reference checks was not recorded. This does not mean no checks ran."
+          : `${status.n_reference_metadata_attempted} reference checks attempted. This does not mean every source was verified.`,
         ...(status.n_metadata_skipped_insufficient ? [`${status.n_metadata_skipped_insufficient} references could not be verified reliably.`] : []),
         ...(status.n_metadata_api_down ? [`${status.n_metadata_api_down} source checks could not reach an external service.`] : []),
         "Claim support across the manuscript was not assessed. Unchecked content is not treated as passed.",
@@ -83,6 +85,7 @@ function baseIntegrityCoverageItem(status: IntegrityCheckStatusOut, manuscriptId
     numeric_citation_style_unassessed: "Some numbered citations could not be linked reliably. Open the paper to check their source numbers.",
     numeric_citation_scan_limit: "The numbered-citation scan reached its safety limit. Unread citations have not been assessed.",
     claim_support_unavailable: "Source details were checked where possible, but some cited claims could not be checked against source content.",
+    statement_extraction_unassessed: "The check could not reliably identify objectives and results to compare. This does not establish that they are absent. Review the manuscript directly.",
     statement_roles_unverified: "The check found possible objectives and results, but could not reliably establish that they describe this study. Comparison leads do not change readiness.",
     native_math_source_incomplete: "Native Word source coverage is incomplete. The available text does not establish that objectives or results are absent.",
     native_math_citation_incomplete: "Supported citations and reference details were checked where possible. Content affected by native Word equations was excluded, so unread content cannot establish that a reference is unused. Other citations or claims may remain unassessed.",

@@ -11,6 +11,7 @@ ONLY high-severity outcome this check ever produces — everything else
 those are, by themselves, evidence of anything wrong with the manuscript.
 """
 
+import re
 from dataclasses import asdict, dataclass, replace
 from enum import StrEnum
 
@@ -244,7 +245,7 @@ async def verify_citation(
                 result = await gbooks_client.search_title(client, citation.title, settings=settings)
             return result
 
-        return await _verify_keyed(
+        verdict = await _verify_keyed(
             session,
             "isbn",
             citation.isbn,
@@ -253,6 +254,33 @@ async def verify_citation(
             instructor_id=instructor_id,
             reference_text=citation.raw_text,
         )
+        if (
+            verdict.result is not None
+            and verdict.result.found
+            and verdict.result.provider == "gbooks"
+        ):
+            raw = verdict.result.raw
+            info = raw.get("volumeInfo", {}) if isinstance(raw, dict) else {}
+            identifiers = info.get("industryIdentifiers", []) if isinstance(info, dict) else []
+            expected = re.sub(r"[\s-]", "", citation.isbn).upper()
+            bound = (
+                bool(expected)
+                and isinstance(identifiers, list)
+                and any(
+                    isinstance(item, dict)
+                    and item.get("type") in {"ISBN_10", "ISBN_13"}
+                    and isinstance(item.get("identifier"), str)
+                    and re.sub(r"[\s-]", "", item["identifier"]).upper() == expected
+                    for item in identifiers
+                )
+            )
+            if not bound:
+                return replace(
+                    verdict,
+                    kind=VerdictKind.unassessed,
+                    unassessed_reason="book_search_identity_unconfirmed",
+                )
+        return verdict
 
     if citation.title:
 
@@ -264,7 +292,15 @@ async def verify_citation(
                 result = await s2_client.search_by_title(client, citation.title, settings=settings)
             return result
 
-        return await _verify_keyed(
+        try:
+            title_policy = title_policy or load_title_policy(
+                settings.citation_metadata_title_policy_file
+            )
+        except (OSError, ValueError, UnicodeError):
+            return CitationVerdict(
+                VerdictKind.unassessed, unassessed_reason="metadata_comparison_policy_unavailable"
+            )
+        verdict = await _verify_keyed(
             session,
             "title",
             citation.title.casefold(),
@@ -273,6 +309,29 @@ async def verify_citation(
             instructor_id=instructor_id,
             reference_text=citation.raw_text,
         )
+        if verdict.result is not None and verdict.result.found:
+            comparison = compare_metadata(
+                citation, verdict.result, policy=title_policy, settings=settings
+            )
+            # Search returns candidates, including cached candidates. An unrelated
+            # first hit cannot confirm this reference or transfer a retraction.
+            bound = (
+                comparison.title_status == "agrees"
+                and not comparison.differing_fields
+                and comparison.author_status in {"agrees", "source_supported_sequence"}
+                and type(citation.year) is int
+                and type(comparison.registered.get("year")) is int
+                and comparison.registered["year"] == citation.year
+            )
+            if not bound:
+                return replace(
+                    verdict,
+                    kind=VerdictKind.unassessed,
+                    metadata_comparison=comparison,
+                    unassessed_reason="title_search_identity_unconfirmed",
+                )
+            return replace(verdict, metadata_comparison=comparison)
+        return verdict
 
     # No DOI/ISBN/title to key a lookup on (e.g. a parse_failed entry) —
     # genuinely unverifiable, no network call made.
@@ -1057,6 +1116,9 @@ async def run_citation_integrity_check(
                 else {}
             ),
             "n_references": len(citations),
+            "n_reference_metadata_attempted": sum(
+                record["lookup_attempted"] for record in verification_records
+            ),
             "n_in_text_citations": len(in_text),
             "n_linked": len(cross.linked),
             "n_orphans": len(cross.orphans),
@@ -1072,6 +1134,7 @@ async def run_citation_integrity_check(
             "numeric_link_evidence": _numeric_link_evidence(numeric),
             "identifier_linkage_leads": identifier_leads,
             "reference_metadata_coverage": verification_records,
+            "search_identity_policy_version": "title-author-year-isbn-v1",
             "reference_list_page": reference_section_page(extraction, patterns),
             "reference_selection_issues": list(selection.issues),
             "citation_parse_issues": sorted(gaps),

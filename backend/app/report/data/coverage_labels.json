@@ -30,5 +30,7 @@
   "title_case_unassessed": "Title capitalization may change scientific meaning. The title comparison remains unassessed.",
   "title_metadata_unavailable": "A complete title was not recorded for both sides. The title comparison remains unassessed.",
   "ai_not_configured": "AI-dependent parts of this check were not assessed because no usable AI configuration was available. Any independently completed results remain available. Unassessed comparisons or claims are not treated as passed. This is a system limit, not a finding against the manuscript.",
-  "ai_key_rejected": "AI-dependent parts of this check were not assessed because the configured AI key was rejected during an AI request and no applicable alternative completed that request. Any independently completed results remain available. Unassessed comparisons or claims are not treated as passed. This is a system limit, not a finding against the manuscript."
+  "ai_key_rejected": "AI-dependent parts of this check were not assessed because the configured AI key was rejected during an AI request and no applicable alternative completed that request. Any independently completed results remain available. Unassessed comparisons or claims are not treated as passed. This is a system limit, not a finding against the manuscript.",
+  "reference_membership_partial": "The primary reference list was retained, while later source membership remains unresolved. Reference metadata was checked where possible; full citation linkage and claim support remain unassessed",
+  "statement_extraction_unassessed": "The detector could not reliably identify objectives and results to compare. This does not establish absence"
 }

@@ -1664,6 +1664,8 @@ def build_report_pdf(data: ReportExportData) -> bytes:
             if coverage.assessment_scope == "reference_metadata_only":
                 counts.append(
                     f"{coverage.n_reference_metadata_attempted} reference checks attempted"
+                    if coverage.n_reference_metadata_attempted is not None
+                    else "The number of attempted reference checks was not recorded"
                 )
             if coverage.n_metadata_api_down:
                 counts.append(

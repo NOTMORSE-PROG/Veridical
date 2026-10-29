@@ -46,8 +46,10 @@ from typing import Literal
 
 from app.checks.agreement.cues import AgreementCues, load_cues
 from app.config import Settings, get_settings
+from app.ingest.references import parse_reference
 from app.ingest.schemas import ExtractionResult, TextBlock
 from app.ingest.source_slices import SourceFragment, SourceSlicer, line_inventory_valid
+from app.models.enums import CitationParseStatus
 
 StatementKind = Literal["intent", "outcome"]
 
@@ -98,6 +100,8 @@ def _heading_section(text: str, cues: AgreementCues) -> Literal["objectives", "o
     lowered = _strip_numbering(text).lower()
     if any(syn in lowered for syn in cues.objective_heading_synonyms):
         return "objectives"
+    if any(re.search(pattern, lowered) for pattern in cues.outcome_heading_exclusion_patterns):
+        return "other"
     if any(syn in lowered for syn in cues.outcome_heading_synonyms):
         return "outcomes"
     return "other"
@@ -291,6 +295,15 @@ def _extract_modal_statements(
         # Agreement" using the words "it intends to do" seven words in).
         lead = _leading_words(lowered, cue_max_lead_words)
         matched_intent = next((c for c in cues.intent_phrase_cues if c in lead), None)
+        if matched_intent is None:
+            matched_intent = next(
+                (
+                    pattern
+                    for pattern in cues.intent_construction_patterns
+                    if re.search(pattern, lead)
+                ),
+                None,
+            )
         matched_outcome = next((c for c in cues.outcome_phrase_cues if c in lead), None)
         if matched_intent is None and matched_outcome is None:
             continue
@@ -310,6 +323,48 @@ def _extract_modal_statements(
             )
         )
     return out
+
+
+def _extract_outcome_prose(
+    blocks: list[TextBlock], cues: AgreementCues, *, heading_max_words: int
+) -> list[Statement]:
+    """Recognize source-bound candidates, not verified roles or complete coverage."""
+    if not cues.outcome_prose_enabled:
+        return []
+    candidates = []
+    in_outcomes = False
+    for block in blocks:
+        if block.is_furniture or not block.text.strip():
+            continue
+        text = block.text.strip()
+        if _is_heading_like(text, max_words=heading_max_words):
+            in_outcomes = _heading_section(text, cues) == "outcomes"
+            continue
+        if not in_outcomes or _LIST_MARKER.match(text):
+            continue
+        if parse_reference(text, order_index=0).parse_status == CitationParseStatus.parsed:
+            continue
+        for start, end in _sentence_spans(text):
+            sentence = _normalize(text[start:end])
+            lowered = sentence.lower()
+            if not any(re.search(pattern, lowered) for pattern in cues.outcome_prose_patterns):
+                continue
+            if not sentence or any(
+                phrase in lowered
+                for phrase in (*cues.future_work_guard_phrases, *cues.scope_negation_phrases)
+            ):
+                continue
+            candidates.append(
+                Statement(
+                    kind="outcome",
+                    text=sentence,
+                    anchor=_anchor_for(block),
+                    page=block.page,
+                    paragraph=block.paragraph,
+                    cue="outcome_section_prose",
+                )
+            )
+    return candidates
 
 
 # --- dedup --------------------------------------------------------------------
@@ -394,6 +449,11 @@ def extract_statements(
                 cues,
                 cue_max_lead_words=settings.agreement_cue_max_lead_words,
                 heading_max_words=settings.agreement_heading_max_words,
+            )
+        )
+        statements.extend(
+            _extract_outcome_prose(
+                list(scope), cues, heading_max_words=settings.agreement_heading_max_words
             )
         )
     threshold = settings.agreement_dedup_similarity_threshold

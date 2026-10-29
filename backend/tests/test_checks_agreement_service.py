@@ -114,9 +114,8 @@ def _extraction(blocks: list[TextBlock]) -> ExtractionResult:
     )
 
 
-async def test_manuscript_with_no_statements_is_not_applicable(session_factory):
-    """Ticket-family AC (F4/F5/F6 share this convention): nothing to check
-    -> N/A, never a silently-clean pass (charter rule 9)."""
+async def test_no_recognized_statements_leaves_applicability_unassessed(session_factory):
+    """V-081: unknown detector recall leaves applicability unassessed, never N/A."""
     check_run_id = await _seed_check_run(session_factory)
     extraction = _extraction([_block("This chapter is purely descriptive prose.")])
     llm = ScriptedLLM([])
@@ -124,7 +123,8 @@ async def test_manuscript_with_no_statements_is_not_applicable(session_factory):
         result = await run_internal_agreement_check(
             session, llm, check_run_id, extraction, get_settings()
         )
-    assert result.outcome == ResultOutcome.not_applicable
+    assert result.outcome == ResultOutcome.escalated
+    assert result.detail["coverage_reason"] == "statement_extraction_unassessed"
     assert result.detail["n_intents"] == 0
     assert result.detail["n_outcomes"] == 0
     assert llm.calls == []
@@ -158,7 +158,8 @@ async def test_bug_151_no_statements_still_writes_a_check_computed_audit_event_w
             )
         ).first()
     assert row is not None
-    assert row.payload["outcome"] == "not_applicable"
+    assert row.payload["outcome"] == "escalated"
+    assert row.payload["coverage_reason"] == "statement_extraction_unassessed"
     assert (
         row.payload["thresholds"]["dedup_similarity_threshold"]
         == settings.agreement_dedup_similarity_threshold
@@ -219,10 +220,8 @@ async def test_seeded_contradiction_produces_a_real_flag_row(session_factory):
     assert exclusion_reason("internal_agreement", rows[0].detail) == "statement_roles_unverified"
 
 
-async def test_unmatched_intent_produces_a_low_flag_no_llm_call(session_factory):
-    """Ticket AC demo seed: a feature claimed in Ch1, absent later -> low
-    flag. High similarity_floor forces zero candidates, so no Gemini call
-    is spent (quota discipline, verified end-to-end)."""
+async def test_unmatched_detector_candidate_does_not_prove_missing_result(session_factory):
+    """V-081: a failed match cannot establish absence with incomplete recognition."""
     check_run_id = await _seed_check_run(session_factory)
     extraction = _extraction(
         [
@@ -238,14 +237,13 @@ async def test_unmatched_intent_produces_a_low_flag_no_llm_call(session_factory)
         result = await run_internal_agreement_check(
             session, llm, check_run_id, extraction, settings
         )
-        assert result.detail["n_flags"] == 1
+        assert result.detail["n_flags"] == 0
+        assert result.detail["absence_leads_withheld"] is True
         flag_query = text(
             "SELECT severity, detail->>'kind' AS kind FROM flag WHERE check_result_id = :id"
         )
         rows = (await session.execute(flag_query, {"id": result.id})).all()
-    assert len(rows) == 1
-    assert rows[0].severity == "low"
-    assert rows[0].kind == "agreement_unmatched_intent"
+    assert rows == []
     assert llm.calls == []
 
 

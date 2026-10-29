@@ -18,6 +18,10 @@ class AgreementCues:
     outcome_phrase_cues: tuple[str, ...]
     future_work_guard_phrases: tuple[str, ...]
     scope_negation_phrases: tuple[str, ...]
+    intent_construction_patterns: tuple[str, ...] = ()
+    outcome_prose_enabled: bool = False
+    outcome_prose_patterns: tuple[str, ...] = ()
+    outcome_heading_exclusion_patterns: tuple[str, ...] = ()
 
 
 def load_cues(path: Path | None = None) -> AgreementCues:
@@ -29,4 +33,8 @@ def load_cues(path: Path | None = None) -> AgreementCues:
         outcome_phrase_cues=tuple(raw["outcome_phrase_cues"]),
         future_work_guard_phrases=tuple(raw["future_work_guard_phrases"]),
         scope_negation_phrases=tuple(raw["scope_negation_phrases"]),
+        intent_construction_patterns=tuple(raw.get("intent_construction_patterns", ())),
+        outcome_prose_enabled=raw.get("outcome_prose_enabled", False) is True,
+        outcome_prose_patterns=tuple(raw.get("outcome_prose_patterns", ())),
+        outcome_heading_exclusion_patterns=tuple(raw.get("outcome_heading_exclusion_patterns", ())),
     )

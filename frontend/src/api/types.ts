@@ -498,7 +498,7 @@ export interface IntegrityCheckStatusOut {
   analysis_coverage?: "complete" | "partial" | "unsupported" | null;
   statistical_notation_unassessed?: boolean | null;
   assessment_scope?: "reference_metadata_only" | "available_text_and_tables" | "available_text_and_reference_metadata" | null;
-  n_reference_metadata_attempted?: number;
+  n_reference_metadata_attempted?: number | null;
   n_metadata_api_down?: number;
   n_images_unassessed?: number;
   n_image_occurrences_omitted?: number;
