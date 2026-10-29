@@ -19,6 +19,7 @@ from app.errors import ConflictError
 from app.ingest.schemas import SectionTree
 from app.report.evidence_placement import (
     PinnedPdfSource,
+    _textbox_reader,
     locate_pdf_evidence,
     pin_pdf_source,
     render_pdf_evidence,
@@ -459,3 +460,65 @@ def test_same_page_references_never_inherit_each_others_marks(sources):
             for index in range(1, source.document.xref_length())
         ]
         assert source.document.is_dirty is False
+
+
+def test_a_located_reference_is_rendered_without_locating_it_again(sources, monkeypatch):
+    from app.report import evidence_placement
+
+    _path, data = sources["transforms"]
+    settings = Settings(_env_file=None)
+    with pinned(data) as source:
+        recorded = reference(data, ROTATED, 1)
+        located = locate_pdf_evidence(source, recorded, TREE, settings)
+        expected = render_pdf_evidence(source, recorded, TREE, settings, llm_mode="real")
+        calls = []
+        real = evidence_placement.locate_pdf_evidence
+        monkeypatch.setattr(
+            evidence_placement,
+            "locate_pdf_evidence",
+            lambda *args, **kwargs: calls.append(args) or real(*args, **kwargs),
+        )
+        reused = render_pdf_evidence(
+            source, recorded, TREE, settings, llm_mode="real", placement=located
+        )
+    assert calls == []
+    assert reused.placement == expected.placement
+    assert reused.image_png == expected.image_png
+
+
+@pytest.mark.parametrize("name", ["text", "transforms", "annotations"])
+def test_the_cached_page_textbox_reads_exactly_what_pymupdf_reads(sources, name):
+    _path, data = sources[name]
+    with pymupdf.open(stream=data, filetype="pdf") as document:
+        for page in document:
+            textbox = _textbox_reader(page)
+            rects = [
+                pymupdf.Rect(line["bbox"])
+                for block in page.get_text("dict")["blocks"]
+                for line in block.get("lines", [])
+            ]
+            rects += [pymupdf.Rect(word[:4]) for word in page.get_text("words")]
+            rects += [page.rect, pymupdf.Rect(0, 0, 1, 1)]
+            for quote in (UNIQUE, ROTATED, MULTILINE, HIDDEN, ANNOTATED):
+                rects += [quad.rect for quad in page.search_for(quote, quads=True)]
+            assert rects
+            for rect in rects:
+                assert textbox(rect) == page.get_textbox(rect)
+
+
+def test_a_page_with_an_incomplete_character_listing_is_read_the_exact_way():
+    listed = {
+        "blocks": [
+            {"type": 0, "lines": [{"spans": [{"chars": [{"c": "a", "bbox": (0, 0, 1, 1)}]}]}]}
+        ]
+    }
+    textpage = Row(extractRAWDICT=lambda: listed, extractText=lambda: "ab\n")
+    calls = []
+
+    def get_textbox(rect, textpage=None):
+        calls.append((rect, textpage))
+        return "exact"
+
+    page = Row(get_textpage=lambda: textpage, get_textbox=get_textbox)
+    assert _textbox_reader(page)((0, 0, 1, 1)) == "exact"
+    assert calls == [((0, 0, 1, 1), textpage)]

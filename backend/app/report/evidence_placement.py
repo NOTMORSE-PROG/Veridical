@@ -178,6 +178,51 @@ def locate_pdf_evidence(
         return EvidencePlacementOut(**coarse, reason="quote_geometry_unverified")
 
 
+def _textbox_reader(page):
+    """`page.get_textbox(rect)` for many rectangles on one page.
+
+    PyMuPDF's get_textbox builds a text page and checks every character of
+    the page in Python on each call, which was most of a report export's
+    work. This reads the same text page once, keeps each character's box,
+    and applies the same rules per rectangle: a character counts when its
+    box overlaps the rectangle, and lines that contributed text are joined
+    with line breaks.
+    """
+    textpage = page.get_textpage()
+    lines = [
+        [(char["c"], char["bbox"]) for span in line["spans"] for char in span["chars"]]
+        for block in textpage.extractRAWDICT()["blocks"]
+        if block["type"] == 0
+        for line in block["lines"]
+    ]
+    kept = sum(char != "\n" for chars in lines for char, _ in chars)
+    if kept != sum(char != "\n" for char in textpage.extractText()):
+        # The character listing leaves out some glyphs the text page holds
+        # (zero-width boxes in some right-to-left scripts). Read such a page
+        # the slow, exact way.
+        return lambda rect: page.get_textbox(rect, textpage=textpage)
+
+    def textbox(rect) -> str:
+        x0, y0, x1, y1 = rect
+        parts = []
+        pending_break = False
+        for chars in lines:
+            found = False
+            for char, (cx0, cy0, cx1, cy1) in chars:
+                if x0 >= cx1 or y0 >= cy1 or x1 <= cx0 or y1 <= cy0:
+                    continue
+                if pending_break:
+                    parts.append("\n")
+                    pending_break = False
+                parts.append(char)
+                found = True
+            if found:
+                pending_break = True
+        return "".join(parts)
+
+    return textbox
+
+
 def _locate_quote(page, quote, coarse, settings):
     try:
         text = normalize(page.get_text("text"))
@@ -190,6 +235,7 @@ def _locate_quote(page, quote, coarse, settings):
             return EvidencePlacementOut(**coarse, reason="quote_geometry_unverified")
         bounds = page.rect * page.derotation_matrix
         inverse = ~page.transformation_matrix
+        textbox = _textbox_reader(page)
         boxes = []
         portions = []
         for quad in quads:
@@ -200,7 +246,7 @@ def _locate_quote(page, quote, coarse, settings):
                 or not bounds.contains(native)
             ):
                 return EvidencePlacementOut(**coarse, reason="quote_geometry_unverified")
-            portions.append(page.get_textbox(native))
+            portions.append(textbox(native))
             converted = native * inverse
             if converted.is_empty or not all(isfinite(value) for value in converted):
                 return EvidencePlacementOut(**coarse, reason="quote_geometry_unverified")
@@ -225,13 +271,17 @@ def render_pdf_evidence(
     *,
     llm_mode: str,
     print_content_width: float | None = None,
+    placement: EvidencePlacementOut | None = None,
 ) -> ReferencePageImage:
     """Reuse the native rasterizer with this reference's own admitted marks only.
 
     No cache is consulted. In particular private annotated images cannot satisfy
     public requests; the public page policy is inspected on this pinned document.
+    A caller that already located this reference on this same pinned source
+    passes that `placement`; locating is the costly half of the work.
     """
-    placement = locate_pdf_evidence(source, reference, section_tree, settings)
+    if placement is None or placement.reference_id != reference.reference_id:
+        placement = locate_pdf_evidence(source, reference, section_tree, settings)
     if placement.state == "unavailable" or placement.page is None:
         return ReferencePageImage(placement, None)
     mode = llm_mode if llm_mode in {"fake", "real", "unknown"} else "unknown"

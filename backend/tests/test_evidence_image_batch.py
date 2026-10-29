@@ -244,3 +244,11 @@ def test_export_pauses_after_each_page_render_only_when_configured(
     assert len(rows) == 3 and len(calls) == 3
     assert len(pauses) == (len(calls) if ratio else 0)
     assert all(pause >= 0 for pause in pauses)
+
+
+def test_each_image_reuses_the_placement_already_found_for_its_reference(render_stubs):
+    calls, _ = render_stubs
+    build(Settings(_env_file=None))
+    assert [kwargs["placement"].reference_id for _, _, kwargs in calls] == [
+        reference.reference_id for reference, _, _ in calls
+    ]

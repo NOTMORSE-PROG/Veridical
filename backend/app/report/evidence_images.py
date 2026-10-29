@@ -216,6 +216,7 @@ def build_recorded_evidence_images(
                     render_settings,
                     llm_mode=llm_mode,
                     print_content_width=print_content_width,
+                    placement=placement,
                 )
                 # Discarding an encoded image does not refund its raster work.
                 used_pixels += result.charged_pixels
