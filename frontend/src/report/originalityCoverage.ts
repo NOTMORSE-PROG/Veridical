@@ -23,7 +23,7 @@ export const ORIGINALITY_NOT_COMPARED = {
   endUnclear: "The end of the reference list could not be found, so the text from where the list starts to the end was not compared. Check any appendices there yourself. Running the check again gives the same result.",
   boundary: (span: string | null) => `The body could not be told apart from the reference list, so no text was compared${span ? ` (${span})` : ""}. This is not evidence of originality. Running the check again gives the same result.`,
   boundaryScope: "Originality and reuse: the body could not be told apart from the reference list, so no text was compared. This is not evidence of originality.",
-  membershipPartial: "Some passages could not be told apart from reference-list entries, so they were left out of the comparison. Running the check again gives the same result.",
+  membershipPartial: "Text after the reference list, such as an appendix that lists sources, could not be confirmed as body text, so it was left out of the comparison. Running the check again gives the same result.",
 } as const;
 
 export function originalityNotComparedDetail(status: IntegrityCheckStatusOut): string | null {
