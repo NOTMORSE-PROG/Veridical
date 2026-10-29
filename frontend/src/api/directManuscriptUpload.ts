@@ -8,7 +8,7 @@ import type { UploadAttemptScope } from "../auth/useUploadScope";
 // ignores it and answers with the original single-request transfer.
 const SUPPORTED_TRANSPORTS = "parts, stream";
 
-interface UploadStatus {
+export interface UploadStatus {
   attempt_id: string;
   status: "pending" | "queued" | "processing" | "done" | "failed" | "expired";
   upload_url?: string;
@@ -22,6 +22,12 @@ interface UploadStatus {
   error?: string;
   poll_after_ms: number;
   poll_timeout_ms: number;
+  filename?: string;
+  size?: number;
+  created_at?: string;
+  // Set when the upload asked the server to start a check once it is ready.
+  check_run_id?: number | null;
+  check_start_error?: string | null;
 }
 
 const attempts = new WeakMap<File, Map<number, string>>();
@@ -30,9 +36,17 @@ export interface DirectUploadProgress {
   onProgress?: (percent: number) => void;
   // The bytes are stored and the server is preparing the file.
   onPreparing?: () => void;
+  // Every status the server reports, including the check it started.
+  onStatus?: (status: UploadStatus) => void;
 }
 
-export async function directManuscriptUpload(file: File, scope: UploadAttemptScope, progress: DirectUploadProgress = {}): Promise<unknown> {
+export interface DirectUploadOptions {
+  // Start a check with this required format as soon as the file is ready.
+  startCheck?: { rubricId: number };
+}
+
+export async function directManuscriptUpload(file: File, scope: UploadAttemptScope, progress: DirectUploadProgress = {},
+  options: DirectUploadOptions = {}): Promise<unknown> {
   const ownerAttempts = attempts.get(file) ?? new Map<number, string>();
   attempts.set(file, ownerAttempts);
   const attemptId = ownerAttempts.get(scope.actorId) ?? crypto.randomUUID();
@@ -40,9 +54,11 @@ export async function directManuscriptUpload(file: File, scope: UploadAttemptSco
   const headers = { "X-Veridical-Expected-Instructor": String(scope.actorId) };
   const current = () => { if (!scope.isCurrent()) throw new StaleUploadContextError(); };
   current();
-  let state = await api.post<UploadStatus>("/manuscripts/uploads", {
+  const report = (next: UploadStatus) => { progress.onStatus?.(next); return next; };
+  let state = report(await api.post<UploadStatus>("/manuscripts/uploads", {
     attempt_id: attemptId, filename: file.name, size: file.size,
-  }, { ...headers, "X-Veridical-Upload-Transports": SUPPORTED_TRANSPORTS });
+    ...(options.startCheck ? { start_check: { rubric_id: options.startCheck.rubricId } } : {}),
+  }, { ...headers, "X-Veridical-Upload-Transports": SUPPORTED_TRANSPORTS }));
   current();
   if (state.attempt_id !== attemptId) throw new UnconfirmedUploadError();
   if (state.status === "pending") {
@@ -50,11 +66,11 @@ export async function directManuscriptUpload(file: File, scope: UploadAttemptSco
     // queries that same attempt instead of creating another manuscript.
     if (state.transport === "relay" && state.relay_mode === "stream") {
       // The server stores the body in parts while it is still arriving.
-      state = await api.putBody<UploadStatus>(`/manuscripts/uploads/${attemptId}/body`, file, headers, progress.onProgress);
+      state = report(await api.putBody<UploadStatus>(`/manuscripts/uploads/${attemptId}/body`, file, headers, progress.onProgress));
     } else if (state.transport === "relay") {
       const form = new FormData();
       form.append("file", file);
-      state = await api.post<UploadStatus>(`/manuscripts/uploads/${attemptId}/file`, form, headers);
+      state = report(await api.post<UploadStatus>(`/manuscripts/uploads/${attemptId}/file`, form, headers));
     } else if (state.parts) {
       await uploadParts(file, {
         parts: state.parts,
@@ -64,7 +80,7 @@ export async function directManuscriptUpload(file: File, scope: UploadAttemptSco
       current();
       await scope.verify();
       current();
-      state = await api.post<UploadStatus>(`/manuscripts/uploads/${attemptId}/complete`, undefined, headers);
+      state = report(await api.post<UploadStatus>(`/manuscripts/uploads/${attemptId}/complete`, undefined, headers));
       if (state.status !== "pending") progress.onProgress?.(100);
     } else {
       if (!state.upload_url || !state.upload_headers) throw new UnconfirmedUploadError();
@@ -72,7 +88,7 @@ export async function directManuscriptUpload(file: File, scope: UploadAttemptSco
       current();
       await scope.verify();
       current();
-      state = await api.post<UploadStatus>(`/manuscripts/uploads/${attemptId}/complete`, undefined, headers);
+      state = report(await api.post<UploadStatus>(`/manuscripts/uploads/${attemptId}/complete`, undefined, headers));
     }
     current();
   }
@@ -84,7 +100,7 @@ export async function directManuscriptUpload(file: File, scope: UploadAttemptSco
       || Date.now() - started > state.poll_timeout_ms) throw new UnconfirmedUploadError();
     await new Promise((resolve) => setTimeout(resolve, state.poll_after_ms));
     current();
-    state = await api.get<UploadStatus>(`/manuscripts/uploads/${attemptId}`);
+    state = report(await api.get<UploadStatus>(`/manuscripts/uploads/${attemptId}`));
     current();
     if (state.attempt_id !== attemptId) throw new UnconfirmedUploadError();
   }

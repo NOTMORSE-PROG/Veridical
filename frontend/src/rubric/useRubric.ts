@@ -97,10 +97,11 @@ export function useSaveCriteria(rubricId: number) {
   });
 }
 
-export function useRubricFamilies() {
+export function useRubricFamilies({ enabled = true }: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: ["rubric-families"],
     queryFn: () => api.get<RubricListItem[]>("/rubric-families"),
+    enabled,
   });
 }
 

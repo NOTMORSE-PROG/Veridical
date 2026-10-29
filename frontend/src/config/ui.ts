@@ -49,6 +49,9 @@ export const STORED_FILES_PAGE_SIZE = 10;
 export const BACKGROUND_UPLOAD_MIN_BYTES = 10 * 1024 * 1024;
 // While the server is busy with another file transfer, a background upload
 // waits and retries instead of failing; it gives up after this many tries.
+// Dismissed tray uploads remembered per instructor on this device. The server
+// lists only the last day's uploads, so a short list covers them.
+export const BACKGROUND_UPLOAD_DISMISSED_KEPT = 50;
 export const BACKGROUND_UPLOAD_BUSY_RETRY = { delayMs: 15_000, maxAttempts: 12 } as const;
 export const REVIEW_DESK_PAGE_SIZE = 20;
 export const FLAG_LIST_INITIAL_COUNT = 8;

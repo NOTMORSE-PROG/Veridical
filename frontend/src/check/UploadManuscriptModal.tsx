@@ -16,7 +16,7 @@
 // the instructor. Assignment happens after upload through reviewed details or
 // an explicitly selected saved group; ingest starts at the
 // "Ungrouped" default (`resolve_or_create_group`'s own fallback).
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { ApiError } from "../api/client";
 import { isKnownUploadRejection, isUploadFileError, StaleUploadContextError } from "../api/uploadOutcome";
@@ -30,6 +30,8 @@ import { GroupAssignmentFields } from "./GroupAssignmentFields";
 import { useIngestManuscript } from "./useCheckRun";
 import { useBackgroundUploads } from "../upload/BackgroundUploads";
 import { BACKGROUND_UPLOAD_MIN_BYTES } from "../config/ui";
+import { useRubricFamilies } from "../rubric/useRubric";
+import { formatChoiceLabel } from "../domain/formatIdentity";
 
 function formatUploadDate(value: string): string {
   return new Date(value).toLocaleString(undefined, {
@@ -94,6 +96,20 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
   const ingest = useIngestManuscript();
   const background = useBackgroundUploads();
   const queryClient = useQueryClient();
+  const [startWhenReady, setStartWhenReady] = useState(false);
+  const [startRubricId, setStartRubricId] = useState<number | "">("");
+  const startCheckId = useId();
+  const startFormatId = useId();
+  const inBackground = Boolean(background && file && file.size >= BACKGROUND_UPLOAD_MIN_BYTES);
+  const offersStartCheck = inBackground && Boolean(background?.canStartCheck);
+  const { data: families, isPending: familiesPending } = useRubricFamilies({ enabled: offersStartCheck });
+  const activeFamilies = useMemo(
+    () => (families ?? []).filter((f) => f.is_active).sort((a, b) => a.title.localeCompare(b.title)),
+    [families],
+  );
+  // The manuscript's program is only known once its pages are read, so every
+  // active required format is offered; the only one is chosen for you.
+  const chosenRubricId = activeFamilies.length === 1 ? activeFamilies[0].id : startRubricId;
   const resetIngest = ingest.reset;
   const scope = useUploadScope();
   const { status: scopeStatus, isCurrent: isScopeCurrent } = scope;
@@ -171,8 +187,12 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
     if (sending.current || scopeStatus !== "ready" || !isScopeCurrent()) return;
     if (unknownFiles.length > 0 && !confirmed) { setConfirming(true); return; }
     if (background && file.size >= BACKGROUND_UPLOAD_MIN_BYTES) {
+      if (offersStartCheck && startWhenReady && chosenRubricId === "") {
+        setFieldError("Choose the required format for the check, or untick Start a check when it's ready.");
+        return;
+      }
       setConfirming(false);
-      background.start(file);
+      background.start(file, offersStartCheck && startWhenReady && chosenRubricId !== "" ? { startCheckRubricId: chosenRubricId } : {});
       onClose();
       return;
     }
@@ -434,6 +454,39 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
                   <RemoveIcon />
                 </button>
               </div>
+            )}
+
+            {inBackground && (
+              <section className="signal-upload-background" aria-labelledby={`${startCheckId}-title`}>
+                <h3 id={`${startCheckId}-title`}>This file uploads in the background</h3>
+                <p>It is large, so the dialog closes and the Uploads panel shows its progress. You can keep working while it is prepared.</p>
+                {offersStartCheck && (familiesPending ? (
+                  <p>Loading your required formats.</p>
+                ) : activeFamilies.length === 0 ? (
+                  <p>No required format is active yet, so start the check from the Uploads panel once the file is ready.</p>
+                ) : (
+                  <>
+                    <label className="signal-upload-background__toggle">
+                      <input id={startCheckId} type="checkbox" checked={startWhenReady}
+                        onChange={(event) => { setStartWhenReady(event.target.checked); setFieldError(null); }} />
+                      <span>Start a check when it's ready</span>
+                    </label>
+                    {startWhenReady && (activeFamilies.length === 1 ? (
+                      <p>The check uses {formatChoiceLabel(activeFamilies[0], activeFamilies)}.</p>
+                    ) : (
+                      <div className="signal-upload-background__format">
+                        <label htmlFor={startFormatId}>Required format for the check</label>
+                        <select id={startFormatId} value={startRubricId}
+                          onChange={(event) => { setStartRubricId(event.target.value === "" ? "" : Number(event.target.value)); setFieldError(null); }}
+                          className="min-h-11 w-full rounded-md border border-border-input bg-panel px-3 text-base text-ink">
+                          <option value="">Select a required format.</option>
+                          {activeFamilies.map((f) => <option key={f.id} value={f.id}>{formatChoiceLabel(f, activeFamilies)}</option>)}
+                        </select>
+                      </div>
+                    ))}
+                  </>
+                ))}
+              </section>
             )}
 
             {ingest.isPending && (
