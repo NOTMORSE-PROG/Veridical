@@ -71,6 +71,7 @@ import { claimFocusContinuation, type FocusContinuation } from "../routing/focus
 import { RelatedFindings } from "./RelatedFindings";
 import { readinessExclusionLine } from "../domain/readinessExclusion";
 import { BulkResolveDialog, BulkSelectionBar } from "./BulkFindingReview";
+import { findingSubject, findingTitle } from "../domain/findingSummary";
 import { BULK_REVIEW_COPY } from "../domain/bulkReviewCopy";
 import type { BulkAction } from "./useBulkResolve";
 
@@ -224,10 +225,36 @@ function viewedSummary(flags: FlagSummaryOut[], viewedIds: ReadonlySet<number>):
 function SelectFinding({ cluster, selection }: { cluster: FlagFindingCluster; selection?: FindingSelection }) {
   if (!selection) return null;
   const first = cluster.flags[0];
+  // Named on the input itself: the excerpt it repeats is already on the card.
   return <label className="signal-bulk-check">
-    <input type="checkbox" checked={selection.isSelected(cluster)} onChange={() => selection.toggle(cluster)} />
-    <span className="sr-only">Select finding: {problemLabel(first.problem_kind) ?? first.criterion_text ?? "Possible inconsistency"}, {instructorAnchor(first.page_anchor)}</span>
+    <input type="checkbox" checked={selection.isSelected(cluster)} onChange={() => selection.toggle(cluster)}
+      aria-label={`Select finding: ${findingTitle(first)}, ${instructorAnchor(first.page_anchor)}: ${findingSubject(first)}`} />
   </label>;
+}
+
+const SELECTION_KEY = "veridical.bulk-selection.v1";
+
+// The selection is kept for this browser tab, so checking a finding's
+// evidence and coming back does not lose it.
+function useStoredSelection(checkRunId: number) {
+  const key = `${SELECTION_KEY}.${checkRunId}`;
+  const [ids, setIds] = useState<ReadonlySet<number>>(() => {
+    try {
+      const parsed: unknown = JSON.parse(window.sessionStorage.getItem(key) ?? "[]");
+      return new Set(Array.isArray(parsed) ? parsed.filter((id): id is number => Number.isSafeInteger(id)) : []);
+    } catch {
+      return new Set();
+    }
+  });
+  useEffect(() => {
+    try {
+      if (ids.size) window.sessionStorage.setItem(key, JSON.stringify([...ids]));
+      else window.sessionStorage.removeItem(key);
+    } catch {
+      // Storage unavailable: the selection lasts only while this page is open.
+    }
+  }, [ids, key]);
+  return [ids, setIds] as const;
 }
 
 function SignalFindingCard({
@@ -1055,9 +1082,11 @@ export function SignalFlagsPanel({
   // not the declaration order -- see `defaultFlagView`'s own comment for
   // why this is a filter-default decision, not a reorder.
   // V-089: the selection spans checks, so it is kept here, by finding location.
-  const [selectedIds, setSelectedIds] = useState<ReadonlySet<number>>(() => new Set());
+  const [selectedIds, setSelectedIds] = useStoredSelection(checkRunId);
   const [bulkAction, setBulkAction] = useState<BulkAction | null>(null);
   const [bulkMessage, setBulkMessage] = useState("");
+  // A typed reason or comment survives closing the dialog.
+  const [bulkDrafts, setBulkDrafts] = useState<Record<BulkAction, string>>({ confirm: "", dismiss: "" });
   const allClusters = clusterFlagFindings(allOtherFlags ?? []);
   const selectedClusters = allClusters.filter((cluster) => cluster.flags.every((flag) => selectedIds.has(flag.id)));
   const selectedLocations = selectedClusters.reduce((total, cluster) => total + cluster.flags.length, 0);
@@ -1069,9 +1098,14 @@ export function SignalFlagsPanel({
       for (const flag of cluster.flags) { if (on) next.delete(flag.id); else next.add(flag.id); }
       return next;
     }),
-    selectMany: (clusters) => setSelectedIds((current) => new Set([...current, ...clusters.flatMap((cluster) => cluster.flags.map((flag) => flag.id))])),
-    selectAllInCheck: () => setSelectedIds(new Set((allOtherFlags ?? []).map((flag) => flag.id))),
+    // Both select only open findings, and only in the check on screen.
+    selectMany: (clusters) => setSelectedIds((current) => new Set([...current,
+      ...clusters.filter((cluster) => cluster.flags.some((flag) => !flag.overridden)).flatMap((cluster) => cluster.flags.map((flag) => flag.id))])),
+    selectAllInCheck: () => setSelectedIds((current) => new Set([...current,
+      ...clusterFlagFindings(otherFlags ?? []).filter((cluster) => cluster.flags.some((flag) => !flag.overridden)).flatMap((cluster) => cluster.flags.map((flag) => flag.id))])),
   };
+  const shownKeys = new Set(clusterFlagFindings(otherFlags ?? []).map((cluster) => cluster.key));
+  const selectedElsewhere = selectedClusters.filter((cluster) => !shownKeys.has(cluster.key)).length;
   const initialView = otherFlags ? defaultFlagView(Math.min(unresolvedHighFlagCount,
     otherFlags.filter(flag => !flag.overridden && flag.severity === "high" && flag.affects_readiness !== false).length), otherFlags) : "open";
 
@@ -1089,8 +1123,9 @@ export function SignalFlagsPanel({
       {review && <p role="status" aria-live="polite" className={bulkMessage ? "signal-bulk-result" : "sr-only"}>{bulkMessage}</p>}
       {review && bulkAction && <BulkResolveDialog action={bulkAction} clusters={selectedClusters} checkRunId={checkRunId}
         expectedRevision={review.assessment?.assessment_revision} viewedIds={viewedIds}
+        text={bulkDrafts[bulkAction]} onText={(text) => setBulkDrafts((current) => ({ ...current, [bulkAction]: text }))}
         onClose={() => setBulkAction(null)}
-        onDone={(message) => { setBulkAction(null); setSelectedIds(new Set()); setBulkMessage(message); }} />}
+        onDone={(message) => { setBulkAction(null); setSelectedIds(new Set()); setBulkDrafts({ confirm: "", dismiss: "" }); setBulkMessage(message); }} />}
       {selectedModule === "statistical_forensics" && <StatisticalCheckScope scope={statisticalScope} />}
       {selectedModule === "originality_reuse" && <OriginalityScope scope={originalityScope} showAddAction />}
       {otherFlags && otherFlags.length > 0
@@ -1107,8 +1142,9 @@ export function SignalFlagsPanel({
         : onlyOptional ? null : optional.state === "success" ? <EmptyState className="signal-integrity-empty" id={`signal-module-empty-${checkRunId}`} title={emptyState.title}><p>{emptyState.description}</p></EmptyState>
           : <p>{optional.state === "error" ? "Other findings could not be loaded." : optional.state === "paused" ? "Waiting to load other findings." : optional.state === "fetching" ? "Loading other findings." : "Other findings are not available."}</p>}
       {selectedModule === "originality_reuse" && <ComparisonLeadList collection={optional} showActions viewedIds={viewedIds} onRetry={() => { void flagsQuery.refetch(); }} />}
-      {review && <BulkSelectionBar findings={selectedClusters.length} locations={selectedLocations} decided={Boolean(review.decision)}
-        onAction={(action) => { setBulkMessage(""); setBulkAction(action); }} onClear={() => setSelectedIds(new Set())} />}
+      {review && <BulkSelectionBar findings={selectedClusters.length} locations={selectedLocations} elsewhere={selectedElsewhere} decided={Boolean(review.decision)}
+        onAction={(action) => { setBulkMessage(""); setBulkAction(action); }}
+        onClear={() => { setSelectedIds(new Set()); document.getElementById("flags-heading")?.focus(); }} />}
       </div>
       <details className="signal-integrity-review-notes"><summary>How findings affect readiness</summary><p>Across all modules, {unresolvedHighFlagCount} open high-severity findings count for readiness. Saved records and check status are separate; an empty list does not establish that the manuscript passed.</p></details>
       </div>

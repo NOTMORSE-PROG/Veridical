@@ -105,6 +105,17 @@ function stubViewer(viewer: ManuscriptViewerOut = VIEWER, report: ReportOut = RE
 }
 
 describe("SignalDocumentViewerPage", () => {
+  it("counts a finding as opened once its evidence is shown here, so the report's review progress moves", async () => {
+    window.localStorage.clear();
+    stubViewer();
+    renderWithProviders(<SignalDocumentViewerPage />, { route: "/report/5/document?finding=7", path: "/report/:checkRunId/document" });
+    await waitFor(() => {
+      const stored = Object.keys(window.localStorage).filter((key) => key.startsWith("veridical.flags-viewed.v1."))
+        .flatMap((key) => JSON.parse(window.localStorage.getItem(key) ?? "[]") as number[]);
+      expect(stored).toContain(7);
+    });
+  });
+
   it("keeps the selected record qualification associated outside the bounded reading workspace", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({
       "/check-runs/5/document": VIEWER, "/check-runs/5/report": REPORT,

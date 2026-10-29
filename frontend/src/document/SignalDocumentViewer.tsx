@@ -19,7 +19,7 @@ import { severityLabel } from "../domain/severity";
 import { systemFindingCopy } from "../domain/systemFindingCopy";
 import { instructorAnchor } from "../domain/sourceAnchor";
 import { useMe } from "../auth/useAuth";
-import { useViewedFlagIds } from "../domain/flagViewed";
+import { markFlagViewed, useViewedFlagIds } from "../domain/flagViewed";
 import { COMPARISON_LEAD_COPY, COMPARISON_LEAD_HEADING_ID, comparisonLeadFilter, comparisonLeadIdentity, isOptionalComparisonLead } from "../domain/comparisonLeadIdentity";
 import { ComparisonLeadList } from "../report/ComparisonLeadList";
 import { comparisonLeadCollection, type ComparisonLeadCollection } from "../report/comparisonLeadCollection";
@@ -609,6 +609,11 @@ export function SignalDocumentViewerPage() {
     : null;
   const [selectedDetail, setSelectedDetail] = useState<{ run: number; id: number; record: FlagOut | undefined; settled: boolean }>();
   const selectedRecord = selectedDetail?.run === id && selectedDetail.id === selectedLocationId ? selectedDetail.record : undefined;
+  // Opening a finding here is reviewing its evidence, as the old finding page
+  // was: once its record has loaded, it counts as opened.
+  useEffect(() => {
+    if (selectedRecord && selectedRecord.check_run_id === id) markFlagViewed(me?.id, selectedRecord.id);
+  }, [selectedRecord, id, me?.id]);
   const setSelectedRecord = useCallback((record: FlagOut | undefined, settled: boolean) => {
     if (selectedLocationId !== null) setSelectedDetail({ run: id, id: selectedLocationId, record, settled });
   }, [id, selectedLocationId]);
