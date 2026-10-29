@@ -266,6 +266,34 @@ describe("SignalReportPage", () => {
     expect(screen.getByRole("region", { name: "Integrity signals" })).toBeVisible();
   });
 
+  it.each([
+    ["not_applicable", "Not applicable to this manuscript"],
+    ["completed", "No findings to review"],
+    ["partial", "Check partly completed"],
+    ["incomplete", "Check not fully run"],
+    ["not_recorded", "No saved check status"],
+  ] as const)("shows a neutral empty category matching its saved %s status", async (state, title) => {
+    stubReport({ ...BASE_REPORT, integrity_modules: [{ check_kind: "internal_agreement", state }] }, [], []);
+    renderWithProviders(<SignalReportPage />, { route: "/report/5?review_step=findings&module=internal_agreement", path: "/report/:checkRunId" });
+    expect(await screen.findByRole("heading", { name: title })).toBeVisible();
+    const panel = document.getElementById("integrity-signals")!;
+    expect(panel.querySelector(".signal-alert--success")).toBeNull();
+    expect(panel.querySelector(".signal-integrity-review-body")).toContainElement(screen.getByRole("group", { name: "Integrity check modules" }));
+    const notes = within(panel).getByText("How findings affect readiness").closest("details")!;
+    expect(notes).not.toHaveAttribute("open");
+    fireEvent.click(within(notes).getByText("How findings affect readiness"));
+    expect(within(notes).getByText(/an empty list does not establish that the manuscript passed/)).toBeVisible();
+  });
+
+  it("keeps a failed category read distinct from an empty result", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/report": BASE_REPORT,
+      "/check-runs/5/escalated": [], "/check-runs/5/share": null,
+      "/check-runs/5/flags": new Response(JSON.stringify({ error: { code: "internal", message: "Read unavailable" } }), { status: 500 }) }));
+    renderWithProviders(<SignalReportPage />, { route: "/report/5?review_step=findings", path: "/report/:checkRunId" });
+    expect(await screen.findByText("Other findings could not be loaded.")).toBeVisible();
+    expect(document.querySelector(".signal-integrity-empty")).toBeNull();
+  });
+
   it("opens the first criterion directly in the framed demo review with inline navigation", async () => {
     const second = { ...ESCALATED, check_result_id: 44, criterion_id: 33, criterion_text: "Second recorded requirement" };
     const fetch = stubFetchByPath({ "/check-runs/5/report": { ...BASE_REPORT, pending_review_count: 2 },

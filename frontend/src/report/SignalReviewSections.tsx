@@ -41,7 +41,6 @@ import { rememberRouteReturnFocus } from "../routing/useRouteFocus";
 import { ActionLink } from "../ui/ActionLink";
 import { OriginalityScope } from "./OriginalityScope";
 import { StatisticalCheckScope } from "./StatisticalCheckScope";
-import { originalityUnassessed } from "./originalityScopeState";
 import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
@@ -963,6 +962,14 @@ export function SignalFlagsPanel({
   const review = useContext(ReviewContext);
   const [moduleParams, setModuleParams] = useSearchParams();
   const selectedModule = selectedIntegrityModule(moduleParams.get("module"));
+  const moduleState = review?.assessment?.integrity_modules?.find(module => module.check_kind === selectedModule)?.state ?? "not_recorded";
+  const emptyState = {
+    completed: { title: "No findings to review", description: "No findings were recorded for this check. This does not establish that the whole manuscript passed." },
+    not_applicable: { title: "Not applicable to this manuscript", description: "This check was marked not applicable. There are no findings to review in this category." },
+    partial: { title: "Check partly completed", description: "Only part of this check was completed. No findings were recorded. Read the assessment limits before drawing a conclusion." },
+    incomplete: { title: "Check not fully run", description: "This check was not fully run. No findings are available. Read the assessment limits to see what was checked." },
+    not_recorded: { title: "No saved check status", description: "This report does not say whether this check ran. An empty list does not mean the manuscript passed." },
+  }[moduleState];
   const flagsQuery = useFlags(checkRunId);
   const flags = recoverableReadError(flagsQuery.error) ? flagsQuery.data : undefined;
   const { data: me } = useMe();
@@ -985,12 +992,13 @@ export function SignalFlagsPanel({
     <section id="integrity-signals" tabIndex={-1} className="signal-review-section" aria-labelledby="flags-heading">
       <div className="signal-review-section__heading"><div><p className="signal-section-kicker">Integrity record</p><h2 id="flags-heading" tabIndex={-1}>Integrity signals</h2></div>{usableFlags && !onlyOptional && <span>{flagsLastLoaded ? "Last loaded: " : ""}{openFindingCount} {hasOptional ? "other open" : "open"} finding{openFindingCount === 1 ? "" : "s"}</span>}</div>
       {!onlyOptional && <p className="signal-review-section__intro">These are possible inconsistencies, not accusations. Open a signal to inspect its excerpt, source anchor, and available instructor action.</p>}
+      <div className="signal-integrity-review-body">
       <IntegrityModuleNavigation selected={selectedModule} controls={`signal-selected-module-${checkRunId}`}
         modules={review?.assessment?.integrity_modules}
         counts={new Map(["internal_agreement", "citation_integrity", "statistical_forensics", "originality_reuse"].map(kind => [kind, flags?.filter(flag => flag.check_kind === kind).length ?? 0]))}
         onSelect={kind => { const next = new URLSearchParams(moduleParams); next.set("module", kind); next.set("review_step", "findings"); [FLAG_VIEW_PARAM, CLUSTERS_OPEN_PARAM, VISIBLE_COUNT_PARAM].forEach(key => next.delete(key)); setModuleParams(next, { replace: true }); }} />
       <div id={`signal-selected-module-${checkRunId}`}>
-      <p className="signal-field-hint">Showing the selected module. Across all modules, {unresolvedHighFlagCount} open high-severity findings count for readiness. Saved records and execution state are separate; an empty list does not establish a clean manuscript.</p>
+
       {selectedModule === "statistical_forensics" && <StatisticalCheckScope scope={statisticalScope} />}
       {selectedModule === "originality_reuse" && <OriginalityScope scope={originalityScope} showAddAction />}
       {otherFlags && otherFlags.length > 0
@@ -1003,9 +1011,11 @@ export function SignalFlagsPanel({
             viewedIds={viewedIds}
           />
         )
-        : onlyOptional ? null : optional.state === "success" ? <Alert title="No integrity signals" tone={originalityUnassessed(originalityScope) ? "info" : "success"}>No checkable integrity signals are shown in this module.</Alert>
+        : onlyOptional ? null : optional.state === "success" ? <section className="signal-integrity-empty" aria-labelledby={`signal-module-empty-${checkRunId}`}><h3 id={`signal-module-empty-${checkRunId}`}>{emptyState.title}</h3><p>{emptyState.description}</p></section>
           : <p>{optional.state === "error" ? "Other findings could not be loaded." : optional.state === "paused" ? "Waiting to load other findings." : optional.state === "fetching" ? "Loading other findings." : "Other findings are not available."}</p>}
       {selectedModule === "originality_reuse" && <ComparisonLeadList collection={optional} showActions viewedIds={viewedIds} onRetry={() => { void flagsQuery.refetch(); }} />}
+      </div>
+      <details className="signal-integrity-review-notes"><summary>How findings affect readiness</summary><p>Across all modules, {unresolvedHighFlagCount} open high-severity findings count for readiness. Saved records and check status are separate; an empty list does not establish that the manuscript passed.</p></details>
       </div>
     </section>
   );

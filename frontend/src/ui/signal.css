@@ -8471,3 +8471,13 @@
 @layer components {
   .signal-comparison-reading-bar[data-source-presented="true"] > button:not(:focus) { display: none; }
 }
+
+@layer components {
+  .signal-integrity-review-body { display: grid; gap: var(--signal-space-5); min-inline-size: 0; padding: var(--signal-space-6); }
+  .signal-integrity-review-body > div { display: grid; gap: var(--signal-space-4); min-inline-size: 0; }
+  .signal-integrity-empty { display: grid; gap: var(--signal-space-3); min-inline-size: 0; padding: var(--signal-space-5); border: var(--signal-border-hairline) solid var(--color-signal-border); border-radius: var(--signal-radius-control); background: var(--color-signal-canvas); }
+  .signal-integrity-empty :is(h3, p), .signal-integrity-review-notes p { margin: 0; }
+  .signal-integrity-empty p, .signal-integrity-review-notes p { max-inline-size: var(--signal-prose-width); }
+  .signal-integrity-review-notes { display: grid; gap: var(--signal-space-3); min-inline-size: 0; }
+  .signal-integrity-review-notes summary { cursor: pointer; font-size: var(--signal-type-label); color: var(--color-signal-ink-secondary); }
+}
