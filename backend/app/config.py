@@ -360,6 +360,11 @@ class Settings(BaseSettings):
     # at least this long and has one supported location; shorter cores stay
     # rejected.
     semantic_omission_core_min_chars: int = Field(default=40, ge=1)
+    # A grading quotation found verbatim at several locations (an abstract
+    # restated in Chapter 1, a journal-article copy in an appendix) is anchored
+    # to its first location when it is at least this long; a shorter phrase at
+    # several locations stays ambiguous and is not stored as evidence.
+    semantic_repeated_quote_min_chars: int = Field(default=80, ge=1)
     semantic_grading_response_contract: str = Field(
         default="indexed-item-recovery-v1", pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$"
     )

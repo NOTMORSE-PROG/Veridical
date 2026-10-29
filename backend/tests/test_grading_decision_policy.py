@@ -86,6 +86,31 @@ async def test_three_way_split_takes_the_middle_level(decide):
     assert result.detail["decision_basis"] == "middle_of_three"
 
 
+async def test_uncertain_tie_break_abstains_and_the_lower_level_is_taken(decide):
+    result, llm = await _grade(
+        [
+            _verdict_response("Exemplary"),
+            _verdict_response("Proficient"),
+            _verdict_response("uncertain"),
+        ]
+    )
+    assert llm.passes == ["pass_1", "pass_2", "tie_break"]
+    assert result.outcome == ResultOutcome.passed
+    assert result.detail["level"]["name"] == "Proficient"
+    assert result.detail["decision_basis"] == "lower_of_two"
+
+
+async def test_uncertain_tie_break_still_escalates_when_not_deciding(escalate):
+    result, _ = await _grade(
+        [
+            _verdict_response("Exemplary"),
+            _verdict_response("Proficient"),
+            _verdict_response("uncertain"),
+        ]
+    )
+    assert result.outcome == ResultOutcome.escalated
+
+
 async def test_unverifiable_tie_break_takes_the_lower_verified_level(decide):
     result, llm = await _grade(
         [

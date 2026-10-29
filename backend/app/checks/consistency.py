@@ -107,17 +107,22 @@ def _scale_position(criterion: Any, verdict: str) -> float | None:
 def _decided_vote(
     criterion: Any, graded: list[GradedVerdict], votes: list[str | None]
 ) -> VoteResult | None:
-    """Policy "decide": the middle of three verified verdicts, or the lower
-    of two. None when a verdict is not on the criterion's scale."""
+    """Policy "decide": the middle of three verified verdicts, the lower of
+    two, or the only one. An "uncertain" verdict abstains rather than votes;
+    None when no verdict remains or one is not on the criterion's scale."""
     placed = []
     for g in graded:
+        if g.verdict is not None and g.verdict.strip().lower() == "uncertain":
+            continue
         position = _scale_position(criterion, g.verdict) if g.verdict else None
         if position is None:
             return None
         placed.append((position, g))
+    if not placed:
+        return None
     placed.sort(key=lambda item: item[0])
     winner = placed[1][1] if len(placed) == 3 else placed[0][1]
-    basis = "middle_of_three" if len(placed) == 3 else "lower_of_two"
+    basis = {3: "middle_of_three", 2: "lower_of_two", 1: "single_verified_pass"}[len(placed)]
     agreement = round(sum(1 for g in graded if g.verdict == winner.verdict) / len(votes), 3)
     return VoteResult(winner.verdict, agreement, votes, winner, None, decision_basis=basis)
 

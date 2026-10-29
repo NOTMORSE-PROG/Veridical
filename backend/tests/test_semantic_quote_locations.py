@@ -336,3 +336,26 @@ def test_omission_proposal_with_a_ligature_duplicate_elsewhere_is_ambiguous():
     typeset = plain.replace("ff", chr(0xFB00))
     blocks = [block(plain, page=3), block(typeset, page=9)]
     assert _resolve_source_excerpts([plain[:60] + "..."], blocks, "page") is None
+
+
+REPEATED = (
+    "The main aim of this research is to propose a framework that improves how the "
+    "booking system schedules clinic appointments."
+)
+
+
+def test_long_passage_repeated_in_an_appendix_takes_its_first_location():
+    blocks = [
+        block("Chapter 1 opens here.", page=17),
+        block(REPEATED, page=18),
+        block("Appendix C reproduces the journal article.", page=253),
+        block(REPEATED, page=254),
+    ]
+    assert _verify_quotes([REPEATED], blocks, "page") is None
+    assert _resolve_source_excerpts([REPEATED], blocks, "page") == ([REPEATED], ["page 18"])
+
+
+def test_short_phrase_at_several_locations_stays_ambiguous():
+    phrase = "The system was tested"
+    blocks = [block(f"{phrase} with staff.", page=3), block(f"{phrase} with clients.", page=9)]
+    assert _resolve_source_excerpts([phrase], blocks, "page") is None

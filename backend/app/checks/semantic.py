@@ -454,6 +454,7 @@ def _source_excerpt(
     min_chars: int,
     *,
     literal: bool,
+    repeated_min_chars: int | None = None,
 ) -> tuple[str, str] | None:
     """The source's own text and location for one proposal, or None.
 
@@ -464,7 +465,9 @@ def _source_excerpt(
     Exact case is tried before case-folding, as in `_verify_quotes`. Every
     proposal needs exactly one supported location under the folding that
     matched, and the stored excerpt is always the source's characters,
-    widened only to complete a word an omission mark cut."""
+    widened only to complete a word an omission mark cut. A passage of at
+    least `repeated_min_chars` found verbatim at several locations is a
+    repeated passage and takes its first location."""
     if literal:
         core, leading, trailing = _WHITESPACE.sub(" ", quote).strip(), False, False
     else:
@@ -490,7 +493,8 @@ def _source_excerpt(
         if occurrences:
             break
     locations = {anchor for anchor, *_ in occurrences}
-    if len(locations) != 1 or None in locations:
+    repeated = repeated_min_chars is not None and len(key) >= repeated_min_chars
+    if not locations or None in locations or (len(locations) > 1 and not repeated):
         return None
     anchor, index, start, end = occurrences[0]
     text = layouts[index][0]
@@ -524,12 +528,25 @@ def _resolve_source_excerpts(
             cache[casefold] = [_folded_index(text, casefold=casefold) for text, _ in layouts]
         return cache[casefold]
 
-    min_chars = get_settings().semantic_omission_core_min_chars
+    settings = get_settings()
+    min_chars = settings.semantic_omission_core_min_chars
     resolved_quotes: list[str] = []
     resolved_anchors: list[str] = []
     for quote in quotes:
         literal = _verify_quotes([quote], blocks, anchor_kind, scopes=scopes) is not None
-        excerpt = _source_excerpt(quote, layouts, folded, anchor_kind, min_chars, literal=literal)
+        # Only an exact copy of the source may stand for a repeated passage: a
+        # shortened or re-rendered proposal could match different sentences.
+        normalized = _WHITESPACE.sub(" ", quote).strip()
+        verbatim = bool(normalized) and any(normalized in text for text, _spans in layouts)
+        excerpt = _source_excerpt(
+            quote,
+            layouts,
+            folded,
+            anchor_kind,
+            min_chars,
+            literal=literal or verbatim,
+            repeated_min_chars=settings.semantic_repeated_quote_min_chars if verbatim else None,
+        )
         if excerpt is None:
             return None
         resolved_quotes.append(excerpt[0])
