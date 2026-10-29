@@ -46,7 +46,14 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 TICKETS = REPO_ROOT / "tickets"
 BOARD = TICKETS / "BOARD.md"
 
-AGENTS = ("design review", "UX review", "backend review", "panel review", "first-time-user review", "manager")
+# Reviewer roles a DONE ticket must name (DoD 12). Kept with the tickets
+# (local-only) so the list lives beside the text it is matched against.
+ROLES_FILE = TICKETS / "review-roles.txt"
+AGENTS = tuple(
+    line.strip()
+    for line in (ROLES_FILE.read_text(encoding="utf-8").splitlines() if ROLES_FILE.exists() else ())
+    if line.strip() and not line.startswith("#")
+)
 
 # V8 start gate (owner decision 2026-08-16, tickets/V8-PROPOSAL-real-use.md).
 # V8 may begin once the three demo-critical bugs are fixed, and even then only
