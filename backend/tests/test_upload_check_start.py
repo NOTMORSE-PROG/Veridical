@@ -258,6 +258,8 @@ def _prepared_upload(wired, rubric_id):  # noqa: F811 -- imported pytest fixture
 
 @live
 def test_a_deleted_rubric_is_recorded_as_the_reason_not_dropped(wired):  # noqa: F811 -- imported pytest fixtures
+    import app.ingest.upload_worker as upload_worker
+
     rubric_id = _rubric(wired)
     attempt_id = _prepared_upload(wired, rubric_id)
     _delete_rubric(wired, rubric_id)
@@ -266,7 +268,7 @@ def test_a_deleted_rubric_is_recorded_as_the_reason_not_dropped(wired):  # noqa:
     assert attempt.status == "done", attempt.error
     assert attempt.start_rubric_id == rubric_id
     assert attempt.check_run_id is None
-    assert attempt.check_start_error == f"No rubric with id {rubric_id}."
+    assert attempt.check_start_error == upload_worker.RUBRIC_GONE
 
 
 @live

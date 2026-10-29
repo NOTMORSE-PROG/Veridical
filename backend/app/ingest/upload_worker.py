@@ -10,7 +10,7 @@ from sqlalchemy import select, update
 
 from app.config import get_settings
 from app.db import get_session_factory
-from app.errors import VeridicalError, failure_summary
+from app.errors import NotFoundError, VeridicalError, failure_summary
 from app.groups.service import DEFAULT_GROUP_LABEL
 from app.ingest.admission import preparation_scope
 from app.ingest.direct_upload import relay_local_path
@@ -113,6 +113,10 @@ async def _retire_interrupted(session):
 
 
 CHECK_NOT_STARTED = "The check could not be started. Start it from the Review Desk."
+RUBRIC_GONE = (
+    "The required format chosen for this check was removed, so the check did not start. "
+    "Start it from the Review Desk."
+)
 
 
 async def _started_check_id(session, manuscript_id, rubric_id):
@@ -131,6 +135,9 @@ async def _start_requested_check(session, instructor_id, manuscript_id, rubric_i
     found and linked instead of being reported as not started."""
     try:
         check_run = await create_check_run(session, instructor_id, manuscript_id, rubric_id)
+    except NotFoundError:
+        await session.rollback()
+        return None, RUBRIC_GONE
     except VeridicalError as exc:
         await session.rollback()
         return None, str(exc)
@@ -192,7 +199,7 @@ async def _process_next_upload(settings, lease, wake_pipeline=None):
         attempt_id, lease_id = attempt.id, attempt.lease_id
         instructor_id, start_rubric_id = attempt.instructor_id, attempt.start_rubric_id
         heartbeat = asyncio.create_task(_heartbeat(attempt_id, lease_id, settings))
-        receipt = manuscript_id = None
+        receipt = manuscript_id = outcome = None
         try:
             # The staged object is copied inside storage for the durable
             # original; the bytes reach this host once at most (none when the
@@ -224,6 +231,7 @@ async def _process_next_upload(settings, lease, wake_pipeline=None):
                 check_run_id, check_start_error = await _start_requested_check(
                     session, instructor_id, manuscript_id, start_rubric_id
                 )
+                outcome = (check_run_id, check_start_error)
                 if check_run_id is not None and wake_pipeline is not None:
                     # Same effect as a manual start: the scheduler looks now
                     # instead of at its next poll (or never, without polling).
@@ -238,7 +246,10 @@ async def _process_next_upload(settings, lease, wake_pipeline=None):
                 # outcome) must not report a finished upload as failed.
                 _logger.warning("Upload finish was retried (%s)", failure_summary(exc))
                 check_run_id = check_start_error = None
-                if start_rubric_id is not None:
+                if outcome is not None:
+                    # Keep the outcome already known instead of guessing again.
+                    check_run_id, check_start_error = outcome
+                elif start_rubric_id is not None:
                     try:
                         check_run_id = await _started_check_id(
                             session, manuscript_id, start_rubric_id
