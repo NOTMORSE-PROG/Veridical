@@ -3,7 +3,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../api/client";
-import { directManuscriptUpload, type UploadStatus } from "../api/directManuscriptUpload";
+import { directManuscriptUpload, UploadRefusedError, type UploadStatus } from "../api/directManuscriptUpload";
+import { UPLOAD_REFUSAL_COPY } from "../domain/uploadRefusal";
 import { followUpload, listActiveUploads, startedCheckId } from "../api/uploadTray";
 import { StaleUploadContextError, validateIngestReceipt } from "../api/uploadOutcome";
 import { useUploadScope, type UploadAttemptScope } from "../auth/useUploadScope";
@@ -30,6 +31,8 @@ export interface BackgroundUpload {
   checkRunId?: number;
   // The file was ready but the check could not be started; the reason.
   checkStartError?: string;
+  // On a refusal: whether the server kept a record of the attempt.
+  keptRecord?: boolean;
   error?: string;
 }
 
@@ -90,7 +93,8 @@ function fromStatus(status: UploadStatus): Partial<BackgroundUpload> {
     }
   }
   if (status.status === "failed" || status.status === "expired") {
-    return { phase: "failed", percent: null, error: status.error?.trim() || "Document processing did not finish." };
+    return { phase: "failed", percent: null, error: status.error?.trim() || "Document processing did not finish.",
+      keptRecord: Number.isSafeInteger(status.manuscript_id) && (status.manuscript_id ?? 0) > 0 };
   }
   return { phase: "preparing", percent: null, serverOwned: true };
 }
@@ -152,7 +156,7 @@ export function BackgroundUploadsProvider({ children }: { children: ReactNode })
         if (files.current.has(id)) return run(id, file, options, busyAttempt + 1);
         return;
       }
-      update(id, { phase: "failed", percent: null,
+      update(id, { phase: "failed", percent: null, keptRecord: error instanceof UploadRefusedError ? error.keptManuscriptId !== null : undefined,
         error: error instanceof ApiError ? error.message : "The upload did not finish. Try again, or check the Review Desk for a saved record." });
     }
   }, [scope, update, settled]);
@@ -269,6 +273,8 @@ function UploadTray({ uploads, canRetry, onDismiss, onRetry }: {
         <p role="status" aria-live="polite" className="signal-upload-tray__state">{stateText(item)}</p>
         {item.phase === "sending" && <progress max={100} value={item.percent ?? undefined} aria-label={`Upload progress for ${item.fileName}`} />}
         {item.phase === "sending" && !item.serverOwned && <p className="signal-field-hint">Keep this tab open until the file is sent.</p>}
+        {item.phase === "failed" && item.keptRecord !== undefined && <p className="signal-field-hint">{item.keptRecord ? UPLOAD_REFUSAL_COPY.kept : UPLOAD_REFUSAL_COPY.notKept}</p>}
+        {item.phase === "failed" && item.keptRecord && <ActionLink variant="secondary" to="/dashboard">{UPLOAD_REFUSAL_COPY.openDesk}</ActionLink>}
         {item.phase === "failed" && !canRetry(item.id) && <p className="signal-field-hint">Choose the file again in Upload manuscript.</p>}
         <div className="signal-upload-tray__actions">
           {item.phase === "done" && item.checkRunId !== undefined && <ActionLink variant="secondary" to={`/checks/${item.checkRunId}`}>Open the check</ActionLink>}

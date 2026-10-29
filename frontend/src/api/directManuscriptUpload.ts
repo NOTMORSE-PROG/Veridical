@@ -10,6 +10,9 @@ const SUPPORTED_TRANSPORTS = "parts, stream";
 
 export interface UploadStatus {
   attempt_id: string;
+  // The manuscript record this attempt created, if any (BUG-546). On a
+  // refusal a non-null id means a record was kept, whatever its state.
+  manuscript_id?: number | null;
   status: "pending" | "queued" | "processing" | "done" | "failed" | "expired";
   upload_url?: string;
   transport?: "r2" | "relay";
@@ -33,6 +36,17 @@ export interface UploadStatus {
 }
 
 const attempts = new WeakMap<File, Map<number, string>>();
+
+// The server prepared the file and refused it. It may have kept a record of
+// the attempt (keptManuscriptId), which the instructor can open.
+export class UploadRefusedError extends ApiError {
+  readonly keptManuscriptId: number | null;
+
+  constructor(message: string, keptManuscriptId: number | null) {
+    super(422, "upload_processing_failed", message);
+    this.keptManuscriptId = keptManuscriptId;
+  }
+}
 
 export interface DirectUploadProgress {
   onProgress?: (percent: number) => void;
@@ -108,8 +122,8 @@ export async function directManuscriptUpload(file: File, scope: UploadAttemptSco
   }
   if (state.status === "failed" || state.status === "expired") {
     ownerAttempts.delete(scope.actorId);
-    throw new ApiError(422, "upload_processing_failed",
-      state.error ?? "Document processing did not finish. Check the saved record in Review Desk.");
+    throw new UploadRefusedError(state.error ?? "Document processing did not finish. Check the saved record in Review Desk.",
+      Number.isSafeInteger(state.manuscript_id) && (state.manuscript_id ?? 0) > 0 ? state.manuscript_id ?? null : null);
   }
   if (state.status !== "done" || !state.result) throw new UnconfirmedUploadError();
   return state.result;
