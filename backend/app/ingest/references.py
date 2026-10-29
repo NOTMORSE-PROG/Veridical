@@ -51,6 +51,11 @@ _VOLUME_ISSUE_PAGES = re.compile(r"\b\d+\s*\((?P<issue>\d+)\)\s*[:,]\s*\d+")
 _DOI = re.compile(r"\b10\.\d{4,9}/[^\s]+")
 _ISBN = re.compile(r"\bISBN[:\s-]*((?:[\dXx][- ]?){10,17})", re.IGNORECASE)
 _URL = re.compile(r"https?://\S+")
+# Selection issues that leave the bibliography's place in the document unknown,
+# as opposed to issues about its entries or where it ends.
+_REFERENCE_LOCATION_UNKNOWN = frozenset(
+    {"ambiguous_reference_heading", "invalid_source_line_inventory"}
+)
 # Sentence split that survives "CMO No. 15" / "Vol. 3": only a period
 # followed by whitespace and a capital or opening paren starts a new part.
 # "arXiv" is the one common venue that starts lowercase (APA preprint
@@ -186,6 +191,11 @@ def select_references(result: ExtractionResult, patterns: HeadingPatterns) -> Re
             if marker and _parse_reference_number(marker.group(1) or marker.group(2)) is None:
                 return ReferenceSelection([], span, (*issues, "unreadable_reference_number"))
     groups = _segment_blocks(span, result.anchor_kind)
+    if any(_STANDALONE_REFERENCE_LABEL.match(_merge([b.text for b in group])) for group in groups):
+        # An entry that is only its label means the labels were read apart
+        # from the entries (a labels column beside a text column), so no
+        # entry boundary can be trusted.
+        issues.append("detached_reference_labels")
     # These are candidate markers, not proof that an ambiguous numbered line
     # is a reference rather than quoted title text. Do not silently merge it.
     if result.anchor_kind == "page":
@@ -377,10 +387,23 @@ def non_reference_blocks(
     *,
     selection: ReferenceSelection | None = None,
     exclude_heading: bool = False,
+    ambiguous_entries_ok: bool = False,
 ) -> list[TextBlock]:
-    """Exact complement of bibliography/furniture intervals, not object identity."""
+    """Exact complement of bibliography/furniture intervals, not object identity.
+
+    A caller that only needs text known to lie outside the bibliography may
+    pass `ambiguous_entries_ok`. Then a bibliography whose entries or end are
+    ambiguous, but whose region is known, is left out as that whole region
+    (which runs to the end of its scope when the end is unclear) instead of
+    the result being empty. An unknown bibliography location still returns
+    nothing.
+    """
     selection = selection or select_references(result, patterns)
-    if selection.issues:
+    if selection.issues and not (
+        ambiguous_entries_ok
+        and selection.span
+        and not set(selection.issues) & _REFERENCE_LOCATION_UNKNOWN
+    ):
         return []
     excluded: dict[int, list[tuple[int, int]]] = {}
     intervals = [*selection.span, *selection.protected_span]
@@ -1358,7 +1381,11 @@ def _leading_reference_number(text: str) -> int | None:
     entry_start = _ENTRY_AUTHOR_REPEAT.sub("", entry_start).lstrip(_ENTRY_OPENING_QUOTES)
     if not entry_start[:1].isalpha():
         return None
-    return _parse_reference_number(match.group(1) or match.group(2))
+    number = _parse_reference_number(match.group(1) or match.group(2))
+    if match.group(1) and number is not None and number > get_settings().reference_list_label_max:
+        # "2023. URL https://..." continues an entry; it is not entry 2023.
+        return None
+    return number
 
 
 def _contextual_reference_number(text: str) -> int | None:

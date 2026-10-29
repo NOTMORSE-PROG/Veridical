@@ -3,7 +3,12 @@
 import pytest
 
 from app.ingest.patterns import load_patterns
-from app.ingest.references import extract_references, non_reference_blocks, select_references
+from app.ingest.references import (
+    ReferenceSelection,
+    extract_references,
+    non_reference_blocks,
+    select_references,
+)
 from app.ingest.schemas import ExtractionResult, SectionNode, SectionTree, TextBlock
 
 
@@ -126,3 +131,87 @@ def test_detached_numbered_label_retains_unparsed_bibliography_subsection(label)
     refs = extract_references(result, load_patterns())
     assert any("Additional materials" in ref.raw_text for ref in refs)
     assert any("https://example.org/three." in ref.raw_text for ref in refs)
+
+
+BODY_TEXT = "The clinic booking system was evaluated with twenty staff members."
+
+
+def body_and_restarted_bibliography():
+    result = bibliography()
+    result.blocks[4].text = "[1] Author C. (2025). A restarted bibliography."
+    result.blocks.insert(
+        0,
+        TextBlock(page=1, bbox=(10, -60, 400, -40), text=BODY_TEXT, max_font_size=10, bold_ratio=0),
+    )
+    return result
+
+
+def test_text_only_callers_keep_the_body_beside_an_ambiguous_bibliography():
+    result = body_and_restarted_bibliography()
+    patterns = load_patterns()
+    assert select_references(result, patterns).issues == ("ambiguous_duplicate_reference_number",)
+    # The default stays strict for callers that need an exact bibliography.
+    assert non_reference_blocks(result, patterns) == []
+    kept = [b.text for b in non_reference_blocks(result, patterns, ambiguous_entries_ok=True)]
+    assert BODY_TEXT in kept
+    assert not any("Author" in text for text in kept)
+
+
+@pytest.mark.parametrize("issue", ["ambiguous_reference_heading", "invalid_source_line_inventory"])
+def test_an_unknown_bibliography_location_still_leaves_no_body(issue):
+    result = body_and_restarted_bibliography()
+    patterns = load_patterns()
+    located = select_references(result, patterns)
+    unknown = ReferenceSelection(located.groups, located.span, (issue,))
+    assert (
+        non_reference_blocks(result, patterns, selection=unknown, ambiguous_entries_ok=True) == []
+    )
+
+
+def _numbered_bibliography(lines):
+    blocks = [
+        TextBlock(
+            page=1,
+            bbox=(10, index * 30, 400, index * 30 + 20),
+            text=text,
+            max_font_size=24 if index == 0 else 10,
+            bold_ratio=1 if index == 0 else 0,
+        )
+        for index, text in enumerate(["References", *lines])
+    ]
+    return ExtractionResult(
+        page_count=1,
+        anchor_kind="page",
+        image_only=False,
+        text_chars=sum(len(block.text) for block in blocks),
+        blocks=blocks,
+        images=[],
+        section_tree=SectionTree(source="none", nodes=[]),
+    )
+
+
+def test_a_year_starting_a_wrapped_line_is_not_a_list_number():
+    result = _numbered_bibliography(
+        [
+            "Reyes, J. Booking queues in rural clinics. In Proceedings of the Health IT Forum,",
+            "2023. URL https://example.org/reyes.",
+            "Santos, A. Measuring appointment no-shows. Journal of Examples, 4(2), 10-20,",
+            "2023. URL https://example.org/santos.",
+        ]
+    )
+    selection = select_references(result, load_patterns())
+    assert "ambiguous_duplicate_reference_number" not in selection.issues
+
+
+def test_labels_read_apart_from_their_entries_refuse_the_reference_list():
+    result = _numbered_bibliography(
+        [
+            "[1]",
+            "[2]",
+            "Reyes, J. (2024). Booking queues in rural clinics. Journal of Examples.",
+            "Santos, A. (2023). Measuring appointment no-shows. Journal of Examples.",
+        ]
+    )
+    selection = select_references(result, load_patterns())
+    assert "detached_reference_labels" in selection.issues
+    assert extract_references(result, load_patterns()) == []

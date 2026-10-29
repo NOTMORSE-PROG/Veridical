@@ -337,3 +337,32 @@ def test_compute_passage_embeddings_large_block_splits_by_word_count():
     assert len(passages) >= 2
     for p in passages:
         assert len(p.text.split()) <= SETTINGS.reuse_passage_chunk_words
+
+
+def _body_with_restarted_bibliography() -> ExtractionResult:
+    body = "The clinic booking system was evaluated with twenty staff members. " * 30
+    blocks = [
+        _block("Introduction", page=1),
+        _block(body, page=1),
+        _block("References", page=2),
+        _block("[1] Author A. (2024). First source.", page=2),
+        _block("[1] Author B. (2023). A restarted bibliography.", page=2),
+    ]
+    blocks[2].max_font_size = 16.0
+    blocks[2].bold_ratio = 1.0
+    nodes = [
+        SectionNode(title="Introduction", page=1, level=1),
+        SectionNode(title="References", page=2, level=1),
+    ]
+    return _extraction(blocks, nodes)
+
+
+def test_an_ambiguous_bibliography_does_not_hide_the_body_from_comparison():
+    extraction = _body_with_restarted_bibliography()
+    embeddings = compute_document_embeddings(extraction, SETTINGS)
+    assert embeddings.whole_document is not None
+    assert [chapter.title for chapter in embeddings.chapters] == ["Introduction"]
+    passages = compute_passage_embeddings(extraction, SETTINGS)
+    assert passages, "body passages are compared"
+    for passage in passages:
+        assert ("Author" in passage.text) == passage.is_reference_list

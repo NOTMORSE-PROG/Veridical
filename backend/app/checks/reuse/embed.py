@@ -203,7 +203,7 @@ def compute_document_embeddings(
             whole_document=embed_blocks(_unstructured_body_blocks(extraction, patterns)),
             chapters=[],
         )
-    content_blocks = non_reference_blocks(extraction, patterns)
+    content_blocks = non_reference_blocks(extraction, patterns, ambiguous_entries_ok=True)
     chapter_embeddings: list[ChapterEmbedding] = []
     chapter_texts: list[str] = []
 
@@ -510,7 +510,9 @@ def _passage_drafts(
         # Whole/chapter vectors use proven body fragments. A complete passage
         # inventory cannot classify this protected secondary bibliography.
         return None
-    non_ref_ids = {id(b) for b in non_reference_blocks(extraction, patterns)}
+    non_ref_ids = {
+        id(b) for b in non_reference_blocks(extraction, patterns, ambiguous_entries_ok=True)
+    }
     ref_ids = {id(b) for b in content_blocks if id(b) not in non_ref_ids}
     quote_ids = block_quote_block_ids(extraction, settings)
 
