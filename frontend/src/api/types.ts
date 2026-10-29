@@ -821,6 +821,10 @@ export interface FlagOut {
   cited_text?: string | null;
   cited_authors?: string[] | null;
   cited_year?: string | null;
+  /** BUG-518: the instructor confirmed this finding as a real issue (still counted). */
+  finding_confirmed?: boolean;
+  finding_confirm_note?: string | null;
+  finding_confirmed_at?: string | null;
   // BUG-097 (presentation-only remedy, owner ruling 2026-08-24): true only
   // for an F7 flag produced on the account's first-ever manuscript upload.
   // Never changes `severity`.
@@ -889,6 +893,8 @@ export interface FlagSummaryOut {
   cited_text?: string | null;
   cited_authors?: string[] | null;
   cited_year?: string | null;
+  /** BUG-518: the instructor confirmed this finding as a real issue (still counted). */
+  finding_confirmed?: boolean;
 }
 
 // V-065: what the manuscript viewer's document pane can actually do with

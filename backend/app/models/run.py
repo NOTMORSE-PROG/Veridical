@@ -140,6 +140,12 @@ class Flag(Base, PkCreatedMixin):
     # can't tell them apart reliably. A real column, not an inference
     # (design review spec, 2026-08-24).
     confirmed_citation_source: Mapped[bool] = mapped_column(Boolean, server_default="false")
+    # BUG-518: the instructor agrees the finding is a real issue. Unlike the
+    # citation-source confirmation above (which clears a finding), this keeps
+    # it counting for readiness; it is reviewed rather than open.
+    finding_confirmed: Mapped[bool] = mapped_column(Boolean, server_default="false")
+    finding_confirm_note: Mapped[str | None] = mapped_column(Text)
+    finding_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     check_result: Mapped["CheckResult"] = relationship(back_populates="flags")
 

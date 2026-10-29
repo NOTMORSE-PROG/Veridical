@@ -422,3 +422,47 @@ def test_confirm_source_on_a_flag_with_nothing_to_confirm_is_a_409(logged_in_wit
         },
     )
     assert resp.status_code == 409
+
+
+def test_confirm_finding_requires_auth(client):
+    response = client.post("/flags/1/confirm-finding", json={"expected_revision": 0})
+    assert response.status_code == 401
+
+
+def test_confirming_a_finding_keeps_it_counted_and_replaces_a_dismissal(logged_in_with_one_flag):
+    """BUG-518: the instructor agrees the finding is real; no note needed."""
+    client, flag_id = logged_in_with_one_flag
+    confirmed = client.post(
+        f"/flags/{flag_id}/confirm-finding",
+        json={"expected_revision": observed_revision(client, flag_id)},
+    )
+    assert confirmed.status_code == 200
+    body = confirmed.json()
+    assert body["finding_confirmed"] is True and body["overridden"] is False
+    assert body["finding_confirm_note"] is None and body["finding_confirmed_at"]
+    assert "report" in body
+    summary = client.get(f"/check-runs/{body['check_run_id']}/flags").json()
+    assert next(row for row in summary if row["id"] == flag_id)["finding_confirmed"] is True
+
+    dismissed = client.post(
+        f"/flags/{flag_id}/override",
+        json={"reason": "Checked again.", "expected_revision": observed_revision(client, flag_id)},
+    )
+    assert dismissed.status_code == 200
+    assert dismissed.json()["finding_confirmed"] is False
+    assert dismissed.json()["overridden"] is True
+
+    again = client.post(
+        f"/flags/{flag_id}/confirm-finding",
+        json={"note": "  It is real.  ", "expected_revision": observed_revision(client, flag_id)},
+    )
+    assert again.status_code == 200
+    assert again.json()["finding_confirm_note"] == "It is real."
+    assert again.json()["overridden"] is False and again.json()["override_reason"] is None
+
+
+def test_confirming_with_a_stale_revision_is_refused(logged_in_with_one_flag):
+    client, flag_id = logged_in_with_one_flag
+    stale = observed_revision(client, flag_id) + 5
+    response = client.post(f"/flags/{flag_id}/confirm-finding", json={"expected_revision": stale})
+    assert response.status_code == 409

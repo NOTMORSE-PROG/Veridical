@@ -11,11 +11,19 @@ from app.flags.schemas import (
     AnnotateFlagIn,
     ConfirmCitationSourceIn,
     ConfirmCitationSourceOut,
+    ConfirmFindingIn,
+    ConfirmFindingOut,
     FlagOut,
     OverrideFlagIn,
     OverrideFlagOut,
 )
-from app.flags.service import annotate_flag, confirm_citation_source, get_flag, override_flag
+from app.flags.service import (
+    annotate_flag,
+    confirm_citation_source,
+    confirm_finding,
+    get_flag,
+    override_flag,
+)
 from app.models.instructor import Instructor
 from app.report.service import attach_report_figures
 
@@ -50,6 +58,20 @@ async def override_flag_route(
 ) -> OverrideFlagOut:
     out = await override_flag(
         session, flag_id, instructor.id, body.reason, expected_revision=body.expected_revision
+    )
+    out.report = await attach_report_figures(session, out.report)
+    return out
+
+
+@router.post("/{flag_id}/confirm-finding", response_model=ConfirmFindingOut)
+async def confirm_finding_route(
+    flag_id: int,
+    body: ConfirmFindingIn,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    instructor: Annotated[Instructor, Depends(get_current_instructor)],
+) -> ConfirmFindingOut:
+    out = await confirm_finding(
+        session, flag_id, instructor.id, body.note, expected_revision=body.expected_revision
     )
     out.report = await attach_report_figures(session, out.report)
     return out

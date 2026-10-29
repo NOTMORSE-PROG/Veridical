@@ -1055,6 +1055,7 @@ async def flags_for_check_run(session: AsyncSession, check_run_id: int) -> list[
             confirmed_citation_source=flag.confirmed_citation_source,
             problem_kind=(flag.detail or {}).get("kind"),
             matched_ref=(flag.detail or {}).get("matched_manuscript_id"),
+            finding_confirmed=bool(flag.finding_confirmed),
             **cited_work(flag.detail or {}, flag.evidence_excerpt),
         )
         for flag, result in rows

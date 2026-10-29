@@ -1,5 +1,6 @@
 """Flag evidence/annotation/override HTTP contract (F8.2/F8.4, screen 4i)."""
 
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator
@@ -168,6 +169,10 @@ class FlagOut(BaseModel):
     # `FlagSummaryOut.matched_ref`), so the instructor can open the record and
     # verify instead of only agreeing. None for every other check.
     matched_ref: int | None = None
+    # BUG-518: the instructor confirmed this finding as a real issue.
+    finding_confirmed: bool = False
+    finding_confirm_note: str | None = None
+    finding_confirmed_at: datetime | None = None
     # BUG-517: the citation a citation-integrity finding is about, as written
     # (in-text citation or reference entry), with its parsed authors/year.
     # None for every other finding and for rows saved before it existed.
@@ -243,6 +248,17 @@ class ConfirmCitationSourceIn(BaseModel):
 class OverrideFlagOut(FlagOut):
     # The recomputed report state (ticket AC: "recomputes score/status
     # immediately") — same pattern as V-023's `ResolveEscalationOut`.
+    report: ReportOut
+
+
+class ConfirmFindingIn(BaseModel):
+    expected_revision: int = Field(strict=True, ge=0)
+    # BUG-518: agreeing with a finding needs no justification; an optional
+    # note is kept for the record. Blank is stored as no note.
+    note: str | None = None
+
+
+class ConfirmFindingOut(FlagOut):
     report: ReportOut
 
 

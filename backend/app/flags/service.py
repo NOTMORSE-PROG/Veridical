@@ -13,6 +13,8 @@ already excludes from the severity deduction once set (V-019, unchanged
 by this ticket).
 """
 
+from datetime import UTC, datetime
+
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,6 +31,7 @@ from app.flags.schemas import (
     CitationMetadataComparisonOut,
     CitationSourceKeyOut,
     ConfirmCitationSourceOut,
+    ConfirmFindingOut,
     FlagOut,
     OverrideFlagOut,
     PassagePairOut,
@@ -287,6 +290,9 @@ async def _to_flag_out(
         or (result.kind.value == "originality_reuse" and has_stored_pair and passage_pair is None),
         citation_source_key=_citation_source_key(detail),
         confirmed_citation_source=flag.confirmed_citation_source,
+        finding_confirmed=bool(flag.finding_confirmed),
+        finding_confirm_note=flag.finding_confirm_note,
+        finding_confirmed_at=flag.finding_confirmed_at,
         **cited_work(flag.detail or {}, flag.evidence_excerpt),
     )
 
@@ -341,6 +347,10 @@ async def override_flag(
         flag, result, manuscript, check_run = await _scoped_flag(session, flag_id, instructor_id)
         flag.overridden = True
         flag.override_reason = reason.strip()
+        # Dismissing replaces an earlier confirmation; the audit keeps both.
+        flag.finding_confirmed = False
+        flag.finding_confirm_note = None
+        flag.finding_confirmed_at = None
         session.add(
             AuditLog(
                 event_type="flag_overridden",
@@ -368,6 +378,64 @@ async def override_flag(
             assessment_revision=report.assessment_revision,
         )
         out = OverrideFlagOut(
+            **flag_out.model_dump(), report=await get_report(session, run_id, instructor_id)
+        )
+    return out
+
+
+async def confirm_finding(
+    session: AsyncSession,
+    flag_id: int,
+    instructor_id: int,
+    note: str | None,
+    *,
+    expected_revision: int,
+) -> ConfirmFindingOut:
+    """The instructor agrees the finding is a real issue (BUG-518). It keeps
+    counting for readiness and replaces an earlier dismissal; one audit,
+    rescore and revision, like an override."""
+    _flag, initial_result, _manuscript, _run = await _scoped_flag(session, flag_id, instructor_id)
+    run_id = initial_result.check_run_id
+    async with assessment_write(session, run_id, instructor_id, expected_revision) as report:
+        flag, result, manuscript, check_run = await _scoped_flag(session, flag_id, instructor_id)
+        if flag.confirmed_citation_source:
+            raise ConflictError(
+                "This finding was cleared by confirming its citation source. "
+                "It cannot also be confirmed as an issue."
+            )
+        cleaned = (note or "").strip() or None
+        flag.finding_confirmed = True
+        flag.finding_confirm_note = cleaned
+        flag.finding_confirmed_at = datetime.now(UTC)
+        flag.overridden = False
+        flag.override_reason = None
+        session.add(
+            AuditLog(
+                event_type="flag_finding_confirmed",
+                check_run_id=run_id,
+                agreement_score=flag.confidence,
+                payload={
+                    "flag_id": flag_id,
+                    "check_result_id": result.id,
+                    "instructor_id": instructor_id,
+                    "note": cleaned,
+                    "severity": flag.severity.value,
+                    "assessment_revision_before": expected_revision,
+                    "assessment_revision": report.assessment_revision,
+                },
+            )
+        )
+        await session.flush()
+        await aggregate_and_score(session, run_id, commit=False)
+        flag_out = await _to_flag_out(
+            session,
+            flag,
+            result,
+            manuscript,
+            check_run,
+            assessment_revision=report.assessment_revision,
+        )
+        out = ConfirmFindingOut(
             **flag_out.model_dump(), report=await get_report(session, run_id, instructor_id)
         )
     return out

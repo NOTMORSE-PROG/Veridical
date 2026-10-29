@@ -607,6 +607,8 @@ class FlagSummaryOut(BaseModel):
     # a short, honest problem label; an unmapped or absent kind renders no
     # label rather than a guessed one (`frontend/src/domain/problemLabel.ts`).
     problem_kind: str | None = None
+    # BUG-518: confirmed by the instructor as a real issue (still counted).
+    finding_confirmed: bool = False
     # BUG-517: the citation a citation-integrity finding is about, as written
     # (in-text citation or reference entry), with its parsed authors/year.
     # None for every other finding and for rows saved before it existed.
