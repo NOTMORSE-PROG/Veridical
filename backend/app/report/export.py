@@ -615,6 +615,11 @@ def _archive_disclosure(
             "Originality and reuse check did not run because parts of the manuscript "
             "could not be read reliably. No originality conclusion is available."
         )
+    if not_compared_reason == "reference_boundary_unclear":
+        return (
+            "Originality and reuse check: the body could not be told apart from the "
+            "reference list, so no text was compared. This is not evidence of originality."
+        )
     if archive_size_n is None:
         return (
             "Originality and reuse check did not run for this manuscript "
@@ -1713,6 +1718,13 @@ def _build_report_pdf(data: ReportExportData, image_path) -> bytes:
                 )
             if coverage.n_source_pages_unassessed:
                 counts.append(f"{coverage.n_source_pages_unassessed} source pages unassessed")
+            if coverage.pages_not_compared:
+                counts.append(f"Pages not compared: {_page_ranges(coverage.pages_not_compared)}")
+            elif coverage.not_compared_from:
+                counts.append(
+                    f"Not compared from {_display_anchor(coverage.not_compared_from)} "
+                    "to the end of the document"
+                )
             if coverage.n_metadata_skipped_insufficient:
                 counts.append(f"{coverage.n_metadata_skipped_insufficient} references unverified")
             if coverage.n_claim_support_unassessed:

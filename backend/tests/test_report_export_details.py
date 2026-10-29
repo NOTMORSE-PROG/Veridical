@@ -368,6 +368,47 @@ def test_export_retains_plain_language_coverage_causes_and_each_saved_skip_count
         assert expected in text
 
 
+def test_export_names_what_originality_left_out_and_why():
+    from app.report.export import _archive_disclosure, _page_ranges
+    from app.report.schemas import IntegrityCheckStatusOut
+
+    assert _page_ranges(list(range(157, 188))) == "157-187"
+    refused = _archive_disclosure(None, "library", "reference_boundary_unclear")
+    assert "no text was compared" in refused
+    assert "no comparable content" not in refused
+
+    data = _data()
+    data.report.integrity_check_status = [
+        IntegrityCheckStatusOut(
+            check_kind="originality_reuse",
+            outcome="escalated",
+            n_skipped_quota=0,
+            n_skipped_api_down=0,
+            n_skipped_parse_failure=0,
+            coverage_reason="reference_end_unclear",
+            pages_not_compared=list(range(157, 188)),
+        )
+    ]
+    text = " ".join(_text(build_report_pdf(data)).split())
+    assert "The end of the reference list could not be found" in text
+    assert "Pages not compared: 157-187" in text
+    assert "reference end unclear" not in text
+
+    data.report.integrity_check_status = [
+        IntegrityCheckStatusOut(
+            check_kind="originality_reuse",
+            outcome="escalated",
+            n_skipped_quota=0,
+            n_skipped_api_down=0,
+            n_skipped_parse_failure=0,
+            coverage_reason="reference_end_unclear",
+            not_compared_from="¶212",
+        )
+    ]
+    text = " ".join(_text(build_report_pdf(data)).split())
+    assert "Not compared from Extracted paragraph 213 to the end of the document" in text
+
+
 def test_long_group_label_does_not_overlap_footer_or_running_header():
     data = _data()
     data.report.manuscript_group_label = "Very long instructor group name " * 8
