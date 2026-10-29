@@ -1,5 +1,5 @@
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CriterionResultOut, FlagOut, FlagSummaryOut, ManuscriptViewerOut, ReportOut } from "../api/types";
 import { renderWithReviewProviders as renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
@@ -623,6 +623,16 @@ describe("SignalDocumentViewerPage", () => {
     expect(await screen.findByRole("heading", { name: "Criterion records" })).toBeInTheDocument();
     // One way to the report from this workspace, not one per panel.
     expect(screen.getAllByRole("link", { name: /readiness report/ })).toHaveLength(1);
+  });
+
+  it("stays on the findings step when another check is chosen, even with criteria waiting", async () => {
+    stubViewer(VIEWER, { ...REPORT, pending_review_count: 2 });
+    renderWithProviders(<SignalDocumentViewerPage />, { route: "/report/5/document?view=queue&pane=review", path: "/report/:checkRunId/document" });
+    const modules = await screen.findByRole("navigation", { name: "Manuscript check modules" });
+    const other = within(modules).getAllByRole("button").find(button => button.getAttribute("aria-pressed") !== "true")!;
+    fireEvent.click(other);
+    await waitFor(() => expect(screen.getByRole("button", { name: /^Step 2: Inspect findings/ })).toHaveAttribute("aria-current", "step"));
+    expect(screen.queryByRole("heading", { name: "Criteria needing your judgment" })).not.toBeInTheDocument();
   });
 
   it("opens the manuscript first and preserves manual analysis tabs on narrow layouts", async () => {
