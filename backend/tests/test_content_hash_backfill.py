@@ -93,6 +93,9 @@ class FakeStorage:
     def delete(self, key: str) -> None:
         self.objects.pop(key, None)
 
+    def close(self) -> None:
+        pass
+
 
 class BlockingReadStorage(FakeStorage):
     def __init__(self, objects: dict[str, bytes]) -> None:

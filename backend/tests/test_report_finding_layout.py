@@ -1,17 +1,19 @@
 """Finding pagination controls capture flowables without creating a PDF."""
 
-from reportlab.platypus import Paragraph, PTOContainer, Table
+from reportlab.platypus import CondPageBreak, Paragraph, PTOContainer, Table
 
 from app.report import export
 from app.report.schemas import PageEvidenceImageOut, SourceEvidencePrintOut
 from tests.test_report_export_details import _data
-from tests.test_source_print_layout import MeasuredBlock, canvas_stub
+from tests.test_source_print_layout import MeasuredBlock
 
 
 def paragraphs(parts):
     for part in parts:
         if isinstance(part, Paragraph):
             yield part
+        elif isinstance(part, (list, tuple)):
+            yield from paragraphs(part)
         elif isinstance(part, Table):
             for row in part._cellvalues:
                 for cell in row:
@@ -19,6 +21,15 @@ def paragraphs(parts):
                         yield from paragraphs(cell)
         elif isinstance(part, PTOContainer):
             yield from paragraphs(part._content)
+
+
+def flowables(parts):
+    """Every flowable inside `parts`, looking through nested table cells."""
+    for part in parts:
+        if isinstance(part, (list, tuple)):
+            yield from flowables(part)
+        else:
+            yield part
 
 
 def captured(monkeypatch, *, source_height=200, long_quote=False):
@@ -66,7 +77,7 @@ def captured(monkeypatch, *, source_height=200, long_quote=False):
 
     monkeypatch.setattr(export, "source_evidence_flowables", source_blocks)
     monkeypatch.setattr(
-        export.SimpleDocTemplate, "build", lambda self, flow, **kwargs: story.extend(flow)
+        export.SimpleDocTemplate, "multiBuild", lambda self, flow, **kwargs: story.extend(flow)
     )
     before = data.model_dump_json()
     export.build_report_pdf(data)
@@ -81,23 +92,26 @@ def captured(monkeypatch, *, source_height=200, long_quote=False):
     return story, finding, source
 
 
-def test_actual_first_atomic_source_and_finding_heading_move_as_one_finite_height_row(monkeypatch):
-    _, finding, source = captured(monkeypatch)
-    head = finding._content[0]
-    assert isinstance(head, Table)
-    text = [item.getPlainText() for item in paragraphs([head])]
+def test_finding_heading_is_reserved_with_its_reason_and_first_evidence(monkeypatch):
+    # The reason now sits between the heading and the evidence, so the
+    # heading is kept with what follows by a reserved page break and
+    # keep-with-next, not by packing everything into one table row.
+    story, finding, source = captured(monkeypatch)
+    text = [item.getPlainText() for item in paragraphs([finding])]
     assert any(value.startswith("Finding 1:") for value in text)
     assert "Manuscript evidence" in text
-    assert "Summary that is not the bound quotation." not in text
-    assert source in head._cellvalues[0][0]
-    width, height = head.wrapOn(canvas_stub(), 470, 700)
-    assert 200 < height < 700
-    assert head.splitOn(canvas_stub(), width, height - 1) == []
-    assert (
-        PTOContainer([head], header=head._ptoinfo.header).wrapOn(canvas_stub(), width, height)[1]
-        == height
+    assert any(item is source for item in flowables(finding._content))
+    index = next(i for i, part in enumerate(story) if part is finding)
+    reserve = story[index - 1]
+    assert isinstance(reserve, CondPageBreak)
+    assert 0 < reserve.height <= 700
+    heading = next(
+        item
+        for item in finding._content
+        if isinstance(item, Paragraph) and item.getPlainText().startswith("Finding 1:")
     )
-    assert "Finding 1 (continued)" in head._ptoinfo.header[0].getPlainText()
+    assert heading.keepWithNext
+    assert "Finding 1 (continued)" in heading._ptoinfo.header[0].getPlainText()
 
 
 def test_source_too_tall_for_heading_retains_existing_splittable_continuation(monkeypatch):
@@ -132,7 +146,7 @@ def test_calculation_detail_follows_primary_summary_and_coverage_without_changin
     data.report.decision = None
     story = []
     monkeypatch.setattr(
-        export.SimpleDocTemplate, "build", lambda self, flow, **kwargs: story.extend(flow)
+        export.SimpleDocTemplate, "multiBuild", lambda self, flow, **kwargs: story.extend(flow)
     )
     before = data.model_dump_json()
     export.build_report_pdf(data)
@@ -150,5 +164,7 @@ def test_calculation_detail_follows_primary_summary_and_coverage_without_changin
     assert sum("Composite score: 75.0%" in value for value in texts) == 1
     assert export._explainer(data.report) in texts
     assert any(value == "Ready at 85.0% or above. Not Ready at 60.0% or below." for value in texts)
-    assert any("#calculation-details" in part.text for part in paragraphs(story))
+    assert any(
+        getattr(part, "navigation_key", None) == "calculation-details" for part in paragraphs(story)
+    )
     assert data.model_dump_json() == before

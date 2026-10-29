@@ -44,6 +44,7 @@ def test_prepared_pdf_uses_owned_revision_and_downloads_real_pdf(
 
     async def change(sql):
         import asyncpg
+
         connection = await asyncpg.connect(api_scratch_url)
         try:
             await connection.execute(sql)

@@ -76,7 +76,11 @@ def test_refused_inventory_is_distinct_from_measured_empty(monkeypatch):
     assert empty.inventory_state == "measured" and empty.passages_found == 0
     assert empty.passages == []
     monkeypatch.setattr(
-        embed, "select_references", lambda *_: SimpleNamespace(issues=["ambiguous"])
+        embed,
+        "select_references",
+        lambda *_: SimpleNamespace(
+            issues=["ambiguous"], membership_issues=("reference_tail_membership_unresolved",)
+        ),
     )
     refused = embed.compute_library_passage_embeddings(_source(), settings)
     assert refused.inventory_state == "unavailable" and refused.passages_found is None

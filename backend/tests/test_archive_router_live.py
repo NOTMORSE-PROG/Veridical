@@ -958,6 +958,9 @@ def test_inflight_source_hydration_cannot_restore_bytes_after_purge(
         def delete(self, key):
             self.objects.pop(key, None)
 
+        def close(self):
+            pass
+
     storage = DelayedStorage()
     monkeypatch.setattr(source_module, "get_storage", lambda _: storage)
     monkeypatch.setattr(source_module, "ensure_local_file", observed_refill)

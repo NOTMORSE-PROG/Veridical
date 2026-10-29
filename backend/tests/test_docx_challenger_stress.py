@@ -351,7 +351,7 @@ def test_docx_reportlab_multipage_export_comprehensive_stress():
     flags = [
         FlagSummaryOut(
             id=201 + j,
-            check_kind="citations" if j % 2 == 0 else "internal_agreement",
+            check_kind="citation_integrity" if j % 2 == 0 else "internal_agreement",
             severity="high" if j == 0 else "medium",
             criterion_text=f"Integrity Check Criterion {j + 1}",
             evidence_excerpt=f"Identified anomaly at paragraph {j * 6 + 2}: unmatched claim.",
@@ -450,14 +450,14 @@ def test_docx_reportlab_multipage_export_comprehensive_stress():
         )
 
         # Footer page number check
-        assert f"Page {page_num}" in text, (
-            f"Page {page_num} missing expected footer 'Page {page_num}'"
+        assert f"Report page {page_num} of " in text, (
+            f"Page {page_num} missing expected footer 'Report page {page_num} of'"
         )
 
         # Running header on pages after page 1
         if page_idx > 0:
-            assert "VERIDICAL - Readiness Report" in text, (
-                f"Page {page_num} missing running header 'VERIDICAL - Readiness Report'"
+            assert "VERIDICAL / INSTRUCTOR COPY" in text, (
+                f"Page {page_num} missing running header 'VERIDICAL / INSTRUCTOR COPY'"
             )
 
     full_text = "\n".join(p.get_text() for p in doc)
@@ -497,7 +497,7 @@ def test_docx_reportlab_export_xml_escaping_and_watermark_invariants():
     flags = [
         FlagSummaryOut(
             id=301,
-            check_kind="citations",
+            check_kind="citation_integrity",
             severity="high",
             criterion_text=f"Integrity check: {xml_hazardous_text}",
             evidence_excerpt=f"Hazardous quote: {xml_hazardous_text}",
@@ -511,7 +511,7 @@ def test_docx_reportlab_export_xml_escaping_and_watermark_invariants():
         301: FlagExportDetailOut(
             flag_id=301,
             finding_headline=f"Headline: {xml_hazardous_text}",
-            check_kind="citations",
+            check_kind="citation_integrity",
             category="citation_anomaly",
             severity="high",
             page_anchor="paragraph 4",

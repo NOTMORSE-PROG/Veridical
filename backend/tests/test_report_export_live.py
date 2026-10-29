@@ -298,7 +298,9 @@ def test_export_shows_weight_as_an_importance_label_never_a_percentage(client, a
     # Never shown alongside the criterion as a raw weight percentage
     # (the pre-fix behavior for these exact numbers would have shown
     # "60.0%", "6.7%", "33.3%" next to the criterion text/importance).
-    assert "(High importance)" in full_text
+    # 60.0% is left out: it is also the printed Not Ready threshold.
+    for raw_weight in ("6.7%", "33.3%"):
+        assert raw_weight not in full_text
 
 
 def test_export_never_drops_a_pending_criterion_from_a_decided_report(client, api_scratch_url):

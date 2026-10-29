@@ -123,9 +123,7 @@ class NativeJob(BaseModel):
         return Settings(_env_file=None, **self.policy)
 
     def result_prefix(self, settings: Settings) -> str:
-        prefix = source_artifact_prefix(
-            settings, self.source_key, namespace=self.storage_namespace
-        )
+        prefix = source_artifact_prefix(settings, self.source_key, namespace=self.storage_namespace)
         return f"{prefix}{self.job_id}"
 
 

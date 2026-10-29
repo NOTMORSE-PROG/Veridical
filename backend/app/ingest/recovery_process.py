@@ -160,6 +160,38 @@ class _WindowsJob:
             time.sleep(min(poll, remaining))
 
 
+def _wait_for_group_exit(group: int, timeout: float, poll: float) -> None:
+    """Wait until no live process remains in `group` after it was killed.
+
+    SIGKILL is delivered asynchronously, so a helper can still be running
+    for a moment after killpg returns. The Windows job path already waits for
+    its active process count to reach zero; this gives POSIX the same
+    guarantee. Zombies count as finished: they hold no resources and their
+    new parent reaps them.
+    """
+    import psutil
+
+    deadline = time.monotonic() + timeout
+    while True:
+        alive = []
+        for candidate in psutil.process_iter(["status"]):
+            with suppress(psutil.Error, OSError):
+                if (
+                    os.getpgid(candidate.pid) == group
+                    and candidate.info["status"] != psutil.STATUS_ZOMBIE
+                ):
+                    alive.append(candidate)
+        if not alive:
+            return
+        for candidate in alive:
+            with suppress(psutil.Error):
+                candidate.kill()
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("Worker descendants did not finish terminating")
+        time.sleep(min(poll, remaining))
+
+
 def _join_windows_job(name: str) -> None:
     api = _windows_api()
     handle = _require(api.OpenJobObjectW(_JOB_OBJECT_ASSIGN_PROCESS, False, name))
@@ -210,6 +242,7 @@ def managed_worker(
                 # A deliberately setsid-detached process is not contained by this.
                 with suppress(ProcessLookupError):
                     os.killpg(process.pid, signal.SIGKILL)
+                _wait_for_group_exit(process.pid, cleanup_timeout, poll)
         finally:
             try:
                 if process is not None:

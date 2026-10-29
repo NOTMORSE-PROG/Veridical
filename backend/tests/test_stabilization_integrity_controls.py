@@ -378,11 +378,15 @@ async def test_missing_isbn_title_never_searches_the_raw_reference_as_a_title(mo
 
     async def keyed(session, kind, value, *, settings, fetch, instructor_id, reference_text):
         assert instructor_id is None and reference_text == ref.raw_text
-        return await fetch()
+        result = await fetch()
+        kind = (
+            verify.VerdictKind.existence_confirmed if result.found else verify.VerdictKind.not_found
+        )
+        return verify.CitationVerdict(kind=kind, result=result)
 
     monkeypatch.setattr(verify, "_verify_keyed", keyed)
-    result = await verify.verify_citation(None, None, ref, settings=Settings())
-    assert result.found is False
+    verdict = await verify.verify_citation(None, None, ref, settings=Settings())
+    assert verdict.result is not None and verdict.result.found is False
     isbn_lookup.assert_awaited_once()
     title_lookup.assert_not_called()
 

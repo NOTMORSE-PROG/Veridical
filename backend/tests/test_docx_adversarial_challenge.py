@@ -176,7 +176,7 @@ def test_docx_reportlab_multipage_export_stress():
     flags = [
         FlagSummaryOut(
             id=101,
-            check_kind="citations",
+            check_kind="citation_integrity",
             severity="medium",
             criterion_text="Citation Integrity Verification",
             evidence_excerpt=(
@@ -192,7 +192,7 @@ def test_docx_reportlab_multipage_export_stress():
         101: FlagExportDetailOut(
             flag_id=101,
             finding_headline="Unlinked In-Text Citation",
-            check_kind="citations",
+            check_kind="citation_integrity",
             category="missing_citation",
             severity="medium",
             page_anchor="paragraph 12",
@@ -266,11 +266,11 @@ def test_docx_reportlab_multipage_export_stress():
         assert len(clipped) == 0, f"Page {i + 1} has {len(clipped)} clipped text blocks"
 
         # Check footer on all pages
-        assert f"Page {i + 1}" in text, f"Page {i + 1} missing footer page number"
+        assert f"Report page {i + 1} of " in text, f"Page {i + 1} missing footer page number"
 
         # Check running header on later pages
         if i > 0:
-            assert "VERIDICAL - Readiness Report" in text, f"Page {i + 1} missing running header"
+            assert "VERIDICAL / INSTRUCTOR COPY" in text, f"Page {i + 1} missing running header"
 
     full_text = "\n".join(p.get_text() for p in doc)
     assert "This manuscript was submitted as a DOCX" in full_text

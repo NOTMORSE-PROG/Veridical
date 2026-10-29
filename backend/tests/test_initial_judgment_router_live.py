@@ -58,7 +58,9 @@ def test_initial_record_route_freeze_history_and_private_access(logged_in_with_a
 
     with fitz.open(stream=exported.content, filetype="pdf") as document:
         text = " ".join(" ".join(page.get_text() for page in document).split())
-    assert "Instructor Judgments" in text and "Instructor judgment recorded." in text
+    # Judgments now print on each criterion's own page, not under a
+    # separate section heading.
+    assert "Instructor judgment recorded." in text
     assert "Escalation Resolutions" not in text and reason in text
     revised_reason = "Further manuscript evidence supports my revised instructor judgment."
     revised = http.post(

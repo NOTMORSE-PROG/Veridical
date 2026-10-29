@@ -46,6 +46,7 @@ EXPECTED_TABLES = {
     "group_member",  # V-063 (migration 0027)
     "manuscript_passage_archive",  # V-072 (migration 0028)
     "library_entry",  # V-077 (migration 0037)
+    "upload_attempt",  # V-081 (migration 0044)
 }
 
 
