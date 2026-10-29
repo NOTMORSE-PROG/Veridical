@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app import db
 from app.config import Settings, get_settings
+from app.memory import return_freed_memory
 from app.models.run import CheckRun
 from app.pipeline.coordination import Admission, AdmissionState, admit_next, release_claim
 from app.pipeline.lease import ClaimLease
@@ -60,6 +61,8 @@ async def _execute(
                     await _release_claim(cleanup, lease.run_id, lease.token)
         except Exception:
             logger.warning("Claim release deferred for check run %s", lease.run_id)
+        # The run's extraction and stage results are freed; return the pages.
+        return_freed_memory()
     return outcome
 
 

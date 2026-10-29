@@ -78,6 +78,11 @@ class Settings(BaseSettings):
     # addendum) — well inside the free-tier ceiling on its own; local NLI
     # (the judgment half) did not clear the same gate and stays Tier 2.
     embedding_model_id: str = "minishlab/potion-base-8M"
+    # BUG-532: the model is loaded when a check first needs it and dropped
+    # after this many seconds without use, so an idle server does not keep
+    # ~45-70 MiB resident. 0 keeps it loaded for the life of the process once
+    # loaded. Reloading reads the copy downloaded at boot (~0.4 CPU-s).
+    embedding_model_idle_release_seconds: float = Field(default=120.0, ge=0)
 
     # --- ingestion (V-004) ---------------------------------------------------
     # Local store for raw extraction results (page-anchored blocks, images,

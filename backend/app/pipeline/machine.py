@@ -38,10 +38,6 @@ from app.checks.citations.verify import (
     run_citation_integrity_check,
 )
 from app.checks.consistency import SemanticPartialUnavailable, run_semantic_checks_with_consistency
-from app.checks.forensics.service import (
-    existing_statistical_forensics_result,
-    run_statistical_forensics_check,
-)
 from app.checks.reuse.service import (
     existing_originality_reuse_result,
     run_originality_reuse_check,
@@ -795,6 +791,14 @@ async def _run_integrity_stage(
     """F4 (internal agreement, V-034/V-035), F5 (citation integrity,
     V-027/V-028/V-029/V-030), F6 (statistical forensics, V-031/V-032/
     V-033), and F7 (originality/reuse, V-036/V-037) all run for real."""
+    # Imported here, not at module load: F6's statistics libraries (statcheck
+    # pulls in pandas and scipy.stats, ~80 MiB) would otherwise sit in every
+    # idle server process before any check has run (BUG-532).
+    from app.checks.forensics.service import (
+        existing_statistical_forensics_result,
+        run_statistical_forensics_check,
+    )
+
     agreement_existing = await existing_internal_agreement_result(session, check_run.id)
     citation_existing = await existing_citation_integrity_result(session, check_run.id)
     forensics_existing = await existing_statistical_forensics_result(session, check_run.id)

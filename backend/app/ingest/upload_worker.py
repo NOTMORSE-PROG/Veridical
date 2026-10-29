@@ -16,6 +16,7 @@ from app.ingest.admission import preparation_scope
 from app.ingest.direct_upload import relay_local_path
 from app.ingest.receipts import ingestion_receipt
 from app.ingest.service import StagedSource, _ingest_upload
+from app.memory import return_freed_memory
 from app.models.enums import IngestFailureReason, IngestStatus
 from app.models.manuscript import Manuscript
 from app.models.run import CheckRun
@@ -179,7 +180,12 @@ async def _finish_done(session, attempt_id, lease_id, receipt, check_run_id, che
 
 async def process_next_upload(settings, wake_pipeline=None):
     with preparation_scope(settings) as lease:
-        return await _process_next_upload(settings, lease, wake_pipeline)
+        processed = await _process_next_upload(settings, lease, wake_pipeline)
+    if processed:
+        # A preparation's records are all freed by now; hand the pages back so
+        # the next job starts from the idle footprint, not this one's peak.
+        return_freed_memory()
+    return processed
 
 
 async def _process_next_upload(settings, lease, wake_pipeline=None):

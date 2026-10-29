@@ -74,7 +74,7 @@ def test_a_prewarm_failure_never_fails_the_boot(monkeypatch):
     HuggingFace hiccup into total downtime for every instructor, not just
     the two checks that actually need the model -- strictly worse than
     the failure this fix exists to catch. A real load failure (mocked at
-    the actual `get_embedding_model` call, not by mocking the wrapper
+    the actual `prefetch_embedding_model` call, not by mocking the wrapper
     itself away) must be swallowed, logged, and never stop the app from
     booting and serving a real request afterward."""
     monkeypatch.setenv("VERIDICAL_ENV", "prod")
@@ -84,11 +84,36 @@ def test_a_prewarm_failure_never_fails_the_boot(monkeypatch):
     with (
         patch("app.main._upgrade_to_head"),
         patch("app.main._seed_programs_on_boot"),
-        patch("app.main.get_embedding_model", side_effect=RuntimeError("HF unreachable")),
+        patch("app.main.prefetch_embedding_model", side_effect=RuntimeError("HF unreachable")),
         TestClient(app) as client,
     ):
         response = client.get("/health")
     assert response.status_code == 200
+    get_settings.cache_clear()
+
+
+def test_boot_downloads_the_embedding_model_but_does_not_load_it(monkeypatch):
+    """BUG-532: boot fetches the model files (so a model-host outage is still
+    visible at boot) but leaves the model itself out of memory until a check
+    needs it."""
+    from app.ml import embeddings
+
+    monkeypatch.setenv("VERIDICAL_ENV", "prod")
+    get_settings.cache_clear()
+    embeddings.release_embedding_model()
+    from app.main import app
+
+    with (
+        patch("app.main._upgrade_to_head"),
+        patch("app.main._seed_programs_on_boot"),
+        patch("app.main.prefetch_embedding_model") as mock_prefetch,
+        patch("app.ml.embeddings._load_model") as mock_load,
+        TestClient(app) as client,
+    ):
+        assert client.get("/health").status_code == 200
+        mock_prefetch.assert_called_once()
+        mock_load.assert_not_called()
+        assert not embeddings.embedding_model_loaded()
     get_settings.cache_clear()
 
 
