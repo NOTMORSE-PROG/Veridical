@@ -120,9 +120,11 @@ describe("SignalDocumentViewerPage", () => {
     expect(qualification).toHaveTextContent(/fixtures instead of real AI grading/);
     expect(frame).not.toContainElement(qualification);
     const returnNavigation = screen.getByRole("navigation", { name: "Workspace return" });
-    expect(qualification.nextElementSibling).toBe(frame);
-    // The way back to the list sits in the review pane, under the steps.
-    expect(document.getElementById("review-panel")).toContainElement(returnNavigation);
+    // The way back to the list sits in the bar above the manuscript, outside both panes.
+    const bar = qualification.nextElementSibling!;
+    expect(bar).toHaveClass("signal-review-bar");
+    expect(bar).toContainElement(returnNavigation);
+    expect(bar.nextElementSibling).toBe(frame);
     expect(document.querySelectorAll(".signal-flag-mode")).toHaveLength(1);
     expect(document.querySelector(".signal-document-selection-strip")).toBeNull();
   });
@@ -510,12 +512,15 @@ describe("SignalDocumentViewerPage", () => {
 
     expect(await screen.findByRole("heading", { name: "Possible internal contradiction" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Next finding" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /^Citation integrity/ }));
+    // Inside one finding the check tiles give way to the evidence; the list holds them.
+    fireEvent.click(screen.getByRole("button", { name: "Back to findings list" }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Citation integrity/ }));
     fireEvent.click(await screen.findByRole("button", { name: /Finding 2.*Possible citation issue/ }));
     expect(await screen.findByRole("heading", { name: "Possible citation issue" })).toBeInTheDocument();
     expect(screen.getByTestId("pdf-pane")).toHaveAttribute("data-selection", "8");
     expect(screen.queryByRole("button", { name: "Previous finding" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /^Internal agreement/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Back to findings list" }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Internal agreement/ }));
     fireEvent.click(await screen.findByRole("button", { name: /Finding 1.*Possible internal contradiction/ }));
     expect(await screen.findByRole("heading", { name: "Possible internal contradiction" })).toBeInTheDocument();
     expect(screen.getByTestId("pdf-pane")).toHaveAttribute("data-selection", "7");
@@ -616,8 +621,8 @@ describe("SignalDocumentViewerPage", () => {
     expect(await screen.findByRole("heading", { name: "Criterion records" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Final defense-readiness decision" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /^Step 2: Inspect findings/ }));
-    expect(await screen.findByRole("heading", { name: "No recorded evidence items" })).toBeInTheDocument();
-    expect(screen.getByText("This check has no integrity findings or comparison leads. Continue to the recorded grades and the decision.")).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "No saved check status" })).toBeInTheDocument();
+    expect(screen.getByText(/An empty list does not mean the manuscript passed/)).toBeVisible();
     expect(screen.queryByText(REPORT.reason as string)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Continue: Check recorded grades" }));
     expect(await screen.findByRole("heading", { name: "Criterion records" })).toBeInTheDocument();

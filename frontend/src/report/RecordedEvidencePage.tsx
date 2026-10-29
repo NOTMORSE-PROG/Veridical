@@ -35,12 +35,13 @@ export function RecordedFindingSources({ flag, current }: { flag: FlagOut; curre
     ? query.data : undefined;
   const references = manifest?.references.filter(reference => reference.flag_id === flag.id) ?? [];
   return <section className="signal-criterion-packet" aria-label="Original finding sources">
-    <h4>Original finding sources</h4>
+    <h4 className="signal-section-kicker">Original pages</h4>
     {!manifest && <p>Current original-page links are unavailable. Saved evidence remains readable above.</p>}
-    {references.map(reference => <div key={reference.reference_id}>
-      <p>{reference.role === "agreement_intent" ? "Statement A" : reference.role === "agreement_outcome" ? "Statement B" : reference.role === "reuse_own" ? "Checked manuscript" : reference.role === "reuse_match" ? "Saved comparison excerpt" : "Recorded manuscript evidence"}: {instructorAnchor(reference.anchor ?? "")}</p>
+    {references.map(reference => <div key={reference.reference_id} className="signal-source-row">
+      <p className="signal-source-row__label"><strong>{reference.role === "agreement_intent" ? "Statement A" : reference.role === "agreement_outcome" ? "Statement B" : reference.role === "reuse_own" ? "Checked manuscript" : reference.role === "reuse_match" ? "Saved comparison excerpt" : "Recorded manuscript evidence"}</strong>
+        {reference.anchor?.trim() && <span>{instructorAnchor(reference.anchor)}</span>}</p>
       {reference.source_scope === "own_manuscript" && manifest ? <RecordedEvidencePage checkRunId={flag.check_run_id} snapshot={manifest.snapshot_id} reference={reference} />
-        : <p>The bounded comparison excerpt has no original-page image in this report.</p>}
+        : <p className="signal-field-hint">No original-page image is stored for this comparison excerpt.</p>}
     </div>)}
   </section>;
 }
@@ -90,7 +91,7 @@ function RecordedPageSession({ checkRunId, snapshot, reference, cachedPage, cont
     </figure>}
   </>;
   return <div className="signal-recorded-page-actions">
-    <Button id={actionId} variant="quiet" className="signal-evidence-source-link" onClick={() => setOpen(true)}>{reference.anchor?.trim() ? `Open original page: ${instructorAnchor(reference.anchor)}` : "Open saved source"}</Button>
+    <Button id={actionId} variant="secondary" aria-label={reference.anchor?.trim() ? `Open original page: ${instructorAnchor(reference.anchor)}` : undefined} onClick={() => setOpen(true)}>{reference.anchor?.trim() ? "Open original page" : "Open saved source"}</Button>
     <Button variant="secondary" aria-expanded={preview} onClick={() => setPreview(value => !value)}>{preview ? "Hide" : "Show"} original-page preview</Button>
     {preview && content(false)}
     {open && owner.isCurrent() && context && <CriterionEvidenceDialog run={checkRunId} request={{ snapshotId: snapshot, reference, actionId }} context={context} onClose={() => setOpen(false)} />}

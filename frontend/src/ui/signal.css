@@ -295,9 +295,11 @@
     height: var(--signal-border-emphasis);
   }
 
+  /* Brand yellow only passes contrast on the dark hero surfaces; everywhere
+     else the eyebrow uses the secondary text tone. */
   .signal-eyebrow {
     margin: 0;
-    color: var(--color-signal-brand);
+    color: var(--color-signal-ink-secondary);
     font-family: var(--font-signal-display);
     font-size: var(--signal-type-label);
     font-weight: var(--signal-weight-bold);
@@ -317,9 +319,9 @@
     text-wrap: balance;
   }
 
-  .signal-route-header .signal-eyebrow,
-  .signal-auth-card > .signal-eyebrow {
-    color: var(--color-signal-ink-secondary);
+  .signal-hero .signal-eyebrow,
+  .signal-auth-statement .signal-eyebrow {
+    color: var(--color-signal-brand);
   }
 
   .signal-hero__body {
@@ -2719,7 +2721,6 @@
   /* Keeps focused content clear of the pinned steps (height set by WorkspaceSteps). */
   .signal-document-inspector { scroll-padding-block-start: var(--signal-workspace-steps-height); }
   .signal-workspace-step-kicker { margin: 0 0 var(--signal-rhythm-attached); }
-  .signal-workspace-return { padding-inline: var(--signal-space-5); margin-block-end: var(--signal-rhythm-control); }
   .signal-workspace-step-footer {
     display: flex;
     flex-wrap: wrap;
@@ -2729,8 +2730,6 @@
     padding: var(--signal-rhythm-group) var(--signal-space-5);
     border-block-start: var(--signal-border-hairline) solid var(--color-signal-border);
   }
-  /* Back stays left and Continue right, so each sits in the same place on every step. */
-  .signal-workspace-step-footer > .signal-button--primary { margin-inline-start: auto; }
   /* In a short window (or at high zoom) pinned steps would take half the pane. */
   .signal-workspace-steps[data-pinned="false"] { position: static; }
   .signal-report-record { gap: var(--signal-rhythm-related); }
@@ -7014,6 +7013,252 @@
     }
   }
 
+  /* V-088: readiness report summary row and tabbed record. */
+  .signal-report-summary-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(var(--signal-settings-column-min), 1fr));
+    gap: var(--signal-rhythm-related);
+    align-items: stretch;
+  }
+  .signal-chip-list { display: flex; flex-wrap: wrap; gap: var(--signal-space-2); margin: 0; padding: 0; list-style: none; }
+  .signal-chip-list > li {
+    border: var(--signal-border-hairline) solid var(--color-signal-border-strong);
+    border-radius: var(--signal-radius-pill);
+    background: var(--color-signal-surface);
+    padding: var(--signal-space-1) var(--signal-space-3);
+    font-size: var(--signal-type-label);
+  }
+  .signal-decision-note { display: grid; gap: var(--signal-space-1); margin: 0; border-inline-start: var(--signal-border-emphasis) solid var(--color-signal-border-strong); padding-inline-start: var(--signal-space-4); }
+  .signal-report-record { display: grid; gap: var(--signal-rhythm-group); }
+  .signal-record-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--signal-space-1);
+    border-block-end: var(--signal-border-hairline) solid var(--color-signal-border-strong);
+  }
+  .signal-record-tabs button {
+    min-block-size: var(--signal-control-height);
+    border: 0;
+    border-block-end: var(--signal-border-emphasis) solid transparent;
+    background: transparent;
+    color: var(--color-signal-ink-secondary);
+    padding-inline: var(--signal-space-4);
+    font: inherit;
+    font-weight: var(--signal-weight-semibold);
+    cursor: pointer;
+  }
+  .signal-record-tabs button:hover { color: var(--color-signal-ink); background: var(--color-signal-surface-muted); }
+  .signal-record-tabs button[aria-selected="true"] { border-block-end-color: var(--color-signal-link); color: var(--color-signal-ink); }
+  .signal-record-tabs button:focus-visible { outline: var(--signal-border-emphasis) solid var(--color-signal-link); outline-offset: calc(-1 * var(--signal-border-emphasis)); }
+  .signal-record-edit { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--signal-rhythm-control); padding-block: var(--signal-space-4); border-block-start: var(--signal-border-hairline) solid var(--color-signal-border); }
+  .signal-record-edit > p { margin: 0; }
+
+  /* V-088: finding cards use the width: text on the left, the location and
+     the evidence action in a column on the right. */
+  .signal-flag-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    column-gap: var(--signal-rhythm-related);
+    align-items: start;
+  }
+  .signal-flag-row > * { grid-column: 1; }
+  .signal-flag-row > .signal-button,
+  .signal-flag-row > .signal-flag-row__actions {
+    grid-column: 2;
+    grid-row: 1 / span 6;
+    align-self: center;
+    margin-block-start: 0;
+  }
+
+  /* V-088: stored files read as compact rows, not tall cards. */
+  .signal-stored-files .signal-stored-file {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+    gap: var(--signal-space-3) var(--signal-rhythm-related);
+    align-items: start;
+    padding: var(--signal-space-4) var(--signal-space-5);
+  }
+  .signal-stored-files .signal-stored-file__details .signal-library-metadata {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--signal-space-2) var(--signal-space-4);
+  }
+  .signal-stored-files .signal-stored-file__actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: var(--signal-rhythm-control); }
+  .signal-stored-files .signal-stored-file__note { grid-column: 1 / -1; margin: 0; }
+
+  .signal-report-summary-row #review-criteria > .signal-review-section__heading { padding: var(--signal-space-6); }
+
+  /* Beside the manuscript, each stored excerpt scrolls in a fixed-height box;
+     "Compare passages" still opens them at full width. */
+  .passage-pair--inspector .passage-pair__text {
+    max-block-size: var(--signal-passage-inspector-max-height);
+    overflow-y: auto;
+  }
+  .passage-pair--inspector .passage-pair__text:focus-visible { outline: var(--signal-border-emphasis) solid var(--color-signal-link); outline-offset: var(--signal-border-hairline); }
+
+  /* The findings step's kicker sits directly in the pane; align it with the
+     padded content below. */
+  .signal-document-inspector > .signal-workspace-step-kicker { padding-inline: var(--signal-space-5); }
+  /* Finding rows: status at the top right instead of on a line of its own. */
+  .signal-document-review-list button { grid-template-columns: minmax(0, 1fr) auto; column-gap: var(--signal-space-4); }
+  .signal-document-review-list button > * { grid-column: 1; }
+  .signal-document-review-list button > .signal-document-finding-state { grid-column: 2; grid-row: 1; justify-self: end; }
+
+  /* V-088: structured evidence blocks in the review pane. */
+  .signal-integrity-module-summary {
+    display: grid;
+    gap: var(--signal-space-1);
+    border-inline-start: var(--signal-border-emphasis) solid var(--color-signal-link);
+    border-radius: var(--signal-radius-control);
+    background: var(--color-signal-surface-muted);
+    padding: var(--signal-space-4);
+  }
+  .signal-integrity-module-summary h3 { margin: 0; font-size: var(--signal-type-body); font-weight: var(--signal-weight-semibold); }
+  .signal-integrity-module-summary p { margin: 0; }
+  .signal-source-row {
+    display: grid;
+    gap: var(--signal-rhythm-control);
+    border-block-start: var(--signal-border-hairline) solid var(--color-signal-border);
+    padding-block: var(--signal-rhythm-control);
+  }
+  .signal-source-row__label { display: flex; flex-wrap: wrap; gap: var(--signal-space-2); align-items: baseline; margin: 0; }
+  .signal-source-row__label span { color: var(--color-signal-ink-secondary); }
+  .signal-recorded-page-actions { display: flex; flex-wrap: wrap; gap: var(--signal-rhythm-control); align-items: center; }
+  .signal-recorded-page-actions > figure { flex-basis: 100%; }
+  .signal-reading-note {
+    display: grid;
+    gap: var(--signal-space-2);
+    border-radius: var(--signal-radius-control);
+    background: var(--color-signal-surface-muted);
+    padding: var(--signal-space-4);
+    color: var(--color-signal-ink-secondary);
+    font-size: var(--signal-type-label);
+  }
+  .signal-reading-note p, .signal-reading-note ul { margin: 0; }
+  .signal-reading-note ul { padding-inline-start: var(--signal-space-5); }
+  .signal-reading-note__lead { color: var(--color-signal-ink); font-size: var(--signal-type-body); margin: 0; }
+  .signal-reading-note__meta strong { color: var(--color-signal-ink); margin-inline-end: var(--signal-space-2); }
+  .passage-pair__library-link { align-self: flex-start; justify-self: start; margin-block-start: var(--signal-rhythm-control); }
+
+  /* V-088 layout pass: full-width section dividers, padded section bodies,
+     balanced button pairs, honest empty states and paged lists. */
+  .signal-review-section__intro {
+    max-width: none;
+    padding-inline-end: max(var(--signal-space-6), calc(100% - var(--signal-prose-width)));
+  }
+  .signal-review-section__body {
+    display: grid;
+    gap: var(--signal-rhythm-group);
+    border-block-start: var(--signal-border-hairline) solid var(--color-signal-border);
+    padding: var(--signal-space-5) var(--signal-space-6) var(--signal-space-6);
+  }
+  .signal-review-section__intro + .signal-review-section__body { border-block-start: 0; padding-block-start: 0; }
+
+  .signal-button:disabled,
+  .signal-button[aria-disabled="true"] {
+    border-style: dashed;
+    background: transparent;
+  }
+
+  .signal-review-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--signal-rhythm-control);
+  }
+  .signal-review-bar:empty { display: none; }
+  .signal-review-bar__nav {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--signal-rhythm-control);
+  }
+  .signal-review-bar .signal-saved-judgment-access { margin-inline-start: auto; }
+  .signal-workspace-back { gap: var(--signal-space-2); }
+
+  .signal-workspace-step-footer { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .signal-workspace-step-footer > .signal-button { inline-size: 100%; white-space: normal; }
+  .signal-workspace-step-footer > .signal-button--primary { grid-column: 2; margin-inline-start: 0; }
+  .signal-document-finding-nav {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--signal-rhythm-control);
+  }
+  .signal-document-finding-nav > .signal-button { inline-size: 100%; }
+
+  .signal-empty-state {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: var(--signal-space-4);
+    align-items: start;
+    border: var(--signal-border-hairline) dashed var(--color-signal-border-strong);
+    border-radius: var(--signal-radius-panel);
+    background: var(--color-signal-surface);
+    padding: var(--signal-space-5);
+  }
+  .signal-empty-state__icon { color: var(--color-signal-ink-muted); }
+  .signal-empty-state h3 { margin: 0; font-size: var(--signal-type-body); font-weight: var(--signal-weight-semibold); }
+  .signal-empty-state__text p { margin: var(--signal-space-1) 0 0; color: var(--color-signal-ink-secondary); }
+  .signal-empty-state__action { margin-block-start: var(--signal-rhythm-control); }
+
+  .signal-pagination {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--signal-rhythm-control);
+    margin-block-start: var(--signal-rhythm-control);
+  }
+  .signal-pagination > p { margin: 0; }
+
+  .signal-segmented { display: flex; flex-wrap: wrap; gap: var(--signal-space-2); }
+  .signal-segmented button {
+    min-block-size: var(--signal-control-height);
+    border: var(--signal-border-hairline) solid var(--color-signal-border-strong);
+    border-radius: var(--signal-radius-pill);
+    background: var(--color-signal-surface);
+    color: var(--color-signal-ink);
+    padding-inline: var(--signal-space-4);
+    font: inherit;
+    font-size: var(--signal-type-label);
+    cursor: pointer;
+  }
+  .signal-segmented button[aria-pressed="true"] {
+    border-color: var(--color-signal-foundation);
+    background: var(--color-signal-foundation);
+    color: var(--color-signal-surface);
+  }
+
+  .signal-figure-reading-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(var(--signal-evidence-card-min-width), 1fr));
+    gap: var(--signal-rhythm-control);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .signal-figure-reading-card {
+    display: grid;
+    align-content: start;
+    gap: var(--signal-rhythm-control);
+    border: var(--signal-border-hairline) solid var(--color-signal-border);
+    border-radius: var(--signal-radius-panel);
+    background: var(--color-signal-surface);
+    padding: var(--signal-space-4);
+  }
+  .signal-figure-reading-card > .signal-button { justify-self: start; }
+  .signal-figure-reading-card__top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--signal-space-2); }
+  .signal-figure-reading-card h3 { margin: 0; font-size: var(--signal-type-body); }
+  .signal-figure-reading-status {
+    border-radius: var(--signal-radius-pill);
+    background: var(--color-signal-neutral-bg);
+    color: var(--color-signal-neutral-text);
+    padding: var(--signal-space-1) var(--signal-space-3);
+    font-size: var(--signal-type-meta);
+    font-weight: var(--signal-weight-bold);
+  }
+
   @media (max-width: 1199px) {
     .signal-document-viewer {
       padding-inline: 0;
@@ -8579,7 +8824,7 @@
 @layer components {
   .signal-integrity-review-body { display: grid; gap: var(--signal-space-5); min-inline-size: 0; padding: var(--signal-space-6); }
   .signal-integrity-review-body > div { display: grid; gap: var(--signal-space-4); min-inline-size: 0; }
-  .signal-integrity-empty { display: grid; gap: var(--signal-space-3); min-inline-size: 0; padding: var(--signal-space-5); border: var(--signal-border-hairline) solid var(--color-signal-border); border-radius: var(--signal-radius-control); background: var(--color-signal-canvas); }
+  .signal-integrity-empty:not(.signal-empty-state) { display: grid; gap: var(--signal-space-3); min-inline-size: 0; padding: var(--signal-space-5); border: var(--signal-border-hairline) solid var(--color-signal-border); border-radius: var(--signal-radius-control); background: var(--color-signal-canvas); }
   .signal-integrity-empty :is(h3, p), .signal-integrity-review-notes p { margin: 0; }
   .signal-integrity-empty p, .signal-integrity-review-notes p { max-inline-size: var(--signal-prose-width); }
   .signal-integrity-review-notes { display: grid; gap: var(--signal-space-3); min-inline-size: 0; }

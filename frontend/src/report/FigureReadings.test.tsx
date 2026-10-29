@@ -18,7 +18,7 @@ describe("saved non-scoring figure readings", () => {
     expect(screen.getByText(/1 of 1 image occurrences/)).toBeInTheDocument();
     expect(screen.getByText(/do not establish that statistical values/)).toBeInTheDocument();
     expect(screen.getByRole("link", { hidden: true, name: /Open Extracted paragraph 71/ }))
-      .toHaveAttribute("href", "/report/12/document?anchor=paragraph%2070&coverage=images");
+      .toHaveAttribute("href", "/report/12/document?anchor=paragraph%2070");
     expect(screen.getByText(/Nearby source caption/)).toBeInTheDocument();
   });
   it("does not render candidate content for rejected saved readings", () => {

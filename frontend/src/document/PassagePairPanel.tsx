@@ -3,7 +3,7 @@
 // on the other, both showing real text -- the similarity score stays
 // subordinate (owner's anti-Turnitin ruling, carried from V-058), never
 // a large colored percentage or a severity-styled badge.
-import { Link } from "react-router";
+import { ActionLink } from "../ui/ActionLink";
 import type { ReactNode } from "react";
 import type { PassagePairOut } from "../api/types";
 import type { TextRange } from "./sharedPassage";
@@ -41,7 +41,8 @@ export function PassageBlock({
   return (
     <div className="passage-pair__block">
       <p className="mb-1 text-xs font-semibold tracking-header text-ink-tertiary uppercase">{label}</p>
-      <div className="passage-pair__text rounded-lg border border-border bg-page px-4 py-3 break-words text-ink">
+      {/* Long excerpts scroll inside the review pane, so the box must be reachable by keyboard. */}
+      <div className="passage-pair__text rounded-lg border border-border bg-page px-4 py-3 break-words text-ink" tabIndex={0} role="region" aria-label={label}>
         {before && <span className="text-ink-tertiary">{before} </span>}
         <span><HighlightedText text={excerpt} ranges={sharedRanges} /></span>
         {after && <span className="text-ink-tertiary"> {after}</span>}
@@ -84,15 +85,15 @@ export function PassagePairPanel({
       <h3 className="sr-only" tabIndex={-1}>
         Passage comparison
       </h3>
-      {excludedLead && <p className="text-sm text-ink-secondary">{excludedLead}</p>}
-      <p className="text-sm text-ink-secondary">Compare the stored passages in context. Similar wording does not establish identical passages or files, copying, authorship or which document came first.</p>
-      <p className="text-xs text-ink-secondary">
-        {hasExactSharedWording
-          ? "Shaded wording appears in both stored passages."
-          : "No stable exact phrase was found to highlight. Compare both passages manually."}
-      </p>
-      <p className="text-sm text-ink-secondary">These are stored excerpts, not complete source documents.</p>
-      {ownAnchor && <p className="text-xs text-ink-secondary">Recorded {wholeManuscript ? "scope" : "location"}: {ownAnchor}</p>}
+      {excludedLead && <p className="signal-reading-note__lead">{excludedLead}</p>}
+      <div className="signal-reading-note">
+        <p className="signal-reading-note__lead">Compare the stored passages in context. Similar wording does not establish identical passages or files, copying, authorship or which document came first.</p>
+        <ul>
+          <li>{hasExactSharedWording ? "Shaded wording appears in both stored passages." : "No stable exact phrase was found to highlight. Compare both passages manually."}</li>
+          <li>These are stored excerpts, not complete source documents.</li>
+        </ul>
+        {ownAnchor && <p className="signal-reading-note__meta"><strong>Recorded {wholeManuscript ? "scope" : "location"}</strong> {ownAnchor}</p>}
+      </div>
       <div className="passage-pair__columns">
         <PassageBlock
           label="Your manuscript excerpt"
@@ -111,12 +112,7 @@ export function PassagePairPanel({
           />
           {/* V-066 (BUG-122 direction 2): "#N" used to be dead information
               -- the library now gives it somewhere real to go. */}
-          <Link
-            to={`/library/${pair.matched_ref}`}
-            className="mt-1 inline-block text-xs font-medium text-link underline hover:text-link-hover"
-          >
-            Open in Library
-          </Link>
+          <ActionLink to={`/library/${pair.matched_ref}`} variant="secondary" className="passage-pair__library-link" aria-label={`Open in Library: record #${pair.matched_ref}`}>Open in Library</ActionLink>
         </div>
       </div>
     </section>

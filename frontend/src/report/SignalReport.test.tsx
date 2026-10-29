@@ -139,11 +139,13 @@ describe("SignalReportPage", () => {
     stubReport({ ...BASE_REPORT, statistical_check_scope: { state }, historical_native_math_unverified: true }, [], hasConcern ? [flag] : []);
     renderWithProviders(<SignalReportPage />, { route: "/report/5?review_step=findings&module=statistical_forensics", path: "/report/:checkRunId" });
     expect(await screen.findByText(`Statistical checks: ${label}`)).toBeVisible();
-    expect(screen.getAllByText("Saved native Word coverage is unverified")[0]).toBeVisible();
     if (hasConcern) {
       expect(await screen.findByText("1 open finding")).toBeVisible();
       expect(await screen.findByRole("link", { name: /Review evidence/ })).toBeVisible();
     }
+    // Coverage history lives on its own record tab.
+    fireEvent.click(screen.getByRole("tab", { name: /^Assessment limits/ }));
+    expect(screen.getAllByText("Saved native Word coverage is unverified")[0]).toBeVisible();
   });
   it.each(["review-criteria", "criteria-results-heading", "coverage-statement-heading"])("preserves a workspace section intent while its destination report is slow: %s", async target => {
     const path = "/report/5?criterion_record=all";
@@ -501,6 +503,8 @@ describe("SignalReportPage", () => {
     renderWithProviders(<SignalReportPage />, { route: "/report/5?review_step=findings&module=internal_agreement", path: "/report/:checkRunId" });
 
     expect(await screen.findByText("Test-mode AI responses")).toBeInTheDocument();
+    expect(await screen.findByText(/abstract and findings report different participant totals/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: /^Assessment limits/ }));
     expect(screen.getByRole("heading", { name: "Assessment limits" })).toBeInTheDocument();
     expect(screen.getByText("Required format review")).toBeInTheDocument();
     expect(within(screen.getByRole("region", { name: "Assessment limits" })).getByText("Citation integrity")).toBeInTheDocument();
@@ -513,7 +517,7 @@ describe("SignalReportPage", () => {
     // voice-control user trying to say "click Run again".
     expect(rerunLink.textContent?.trim()).toBe("Run again");
     expect(rerunLink.getAttribute("aria-label")?.toLowerCase().startsWith("run again")).toBe(true);
-    expect(await screen.findByText(/abstract and findings report different participant totals/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: /^Integrity findings/ }));
     expect(screen.getByText("High severity")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Review evidence" })).toHaveAttribute("href", "/flags/7");
   });
