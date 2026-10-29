@@ -1,4 +1,4 @@
-import { act, fireEvent, screen } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderWithUploadProviders } from "../test/renderWithUploadProviders";
 import { BackgroundUploadsProvider, useBackgroundUploads } from "./BackgroundUploads";
@@ -46,6 +46,14 @@ describe("background uploads", () => {
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("Ready.")).toBeInTheDocument();
+  });
+
+  it("finishes two large files chosen one after the other", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(SUMMARY), { status: 200 })));
+    await renderWithUploadProviders(<BackgroundUploadsProvider><Starter /></BackgroundUploadsProvider>);
+    choose("first.pdf");
+    choose("second.pdf");
+    await waitFor(() => expect(screen.getAllByText("Ready.")).toHaveLength(2));
   });
 
   it("waits while another transfer runs and starts on its own, instead of failing", async () => {

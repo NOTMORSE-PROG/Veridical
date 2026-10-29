@@ -4,8 +4,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../api/client";
 import { directManuscriptUpload } from "../api/directManuscriptUpload";
-import { validateIngestReceipt } from "../api/uploadOutcome";
-import { useUploadScope } from "../auth/useUploadScope";
+import { StaleUploadContextError, validateIngestReceipt } from "../api/uploadOutcome";
+import { useUploadScope, type UploadAttemptScope } from "../auth/useUploadScope";
 import { BACKGROUND_UPLOAD_BUSY_RETRY } from "../config/ui";
 import { ActionLink } from "../ui/ActionLink";
 import { Button } from "../ui/Button";
@@ -40,6 +40,18 @@ export function useBackgroundUploads() {
 
 const directUpload = import.meta.env.VITE_DIRECT_MANUSCRIPT_UPLOAD_ENABLED === "true";
 
+// The upload dialog sends one file, so each new capture retires the one
+// before it. Here several files can be on their way at once, so each one
+// stays current for as long as the same instructor is signed in.
+function sharedAttempt(base: UploadAttemptScope, scope: { isCurrent: () => boolean; verify: (afterPending?: boolean) => Promise<void> }): UploadAttemptScope {
+  return {
+    actorId: base.actorId,
+    isCurrent: scope.isCurrent,
+    async verify() { await scope.verify(true); if (!scope.isCurrent()) throw new StaleUploadContextError(); },
+    rejectActor: base.rejectActor,
+  };
+}
+
 export function BackgroundUploadsProvider({ children }: { children: ReactNode }) {
   const scope = useUploadScope("background-uploads");
   const queryClient = useQueryClient();
@@ -49,7 +61,7 @@ export function BackgroundUploadsProvider({ children }: { children: ReactNode })
     setUploads((current) => current.map((item) => item.id === id ? { ...item, ...patch } : item)), []);
 
   const run = useCallback(async (id: string, file: File, busyAttempt = 0): Promise<void> => {
-    const attempt = scope.capture();
+    const attempt = sharedAttempt(scope.capture(), scope);
     update(id, { phase: "sending", percent: directUpload ? 0 : null, error: undefined, serverOwned: false });
     try {
       await attempt.verify();
