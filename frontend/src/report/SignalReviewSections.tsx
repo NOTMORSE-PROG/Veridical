@@ -70,6 +70,16 @@ import type { OpenEvidenceSource } from "./evidenceTypes";
 import { claimFocusContinuation, type FocusContinuation } from "../routing/focusContinuation";
 import { RelatedFindings } from "./RelatedFindings";
 import { readinessExclusionLine } from "../domain/readinessExclusion";
+import { BulkResolveDialog, BulkSelectionBar } from "./BulkFindingReview";
+import { BULK_REVIEW_COPY } from "../domain/bulkReviewCopy";
+import type { BulkAction } from "./useBulkResolve";
+
+interface FindingSelection {
+  isSelected: (cluster: FlagFindingCluster) => boolean;
+  toggle: (cluster: FlagFindingCluster) => void;
+  selectMany: (clusters: FlagFindingCluster[]) => void;
+  selectAllInCheck: () => void;
+}
 
 const GRADE_LIST_COPY = {
   waiting: "Waiting for your judgment",
@@ -211,6 +221,15 @@ function viewedSummary(flags: FlagSummaryOut[], viewedIds: ReadonlySet<number>):
   return `Viewed ${viewed.length} of ${unresolved.length} open locations`;
 }
 
+function SelectFinding({ cluster, selection }: { cluster: FlagFindingCluster; selection?: FindingSelection }) {
+  if (!selection) return null;
+  const first = cluster.flags[0];
+  return <label className="signal-bulk-check">
+    <input type="checkbox" checked={selection.isSelected(cluster)} onChange={() => selection.toggle(cluster)} />
+    <span className="sr-only">Select finding: {problemLabel(first.problem_kind) ?? first.criterion_text ?? "Possible inconsistency"}, {instructorAnchor(first.page_anchor)}</span>
+  </label>;
+}
+
 function SignalFindingCard({
   cluster,
   expanded,
@@ -218,7 +237,9 @@ function SignalFindingCard({
   showResolutionSummary,
   viewedIds,
   onToggle,
+  selection,
 }: {
+  selection?: FindingSelection;
   cluster: FlagFindingCluster;
   expanded: boolean;
   showActions: boolean;
@@ -247,6 +268,7 @@ function SignalFindingCard({
     return (
       <li className={first.overridden ? "signal-flag-row signal-flag-row--resolved" : "signal-flag-row"}>
         <div className="signal-flag-row__summary">
+          <SelectFinding cluster={cluster} selection={selection} />
           <span className={`signal-severity signal-severity--${first.affects_readiness === false ? "low" : first.severity}`}>{first.affects_readiness === false ? "Review lead: not scored" : SEVERITY_LABEL[first.severity]}</span>
           {!first.overridden && viewedIds.has(first.id) && (
             <span className="signal-viewed-state"><ViewedIcon />Viewed</span>
@@ -285,6 +307,7 @@ function SignalFindingCard({
   return (
     <li className={allResolved ? "signal-flag-row signal-flag-row--resolved" : "signal-flag-row"}>
       <div className="signal-flag-row__summary">
+        <SelectFinding cluster={cluster} selection={selection} />
         <span className={`signal-severity signal-severity--${first.affects_readiness === false ? "low" : severity}`}>{first.affects_readiness === false ? "Review lead: not scored" : SEVERITY_LABEL[severity]}</span>
         {viewedSummary(flags, viewedIds) && (
           <span className="signal-viewed-state"><ViewedIcon />{viewedSummary(flags, viewedIds)}</span>
@@ -402,7 +425,9 @@ function SignalFlagList({
   initialView,
   trackViewed = false,
   viewedIds = EMPTY_VIEWED,
+  selection,
 }: {
+  selection?: FindingSelection;
   flags: FlagSummaryOut[];
   showActions: boolean;
   initialView: FlagView;
@@ -520,6 +545,10 @@ function SignalFlagList({
         <p className="signal-field-hint">
           One finding can contain both open and resolved locations, so those two filter counts may overlap. All counts each finding once.
         </p>
+        {selection && visible.length > 0 && <div className="signal-control-cluster signal-bulk-select">
+          <Button variant="quiet" onClick={() => selection.selectMany(visible)}>{BULK_REVIEW_COPY.selectPage}</Button>
+          <Button variant="quiet" onClick={selection.selectAllInCheck}>{BULK_REVIEW_COPY.selectCheck}</Button>
+        </div>}
       </div>
 
       {visible.length ? (
@@ -533,6 +562,7 @@ function SignalFlagList({
               showResolutionSummary={view === "all"}
               viewedIds={viewedIds}
               onToggle={() => toggleCluster(cluster.key)}
+              selection={selection}
             />
           ))}
         </ul>
@@ -1024,6 +1054,24 @@ export function SignalFlagsPanel({
   // BUG-167: defaults the FILTER to the worst unresolved severity present,
   // not the declaration order -- see `defaultFlagView`'s own comment for
   // why this is a filter-default decision, not a reorder.
+  // V-089: the selection spans checks, so it is kept here, by finding location.
+  const [selectedIds, setSelectedIds] = useState<ReadonlySet<number>>(() => new Set());
+  const [bulkAction, setBulkAction] = useState<BulkAction | null>(null);
+  const [bulkMessage, setBulkMessage] = useState("");
+  const allClusters = clusterFlagFindings(allOtherFlags ?? []);
+  const selectedClusters = allClusters.filter((cluster) => cluster.flags.every((flag) => selectedIds.has(flag.id)));
+  const selectedLocations = selectedClusters.reduce((total, cluster) => total + cluster.flags.length, 0);
+  const selection: FindingSelection = {
+    isSelected: (cluster) => cluster.flags.every((flag) => selectedIds.has(flag.id)),
+    toggle: (cluster) => setSelectedIds((current) => {
+      const next = new Set(current);
+      const on = cluster.flags.every((flag) => next.has(flag.id));
+      for (const flag of cluster.flags) { if (on) next.delete(flag.id); else next.add(flag.id); }
+      return next;
+    }),
+    selectMany: (clusters) => setSelectedIds((current) => new Set([...current, ...clusters.flatMap((cluster) => cluster.flags.map((flag) => flag.id))])),
+    selectAllInCheck: () => setSelectedIds(new Set((allOtherFlags ?? []).map((flag) => flag.id))),
+  };
   const initialView = otherFlags ? defaultFlagView(Math.min(unresolvedHighFlagCount,
     otherFlags.filter(flag => !flag.overridden && flag.severity === "high" && flag.affects_readiness !== false).length), otherFlags) : "open";
 
@@ -1038,6 +1086,11 @@ export function SignalFlagsPanel({
         onSelect={kind => { const next = new URLSearchParams(moduleParams); next.set("module", kind); next.set("review_step", "findings"); [FLAG_VIEW_PARAM, CLUSTERS_OPEN_PARAM, VISIBLE_COUNT_PARAM].forEach(key => next.delete(key)); setModuleParams(next, { replace: true }); }} />
       <div id={`signal-selected-module-${checkRunId}`}>
 
+      {review && <p role="status" aria-live="polite" className={bulkMessage ? "signal-bulk-result" : "sr-only"}>{bulkMessage}</p>}
+      {review && bulkAction && <BulkResolveDialog action={bulkAction} clusters={selectedClusters} checkRunId={checkRunId}
+        expectedRevision={review.assessment?.assessment_revision} viewedIds={viewedIds}
+        onClose={() => setBulkAction(null)}
+        onDone={(message) => { setBulkAction(null); setSelectedIds(new Set()); setBulkMessage(message); }} />}
       {selectedModule === "statistical_forensics" && <StatisticalCheckScope scope={statisticalScope} />}
       {selectedModule === "originality_reuse" && <OriginalityScope scope={originalityScope} showAddAction />}
       {otherFlags && otherFlags.length > 0
@@ -1048,11 +1101,14 @@ export function SignalFlagsPanel({
             initialView={initialView}
             trackViewed
             viewedIds={viewedIds}
+            selection={review ? selection : undefined}
           />
         )
         : onlyOptional ? null : optional.state === "success" ? <EmptyState className="signal-integrity-empty" id={`signal-module-empty-${checkRunId}`} title={emptyState.title}><p>{emptyState.description}</p></EmptyState>
           : <p>{optional.state === "error" ? "Other findings could not be loaded." : optional.state === "paused" ? "Waiting to load other findings." : optional.state === "fetching" ? "Loading other findings." : "Other findings are not available."}</p>}
       {selectedModule === "originality_reuse" && <ComparisonLeadList collection={optional} showActions viewedIds={viewedIds} onRetry={() => { void flagsQuery.refetch(); }} />}
+      {review && <BulkSelectionBar findings={selectedClusters.length} locations={selectedLocations} decided={Boolean(review.decision)}
+        onAction={(action) => { setBulkMessage(""); setBulkAction(action); }} onClear={() => setSelectedIds(new Set())} />}
       </div>
       <details className="signal-integrity-review-notes"><summary>How findings affect readiness</summary><p>Across all modules, {unresolvedHighFlagCount} open high-severity findings count for readiness. Saved records and check status are separate; an empty list does not establish that the manuscript passed.</p></details>
       </div>
