@@ -215,3 +215,44 @@ def test_labels_read_apart_from_their_entries_refuse_the_reference_list():
     selection = select_references(result, load_patterns())
     assert "detached_reference_labels" in selection.issues
     assert extract_references(result, load_patterns()) == []
+
+
+def _two_column_bibliography(*, second_label_y=90):
+    def block(text, x, top, bottom, *, size=10, bold=0):
+        return TextBlock(
+            page=1, bbox=(x, top, x + 300, bottom), text=text, max_font_size=size, bold_ratio=bold
+        )
+
+    blocks = [
+        block("References", 10, 0, 20, size=24, bold=1),
+        block("[1]", 78, 30, 42),
+        block("[2]", 78, second_label_y, second_label_y + 12),
+        block("Reyes, J. Booking queues in rural clinics. Journal of Examples,", 108, 30, 42),
+        block("4(2), 10-20. https://example.org/records/", 108, 44, 56),
+        block("7534015.", 108, 58, 70),
+        block("Santos, A. Measuring appointment no-shows. Health IT Notes, 2023.", 108, 90, 102),
+    ]
+    return ExtractionResult(
+        page_count=1,
+        anchor_kind="page",
+        image_only=False,
+        text_chars=sum(len(b.text) for b in blocks),
+        blocks=blocks,
+        images=[],
+        section_tree=SectionTree(source="none", nodes=[]),
+    )
+
+
+def test_labels_printed_beside_their_entries_are_paired_by_line():
+    refs = extract_references(_two_column_bibliography(), load_patterns())
+    assert [" ".join(ref.raw_text.split()) for ref in refs] == [
+        "[1] Reyes, J. Booking queues in rural clinics. Journal of Examples, "
+        "4(2), 10-20. https://example.org/records/ 7534015.",
+        "[2] Santos, A. Measuring appointment no-shows. Health IT Notes, 2023.",
+    ]
+
+
+def test_a_label_with_no_entry_on_its_line_refuses_the_pairing():
+    result = _two_column_bibliography(second_label_y=150)
+    assert "detached_reference_labels" in select_references(result, load_patterns()).issues
+    assert extract_references(result, load_patterns()) == []

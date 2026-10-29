@@ -34,7 +34,7 @@ from app.ingest.patterns import HeadingPatterns
 from app.ingest.reference_dois import recover_reference_dois
 from app.ingest.reference_metadata_patterns import load_reference_metadata_patterns
 from app.ingest.reference_urls import reference_urls, text_url
-from app.ingest.schemas import ExtractionResult, SectionNode, TextBlock
+from app.ingest.schemas import Bbox, ExtractionResult, SectionNode, TextBlock
 from app.ingest.source_slices import SourceFragment, SourceSlicer, line_inventory_valid, slice_block
 from app.models.enums import CitationParseStatus
 
@@ -191,11 +191,15 @@ def select_references(result: ExtractionResult, patterns: HeadingPatterns) -> Re
             if marker and _parse_reference_number(marker.group(1) or marker.group(2)) is None:
                 return ReferenceSelection([], span, (*issues, "unreadable_reference_number"))
     groups = _segment_blocks(span, result.anchor_kind)
-    if any(_STANDALONE_REFERENCE_LABEL.match(_merge([b.text for b in group])) for group in groups):
+    if any(_standalone_label(_merge([b.text for b in group])) for group in groups):
         # An entry that is only its label means the labels were read apart
-        # from the entries (a labels column beside a text column), so no
-        # entry boundary can be trusted.
-        issues.append("detached_reference_labels")
+        # from the entries (a labels column beside a text column). Rebuild
+        # the entries from line positions, or trust none of them.
+        paired = _pair_detached_labels(span)
+        if paired is None:
+            issues.append("detached_reference_labels")
+        else:
+            groups = paired
     # These are candidate markers, not proof that an ambiguous numbered line
     # is a reference rather than quoted title text. Do not silently merge it.
     if result.anchor_kind == "page":
@@ -296,7 +300,10 @@ def reference_entry_locations(
             ReferenceEntryLocation(
                 index=index,
                 raw_text=_merge([block.text for block in group]),
-                printed_number=_contextual_reference_number(first.text),
+                # A label printed apart from its entry is its own first block.
+                printed_number=_contextual_reference_number(
+                    _merge([block.text for block in group])
+                ),
                 page=first.page,
                 paragraph=first.paragraph,
                 bboxes=tuple(
@@ -1153,7 +1160,7 @@ def _until_explicit_heading(
         tail = _split_numbered_block_lines(span[index + 1 : end])
         if any(
             _NUMBERED_ENTRY.match(item.text) is not None
-            or _STANDALONE_REFERENCE_LABEL.fullmatch(item.text) is not None
+            or _standalone_label(item.text)
             or parse_reference(item.text, 0).parse_status == CitationParseStatus.parsed
             for item in tail
         ):
@@ -1263,10 +1270,69 @@ def _contrasting_end_heading(
     )
 
 
+def _standalone_label(text: str) -> bool:
+    """A list label printed on a line of its own: "[12]", or "12." up to the
+    list-number limit. "7534015." alone is the tail of a wrapped identifier."""
+    if _STANDALONE_REFERENCE_LABEL.fullmatch(text) is None:
+        return False
+    if text.lstrip().startswith("["):
+        return True
+    number = _parse_reference_number(text.strip()[:-1])
+    return number is not None and number <= get_settings().reference_list_label_max
+
+
+def _first_line_box(block: TextBlock) -> Bbox | None:
+    lines = block.source_lines or []
+    return lines[0].bbox if lines else block.bbox
+
+
+def _pair_detached_labels(span: list[TextBlock]) -> list[list[TextBlock]] | None:
+    """Rebuild entries from a labels column printed beside a text column.
+
+    Each label belongs to the one text block whose first printed line holds
+    the label's vertical centre on the same page. Text blocks that start no
+    entry continue the entry before them. Anything else (a label with no
+    text on its line, two labels on one line, text before the first label)
+    means the entries cannot be trusted, and None is returned.
+    """
+    labels: list[TextBlock] = []
+    texts: list[TextBlock] = []
+    for block in span:
+        if block.page is None or _first_line_box(block) is None:
+            return None
+        if _standalone_label(block.text):
+            labels.append(block)
+        elif block.text.strip():
+            texts.append(block)
+    starts: dict[int, TextBlock] = {}
+    for label in labels:
+        box = _first_line_box(label)
+        centre = (box[1] + box[3]) / 2
+        holders = [
+            text
+            for text in texts
+            if text.page == label.page
+            and _first_line_box(text)[1] <= centre <= _first_line_box(text)[3]
+        ]
+        if len(holders) != 1 or id(holders[0]) in starts:
+            return None
+        starts[id(holders[0])] = label
+    groups: list[list[TextBlock]] = []
+    for text in sorted(texts, key=lambda block: (block.page, _first_line_box(block)[1])):
+        label = starts.get(id(text))
+        if label is not None:
+            groups.append([label, text])
+        elif groups:
+            groups[-1].append(text)
+        else:
+            return None
+    return groups if len(groups) == len(labels) else None
+
+
 def _bibliography_continues(span: list[TextBlock]) -> bool:
     return any(
         _NUMBERED_ENTRY.match(block.text) is not None
-        or _STANDALONE_REFERENCE_LABEL.fullmatch(block.text) is not None
+        or _standalone_label(block.text)
         or date_patterns()["entry"].match(block.text) is not None
         for block in _split_numbered_block_lines(span)
     )
