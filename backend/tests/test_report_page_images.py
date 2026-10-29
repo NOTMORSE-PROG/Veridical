@@ -458,3 +458,19 @@ def test_image_notice_uses_a_scoped_summary_and_retains_full_unknown_caution(
         assert "Check the recorded evidence directly" in _LLM_MODE_DISCLOSURE["unknown"][0]
     else:
         assert observed == []
+
+
+@pytest.mark.parametrize(("ratio", "paused"), [(0.0, False), (1.5, True)])
+def test_export_pauses_between_page_renders_only_when_configured(
+    doc_and_tree, monkeypatch, ratio, paused
+):
+    from app.report import page_images
+
+    pauses = []
+    monkeypatch.setattr(page_images.time, "sleep", pauses.append)
+    doc, tree = doc_and_tree
+    settings = get_settings().model_copy(update={"export_render_pause_ratio": ratio})
+    result = _build(doc, tree, [_flag(1, "p. 1"), _flag(2, "p. 2")], settings=settings)
+    assert result[1].image_png is not None and result[2].image_png is not None
+    assert bool(pauses) is paused
+    assert all(pause >= 0 for pause in pauses)

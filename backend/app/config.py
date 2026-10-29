@@ -831,6 +831,10 @@ class Settings(BaseSettings):
     # 150dpi is legible print quality without spending that headroom faster
     # than needed.
     export_page_image_dpi: int = Field(default=150, gt=0)
+    # After each page image an export renders, pause for this multiple of the
+    # time it took (0 = no pause). On a host with a fraction of one CPU the
+    # renders otherwise starve request handling and health checks.
+    export_render_pause_ratio: float = Field(default=0.0, ge=0, le=5)
     export_numeric_detail_decimal_places: int = Field(default=1, ge=0, le=10)
     # Bound each complete source-plus-disclosure RGB raster before allocation.
     # Independent of the distinct-page cap: a single unusually large PDF page

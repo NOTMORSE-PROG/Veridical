@@ -218,8 +218,11 @@ class ExportJobs:
             job.state, job.message = "failed", "PDF preparation was interrupted. Export again."
             job.cleanup()
             raise
-        except Exception:
-            logging.getLogger(__name__).warning("Report PDF preparation failed", exc_info=False)
+        except Exception as exc:
+            # The exception type only: its message can quote manuscript text.
+            logging.getLogger(__name__).warning(
+                "Report PDF preparation failed: %s", type(exc).__name__, exc_info=False
+            )
             job.state, job.message = (
                 "failed",
                 "PDF preparation could not finish. Try exporting again shortly.",
