@@ -131,6 +131,8 @@ function ReopenDialog({ report, onClose, onSaved, fallbackFocusRef, readFailed, 
 
 export function SignalDecisionPanel({ report, manuscriptLabel, readFailed, retrying, onRetry }: ReportReadRecovery & { report: ReportOut; manuscriptLabel: string }) {
   const location = useLocation();
+  const criteriaSearch = new URLSearchParams(location.search);
+  criteriaSearch.set("review_step", "criteria");
   const [openDecision, setOpenDecision] = useState<Decision>();
   const [reopen, setReopen] = useState(false);
   const [receipt, setReceipt] = useState<ReportOut>();
@@ -151,7 +153,7 @@ export function SignalDecisionPanel({ report, manuscriptLabel, readFailed, retry
       <Button variant="secondary" disabled={unavailable} onClick={() => setReopen(true)}>Reopen this decision</Button>
     </div> : <div className="signal-decision-choice">
       <p>VERIDICAL provides a readiness band and checkable evidence. You make the final decision after reviewing the full record above.</p>
-      {pending && <Alert title={`${report.pending_review_count} ${report.pending_review_count === 1 ? "criterion needs" : "criteria need"} your judgment`} tone="warning">You can return this manuscript for revision with a reason. Returning does not grade or exclude these criteria. Approval remains unavailable. <WorkflowLink to={{ pathname: `/report/${report.check_run_id}`, search: location.search, hash: "review-criteria" }} onClick={event => {
+      {pending && <Alert title={`${report.pending_review_count} ${report.pending_review_count === 1 ? "criterion needs" : "criteria need"} your judgment`} tone="warning">You can return this manuscript for revision with a reason. Returning does not grade or exclude these criteria. Approval remains unavailable. <WorkflowLink to={{ pathname: `/report/${report.check_run_id}`, search: criteriaSearch.toString(), hash: "review-criteria" }} onClick={event => {
         if (event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
         requestAnimationFrame(() => { const target = document.getElementById("review-criteria"); target?.scrollIntoView({ block: "start" }); target?.focus({ preventScroll: true }); });
       }}>Review unresolved criteria.</WorkflowLink></Alert>}

@@ -38,7 +38,7 @@ describe("OriginalityScope", () => {
     renderWithProviders(
       <OriginalityScope scope={{ compared_count: null, corpus: "library", not_compared_reason: "no_text" }} showAddAction />,
     );
-    expect(screen.getByText(/no readable text was found in this manuscript/)).toBeInTheDocument();
+    expect(screen.getByText(/no eligible text was available for this comparison/)).toBeInTheDocument();
     expect(screen.queryByText(/nothing to compare against/)).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /Add to Library/ })).not.toBeInTheDocument();
     expect(originalityUnassessed({ compared_count: null, corpus: "library", not_compared_reason: "no_text" })).toBe(true);

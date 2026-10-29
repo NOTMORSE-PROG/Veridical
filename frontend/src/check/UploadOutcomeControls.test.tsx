@@ -167,6 +167,25 @@ describe.each(["manuscript", "format"] as const)("%s upload uncertainty", (kind)
     expect(out.posts).not.toHaveBeenCalled();
   });
 
+  it("keeps the selected file visible after a background connection failure but still verifies before submitting", async () => {
+    let reads = 0;
+    const out = setup(modal(), async () => json(receipt), async () => {
+      reads += 1;
+      return reads === 2 ? json({ error: { code: "internal", message: "Transient connection failure" } }, 503)
+        : json({ instructor: instructor(1) });
+    });
+    const { input, file } = await choose();
+    fireEvent.focus(window);
+    await waitFor(() => expect(out.gets).toHaveBeenCalledTimes(2));
+    expect(screen.getByText("private.docx")).toBeVisible();
+    expect(input.files?.[0]).toBe(file);
+    expect(screen.queryByText(/Could not confirm your sign-in status/)).not.toBeInTheDocument();
+    expect(out.posts).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: initial }));
+    await waitFor(() => expect(out.posts).toHaveBeenCalledTimes(1));
+    expect(reads).toBeGreaterThanOrEqual(3);
+  });
+
   it("keeps the upload form visible while its success awaits the post-response account check", async () => {
     const checked = deferred<Response>();
     let reads = 0;

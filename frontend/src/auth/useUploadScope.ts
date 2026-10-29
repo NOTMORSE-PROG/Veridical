@@ -40,7 +40,7 @@ export function useUploadScope(contextKey?: string) {
     validation.current += 1;
     if (alive.current) setStatus("lost");
   }, []);
-  const verify = useCallback(function verify(afterPending = false): Promise<void> {
+  const verify = useCallback(function verify(afterPending = false, quiet = false): Promise<void> {
     if (inFlightValidation.current && isCurrent()) {
       // A request completion must initiate its own check after the response;
       // a focus read that began during the POST is not that later check.
@@ -58,7 +58,7 @@ export function useUploadScope(contextKey?: string) {
           invalidate(); client.clear(); client.setQueryData(ME_QUERY_KEY, null);
           throw new StaleUploadContextError();
         }
-        setStatus("unavailable");
+        setStatus(previous => quiet && previous === "ready" ? previous : "unavailable");
         throw new UploadSessionUnavailableError();
       }
       if (!isCurrent() || generation !== validation.current) throw new StaleUploadContextError();
@@ -87,7 +87,7 @@ export function useUploadScope(contextKey?: string) {
     const unsubscribe = client.getQueryCache().subscribe(() => {
       if (!isCurrent()) invalidate();
     });
-    const check = () => { if (document.visibilityState !== "hidden") void verify().catch(() => {}); };
+    const check = () => { if (document.visibilityState !== "hidden") void verify(false, true).catch(() => {}); };
     window.addEventListener("focus", check);
     document.addEventListener("visibilitychange", check);
     void verify().catch(() => {});

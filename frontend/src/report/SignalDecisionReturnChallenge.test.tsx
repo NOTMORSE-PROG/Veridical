@@ -74,6 +74,19 @@ const BASE_REPORT: ReportOut = {
 };
 
 describe("Adversarial Challenge: Return for Revision & Unresolved Criteria Preservation", () => {
+  it("opens the mounted criteria step from the decision recovery link and preserves return context", () => {
+    renderWithProviders(<SignalDecisionPanel report={BASE_REPORT} manuscriptLabel="Control" />, {
+      route: "/report/5?review_step=decision&desk_return=%2Fdashboard&module=citation_integrity",
+      path: "/report/:checkRunId",
+    });
+    const link = screen.getByRole("link", { name: "Review unresolved criteria." });
+    const target = new URL(link.getAttribute("href")!, "https://example.test");
+    expect(target.searchParams.get("review_step")).toBe("criteria");
+    expect(target.searchParams.get("desk_return")).toBe("/dashboard");
+    expect(target.searchParams.get("module")).toBe("citation_integrity");
+    expect(target.hash).toBe("#review-criteria");
+  });
+
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();

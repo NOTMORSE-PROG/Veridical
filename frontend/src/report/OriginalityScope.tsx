@@ -21,8 +21,7 @@ export function OriginalityScope({
   if (scope.not_compared_reason === "no_text") {
     return (
       <p className="signal-originality-scope">
-        Originality and reuse: no readable text was found in this manuscript, so it was not compared against the
-        Library.
+        Originality and reuse: no eligible text was available for this comparison, so the Library comparison did not run. This is not evidence of originality.
       </p>
     );
   }
