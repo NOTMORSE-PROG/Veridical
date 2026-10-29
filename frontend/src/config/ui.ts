@@ -44,6 +44,9 @@ export const STORED_FILES_PAGE_SIZE = 10;
 // Manuscripts at least this large upload in the background (V-090) so the
 // instructor is not held on the upload dialog while the server prepares them.
 export const BACKGROUND_UPLOAD_MIN_BYTES = 10 * 1024 * 1024;
+// While the server is busy with another file transfer, a background upload
+// waits and retries instead of failing; it gives up after this many tries.
+export const BACKGROUND_UPLOAD_BUSY_RETRY = { delayMs: 15_000, maxAttempts: 12 } as const;
 export const REVIEW_DESK_PAGE_SIZE = 20;
 export const FLAG_LIST_INITIAL_COUNT = 8;
 export const FLAG_LIST_BATCH_COUNT = 8;

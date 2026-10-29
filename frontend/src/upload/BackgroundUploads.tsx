@@ -6,10 +6,11 @@ import { api, ApiError } from "../api/client";
 import { directManuscriptUpload } from "../api/directManuscriptUpload";
 import { validateIngestReceipt } from "../api/uploadOutcome";
 import { useUploadScope } from "../auth/useUploadScope";
+import { BACKGROUND_UPLOAD_BUSY_RETRY } from "../config/ui";
 import { ActionLink } from "../ui/ActionLink";
 import { Button } from "../ui/Button";
 
-export type UploadPhase = "sending" | "preparing" | "done" | "failed";
+export type UploadPhase = "waiting" | "sending" | "preparing" | "done" | "failed";
 
 export interface BackgroundUpload {
   id: string;
@@ -47,7 +48,7 @@ export function BackgroundUploadsProvider({ children }: { children: ReactNode })
   const update = useCallback((id: string, patch: Partial<BackgroundUpload>) =>
     setUploads((current) => current.map((item) => item.id === id ? { ...item, ...patch } : item)), []);
 
-  const run = useCallback(async (id: string, file: File) => {
+  const run = useCallback(async (id: string, file: File, busyAttempt = 0): Promise<void> => {
     const attempt = scope.capture();
     update(id, { phase: "sending", percent: directUpload ? 0 : null, error: undefined, serverOwned: false });
     try {
@@ -65,6 +66,14 @@ export function BackgroundUploadsProvider({ children }: { children: ReactNode })
       void queryClient.invalidateQueries({ queryKey: ["manuscripts"] });
       void queryClient.invalidateQueries({ queryKey: ["stats"] });
     } catch (error) {
+      // The server takes one streamed transfer at a time; another upload in
+      // progress is a reason to wait, not a failure.
+      if (error instanceof ApiError && error.code === "document_preparation_busy" && busyAttempt + 1 < BACKGROUND_UPLOAD_BUSY_RETRY.maxAttempts) {
+        update(id, { phase: "waiting", percent: null });
+        await new Promise((resolve) => setTimeout(resolve, BACKGROUND_UPLOAD_BUSY_RETRY.delayMs));
+        if (files.current.has(id)) return run(id, file, busyAttempt + 1);
+        return;
+      }
       update(id, { phase: "failed", percent: null,
         error: error instanceof ApiError ? error.message : "The upload did not finish. Try again, or check the Review Desk for a saved record." });
     }
@@ -89,7 +98,7 @@ export function BackgroundUploadsProvider({ children }: { children: ReactNode })
 
   // Closing the tab only stops an upload while its bytes are still on the
   // way; after that the server finishes on its own.
-  const leaving = uploads.some((item) => (item.phase === "sending" || item.phase === "preparing") && !item.serverOwned);
+  const leaving = uploads.some((item) => (item.phase === "waiting" || item.phase === "sending" || item.phase === "preparing") && !item.serverOwned);
   useEffect(() => {
     if (!leaving) return;
     const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); };
@@ -115,7 +124,8 @@ function UploadTray({ uploads, onDismiss, onRetry }: { uploads: BackgroundUpload
       {uploads.map((item) => <li key={item.id} className="signal-upload-tray__item" data-phase={item.phase}>
         <div className="signal-upload-tray__name"><strong>{item.fileName}</strong><span>{sizeLabel(item.size)}</span></div>
         <p role="status" aria-live="polite" className="signal-upload-tray__state">
-          {item.phase === "sending" ? item.percent === null ? "Sending file" : `Sending file ${item.percent}%`
+          {item.phase === "waiting" ? "Waiting for another upload to finish. It will start on its own."
+            : item.phase === "sending" ? item.percent === null ? "Sending file" : `Sending file ${item.percent}%`
             : item.phase === "preparing" ? "Preparing: reading the pages. You can keep working or close this tab."
             : item.phase === "done" ? "Ready." : item.error}
         </p>
