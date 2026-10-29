@@ -59,6 +59,7 @@ from reportlab.platypus import (
 from app.checks.escalation import NEEDS_REVIEW_OUTCOMES as _NEEDS_REVIEW_OUTCOMES_ENUM
 from app.config import get_settings
 from app.library.passage_indexing import indexing_scope_sentences
+from app.report.automatic_grade import automatic_grade_caution, automatic_grade_lines
 from app.report.rule_facts import rule_facts_copy, rule_facts_presentation
 from app.report.schemas import (
     CriterionResultOut,
@@ -946,6 +947,21 @@ def _criterion_flowable(
         parts.append(
             Paragraph("<b>Recorded system note:</b> " + escape(row.reason), styles["cell"])
         )
+    if not row.resolution:
+        parts.extend(
+            Paragraph(escape(line), styles["cell_caption"]) for line in automatic_grade_lines(row)
+        )
+        caution = automatic_grade_caution(row)
+        if caution:
+            # An unconfirmed evidence check is a weaker state than a routine
+            # caption, so it takes the document's "needs attention" tone
+            # (as the screen marks it) instead of faint caption ink.
+            caution_style = ParagraphStyle(
+                "grade_caution",
+                parent=styles["caption_bold"],
+                textColor=_TONE_COLORS["caution"][1],
+            )
+            parts.append(Paragraph(escape(caution), caution_style))
     facts = _rule_facts_flowables(row, styles)
     if facts and not row.resolution:
         parts[0].keepWithNext = True

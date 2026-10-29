@@ -1,0 +1,7 @@
+{
+  "agreed": "Graded automatically: {agreeing} of {passes} grading passes chose this grade.",
+  "middle_of_three": "Graded automatically: the three grading passes disagreed, so the middle level was used.",
+  "lower_of_two": "Graded automatically: two grading passes disagreed and no third pass settled it with quotes VERIDICAL could check, so the lower of the two grades was used.",
+  "single_verified_pass": "Graded automatically: only one grading pass settled on a grade with quotes VERIDICAL could check, so its grade was used.",
+  "caution": "Evidence check not confirmed: {reason}"
+}

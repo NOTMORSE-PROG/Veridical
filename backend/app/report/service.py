@@ -56,6 +56,7 @@ from app.models.manuscript import Manuscript, ManuscriptPassageArchive
 from app.models.rubric import Criterion, Rubric
 from app.models.run import CheckResult, CheckRun, Flag, ReadinessReport
 from app.report.assessment import assessment_write, lock_assessment
+from app.report.automatic_grade import clean_caution
 from app.report.cited_work import cited_work
 from app.report.document_projection import project_docx_source
 from app.report.docx_images import manuscript_docx_image_for
@@ -377,7 +378,7 @@ def _automatic_grade(result: CheckResult, detail: dict, resolution: object) -> d
     caution = detail.get("support_caution")
     return {
         "decision_basis": basis if basis in _DECISION_BASES else None,
-        "support_caution": caution if isinstance(caution, str) and caution.strip() else None,
+        "support_caution": clean_caution(caution),
         "agreeing_passes": sum(
             normalize_verdict(vote) == normalize_verdict(verdict) for vote in real
         )

@@ -362,6 +362,13 @@ class PublicCriterionResultOut(BaseModel):
     reasoning: str | None
     reason: str | None
     evidence: list[EvidenceItem]
+    # V-087: how an automatic grade was chosen and any caution about its
+    # evidence. They describe the system's grading, not the instructor's
+    # private reasoning, and are empty once the instructor sets the grade.
+    decision_basis: Literal["single_verified_pass", "lower_of_two", "middle_of_three"] | None = None
+    support_caution: str | None = None
+    agreeing_passes: int | None = None
+    grading_passes: int | None = None
     # V-069 AC5: the adviser view carries the level too, same as the
     # Saved rule observations deliberately publish only their typed fields,
     # including recorded heading text, never arbitrary result detail.

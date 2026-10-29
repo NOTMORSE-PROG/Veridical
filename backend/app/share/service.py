@@ -18,7 +18,12 @@ from app.models.run import CheckResult, CheckRun, Flag
 from app.models.share import ShareLink
 from app.pipeline.service import get_check_run
 from app.report.assessment import lock_assessment
-from app.report.schemas import PublicCriterionResultOut, PublicReportOut, ReportOut
+from app.report.schemas import (
+    CriterionResultOut,
+    PublicCriterionResultOut,
+    PublicReportOut,
+    ReportOut,
+)
 from app.report.service import flags_for_check_run, report_out_for_check_run
 from app.share.schemas import (
     PublicFindingDetailOut,
@@ -228,6 +233,20 @@ async def revoke_share_link(session: AsyncSession, check_run_id: int, instructor
     await session.commit()
 
 
+def _automatic_grade_fields(row: CriterionResultOut) -> dict:
+    """How an automatic grade was chosen, for the adviser. The report already
+    leaves these empty once the instructor has set the grade; this checks
+    again so a grade the instructor set is never shown as automatic here."""
+    if row.resolution is not None:
+        return {}
+    return {
+        "decision_basis": row.decision_basis,
+        "support_caution": row.support_caution,
+        "agreeing_passes": row.agreeing_passes,
+        "grading_passes": row.grading_passes,
+    }
+
+
 def _to_public_report(report: ReportOut) -> PublicReportOut:
     """BUG-044 fix: an explicit field-by-field projection, not a reuse of
     `ReportOut` or a blind `.model_dump()` reconstruction — every field
@@ -282,6 +301,7 @@ def _to_public_report(report: ReportOut) -> PublicReportOut:
                 # showing the AI's own superseded evidence as if it were
                 # final.
                 resolved=r.resolution is not None,
+                **_automatic_grade_fields(r),
             )
             for r in report.results
         ],

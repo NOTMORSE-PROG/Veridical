@@ -624,6 +624,13 @@ def test_shared_report_public_schema_is_an_exact_allow_list(
         # a hand-resolved criterion had no signal at all on the public
         # view and fell through to "AI-graded."
         "resolved",
+        # V-087: how an automatic grade was chosen and any caution about its
+        # evidence, deliberately published to the adviser view. They describe
+        # the system's grading, never the instructor's private reasoning.
+        "decision_basis",
+        "support_caution",
+        "agreeing_passes",
+        "grading_passes",
     }
 
 
