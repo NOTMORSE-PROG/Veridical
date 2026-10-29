@@ -5407,8 +5407,8 @@
   }
 
   .signal-settings-nav {
-    inline-size: fit-content;
-    max-inline-size: 100%;
+    inline-size: 100%;
+    align-items: center;
     position: sticky;
     z-index: var(--signal-z-raised);
     inset-block-start: var(--signal-workspace-header-height);
@@ -5420,7 +5420,13 @@
     border-radius: var(--signal-radius-panel);
     padding: var(--signal-space-3);
     background: var(--color-signal-surface);
-    box-shadow: var(--signal-shadow-raised);
+  }
+
+  .signal-settings-nav__label {
+    margin-inline-end: var(--signal-space-2);
+    color: var(--color-signal-ink-secondary);
+    font-size: var(--signal-type-label);
+    font-weight: var(--signal-weight-semibold);
   }
 
   .signal-settings-nav a {
@@ -5429,6 +5435,13 @@
     color: var(--color-signal-link);
     font-size: var(--signal-type-label);
     font-weight: var(--signal-weight-semibold);
+  }
+
+  .signal-settings-nav a {
+    display: inline-flex;
+    align-items: center;
+    min-block-size: var(--signal-control-height);
+    border: var(--signal-border-hairline) solid var(--color-signal-border);
   }
 
   .signal-settings-nav a:hover {
@@ -8960,4 +8973,6 @@
   .signal-upload-tray__item[data-phase="failed"] .signal-upload-tray__state { color: var(--color-signal-not-ready-text); }
   .signal-upload-tray progress { inline-size: 100%; accent-color: var(--color-signal-link); }
   .signal-upload-tray__actions { display: flex; flex-wrap: wrap; gap: var(--signal-space-2); }
+  /* Audit rows: a real button for each entry's details, the same width on every row. */
+  .signal-audit-detail { min-inline-size: max-content; white-space: nowrap; }
 }

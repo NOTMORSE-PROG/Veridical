@@ -28,6 +28,8 @@ import { auditEventOrigin, type AuditEventOrigin } from "./eventOrigin";
 import { rememberRouteReturnFocus, useRouteFocus } from "../routing/useRouteFocus";
 import { readAuditReviewOrigin } from "../routing/auditReturn";
 import { auditOwnerCurrent, useAuditLogDetail, useAuditLogPage, useAuditOwner, type AuditOwner } from "./useAudit";
+import { Button } from "../ui/Button";
+import { CHECK_KIND_SHORT_LABEL } from "../domain/checkKind";
 
 const FILTERS: ReadonlyArray<{ label: string; value?: string; eventType?: string; eventTypePrefix?: string }> = [
   { label: "All" },
@@ -134,7 +136,11 @@ const EVENT_EXPLANATIONS_BY_MODE: Partial<Record<string, Partial<Record<LLMMode,
 };
 
 function humanizeIdentifier(value: string): string {
-  const words = value.replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+  // Check names read the way the rest of the product names them
+  // ("statistical_forensics_..." becomes "Statistical checks ...").
+  const kind = Object.keys(CHECK_KIND_SHORT_LABEL).find((key) => value.startsWith(`${key}_`));
+  const named = kind ? `${CHECK_KIND_SHORT_LABEL[kind]} ${value.slice(kind.length + 1).replace(/[_-]+/g, " ")}`.replace(/\bchecks check\b/i, "checks") : value;
+  const words = named.replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
   if (!words) return "Recorded activity";
   return words[0].toUpperCase() + words.slice(1);
 }
@@ -656,13 +662,10 @@ function OwnedAuditLogPage({ owner }: { owner: AuditOwner }) {
                         <EventContent row={row} />
                       </span>
                       <span role="cell" className="justify-self-end">
-                        <button
-                          type="button"
-                          onClick={() => setParam("detail", String(row.id))}
-                          className="inline-flex min-h-8 items-center text-sm font-medium text-link underline hover:text-link-hover"
-                        >
-                          Detail
-                        </button>
+                        <Button variant="secondary" className="signal-audit-detail" onClick={() => setParam("detail", String(row.id))}
+                          aria-label={`View details for entry #${row.id}`}>
+                          View details
+                        </Button>
                       </span>
                     </div>
                   );
@@ -709,13 +712,10 @@ function OwnedAuditLogPage({ owner }: { owner: AuditOwner }) {
                             <EventContent row={row} />
                           </span>
                           <span role="cell" className="justify-self-end">
-                            <button
-                              type="button"
-                              onClick={() => setParam("detail", String(row.id))}
-                              className="inline-flex min-h-8 items-center text-sm font-medium text-link underline hover:text-link-hover"
-                            >
-                              Detail
-                            </button>
+                            <Button variant="secondary" className="signal-audit-detail" onClick={() => setParam("detail", String(row.id))}
+                              aria-label={`View details for entry #${row.id}`}>
+                              View details
+                            </Button>
                           </span>
                         </div>
                       ))}

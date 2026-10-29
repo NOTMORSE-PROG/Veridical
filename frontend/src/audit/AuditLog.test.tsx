@@ -113,11 +113,23 @@ describe("AuditLogPage", () => {
       vi.stubGlobal("fetch", stubFetchByPath({ "/audit": { ...PAGE, items } }));
       renderWithProviders(<AuditLogPage />, { route: "/audit" });
       await screen.findByRole("table");
-      expect(screen.getAllByRole("button", { name: "Detail" })).toHaveLength(2);
+      expect(screen.getAllByRole("button", { name: /^View details for entry #/ })).toHaveLength(2);
       expect(screen.queryByText("Automated:")).not.toBeInTheDocument();
       expect(screen.queryByText("Grouped entries")).not.toBeInTheDocument();
     },
   );
+
+  it("names checks in event labels the way the rest of the product does", async () => {
+    const rows = [
+      { ...PAGE.items[0], id: 50, event_type: "statistical_forensics_source_scope_recorded", prompt_type: null },
+      { ...PAGE.items[0], id: 51, event_type: "statistical_forensics_check_computed", prompt_type: null },
+    ];
+    vi.stubGlobal("fetch", stubFetchByPath({ "/audit": { ...PAGE, items: rows, total: 2 } }));
+    renderWithProviders(<AuditLogPage />, { route: "/audit" });
+    expect(await screen.findByText("Statistical checks source scope recorded")).toBeInTheDocument();
+    expect(screen.queryByText(/forensics/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "View details for entry #50" })).toBeInTheDocument();
+  });
 
   it("shows the actual historical Return and full reason without expanding Technical", async () => {
     const row = { ...PAGE.items[0], event_type: "report_decided", prompt_type: null };
@@ -127,7 +139,7 @@ describe("AuditLogPage", () => {
         pending_criteria: [{ criterion_id: 35, check_result_id: 178, outcome: "escalated" }] },
     } }));
     renderWithProviders(<AuditLogPage />, { route: "/audit" });
-    fireEvent.click((await screen.findAllByRole("button", { name: "Detail" }))[0]);
+    fireEvent.click((await screen.findAllByRole("button", { name: /^View details for entry #/ }))[0]);
     const dialog = screen.getByRole("dialog");
     expect(await within(dialog).findByText("Returned for revision")).toBeVisible();
     expect(within(dialog).getByText(note)).toBeVisible();
@@ -143,7 +155,7 @@ describe("AuditLogPage", () => {
       ...row, payload: { instructor_id: 2, resolution: "mark_level", criterion_id: 35, check_result_id: 178, new_score: 50, ai_majority_verdict: "Proficient", reason: "SANDBOX actual recorded judgment reason." },
     } }));
     renderWithProviders(<AuditLogPage />, { route: "/audit" });
-    fireEvent.click((await screen.findAllByRole("button", { name: "Detail" }))[0]);
+    fireEvent.click((await screen.findAllByRole("button", { name: /^View details for entry #/ }))[0]);
     const dialog = screen.getByRole("dialog");
     expect(await within(dialog).findByText(/selected level name is unavailable/)).toBeVisible();
     expect(within(dialog).getByText("Instructor #2")).toBeVisible();
@@ -156,7 +168,7 @@ describe("AuditLogPage", () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/audit": { ...PAGE, page: 2, total: 60 }, "/audit/42": DETAIL }));
     renderWithProviders(<AuditLogPage />, { route: "/audit?page=2" });
     expect(await screen.findByText("Page 2 of 3")).toBeVisible();
-    fireEvent.click(screen.getAllByRole("button", { name: "Detail" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: /^View details for entry #/ })[0]);
     await screen.findByRole("dialog");
     expect(screen.getByText("Page 2 of 3")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
@@ -237,7 +249,7 @@ describe("AuditLogPage", () => {
     denied = true;
     await client.invalidateQueries({ queryKey: ["audit-log"] });
     await waitFor(() => expect(screen.queryByText(/PRIVATE-OLD-GROUP/)).not.toBeInTheDocument());
-    expect(screen.queryByRole("button", { name: "Detail" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^View details for entry #/ })).not.toBeInTheDocument();
   });
 
   it("revokes old private content immediately when the authenticated reader changes", async () => {
@@ -270,7 +282,7 @@ describe("AuditLogPage", () => {
     }));
     renderWithProviders(<AuditLogPage />, { route: "/audit", path: "/audit" });
     expect((await screen.findAllByText("Stored file deleted")).length).toBe(1);
-    fireEvent.click(screen.getAllByRole("button", { name: "Detail" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: /^View details for entry #/ })[0]);
     expect(await screen.findByText(/An instructor deleted the uploaded file and its extracted text/))
       .toHaveTextContent("Saved reports, decisions, comparison evidence and audit history are kept.");
     expect(screen.getByText(/cannot be used as a source in future originality checks/)).toBeInTheDocument();
@@ -288,7 +300,7 @@ describe("AuditLogPage", () => {
     const rows = await within(table).findAllByRole("row");
     expect(rows[1]).toHaveTextContent("Entry #42");
     expect(rows[2]).toHaveTextContent("Entry #41");
-    fireEvent.click(within(rows[1]).getByRole("button", { name: "Detail" }));
+    fireEvent.click(within(rows[1]).getByRole("button", { name: /^View details for entry #/ }));
     expect(await screen.findByText(DETAIL.created_at)).toBeInTheDocument();
     expect(screen.getByText("Stored time")).toBeInTheDocument();
     expect(screen.getByText(/Entry numbers identify records, not verified event times/)).toBeInTheDocument();
@@ -313,7 +325,7 @@ describe("AuditLogPage", () => {
     const rows = within(table).getAllByRole("row");
     expect(rows[2]).toHaveTextContent("Entry #42");
     expect(rows[3]).toHaveTextContent("Entry #38");
-    expect(within(table).getAllByRole("button", { name: "Detail" })).toHaveLength(2);
+    expect(within(table).getAllByRole("button", { name: /^View details for entry #/ })).toHaveLength(2);
     expect(within(table).getByRole("button", { name: "Hide" })).toHaveAttribute("aria-expanded", "true");
   });
 
@@ -374,7 +386,7 @@ describe("AuditLogPage", () => {
     );
     renderWithProviders(<AuditLogPage />, { route: "/audit", path: "/audit" });
     await screen.findAllByText("AI call");
-    fireEvent.click(screen.getAllByRole("button", { name: "Detail" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: /^View details for entry #/ })[0]);
     expect(await screen.findByText(`Audit entry #42`)).toBeInTheDocument();
     expect(await screen.findByRole("heading", { name: "What this records" })).toBeInTheDocument();
     expect(screen.getByText(/completed an automated review step/)).toBeInTheDocument();
@@ -412,7 +424,7 @@ describe("AuditLogPage", () => {
     await screen.findAllByText("Flag overridden");
     expect(screen.queryByText(/grading passes|0\.91/)).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getAllByRole("button", { name: "Detail" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: /^View details for entry #/ })[0]);
     expect(await screen.findByText(/agreement_score:\s*0\.91/)).toBeInTheDocument();
     expect(screen.queryByText(/grading passes/)).not.toBeInTheDocument();
   });
@@ -426,7 +438,7 @@ describe("AuditLogPage", () => {
     renderWithProviders(<AuditLogPage />, { route: "/audit", path: "/audit" });
     await screen.findAllByText("AI call");
     expect(screen.queryByText("Chapter1-3_FinalDefense.pdf")).not.toBeInTheDocument();
-    fireEvent.click(screen.getAllByRole("button", { name: "Detail" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: /^View details for entry #/ })[0]);
     expect(await screen.findByText("Chapter1-3_FinalDefense.pdf")).toBeInTheDocument();
   });
 
@@ -489,7 +501,7 @@ describe("AuditLogPage", () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/audit": { ...PAGE, items } }));
     renderWithProviders(<AuditLogPage />, { route: "/audit" });
     await screen.findByRole("table");
-    expect(screen.getAllByRole("button", { name: "Detail" })).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: /^View details for entry #/ })).toHaveLength(2);
     expect(screen.queryByText("Grouped entries")).not.toBeInTheDocument();
   });
 
@@ -534,7 +546,7 @@ describe("AuditLogPage", () => {
     );
     renderWithProviders(<AuditLogPage />, { route: "/audit", path: "/audit" });
     await screen.findAllByText("AI call");
-    fireEvent.click(screen.getAllByRole("button", { name: "Detail" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: /^View details for entry #/ })[0]);
     expect(await screen.findByRole("alert")).toHaveTextContent("No audit entry 42.");
     expect(screen.queryByText("Loading audit entry.")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Retry audit entry" })).toBeInTheDocument();
@@ -609,11 +621,11 @@ describe("AuditLogPage", () => {
     // one is an aria-hidden +/- glyph inside a button whose accessible
     // name is the group's own summary text, not this fixed string.
     expect((await screen.findAllByRole("button", { name: "Show all" })).length).toBe(1);
-    expect(screen.queryAllByRole("button", { name: "Detail" })).toHaveLength(0);
+    expect(screen.queryAllByRole("button", { name: /^View details for entry #/ })).toHaveLength(0);
 
     // Shared expand state -- toggling the desktop control expands both.
     fireEvent.click(screen.getByRole("button", { name: "Show all" }));
-    expect(await screen.findAllByRole("button", { name: "Detail" })).toHaveLength(3);
+    expect(await screen.findAllByRole("button", { name: /^View details for entry #/ })).toHaveLength(3);
   });
 
   it("BUG-219: never collapses a fake-mode row and a real-mode row into one group, even when adjacent with the same event_type and manuscript", async () => {
@@ -630,7 +642,7 @@ describe("AuditLogPage", () => {
     renderWithProviders(<AuditLogPage />, { route: "/audit", path: "/audit" });
     // Two ungrouped single rows, each with its own Detail button -- never
     // one "2 x ..." summary that would have to pick just one mode to state.
-    expect((await screen.findAllByRole("button", { name: "Detail" })).length).toBe(2);
+    expect((await screen.findAllByRole("button", { name: /^View details for entry #/ })).length).toBe(2);
     expect(screen.queryByRole("button", { name: "Show all" })).not.toBeInTheDocument();
   });
 
@@ -674,7 +686,7 @@ describe("AuditLogPage", () => {
       }),
     );
     renderWithProviders(<AuditLogPage />, { route: "/audit", path: "/audit" });
-    fireEvent.click((await screen.findAllByRole("button", { name: "Detail" }))[0]);
+    fireEvent.click((await screen.findAllByRole("button", { name: /^View details for entry #/ }))[0]);
     expect(await screen.findByText(/using simulated fixture responses/)).toBeInTheDocument();
     expect(screen.getByText(/Do not treat the simulated result as a real AI assessment/)).toBeInTheDocument();
     expect(screen.queryByText(/preserved the exact inputs and response for reproducibility/)).not.toBeInTheDocument();
@@ -708,7 +720,7 @@ describe("AuditLogPage", () => {
     expect(screen.getAllByText("Automated review step").length).toBe(1);
     expect(screen.getAllByText("AI call").length).toBe(1); // the real-mode row only
 
-    const detailButtons = screen.getAllByRole("button", { name: "Detail" });
+    const detailButtons = screen.getAllByRole("button", { name: /^View details for entry #/ });
     for (const [index, mode] of [
       [0, "fake"],
       [1, "unknown"],
@@ -735,7 +747,7 @@ describe("AuditLogPage", () => {
       }),
     );
     renderWithProviders(<AuditLogPage />, { route: "/audit", path: "/audit" });
-    fireEvent.click((await screen.findAllByRole("button", { name: "Detail" }))[0]);
+    fireEvent.click((await screen.findAllByRole("button", { name: /^View details for entry #/ }))[0]);
     expect(
       await screen.findByText(/This entry records a completed automated review step. It does not establish whether the responses came from a real external model or simulated fixtures/),
     ).toBeInTheDocument();
@@ -750,7 +762,7 @@ describe("AuditLogPage", () => {
     ).toBeInTheDocument();
     expect(screen.queryByText(/^Audit entries cannot be edited or deleted\.?$/)).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getAllByRole("button", { name: "Detail" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: /^View details for entry #/ })[0]);
     expect(await screen.findByText(/VERIDICAL does not allow this entry to be edited or deleted/)).toBeInTheDocument();
     expect(screen.getByText(/A database trigger rejects UPDATE and DELETE while enabled/)).toBeInTheDocument();
     expect(screen.getByText(/Privileged database access can bypass or disable this safeguard/)).toBeInTheDocument();
