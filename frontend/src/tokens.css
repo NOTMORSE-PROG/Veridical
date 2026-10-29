@@ -334,6 +334,8 @@
   --signal-reading-bar-height: var(--signal-control-height-coarse);
   /* Set at runtime to the pinned review-step height; zero when not pinned. */
   --signal-workspace-steps-height: 0px;
+  /* Set while the bulk selection bar is fixed to the screen (V-089). */
+  --signal-bulk-bar-height: 0px;
   --signal-prose-width: 72ch;
   --signal-form-width: 30rem;
   --signal-workbench-width: 90rem;
