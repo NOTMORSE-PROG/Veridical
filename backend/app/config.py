@@ -989,6 +989,9 @@ class Settings(BaseSettings):
     storage_allow_unscoped_access: bool = False
     source_reader_max_mb: int = Field(default=256, gt=0)
     source_reader_memory_threshold_bytes: int = Field(default=1_048_576, ge=0)
+    # Longest a transaction holding a manuscript's source lock may sit idle
+    # while the source is rendered or streamed; 0 keeps the server's limit.
+    source_read_idle_transaction_timeout_seconds: int = Field(default=1800, ge=0)
 
     @field_validator("storage_namespace")
     @classmethod

@@ -13,7 +13,13 @@ from sqlalchemy import select
 
 from app.config import get_settings
 from app.db import get_session_factory
-from app.errors import ConflictError, GoneError, NotFoundError, RateLimitedError
+from app.errors import (
+    ConflictError,
+    GoneError,
+    NotFoundError,
+    RateLimitedError,
+    failure_summary,
+)
 from app.models.enums import CheckRunStatus
 from app.models.manuscript import Manuscript
 from app.models.run import CheckRun, ReadinessReport
@@ -219,9 +225,9 @@ class ExportJobs:
             job.cleanup()
             raise
         except Exception as exc:
-            # The exception type only: its message can quote manuscript text.
+            # Class and location only: the message can quote manuscript text.
             logging.getLogger(__name__).warning(
-                "Report PDF preparation failed: %s", type(exc).__name__, exc_info=False
+                "Report PDF preparation failed: %s", failure_summary(exc), exc_info=False
             )
             job.state, job.message = (
                 "failed",

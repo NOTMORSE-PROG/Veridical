@@ -6,6 +6,8 @@ never be conflated with findings: an API being down is not an integrity
 problem, N/A is not a pass, unverifiable is not fake.
 """
 
+import os
+import traceback
 from typing import ClassVar
 
 
@@ -185,3 +187,25 @@ HTTP_STATUS: dict[str, int] = {
     # loop so it only ever reaches HTTP after repeated failure.
     "parse_failed": 422,
 }
+
+
+_APP_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def failure_summary(exc: BaseException) -> str:
+    """Name a failure for the operator log without its message.
+
+    A message can quote manuscript text, so this gives only the exception
+    class and the innermost frame of our own code, for example
+    "InterfaceError at app/storage/access.py:31 (lock_source)".
+    """
+    ours = [
+        frame
+        for frame in traceback.extract_tb(exc.__traceback__)
+        if os.path.abspath(frame.filename).startswith(_APP_DIR + os.sep)
+    ]
+    if not ours:
+        return type(exc).__name__
+    frame = ours[-1]
+    path = os.path.relpath(os.path.abspath(frame.filename), os.path.dirname(_APP_DIR))
+    return f"{type(exc).__name__} at {path.replace(os.sep, '/')}:{frame.lineno} ({frame.name})"

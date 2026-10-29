@@ -59,6 +59,9 @@ class StubSession:
     async def refresh(self, value, **kwargs):
         self.refreshes.append(kwargs)
 
+    async def execute(self, statement):
+        return None
+
 
 def install_bound_stubs(monkeypatch, current, **changes):
     calls = install_snapshot_stubs(monkeypatch, current, **changes)
