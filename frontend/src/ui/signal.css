@@ -2717,7 +2717,7 @@
   /* The selected tile's darker background needs the stronger text tone. */
   .signal-workspace-steps button[aria-current="step"] .signal-workspace-steps__status { color: var(--color-signal-ink-secondary); }
   /* Keeps focused content clear of the pinned steps (height set by WorkspaceSteps). */
-  .signal-document-inspector { scroll-padding-block-start: var(--signal-workspace-steps-height, 0px); }
+  .signal-document-inspector { scroll-padding-block-start: var(--signal-workspace-steps-height); }
   .signal-workspace-step-kicker { margin: 0 0 var(--signal-rhythm-attached); }
   .signal-workspace-return { padding-inline: var(--signal-space-5); margin-block-end: var(--signal-rhythm-control); }
   .signal-workspace-step-footer {
@@ -2732,9 +2732,7 @@
   /* Back stays left and Continue right, so each sits in the same place on every step. */
   .signal-workspace-step-footer > .signal-button--primary { margin-inline-start: auto; }
   /* In a short window (or at high zoom) pinned steps would take half the pane. */
-  @media (max-height: 600px) {
-    .signal-workspace-steps { position: static; }
-  }
+  .signal-workspace-steps[data-pinned="false"] { position: static; }
   .signal-report-record { gap: var(--signal-rhythm-related); }
   .signal-report-pending-list { margin: 0; padding-inline-start: var(--signal-space-5); }
 

@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef } from "react";
 import type { ReportOut } from "../api/types";
 import { DECISION_LABEL } from "../domain/decisionTone";
 import { REPORT_STEPS, type ReportStep } from "../report/reviewStep";
+import { WORKSPACE_STEPS_MAX_PINNED_SHARE } from "../config/ui";
 import { Button } from "../ui/Button";
 
 export interface WorkspaceStepCounts {
@@ -33,13 +34,14 @@ export function WorkspaceStepNavigation({ current, counts, onSelect }: { current
     const pane = nav?.parentElement;
     if (!nav || !pane) return;
     const measure = () => {
-      const pinned = getComputedStyle(nav).position === "sticky";
-      pane.style.setProperty("--signal-workspace-steps-height", pinned ? `${nav.getBoundingClientRect().height}px` : "0px");
+      const height = nav.getBoundingClientRect().height;
+      const pinned = pane.clientHeight > 0 && height <= pane.clientHeight * WORKSPACE_STEPS_MAX_PINNED_SHARE;
+      nav.dataset.pinned = String(pinned);
+      pane.style.setProperty("--signal-workspace-steps-height", pinned ? `${height}px` : "0px");
     };
     measure();
-    const observer = new ResizeObserver(measure); observer.observe(nav);
-    window.addEventListener("resize", measure);
-    return () => { observer.disconnect(); window.removeEventListener("resize", measure); pane.style.removeProperty("--signal-workspace-steps-height"); };
+    const observer = new ResizeObserver(measure); observer.observe(nav); observer.observe(pane);
+    return () => { observer.disconnect(); pane.style.removeProperty("--signal-workspace-steps-height"); };
   }, []);
   return <nav ref={ref} className="signal-workspace-steps" aria-label="Review steps">
     <ol>{REPORT_STEPS.map((step, index) => {
