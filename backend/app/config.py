@@ -194,6 +194,10 @@ class Settings(BaseSettings):
     # server-side picker pagination ships without changing application code.
     manuscript_list_default_page_size: int = 50
     manuscript_list_max_page_size: int = 200
+    # Highest page number the Review Desk, Library and Archive lists accept.
+    # Without a cap a huge page number overflowed the query's OFFSET and
+    # failed as a server error (BUG-536); audit history has its own below.
+    list_max_page: int = Field(default=10_000, gt=0)
     # Audit history has its own paging policy because it can grow far beyond
     # the manuscript list and exposes the full traceability record.
     audit_list_default_page_size: int = 50

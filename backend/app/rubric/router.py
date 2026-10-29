@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_instructor, get_upload_instructor
 from app.config import get_settings
-from app.db import get_session
+from app.db import DbInt, get_session
 from app.errors import FormatAIConfigurationError
 from app.llm import LLMNotConfiguredError, get_llm_client_for
 from app.models.instructor import Instructor
@@ -56,7 +56,7 @@ _CHUNK_BYTES = 1024 * 1024
 
 @router.get("/rubrics/{rubric_id}/document", response_model=RubricDocumentOut)
 async def rubric_document_route(
-    rubric_id: int,
+    rubric_id: DbInt,
     response: Response,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
@@ -69,7 +69,7 @@ async def rubric_document_route(
 
 @router.get("/rubrics/{rubric_id}/document/paragraphs", response_model=RubricParagraphsOut)
 async def rubric_paragraphs_route(
-    rubric_id: int,
+    rubric_id: DbInt,
     source_sha256: SourceHash,
     response: Response,
     session: Annotated[AsyncSession, Depends(get_session)],
@@ -87,7 +87,7 @@ async def rubric_paragraphs_route(
 
 @router.get("/rubrics/{rubric_id}/document/file")
 async def rubric_pdf_route(
-    rubric_id: int,
+    rubric_id: DbInt,
     source_sha256: SourceHash,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
@@ -104,7 +104,7 @@ async def rubric_pdf_route(
 
 @router.get("/rubrics/{rubric_id}/document/original")
 async def rubric_original_route(
-    rubric_id: int,
+    rubric_id: DbInt,
     source_sha256: SourceHash,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
@@ -121,8 +121,8 @@ async def rubric_original_route(
 
 @router.get("/rubrics/{rubric_id}/document/images/{image_index}")
 async def rubric_image_route(
-    rubric_id: int,
-    image_index: Annotated[int, PathParam(ge=0)],
+    rubric_id: DbInt,
+    image_index: Annotated[DbInt, PathParam(ge=0)],
     source_sha256: SourceHash,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
@@ -173,7 +173,7 @@ async def upload_rubric(
 
 @router.get("/rubrics/{rubric_id}", response_model=RubricOut)
 async def get_rubric_route(
-    rubric_id: int,
+    rubric_id: DbInt,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> RubricOut:
@@ -183,7 +183,7 @@ async def get_rubric_route(
 
 @router.put("/rubrics/{rubric_id}/criteria", response_model=RubricOut)
 async def put_rubric_criteria(
-    rubric_id: int,
+    rubric_id: DbInt,
     body: UpdateCriteriaRequest,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
@@ -194,7 +194,7 @@ async def put_rubric_criteria(
 
 @router.post("/rubrics/{rubric_id}/activate", response_model=RubricOut)
 async def activate_rubric_route(
-    rubric_id: int,
+    rubric_id: DbInt,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> RubricOut:
@@ -204,7 +204,7 @@ async def activate_rubric_route(
 
 @router.delete("/rubrics/{rubric_id}", status_code=204)
 async def delete_rubric_route(
-    rubric_id: int,
+    rubric_id: DbInt,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> None:

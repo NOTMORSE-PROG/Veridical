@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_instructor, get_upload_instructor
 from app.config import get_settings
-from app.db import get_session
+from app.db import DbInt, get_session
 from app.library.schemas import (
     LibraryDecisionIn,
     LibraryEntryStateOut,
@@ -77,10 +77,10 @@ def _submission_metadata(
 async def list_library_route(
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
-    # security-auditor (V-066 review): bounded so an out-of-range page is a
-    # 422, not a 500 deep inside the query.
-    page: Annotated[int, Query(ge=1)] = 1,
-    page_size: Annotated[int, Query(ge=1, le=200)] = 50,
+    # Bounded so an out-of-range page is a 422, not a 500 deep inside the
+    # query.
+    page: Annotated[DbInt, Query(ge=1, le=get_settings().list_max_page)] = 1,
+    page_size: Annotated[DbInt, Query(ge=1, le=200)] = 50,
     program: str | None = None,
     search: str | None = None,
     scope: LibraryListScope = "active",
@@ -125,7 +125,7 @@ async def submit_library_entry_route(
 
 @router.get("/library/{manuscript_id}", response_model=LibraryItemOut)
 async def get_library_item_route(
-    manuscript_id: int,
+    manuscript_id: DbInt,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> LibraryItemOut:
@@ -134,7 +134,7 @@ async def get_library_item_route(
 
 @router.patch("/library/{manuscript_id}", response_model=LibraryItemOut)
 async def update_library_entry_route(
-    manuscript_id: int,
+    manuscript_id: DbInt,
     body: LibraryEntryUpdate,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
@@ -144,7 +144,7 @@ async def update_library_entry_route(
 
 @router.post("/library/{manuscript_id}/decision", response_model=LibraryEntryStateOut)
 async def decide_library_entry_route(
-    manuscript_id: int,
+    manuscript_id: DbInt,
     body: LibraryDecisionIn,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_upload_instructor)],
@@ -156,7 +156,7 @@ async def decide_library_entry_route(
 
 @router.post("/library/{manuscript_id}/remove", response_model=LibraryEntryStateOut)
 async def remove_library_entry_route(
-    manuscript_id: int,
+    manuscript_id: DbInt,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_upload_instructor)],
 ) -> LibraryEntryStateOut:
@@ -165,7 +165,7 @@ async def remove_library_entry_route(
 
 @router.get("/library/{manuscript_id}/excerpt", response_model=LibraryExcerptOut)
 async def get_library_excerpt_route(
-    manuscript_id: int,
+    manuscript_id: DbInt,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> LibraryExcerptOut:
@@ -176,7 +176,7 @@ async def get_library_excerpt_route(
 
 @router.get("/library/{manuscript_id}/document", response_model=ManuscriptViewerOut)
 async def get_library_document_route(
-    manuscript_id: int,
+    manuscript_id: DbInt,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> ManuscriptViewerOut:
@@ -187,7 +187,7 @@ async def get_library_document_route(
 
 @router.get("/library/{manuscript_id}/document/file")
 async def get_library_file_route(
-    manuscript_id: int,
+    manuscript_id: DbInt,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> FileResponse:
@@ -201,7 +201,7 @@ async def get_library_file_route(
 
 @router.get("/library/{manuscript_id}/document/paragraphs", response_model=DocumentParagraphsOut)
 async def get_library_paragraphs_route(
-    manuscript_id: int,
+    manuscript_id: DbInt,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> DocumentParagraphsOut:
@@ -210,8 +210,8 @@ async def get_library_paragraphs_route(
 
 @router.get("/library/{manuscript_id}/document/images/{image_index}")
 async def get_library_docx_image_route(
-    manuscript_id: int,
-    image_index: Annotated[int, Path(ge=0)],
+    manuscript_id: DbInt,
+    image_index: Annotated[DbInt, Path(ge=0)],
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> Response:
@@ -229,7 +229,7 @@ async def get_library_docx_image_route(
 
 @router.get("/library/{manuscript_id}/document/original")
 async def get_library_original_file_route(
-    manuscript_id: int,
+    manuscript_id: DbInt,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> FileResponse:

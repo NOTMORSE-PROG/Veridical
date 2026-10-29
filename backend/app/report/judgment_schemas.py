@@ -7,6 +7,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.config import get_settings
+from app.db import DbInt
 from app.report.rule_facts import RuleFacts
 from app.report.schemas import CriterionLevelOut, EvidenceItem, ReportOut, RubricLevelOut
 from app.report.source_coverage import CriterionSourceCoverageOut
@@ -137,9 +138,9 @@ class JudgmentContextOut(PrivateJudgmentModel):
 
 
 class JudgmentRecordIn(PrivateJudgmentModel):
-    expected_revision: int = Field(strict=True, ge=0)
+    expected_revision: DbInt = Field(strict=True, ge=0)
     resolution: RevisionResolution
-    level: int | None = Field(default=None, strict=True)
+    level: DbInt | None = Field(default=None, strict=True)
     reason: str
 
     @field_validator("reason")
@@ -165,7 +166,7 @@ class JudgmentRecordIn(PrivateJudgmentModel):
 
 
 class JudgmentRevisionIn(JudgmentRecordIn):
-    expected_judgment_revision: int = Field(strict=True, ge=0)
+    expected_judgment_revision: DbInt = Field(strict=True, ge=0)
 
 
 class JudgmentHistoryEntry(PrivateJudgmentModel):

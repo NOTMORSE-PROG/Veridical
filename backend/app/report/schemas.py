@@ -6,6 +6,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.config import get_settings
+from app.db import DbInt
 from app.ingest.schemas import FigureReading
 from app.library.passage_indexing import LibraryPassageIndexingSummary
 from app.report.rule_facts import RuleFacts
@@ -464,13 +465,13 @@ class PublicReportOut(BaseModel):
 
 
 class DecisionIn(BaseModel):
-    expected_revision: int = Field(strict=True, ge=0)
+    expected_revision: DbInt = Field(strict=True, ge=0)
     decision: Literal["approved", "returned", "rejected"]
     note: str | None = None
 
 
 class ReopenIn(BaseModel):
-    expected_revision: int = Field(strict=True, ge=0)
+    expected_revision: DbInt = Field(strict=True, ge=0)
     # Always required (the decision note is only conditionally required,
     # BUG-095) -- undoing a decision is exactly the kind of action this
     # project's own audit-trail philosophy (V-024) says must explain
@@ -542,7 +543,7 @@ class EscalatedItemOut(BaseModel):
 
 
 class ResolveEscalationIn(BaseModel):
-    expected_revision: int = Field(strict=True, ge=0)
+    expected_revision: DbInt = Field(strict=True, ge=0)
     # "needs_document" (V-068 AC2, DECIDED 2026-08-16): a third option that
     # isn't a guess — excludes the criterion from the composite like
     # `not_applicable`, never blocks the decision.
@@ -555,7 +556,7 @@ class ResolveEscalationIn(BaseModel):
     # "mark_level" — the level's own ordinal, matched against the
     # criterion's own scale server-side (never trusted as a name/points
     # pair the client could get wrong).
-    level: int | None = None
+    level: DbInt | None = None
 
     @field_validator("reason")
     @classmethod

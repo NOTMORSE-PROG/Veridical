@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_instructor
-from app.db import get_session
+from app.db import DbInt, get_session
 from app.flags.schemas import (
     AnnotateFlagIn,
     ConfirmCitationSourceIn,
@@ -32,7 +32,7 @@ router = APIRouter(prefix="/flags", tags=["flags"])
 
 @router.get("/{flag_id}", response_model=FlagOut)
 async def get_flag_route(
-    flag_id: int,
+    flag_id: DbInt,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> FlagOut:
@@ -41,7 +41,7 @@ async def get_flag_route(
 
 @router.post("/{flag_id}/annotate", response_model=FlagOut)
 async def annotate_flag_route(
-    flag_id: int,
+    flag_id: DbInt,
     body: AnnotateFlagIn,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
@@ -51,7 +51,7 @@ async def annotate_flag_route(
 
 @router.post("/{flag_id}/override", response_model=OverrideFlagOut)
 async def override_flag_route(
-    flag_id: int,
+    flag_id: DbInt,
     body: OverrideFlagIn,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
@@ -65,7 +65,7 @@ async def override_flag_route(
 
 @router.post("/{flag_id}/confirm-finding", response_model=ConfirmFindingOut)
 async def confirm_finding_route(
-    flag_id: int,
+    flag_id: DbInt,
     body: ConfirmFindingIn,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
@@ -79,7 +79,7 @@ async def confirm_finding_route(
 
 @router.post("/{flag_id}/confirm-source", response_model=ConfirmCitationSourceOut)
 async def confirm_citation_source_route(
-    flag_id: int,
+    flag_id: DbInt,
     body: ConfirmCitationSourceIn,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],

@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_upload_instructor
 from app.config import get_settings
-from app.db import get_session
+from app.db import DbInt, get_session
 from app.errors import (
     ConflictError,
     DocumentPreparationBusyError,
@@ -265,14 +265,14 @@ async def _relay_transfer(storage, source, key, directory: Path):
 
 class StartCheck(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    rubric_id: int = Field(gt=0)
+    rubric_id: DbInt = Field(gt=0)
 
 
 class BeginUpload(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     attempt_id: str
     filename: str = Field(min_length=1, max_length=255)
-    size: int = Field(gt=0)
+    size: DbInt = Field(gt=0)
     # V-090: start a check with this rubric as soon as the manuscript is ready.
     start_check: StartCheck | None = None
 

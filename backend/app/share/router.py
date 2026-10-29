@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_instructor
 from app.config import get_settings
-from app.db import get_session
+from app.db import DbInt, get_session
 from app.models.instructor import Instructor
 from app.report.evidence_service import (
     EvidenceManifestOut,
@@ -40,7 +40,7 @@ PUBLIC_SHARE_SERVER_ERROR_BODY = "Internal Server Error"
 
 @router.get("/check-runs/{check_run_id}/share", response_model=ShareLinkOut | None)
 async def get_share_link_route(
-    check_run_id: int,
+    check_run_id: DbInt,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> ShareLinkOut | None:
@@ -49,7 +49,7 @@ async def get_share_link_route(
 
 @router.post("/check-runs/{check_run_id}/share", response_model=ShareLinkOut)
 async def create_share_link_route(
-    check_run_id: int,
+    check_run_id: DbInt,
     body: CreateShareLinkIn,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
@@ -59,7 +59,7 @@ async def create_share_link_route(
 
 @router.delete("/check-runs/{check_run_id}/share")
 async def revoke_share_link_route(
-    check_run_id: int,
+    check_run_id: DbInt,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> dict[str, bool]:
