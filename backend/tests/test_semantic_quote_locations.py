@@ -66,19 +66,71 @@ def test_missing_or_empty_quote_remains_rejected(quote):
     assert _verify_quotes([quote], [block("Recorded passage", page=3)], "page") is None
 
 
-def test_trailing_ellipsis_stripped_when_matching_source():
+def test_trailing_ellipsis_is_not_a_literal_source_quotation():
     blocks = [block("This is an exact quotation from the manuscript.", page=4)]
-    assert _verify_quotes(
-        ["This is an exact quotation from the manuscript..."], blocks, "page"
-    ) == ["page 4"]
-    assert _verify_quotes(["This is an exact quotation from the manuscript…"], blocks, "page") == [
-        "page 4"
-    ]
+    for quote in (
+        "This is an exact quotation from the manuscript...",
+        "This is an exact quotation from the manuscript\u2026",
+    ):
+        assert _verify_quotes([quote], blocks, "page") is None
 
 
-def test_toc_dot_leader_disambiguated_to_heading_page():
+def test_dot_leader_does_not_prove_which_page_the_model_quoted():
     blocks = [
         block("CHAPTER 1 INTRODUCTION.............................................6", page=2),
         block("CHAPTER 1\nINTRODUCTION", page=6),
     ]
-    assert _verify_quotes(["CHAPTER 1 INTRODUCTION"], blocks, "page") == ["page 6"]
+    assert _verify_quotes(["CHAPTER 1 INTRODUCTION"], blocks, "page") is None
+
+
+@pytest.mark.parametrize("first_page", [1, None])
+def test_prose_ellipsis_cannot_hide_a_real_second_quote_location(first_page):
+    quote = "Measured motor output remained stable"
+    blocks = [
+        block(quote + " ... followed by an omitted qualification.", page=first_page),
+        block(quote, page=2),
+    ]
+    assert _verify_quotes([quote], blocks, "page") is None
+
+
+async def test_generated_omission_mark_cannot_create_a_second_evidence_owner():
+    from app.checks.semantic import SemanticBatch, grade_batch_verdicts
+    from tests.test_checks_semantic import FakeCriterion
+    from tests.test_semantic_partial_recovery import Scripted
+
+    quote = "Measured motor output remained stable"
+    llm = Scripted(
+        [
+            {
+                "verdicts": [
+                    {
+                        "index": index,
+                        "verdict": "pass",
+                        "reasoning": "Scripted proposal",
+                        "evidence_quotes": [quote + suffix],
+                    }
+                    for index, suffix in enumerate(("", "..."))
+                ]
+            },
+            {
+                "verdicts": [
+                    {
+                        "index": 0,
+                        "verdict": "uncertain",
+                        "reasoning": "No independent literal evidence",
+                        "evidence_quotes": [],
+                    }
+                ]
+            },
+        ]
+    )
+    out = await grade_batch_verdicts(
+        SemanticBatch("source", [block(quote, page=3)]),
+        [FakeCriterion(1, "First requirement"), FakeCriterion(2, "Second requirement")],
+        llm,
+        None,
+        "page",
+    )
+    assert out[1].verdict == "pass"
+    assert out[2].verdict is None and out[2].anchors is None
+    assert len(llm.calls) == 2
