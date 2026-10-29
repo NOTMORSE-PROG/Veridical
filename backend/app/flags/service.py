@@ -343,7 +343,7 @@ def _dismiss_finding(
     *,
     revision_before: int,
     revision: int,
-    batch_id: str | None = None,
+    batch: dict | None = None,
 ) -> AuditLog:
     """Dismiss one finding and return its audit entry (single or bulk)."""
     flag.overridden = True
@@ -361,8 +361,7 @@ def _dismiss_finding(
         "assessment_revision_before": revision_before,
         "assessment_revision": revision,
     }
-    if batch_id is not None:
-        payload["batch_id"] = batch_id
+    payload.update(batch or {})
     return AuditLog(
         event_type="flag_overridden",
         check_run_id=result.check_run_id,
@@ -380,7 +379,7 @@ def _confirm_finding(
     confirmed_at: datetime,
     revision_before: int,
     revision: int,
-    batch_id: str | None = None,
+    batch: dict | None = None,
 ) -> AuditLog:
     """Confirm one finding as a real issue and return its audit entry."""
     cleaned = (note or "").strip() or None
@@ -398,8 +397,7 @@ def _confirm_finding(
         "assessment_revision_before": revision_before,
         "assessment_revision": revision,
     }
-    if batch_id is not None:
-        payload["batch_id"] = batch_id
+    payload.update(batch or {})
     return AuditLog(
         event_type="flag_finding_confirmed",
         check_run_id=result.check_run_id,
@@ -549,6 +547,16 @@ async def confirm_citation_source(
     return out
 
 
+class _NothingToChange(Exception):
+    """Every selected finding is already in the requested state."""
+
+
+def _already_resolved(flag: Flag, action: Literal["confirm", "dismiss"]) -> bool:
+    if action == "confirm":
+        return flag.finding_confirmed and not flag.overridden
+    return flag.overridden and not flag.finding_confirmed
+
+
 async def bulk_resolve_flags(
     session: AsyncSession,
     check_run_id: int,
@@ -559,81 +567,107 @@ async def bulk_resolve_flags(
     expected_revision: int,
     note: str | None = None,
     reason: str | None = None,
+    unopened_count: int | None = None,
 ) -> BulkResolveFlagsOut:
     """V-089: confirm or dismiss many findings of one run as one action.
 
     All or nothing: every id must be a finding of this run on this
-    instructor's account, or nothing changes. Each finding is changed and
-    audited exactly as its single-flag action would do it, every audit entry
-    carries the same batch id, and the run is rescored once.
+    instructor's account, or nothing changes. A finding already in the
+    requested state is left exactly as it is (its own note or reason is never
+    replaced by the shared one) and returned in `unchanged_ids`. Every other
+    finding is changed and audited exactly as its single-flag action would
+    do it, each audit entry carries the batch id, and the run is rescored
+    once. When nothing needs changing, nothing is written at all.
     """
     ids = list(dict.fromkeys(flag_ids))
     if action == "dismiss" and not (reason or "").strip():
         raise ConflictError("A reason is required to dismiss findings.")
     batch_id = uuid4().hex
-    async with assessment_write(session, check_run_id, instructor_id, expected_revision) as report:
-        rows = (
-            await session.execute(
-                select(Flag, CheckResult)
-                .join(CheckResult, CheckResult.id == Flag.check_result_id)
-                .join(CheckRun, CheckRun.id == CheckResult.check_run_id)
-                .join(Manuscript, Manuscript.id == CheckRun.manuscript_id)
-                .where(
-                    Flag.id.in_(ids),
-                    CheckResult.check_run_id == check_run_id,
-                    Manuscript.instructor_id == instructor_id,
+    batch = {"batch_id": batch_id}
+    if unopened_count is not None:
+        # As counted by the reviewer's screen, not measured here.
+        batch["client_reported_unopened_count"] = unopened_count
+    try:
+        async with assessment_write(
+            session, check_run_id, instructor_id, expected_revision
+        ) as report:
+            rows = (
+                await session.execute(
+                    select(Flag, CheckResult)
+                    .join(CheckResult, CheckResult.id == Flag.check_result_id)
+                    .join(CheckRun, CheckRun.id == CheckResult.check_run_id)
+                    .join(Manuscript, Manuscript.id == CheckRun.manuscript_id)
+                    .where(
+                        Flag.id.in_(ids),
+                        CheckResult.check_run_id == check_run_id,
+                        Manuscript.instructor_id == instructor_id,
+                    )
+                    .execution_options(populate_existing=True)
                 )
-                .execution_options(populate_existing=True)
-            )
-        ).all()
-        found = {flag.id: (flag, result) for flag, result in rows}
-        if len(found) != len(ids):
-            raise NotFoundError(
-                "Some selected findings are not part of this check. Nothing was changed. "
-                "Reload the findings and select again."
-            )
-        # A source confirmation's recorded reason is the verification itself;
-        # a shared batch note or reason must not replace it.
-        cleared = sum(1 for flag, _ in found.values() if flag.confirmed_citation_source)
-        if cleared:
-            raise ConflictError(
-                f"{cleared} of the selected findings were cleared by confirming their "
-                "citation source, and their recorded verification would be replaced. "
-                "Nothing was changed. Remove them from the selection and try again."
-            )
-        confirmed_at = datetime.now(UTC)
-        for flag_id in ids:
-            flag, result = found[flag_id]
-            if action == "confirm":
-                entry = _confirm_finding(
-                    flag,
-                    result,
-                    instructor_id,
-                    note,
-                    confirmed_at=confirmed_at,
-                    revision_before=expected_revision,
-                    revision=report.assessment_revision,
-                    batch_id=batch_id,
+            ).all()
+            found = {flag.id: (flag, result) for flag, result in rows}
+            if len(found) != len(ids):
+                raise NotFoundError(
+                    "Some selected findings are not part of this check. Nothing was changed. "
+                    "Reload the findings and select again."
                 )
-            else:
-                entry = _dismiss_finding(
-                    flag,
-                    result,
-                    instructor_id,
-                    reason or "",
-                    revision_before=expected_revision,
-                    revision=report.assessment_revision,
-                    batch_id=batch_id,
+            # A source confirmation's recorded reason is the verification
+            # itself; a shared batch note or reason must not replace it.
+            cleared = sum(1 for flag, _ in found.values() if flag.confirmed_citation_source)
+            if cleared:
+                raise ConflictError(
+                    f"{cleared} of the selected findings were cleared by confirming their "
+                    "citation source, and their recorded verification would be replaced. "
+                    "Nothing was changed. Remove them from the selection and try again."
                 )
-            session.add(entry)
-        await session.flush()
-        await aggregate_and_score(session, check_run_id, commit=False)
-        changed = set(ids)
-        out = BulkResolveFlagsOut(
-            flags=[
-                row for row in await flags_for_check_run(session, check_run_id) if row.id in changed
-            ],
+            unchanged = [i for i in ids if _already_resolved(found[i][0], action)]
+            to_change = [i for i in ids if i not in set(unchanged)]
+            if not to_change:
+                raise _NothingToChange
+            confirmed_at = datetime.now(UTC)
+            for flag_id in to_change:
+                flag, result = found[flag_id]
+                if action == "confirm":
+                    entry = _confirm_finding(
+                        flag,
+                        result,
+                        instructor_id,
+                        note,
+                        confirmed_at=confirmed_at,
+                        revision_before=expected_revision,
+                        revision=report.assessment_revision,
+                        batch=batch,
+                    )
+                else:
+                    entry = _dismiss_finding(
+                        flag,
+                        result,
+                        instructor_id,
+                        reason or "",
+                        revision_before=expected_revision,
+                        revision=report.assessment_revision,
+                        batch=batch,
+                    )
+                session.add(entry)
+            await session.flush()
+            await aggregate_and_score(session, check_run_id, commit=False)
+            changed = set(to_change)
+            out = BulkResolveFlagsOut(
+                flags=[
+                    row
+                    for row in await flags_for_check_run(session, check_run_id)
+                    if row.id in changed
+                ],
+                unchanged_ids=unchanged,
+                report=await get_report(session, check_run_id, instructor_id),
+                batch_id=batch_id,
+            )
+    except _NothingToChange:
+        # Rolled back: no revision bump, no rescore, no audit entry.
+        return BulkResolveFlagsOut(
+            flags=[],
+            unchanged_ids=ids,
             report=await get_report(session, check_run_id, instructor_id),
-            batch_id=batch_id,
+            batch_id=None,
         )
     return out

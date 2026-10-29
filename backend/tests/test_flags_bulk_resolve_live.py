@@ -153,7 +153,11 @@ def seeded(client, api_scratch_url):
                     "overridden": True,
                     "override_reason": "Earlier dismissal.",
                 },
-                {"severity": FlagSeverity.low, "finding_confirmed": True},
+                {
+                    "severity": FlagSeverity.low,
+                    "finding_confirmed": True,
+                    "finding_confirm_note": "Table 3 total is off by 12; group told.",
+                },
                 {
                     "severity": FlagSeverity.low,
                     "overridden": True,
@@ -264,6 +268,7 @@ def test_bulk_confirm_mixed_states_rescores_once_and_audits_each(
 
     client, ids = seeded
     run = ids["run"]
+    changed = [ids["open_high"], ids["dismissed"]]
     targets = [ids["open_high"], ids["dismissed"], ids["confirmed"]]
     before = _report(client, run)
     calls = []
@@ -282,30 +287,37 @@ def test_bulk_confirm_mixed_states_rescores_once_and_audits_each(
         flag_ids=targets,
         expected_revision=before["assessment_revision"],
         note="  Checked against the manuscript.  ",
+        unopened_count=1,
     )
 
     assert response.status_code == 200, response.text
     body = response.json()
     assert calls == [run]
-    assert sorted(row["id"] for row in body["flags"]) == sorted(targets)
+    assert sorted(row["id"] for row in body["flags"]) == sorted(changed)
+    assert body["unchanged_ids"] == [ids["confirmed"]]
     assert all(row["finding_confirmed"] and not row["overridden"] for row in body["flags"])
     assert body["report"]["assessment_revision"] == before["assessment_revision"] + 1
     batch_id = body["batch_id"]
     assert isinstance(batch_id, str) and batch_id
 
     stored = _flag_rows(api_scratch_url, targets)
-    assert {row["finding_confirm_note"] for row in stored.values()} == {
+    assert {stored[i]["finding_confirm_note"] for i in changed} == {
         "Checked against the manuscript."
     }
-    assert all(row["override_reason"] is None for row in stored.values())
-    assert len({row["finding_confirmed_at"] for row in stored.values()}) == 1
+    assert all(stored[i]["override_reason"] is None for i in changed)
+    assert len({stored[i]["finding_confirmed_at"] for i in changed}) == 1
+    # Already confirmed: its own note is kept, not replaced by the batch note.
+    assert stored[ids["confirmed"]]["finding_confirm_note"] == (
+        "Table 3 total is off by 12; group told."
+    )
 
     audit = _resolution_audit(api_scratch_url)
-    assert sorted(row["flag_id"] for row in audit) == sorted(targets)
+    assert sorted(row["flag_id"] for row in audit) == sorted(changed)
     for row in audit:
         assert row["event_type"] == "flag_finding_confirmed"
         assert row["check_run_id"] == run
         assert row["batch_id"] == batch_id
+        assert row["client_reported_unopened_count"] == 1
         assert row["note"] == "Checked against the manuscript."
         assert row["assessment_revision_before"] == before["assessment_revision"]
         assert row["assessment_revision"] == before["assessment_revision"] + 1
@@ -328,13 +340,20 @@ def test_bulk_dismiss_copies_reason_clears_confirmations_and_rescores(seeded, ap
         client,
         run,
         action="dismiss",
-        flag_ids=targets,
+        flag_ids=[*targets, ids["dismissed"]],
         expected_revision=before["assessment_revision"],
         reason="  Reviewed with the group; not an issue.  ",
+        unopened_count=4,
     )
 
     assert response.status_code == 200, response.text
     body = response.json()
+    assert body["unchanged_ids"] == [ids["dismissed"]]
+    kept = _flag_rows(api_scratch_url, [ids["dismissed"]])[ids["dismissed"]]
+    assert kept["override_reason"] == "Earlier dismissal."
+    assert {
+        row["client_reported_unopened_count"] for row in _resolution_audit(api_scratch_url)
+    } == {4}
     assert all(row["overridden"] and not row["finding_confirmed"] for row in body["flags"])
     stored = _flag_rows(api_scratch_url, targets)
     for row in stored.values():
@@ -397,24 +416,43 @@ def test_duplicate_ids_change_and_audit_each_finding_once(seeded, api_scratch_ur
     )
 
 
-def test_re_resolving_is_repeatable_and_a_replayed_request_is_refused(seeded, api_scratch_url):
+def test_re_resolving_leaves_findings_untouched_and_a_replay_is_refused(
+    seeded, api_scratch_url, monkeypatch
+):
+    import app.flags.service as flag_service
+
     client, ids = seeded
     run = ids["run"]
     targets = [ids["open_high"], ids["open_med"]]
     revision = _revision(client, run)
-    first = _post(client, run, action="confirm", flag_ids=targets, expected_revision=revision)
+    first = _post(
+        client, run, action="confirm", flag_ids=targets, expected_revision=revision, note="Real."
+    )
     assert first.status_code == 200, first.text
+    assert first.json()["unchanged_ids"] == []
+    stored = _flag_rows(api_scratch_url, targets)
 
     replay = _post(client, run, action="confirm", flag_ids=targets, expected_revision=revision)
     assert replay.status_code == 409
     assert len(_resolution_audit(api_scratch_url)) == 2
 
+    calls = []
+
+    async def counting(*args, **kwargs):
+        calls.append(1)
+
+    monkeypatch.setattr(flag_service, "aggregate_and_score", counting)
     again = _post(client, run, action="confirm", flag_ids=targets, expected_revision=revision + 1)
     assert again.status_code == 200, again.text
-    assert again.json()["batch_id"] != first.json()["batch_id"]
-    assert again.json()["report"]["flag_deduction"] == first.json()["report"]["flag_deduction"]
-    assert all(row["finding_confirmed"] for row in _flag_rows(api_scratch_url, targets).values())
-    assert len(_resolution_audit(api_scratch_url)) == 4
+    body = again.json()
+    # Nothing to change: nothing written, no batch, no rescore, same revision.
+    assert body["flags"] == [] and body["unchanged_ids"] == targets
+    assert body["batch_id"] is None
+    assert body["report"]["assessment_revision"] == revision + 1
+    assert calls == []
+    assert _revision(client, run) == revision + 1
+    assert len(_resolution_audit(api_scratch_url)) == 2
+    assert _flag_rows(api_scratch_url, targets) == stored
 
 
 def _assert_nothing_changed(client, api_scratch_url, ids, revision):
@@ -572,6 +610,9 @@ def test_a_decided_report_refuses_bulk_changes(seeded, api_scratch_url):
         {"action": "confirm", "flag_ids": [2**63]},
         {"action": "confirm", "flag_ids": [1], "note": "x" * 2001},
         {"action": "dismiss", "flag_ids": [1], "reason": "x" * 2001},
+        {"action": "dismiss", "flag_ids": [1], "reason": "Fine.", "unopened_count": -1},
+        {"action": "dismiss", "flag_ids": [1], "reason": "Fine.", "unopened_count": 2},
+        {"action": "dismiss", "flag_ids": [1], "reason": "Fine.", "unopened_count": "1"},
     ],
     ids=[
         "empty",
@@ -590,6 +631,9 @@ def test_a_decided_report_refuses_bulk_changes(seeded, api_scratch_url):
         "id-beyond-bigint",
         "note-too-long",
         "reason-too-long",
+        "negative-unopened",
+        "unopened-above-selection",
+        "string-unopened",
     ],
 )
 def test_malformed_requests_are_422(seeded, api_scratch_url, body):

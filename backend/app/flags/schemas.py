@@ -292,6 +292,9 @@ class BulkResolveFlagsIn(BaseModel):
     note: str | None = None
     # Dismiss: required, as `OverrideFlagIn`, and never whitespace only.
     reason: str | None = None
+    # How many selected findings the reviewer's screen showed as not yet
+    # opened. Stored on each audit entry as client-reported, not verified.
+    unopened_count: int | None = Field(default=None, strict=True, ge=0)
 
     @field_validator("flag_ids", mode="before")
     @classmethod
@@ -327,12 +330,17 @@ class BulkResolveFlagsIn(BaseModel):
                 raise ValueError("a reason is required to dismiss findings")
         elif self.reason is not None:
             raise ValueError("a confirmation takes an optional note, not a reason")
+        if self.unopened_count is not None and self.unopened_count > len(self.flag_ids):
+            raise ValueError("unopened_count cannot exceed the number of selected findings")
         return self
 
 
 class BulkResolveFlagsOut(BaseModel):
     # The changed findings as the report's flags list shows them.
     flags: list[FlagSummaryOut]
+    # Selected findings already in the requested state, left as they were.
+    unchanged_ids: list[int]
     report: ReportOut
-    # Carried by every audit entry this action wrote.
-    batch_id: str
+    # Carried by every audit entry this action wrote; None when every
+    # selected finding was unchanged and nothing was written.
+    batch_id: str | None
