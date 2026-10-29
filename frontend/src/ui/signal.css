@@ -8903,7 +8903,7 @@
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: var(--signal-rhythm-control);
-    align-items: start;
+    align-items: stretch;
     padding: var(--signal-space-5) var(--signal-space-6) var(--signal-space-6);
   }
   @media (max-width: 1023px) {
@@ -8915,4 +8915,8 @@
     padding: var(--signal-space-5);
     min-inline-size: 0;
   }
+  /* Cards in a row share one height; the details bar sits on the bottom
+     edge so the rows line up. */
+  #record-panel-grades .signal-result-list > .signal-result-card { display: flex; flex-direction: column; gap: var(--signal-space-2); }
+  #record-panel-grades .signal-result-list > .signal-result-card > details:last-of-type { margin-block-start: auto; }
 }
