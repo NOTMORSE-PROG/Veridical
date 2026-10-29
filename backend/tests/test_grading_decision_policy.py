@@ -207,3 +207,27 @@ def test_report_rows_explain_an_automatic_grade_until_an_instructor_judges():
     assert _automatic_grade(decided, split, None)["decision_basis"] == "middle_of_three"
     assert _automatic_grade(decided, detail, {"type": "mark_level"}) == {}
     assert _automatic_grade(SimpleNamespace(outcome=ResultOutcome.escalated), detail, None) == {}
+
+
+def test_report_rows_drop_an_old_no_grade_clause_beside_a_kept_grade():
+    """Older decide-mode cautions could end "no automatic grade was
+    assigned". The report row is what the screen and the adviser view read,
+    so it must not carry that clause beside the grade it kept."""
+    from types import SimpleNamespace
+
+    from app.report.service import _automatic_grade
+
+    detail = {
+        "basis": "llm",
+        "verdict": "pass",
+        "votes": ["pass", "pass", "pass"],
+        "support_caution": (
+            "Review the criterion and its performance level directly; "
+            "no automatic grade was assigned."
+        ),
+    }
+    row = _automatic_grade(SimpleNamespace(outcome=ResultOutcome.passed), detail, None)
+    assert row["support_caution"] == "Review the criterion and its performance level directly."
+    only_the_clause = {**detail, "support_caution": "No automatic grade was assigned."}
+    row = _automatic_grade(SimpleNamespace(outcome=ResultOutcome.passed), only_the_clause, None)
+    assert row["support_caution"] is None
