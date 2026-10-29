@@ -21,13 +21,29 @@ const fill = (template: string, values: Record<string, string | number>) =>
 
 // What each grading pass chose, so a disagreement behind the grade is visible.
 // Kept apart from AUTOMATIC_GRADE_COPY, which the PDF export mirrors word for word.
-export const GRADE_PASSES_COPY = { passes: "Grading passes: {passes}.", noGrade: "no usable grade" } as const;
+export const GRADE_PASSES_COPY = {
+  passes: "The grading passes disagreed: {passes}. A pass is one automatic grading attempt, not an independent reviewer.",
+  pass: "Pass {n} {grade}",
+  noGrade: "no grade recorded",
+} as const;
 
+// A pass/fail criterion's votes in the card's own words; a level name is shown
+// as recorded. "uncertain" is an abstention, the same as no grade.
+const VOTE_WORDS: Record<string, string> = { pass: "Meets criterion", partial: "Partly meets criterion", fail: "Does not meet" };
+
+function voteWords(vote: string | null): string | null {
+  const value = vote?.trim();
+  if (!value || value.toLowerCase() === "uncertain") return null;
+  return VOTE_WORDS[value.toLowerCase()] ?? value;
+}
+
+// What each grading pass chose, shown only when they disagreed: a unanimous
+// grade already says so in how it was chosen.
 export function automaticGradePasses(row: Pick<CriterionResultOut, "votes">): string | null {
-  const votes = Array.isArray(row.votes) ? row.votes.filter((vote) => vote === null || typeof vote === "string") : [];
-  if (votes.length === 0) return null;
+  const votes = Array.isArray(row.votes) ? row.votes.filter((vote) => vote === null || typeof vote === "string").map(voteWords) : [];
+  if (votes.length < 2 || votes.every((vote) => vote === votes[0])) return null;
   return fill(GRADE_PASSES_COPY.passes, {
-    passes: votes.map((vote, index) => `Pass ${index + 1} ${vote?.trim() || GRADE_PASSES_COPY.noGrade}`).join(", "),
+    passes: votes.map((vote, index) => fill(GRADE_PASSES_COPY.pass, { n: index + 1, grade: vote ?? GRADE_PASSES_COPY.noGrade })).join(", "),
   });
 }
 

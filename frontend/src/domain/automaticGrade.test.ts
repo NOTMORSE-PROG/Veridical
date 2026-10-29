@@ -27,9 +27,13 @@ describe("automaticGradeLines", () => {
     expect(automaticGradeCaution({ support_caution: "orphaned caution" })).toBeNull();
   });
 
-  it("lists what each grading pass chose, so a disagreement is visible", () => {
-    expect(automaticGradePasses({ votes: ["Proficient", "Proficient", "Beginner"] })).toBe("Grading passes: Pass 1 Proficient, Pass 2 Proficient, Pass 3 Beginner.");
-    expect(automaticGradePasses({ votes: ["Exemplary", null] })).toBe("Grading passes: Pass 1 Exemplary, Pass 2 no usable grade.");
+  it("names each pass's grade in the card's words, only when the passes disagreed", () => {
+    expect(automaticGradePasses({ votes: ["Proficient", "Proficient", "Beginner"] }))
+      .toBe("The grading passes disagreed: Pass 1 Proficient, Pass 2 Proficient, Pass 3 Beginner. A pass is one automatic grading attempt, not an independent reviewer.");
+    expect(automaticGradePasses({ votes: ["pass", "fail", "pass"] })).toContain("Pass 1 Meets criterion, Pass 2 Does not meet, Pass 3 Meets criterion.");
+    // An abstaining "uncertain" pass reads the same as a pass with no grade.
+    expect(automaticGradePasses({ votes: ["Exemplary", null, "uncertain"] })).toContain("Pass 2 no grade recorded, Pass 3 no grade recorded.");
+    expect(automaticGradePasses({ votes: ["Proficient", "Proficient"] })).toBeNull();
     expect(automaticGradePasses({ votes: [] })).toBeNull();
     expect(automaticGradePasses({})).toBeNull();
   });
