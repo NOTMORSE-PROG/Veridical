@@ -74,5 +74,3 @@ export const SHARE_EXPIRY_OPTIONS = [
 // so the screen can say so before anything is sent.
 export const BULK_RESOLVE_MAX_LOCATIONS = 200;
 export const BULK_RESOLVE_MAX_TEXT_CHARS = 2000;
-// How many selected findings the confirmation dialog lists by name.
-export const BULK_RESOLVE_LISTED_FINDINGS = 8;

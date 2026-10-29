@@ -9058,5 +9058,19 @@
   .signal-bulk-check input { inline-size: var(--signal-space-4); block-size: var(--signal-space-4); accent-color: var(--color-signal-link); }
   .signal-bulk-select { margin-block-start: var(--signal-space-2); }
   .signal-bulk-result { margin: 0 0 var(--signal-space-4); font-weight: var(--signal-weight-semibold); }
-  .signal-bulk-dialog__list { max-block-size: var(--signal-passage-inspector-max-height); overflow: auto; margin: 0; padding-inline-start: var(--signal-space-5); }
+  .signal-bulk-dialog__list { display: grid; gap: var(--signal-space-3); max-block-size: var(--signal-passage-inspector-max-height); overflow: auto; margin: 0; padding: 0; list-style: none; }
+  .signal-bulk-dialog__list > li { display: grid; gap: var(--signal-space-1); border-block-end: var(--signal-border-hairline) solid var(--color-signal-border); padding-block-end: var(--signal-space-2); }
+  .signal-bulk-dialog__subject { color: var(--color-signal-ink-secondary); overflow-wrap: anywhere; }
+  .signal-bulk-dialog__meta { display: flex; flex-wrap: wrap; gap: var(--signal-space-3); align-items: center; }
+  .signal-bulk-dialog__unopened { color: var(--color-signal-warning-text); font-weight: var(--signal-weight-semibold); }
+  .signal-bulk-dialog__acknowledge { display: flex; gap: var(--signal-space-2); align-items: flex-start; font-weight: var(--signal-weight-semibold); }
+  .signal-bulk-dialog__acknowledge input { margin-block-start: var(--signal-space-1); inline-size: var(--signal-space-4); block-size: var(--signal-space-4); accent-color: var(--color-signal-link); }
+  /* Focused controls never sit under the bar. */
+  html:has(.signal-bulk-bar) { scroll-padding-block-end: calc(2 * var(--signal-space-12)); }
+  /* Beside the uploads tray, the bar moves left so neither covers the other. */
+  body:has(.signal-upload-tray) .signal-bulk-bar {
+    inset-inline-start: var(--signal-space-5);
+    transform: none;
+    inline-size: min(calc(100% - var(--signal-settings-column-min) - 3 * var(--signal-space-5)), var(--signal-prose-width));
+  }
 }
