@@ -74,10 +74,11 @@ it("names PDF pages left out of an assessment and keeps them on the private row"
   show(unread);
   expect(screen.getByText(/Pages 45-47, 53 could not be read in a reliable order/)).toBeVisible();
   expect(screen.getByText(/Check those pages before relying on it/)).toBeVisible();
-  const details = criterionAssessmentDetails({ ...row, source_coverage: unread }, false);
+  const unreadRow: CriterionResultOut = { ...row, source_coverage: unread };
+  const details = criterionAssessmentDetails(unreadRow, false);
   expect(details.sourceCoverage?.unread_pages).toEqual([45, 46, 47, 53]);
   expect(details.summary).toMatch(/some pages not read/);
-  expect(criterionAssessmentDetails({ ...row, source_coverage: unread }, true).sourceCoverage).toBeNull();
-  expect(privateCriterionCoverage({ ...row, source_coverage: { ...unread, unread_pages: [0] } }, false)?.native_math_inventory_state)
-    .toBe("unavailable");
+  expect(criterionAssessmentDetails(unreadRow, true).sourceCoverage).toBeNull();
+  const malformed: CriterionResultOut = { ...row, source_coverage: { ...unread, unread_pages: [0] } };
+  expect(privateCriterionCoverage(malformed, false)?.native_math_inventory_state).toBe("unavailable");
 });
