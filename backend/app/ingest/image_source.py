@@ -8,6 +8,7 @@ import pymupdf
 from app.config import Settings
 from app.errors import GoneError
 from app.ingest.docx_source import read_docx_image
+from app.ingest.native_cache import release_native_cache
 from app.ingest.patterns import HeadingPatterns
 from app.ingest.schemas import ExtractionResult, FigureReading, ImageBlock, SectionNode
 
@@ -53,10 +54,15 @@ def _priority_page_ranges(
 
 
 def _crop(file_path: Path, image: ImageBlock, settings: Settings) -> bytes:
-    with pymupdf.open(str(file_path)) as doc:
-        page = doc[image.page - 1]
-        pix = page.get_pixmap(clip=pymupdf.Rect(*image.bbox), dpi=settings.ingest_vision_crop_dpi)
-        return pix.tobytes("png")
+    try:
+        with pymupdf.open(str(file_path)) as doc:
+            page = doc[image.page - 1]
+            pix = page.get_pixmap(
+                clip=pymupdf.Rect(*image.bbox), dpi=settings.ingest_vision_crop_dpi
+            )
+            return pix.tobytes("png")
+    finally:
+        release_native_cache()
 
 
 def _caption(result, image, patterns, settings):

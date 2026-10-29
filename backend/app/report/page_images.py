@@ -27,6 +27,7 @@ import pymupdf
 from reportlab.lib.pagesizes import A4
 
 from app.config import Settings
+from app.ingest.native_cache import release_native_cache
 from app.ingest.regions import AnchorRegion, recover_region
 from app.ingest.schemas import SectionTree
 from app.report.export import _LLM_MODE_DISCLOSURE, _PRINT_LAYOUT, _TONE_COLORS
@@ -177,6 +178,30 @@ def _render_page_png(
     is rasterized with its own layer/annotation state, then marks are drawn
     directly on those pixels. No page copy can lose document-level visibility.
     """
+    try:
+        return _render_marked_page(
+            page,
+            boxes,
+            llm_disclosure=llm_disclosure,
+            settings=settings,
+            box_coordinates=box_coordinates,
+            print_content_width=print_content_width,
+        )
+    finally:
+        # Each rendered page decodes its images into MuPDF's process-wide
+        # cache; drop them so an export of many pages stays within memory.
+        release_native_cache()
+
+
+def _render_marked_page(
+    page: pymupdf.Page,
+    boxes: tuple[Bbox, ...],
+    *,
+    llm_disclosure: tuple[str, str] | None,
+    settings: Settings,
+    box_coordinates: Literal["legacy_region", "pdf_points"],
+    print_content_width: float | None,
+) -> bytes:
     planned_page_image_pixels(
         page,
         llm_disclosure=llm_disclosure,
