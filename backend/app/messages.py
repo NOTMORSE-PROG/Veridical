@@ -75,6 +75,12 @@ PDF_TOO_MANY_PAGES = (
     "Please split it or upload a shorter version."
 )
 
+TOO_MANY_IMAGE_FRAGMENTS = (
+    "This PDF contains {count:,} small image pieces, more than this server can prepare, "
+    "so it cannot be checked as uploaded. A copy saved with its images flattened (for "
+    "example, through Print to PDF) may work."
+)
+
 EXTRACTION_TIMED_OUT = (
     "This document took too long to process and could not be checked. "
     "Please try a shorter or simpler file."

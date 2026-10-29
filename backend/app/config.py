@@ -1054,6 +1054,13 @@ class Settings(BaseSettings):
     direct_upload_relay_idle_seconds: float = Field(default=60, gt=0)
     # Whole-file SHA-256 results reused while the file is unchanged on disk.
     source_digest_memo_entries: int = Field(default=64, ge=1)
+    # A PDF made of tens of thousands of tiny image pieces needs several
+    # bookkeeping records per piece; one such file (66,933 pieces) grew the
+    # API's memory by ~430 MiB (~5.7 KiB per piece) and was killed at the free
+    # host's 512 MiB. Real theses measured 19-113 pieces. 5,000 keeps that cost
+    # near 28 MiB, 44x above the largest real thesis. Not an `ingest_` name on
+    # purpose: those settings travel in the signed helper job contract.
+    preparation_max_image_fragments: int = Field(default=5000, ge=1)
     # V-090 upload tray: finished attempts stay listed this long so a reload
     # can show what happened; the list is capped for one screen.
     direct_upload_tray_window_seconds: int = Field(default=86400, ge=60)

@@ -52,6 +52,7 @@ from app.groups.service import (
 from app.ingest import docx, figures, pdf, references, vision
 from app.ingest.admission import PreparationLease, preparation_scope
 from app.ingest.compute_contract import BoundedWriter
+from app.ingest.fragment_guard import refuse_fragment_heavy
 from app.ingest.patterns import load_patterns
 from app.ingest.recovery import recover_layout, selected_pages
 from app.ingest.schemas import (
@@ -332,6 +333,9 @@ async def _ingest_manuscript(
                 )
         except TimeoutError as exc:
             raise FileTooLargeError(messages.EXTRACTION_TIMED_OUT) from exc
+        # Before any per-piece record is built (BUG-532); also covers a helper
+        # deployment that predates its own copy of this check.
+        refuse_fragment_heavy(result, settings)
         # Only the fresh sniffed DOCX parser supplies this witness. Stage it
         # locally until finalization; optional consumers may commit their own
         # bookkeeping before ingestion is ready to publish its terminal row.

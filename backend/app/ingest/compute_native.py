@@ -9,6 +9,7 @@ from app.config import Settings
 from app.errors import FileMalformedError, GoneError
 from app.ingest import docx, pdf
 from app.ingest.compute_contract import BoundedWriter, NativeJob, canonical_json, digest
+from app.ingest.fragment_guard import refuse_fragment_heavy
 from app.ingest.image_source import _raster, _selected_indices, prepare_figures
 from app.ingest.patterns import load_patterns
 from app.storage import Storage
@@ -38,6 +39,8 @@ def execute_native_job(job: NativeJob, settings: Settings, storage: Storage) -> 
             result = docx.extract_document(str(source), policy)
         else:
             raise FileMalformedError("The uploaded file is not a readable PDF or DOCX.")
+        # Refused here, before the API ever parses a result it cannot hold.
+        refuse_fragment_heavy(result, settings)
         extraction = result.model_dump_json().encode()
         if len(extraction) > settings.native_compute_max_result_mb * 1024 * 1024:
             raise ValueError("Native extraction exceeded the configured result limit.")
