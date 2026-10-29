@@ -75,10 +75,10 @@ describe("grades beside findings on the same pages", () => {
     const votes = ["Proficient", "Proficient", "Beginner"];
     const { unmount } = renderWithProviders(<SignalCriteriaResults checkRunId={3} results={[graded({ votes, agreeing_passes: 2 }),
       graded({ criterion_id: 8, text: "Tone", votes, resolution: { type: "mark_level", reason: "Mine.", ai_majority_verdict: null } })]} />, { route: "/report/3" });
-    expect(screen.getAllByText("Grading passes: Pass 1 Proficient, Pass 2 Proficient, Pass 3 Beginner.")).toHaveLength(1);
+    expect(screen.getAllByText(/^The grading passes disagreed: Pass 1 Proficient, Pass 2 Proficient, Pass 3 Beginner\./)).toHaveLength(1);
     unmount();
     renderWithProviders(<SignalCriteriaResults checkRunId={3} publicView results={[graded({ votes })]} />, { route: "/shared/abc" });
-    expect(screen.queryByText(/Grading passes:/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/grading passes disagreed/)).not.toBeInTheDocument();
   });
 
   it("explains why a finding is left out of readiness", () => {
