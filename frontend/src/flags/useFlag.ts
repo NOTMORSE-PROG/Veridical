@@ -76,6 +76,32 @@ export function useOverrideFlag(flagId: number) {
   });
 }
 
+// BUG-518: the instructor agrees the finding is a real issue. It keeps
+// counting for readiness; only its review state changes.
+export function useConfirmFinding(flagId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    onMutate: () => flagMutationOwner(queryClient, flagId),
+    mutationFn: async (body: { note: string | null; expected_revision: number }) => {
+      if (!isAssessmentRevision(body.expected_revision)) throw new ApiError(409, "conflict", "Review the current assessment before confirming this finding.");
+      const out = await api.post<ConfirmCitationSourceOut>(`/flags/${flagId}/confirm-finding`, body);
+      if (!out || typeof out !== "object" || out.id !== flagId || !out.finding_confirmed || out.overridden
+        || out.assessment_revision !== body.expected_revision + 1 || out.report?.check_run_id !== out.check_run_id
+        || out.report.assessment_revision !== out.assessment_revision) {
+        throw new ApiError(502, "invalid_response", "The response did not confirm this finding. Review the current finding before trying again.");
+      }
+      return out;
+    },
+    onSuccess: (out, _input, owner) => {
+      if (!owner?.accepts(out) || out.report?.check_run_id !== out.check_run_id) return;
+      queryClient.setQueryData<FlagOut>(["flag", flagId], current => keepNewerAssessment(current, out));
+      queryClient.setQueryData<ReportOut>(["report", out.report.check_run_id], current => keepNewerAssessment(current, out.report));
+      queryClient.invalidateQueries({ queryKey: ["report", out.report.check_run_id, "flags"] });
+      queryClient.invalidateQueries({ queryKey: ["stats"] });
+    },
+  });
+}
+
 // BUG-078: byte-identical onSuccess shape to useOverrideFlag (same three
 // setQueryData/invalidateQueries calls) — reusing it means the report's
 // flags panel correctly stops showing this flag as active, for free.

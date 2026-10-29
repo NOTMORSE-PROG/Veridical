@@ -13,7 +13,7 @@ import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import { useExplicitActionFocus } from "../routing/useExplicitActionFocus";
 import { ConfirmCitationSourceModal } from "./ConfirmCitationSourceModal";
-import { useAnnotateFlag, useOverrideFlag } from "./useFlag";
+import { useAnnotateFlag, useConfirmFinding, useOverrideFlag } from "./useFlag";
 import { useFlagActionReview } from "./useFlagActionReview";
 import { FlagActionCurrentReview } from "./FlagActionCurrentReview";
 import { useFindingCompletion, useFindingCompletionOwner } from "./useFindingCompletion";
@@ -100,6 +100,31 @@ function AnnotationPanel({ flag, drafts }: { flag: FlagOut; drafts: Map<string, 
       <p id={noteHelpId} className="signal-field-hint">Saves your note without changing the result. It is not included in shared reports.</p>
     </section>
   );
+}
+
+const confirmedAtFormatter = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
+
+// Agreeing with a finding needs no justification, so the note is optional.
+function ConfirmFinding({ flag }: { flag: FlagOut }) {
+  const [note, setNote] = useState("");
+  const confirm = useConfirmFinding(flag.id);
+  const review = useFlagActionReview(flag, "confirm-finding");
+  const noteId = useId();
+  if (flag.finding_confirmed) return <div className="signal-finding-confirmed" role="status">
+    <strong>Confirmed by you{flag.finding_confirmed_at ? ` on ${confirmedAtFormatter.format(new Date(flag.finding_confirmed_at))}` : ""}.</strong>
+    <p>{flag.finding_confirm_note ? `Your note: ${flag.finding_confirm_note}` : "No note was added."} It still counts for readiness. You can dismiss it instead if you change your mind.</p>
+  </div>;
+  return <div className="signal-finding-confirm">
+    <h3>Is this a real issue?</h3>
+    <p>Confirm it to mark it as checked. It keeps counting for readiness.</p>
+    <label htmlFor={noteId}>Comment (optional)</label>
+    <textarea id={noteId} rows={2} value={note} disabled={confirm.isPending} onChange={event => setNote(event.target.value)} />
+    {confirm.isError && <p role="alert" className="signal-field-error">{confirm.error instanceof Error ? confirm.error.message : "The finding could not be confirmed. Try again."}</p>}
+    <Button variant="primary" disabled={confirm.isPending || !review.canSubmit} onClick={() => {
+      if (!review.isCurrent() || !isAssessmentRevision(review.expectedRevision)) return;
+      confirm.mutate({ note: note.trim() || null, expected_revision: review.expectedRevision });
+    }}>{confirm.isPending ? "Confirming" : "Confirm finding"}</Button>
+  </div>;
 }
 
 function OverrideDialog({ flag, onClose, onAccepted, continuationIsCurrent, fallbackFocusRef }: { flag: FlagOut; onClose: () => void; onAccepted: (flag: FlagOut) => boolean; continuationIsCurrent: () => boolean; fallbackFocusRef: React.RefObject<HTMLHeadingElement | null> }) {
@@ -226,6 +251,7 @@ function ResolutionControl({ flag: observedFlag }: { flag: FlagOut }) {
       ) : (
         <Alert title="No source record can be confirmed" tone="info">VERIDICAL could not identify a DOI, ISBN, or title. If you verified the citation independently, dismiss only this finding and explain why.</Alert>
       ))}
+      <ConfirmFinding flag={flag} />
       <div className="signal-evidence-actions"><Button ref={overrideTriggerRef} variant="secondary" onClick={() => setOverrideOpen(true)}>Dismiss finding</Button></div><p className="signal-field-hint">Opens a form for your reason. Nothing is dismissed until you confirm.</p>
     </>}
   </section>;

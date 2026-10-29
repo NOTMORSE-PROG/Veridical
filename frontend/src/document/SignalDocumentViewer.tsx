@@ -183,7 +183,7 @@ function ReviewQueue({ findings, regions, sourceAvailability, report, collection
         <><ol id="workspace-findings-list" tabIndex={-1} aria-label="Findings on this page" className="signal-document-review-list">
           {pageItems.map((finding) => {
             const precision = regionPrecision(regionForFinding(finding, regions), sourceAvailability);
-            const state = finding.isSourceConfirmed ? "Source confirmed" : finding.isResolved ? "Resolved" : "Open";
+            const state = finding.isSourceConfirmed ? "Source confirmed" : finding.isResolved ? "Resolved" : finding.isConfirmed ? "Confirmed" : "Open";
             return (
               <li key={finding.key}>
                 <button id={`review-finding-${finding.representative.id}`} type="button" onClick={() => onSelect(finding.representative.id)}>
@@ -572,7 +572,8 @@ export function SignalDocumentViewerPage() {
   }), [id, flags, flagsQuery.error, flagsQuery.fetchStatus, flagsQuery.isError, flagsQuery.isSuccess]);
   const numbersByFlagId = useMemo(() => findingNumberByFlagId(findings), [findings]);
   const stepReport = usableReport(reportQuery.data, id, reportQuery.error);
-  const openFindingCount = flags ? otherFindings.filter((finding) => !finding.isResolved).length : undefined;
+  // Confirmed findings still count for readiness but no longer wait for review.
+  const openFindingCount = flags ? otherFindings.filter((finding) => !finding.isResolved && !finding.isConfirmed).length : undefined;
   // Wait for the findings before choosing a default step only when no
   // criterion is waiting, because only then can the findings change it.
   const step = workspaceStep(searchParams, !stepReport ? undefined

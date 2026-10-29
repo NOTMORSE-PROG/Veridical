@@ -242,6 +242,7 @@ function SignalFindingCard({
             <span className="signal-viewed-state"><ViewedIcon />Viewed</span>
           )}
           {first.overridden && <span className="signal-resolution-state">Resolved by instructor</span>}
+          {!first.overridden && first.finding_confirmed && <span className="signal-resolution-state">Confirmed by instructor</span>}
           {first.confirmed_citation_source && <span className="signal-resolution-state">Source confirmed</span>}
         </div>
         <h3 id={headingId} tabIndex={-1}>{problemLabel(first.problem_kind) ?? first.criterion_text ?? "Possible inconsistency"}</h3>

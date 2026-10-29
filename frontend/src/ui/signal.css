@@ -8919,4 +8919,17 @@
      edge so the rows line up. */
   #record-panel-grades .signal-result-list > .signal-result-card { display: flex; flex-direction: column; gap: var(--signal-space-2); }
   #record-panel-grades .signal-result-list > .signal-result-card > details:last-of-type { margin-block-start: auto; }
+  /* BUG-518: confirm a finding as a real issue (note optional). */
+  .signal-finding-confirm,
+  .signal-finding-confirmed {
+    display: grid;
+    gap: var(--signal-space-2);
+    border-radius: var(--signal-radius-control);
+    background: var(--color-signal-surface-muted);
+    padding: var(--signal-space-4);
+    margin-block-end: var(--signal-rhythm-control);
+  }
+  .signal-finding-confirm h3, .signal-finding-confirm p, .signal-finding-confirmed p { margin: 0; }
+  .signal-finding-confirm textarea { inline-size: 100%; }
+  .signal-finding-confirm > .signal-button { justify-self: start; }
 }
