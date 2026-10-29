@@ -8773,7 +8773,7 @@
 }
 
 @layer components {
-  .signal-shared-route > .signal-route-header .signal-eyebrow { color: var(--color-signal-brand); }
+  .signal-shared-route > .signal-route-header .signal-eyebrow { color: var(--color-signal-ink-secondary); }
   .signal-shared-verdict { grid-template-columns: repeat(2, minmax(0, 1fr)); background: var(--color-signal-surface); color: var(--color-signal-ink); border: var(--signal-border-hairline) solid var(--color-signal-border); padding: var(--signal-space-8); gap: var(--signal-space-8); }
   .signal-shared-verdict h2, .signal-shared-verdict .signal-section-kicker { color: var(--color-signal-ink); }
   .signal-shared-verdict p:not(.signal-section-kicker), .signal-shared-verdict dt { color: var(--color-signal-ink-secondary); }
@@ -8888,4 +8888,13 @@
   .signal-result-card .signal-attached-flow > blockquote { order: -2; }
   .signal-result-card .signal-attached-flow :is(.signal-button) { min-block-size: var(--signal-control-height); }
   .signal-pagination__gap { align-self: center; padding-inline: var(--signal-space-2); color: var(--color-signal-ink-muted); }
+  /* BUG-513: the page badge sits in the margin beside the highlight, never
+     over the words it marks. */
+  .signal-document-marker { transform: translate(calc(-100% - var(--signal-space-1)), 0); }
+  /* BUG-514: on dark surfaces the focus ring uses the brand tone (3:1+). */
+  .signal-workspace-bar :focus-visible,
+  .signal-document-toolbar :focus-visible,
+  .signal-report-hero :focus-visible { outline-color: var(--color-signal-brand); }
+  /* Review Desk queue cards: content starts at the top so counts line up. */
+  .signal-queue-tabs button { align-content: start; align-items: start; }
 }

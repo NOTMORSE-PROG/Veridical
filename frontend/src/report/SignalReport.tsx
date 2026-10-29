@@ -232,9 +232,10 @@ export function SignalReportPage() {
                   tabIndex={tab === value ? 0 : -1} onClick={() => selectTab(value)}
                   onKeyDown={event => {
                     const move = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
-                    if (!move) return;
+                    if (!move && event.key !== "Home" && event.key !== "End") return;
                     event.preventDefault();
-                    const next = RECORD_TABS[(RECORD_TABS.indexOf(value) + move + RECORD_TABS.length) % RECORD_TABS.length];
+                    const next = event.key === "Home" ? RECORD_TABS[0] : event.key === "End" ? RECORD_TABS[RECORD_TABS.length - 1]
+                      : RECORD_TABS[(RECORD_TABS.indexOf(value) + move + RECORD_TABS.length) % RECORD_TABS.length];
                     selectTab(next);
                   }}>{label}</button>)}
             </div>

@@ -22,7 +22,7 @@ export const CHECK_KIND_META: Record<string, CheckKindMeta> = {
     verificationPrompt: "Open the cited source and confirm that its author, title, year, and attached claim match the manuscript.",
   },
   statistical_forensics: {
-    eyebrow: "Statistical forensics check",
+    eyebrow: "Statistical checks",
     title: "Possible statistical inconsistency",
     verificationPrompt: "Check the recorded numbers and calculation against the original analysis output. This check does not verify the raw data.",
   },
@@ -40,7 +40,7 @@ export const CHECK_KIND_META: Record<string, CheckKindMeta> = {
 export const CHECK_KIND_SHORT_LABEL: Record<string, string> = {
   internal_agreement: "Internal agreement",
   citation_integrity: "Citation integrity",
-  statistical_forensics: "Statistical forensics",
+  statistical_forensics: "Statistical checks",
   originality_reuse: "Originality and reuse",
 };
 

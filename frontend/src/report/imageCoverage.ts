@@ -39,7 +39,7 @@ export function imageCoverageItem(status: IntegrityCheckStatusOut, checkRunId: n
   if (status.n_recovery_figures_unassessed || status.n_recovery_tables_unassessed) subIssues.push(`${status.n_recovery_figures_unassessed ?? 0} figure and ${status.n_recovery_tables_unassessed ?? 0} table recovery proposals remain unassessed. These are not verified image locations.`);
   return {
     key: status.check_kind,
-    label: `Statistical forensics · ${partial ? "Partially assessed" : "Not assessed"}`,
+    label: `Statistical checks · ${partial ? "Partially assessed" : "Not assessed"}`,
     detail: partial
       ? "Statistical statements were extracted from readable text or tables. Some image content remains unassessed. This limit is not a statistical error."
       : "No supported statistical statements were found in readable text and tables. Unassessed images may contain information this check missed.",

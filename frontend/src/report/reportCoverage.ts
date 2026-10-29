@@ -10,7 +10,7 @@ import { descriptiveAssumptionLimit } from "./statisticalScopeCopy";
 const INTEGRITY_LABEL: Record<IntegrityCheckStatusOut["check_kind"], string> = {
   internal_agreement: "Internal agreement",
   citation_integrity: "Citation integrity",
-  statistical_forensics: "Statistical forensics",
+  statistical_forensics: "Statistical checks",
   originality_reuse: "Originality/reuse",
 };
 
@@ -143,7 +143,7 @@ function baseIntegrityCoverageItem(status: IntegrityCheckStatusOut, manuscriptId
 export function coverageItems(report: ReportOut): CoverageStatementItem[] {
   const items: CoverageStatementItem[] = [];
   const descriptiveLimit = descriptiveAssumptionLimit(report.statistical_check_scope);
-  if (descriptiveLimit) items.push({ key: "statistical_descriptive_assumptions", label: "Statistical forensics · Partially assessed",
+  if (descriptiveLimit) items.push({ key: "statistical_descriptive_assumptions", label: "Statistical checks · Partially assessed",
     detail: descriptiveLimit });
   if (report.historical_native_math_unverified) {
     items.push({ key: "historical_native_math_unverified", label: NATIVE_MATH_HISTORY_TITLE, detail: NATIVE_MATH_HISTORY_LIMIT });
