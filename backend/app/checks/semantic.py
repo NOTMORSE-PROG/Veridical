@@ -9,6 +9,8 @@ without reshaping it.
 """
 
 import re
+import unicodedata
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -277,6 +279,146 @@ def _verify_quotes(
     return anchors
 
 
+_OMISSION = r"(?:(?:\.\s*){2}\.|…)"
+_OMISSION_MARK = re.compile(_OMISSION)
+_LEADING_OMISSION = re.compile(rf"^{_OMISSION}\s*")
+_TRAILING_OMISSION = re.compile(rf"\s*{_OMISSION}$")
+
+
+def _folded_index(text: str, *, casefold: bool) -> tuple[str, list[int]]:
+    """`text` NFKC-normalized (and case-folded when asked), with each folded
+    character's index in `text`. PDF extraction keeps ligature glyphs (the
+    "fi" ligature) and spaces at line breaks after punctuation ("https://
+    doi.org") that a model's transcription of the same words never contains.
+    Whitespace is dropped only beside punctuation: between two letters or
+    digits it stays one space, so "12 50" never folds into "1250"."""
+    folded: list[str] = []
+    positions: list[int] = []
+    pending_space = False
+    for index, char in enumerate(text):
+        if char.isspace():
+            pending_space = True
+            continue
+        normalized = unicodedata.normalize("NFKC", char)
+        if casefold:
+            normalized = normalized.casefold()
+        if not normalized:
+            continue
+        if pending_space and folded and folded[-1].isalnum() and normalized[0].isalnum():
+            folded.append(" ")
+            positions.append(index)
+        pending_space = False
+        for part in normalized:
+            folded.append(part)
+            positions.append(index)
+    return "".join(folded), positions
+
+
+def _strip_omission(quote: str) -> tuple[str, bool, bool] | None:
+    """(core, leading mark, trailing mark), or None for an empty core or an
+    interior omission (two passages joined by a generated mark)."""
+    normalized = _WHITESPACE.sub(" ", quote).strip()
+    leading = _LEADING_OMISSION.match(normalized)
+    trailing = _TRAILING_OMISSION.search(normalized)
+    start = leading.end() if leading else 0
+    end = trailing.start() if trailing else len(normalized)
+    core = normalized[start:end].strip() if start < end else ""
+    if not core or _OMISSION_MARK.search(core):
+        return None
+    return core, leading is not None, trailing is not None
+
+
+def _source_excerpt(
+    quote: str,
+    layouts: list[tuple[str, list[tuple[int, int, TextBlock]]]],
+    folded: Callable[[bool], list[tuple[str, list[int]]]],
+    anchor_kind: str,
+    min_chars: int,
+    *,
+    literal: bool,
+) -> tuple[str, str] | None:
+    """The source's own text and location for one proposal, or None.
+
+    A literal proposal (one `_verify_quotes` accepts) is matched as written.
+    Otherwise a leading/trailing omission mark is set aside, and the core may
+    differ from the source only by rendering (NFKC ligatures, case, spaces at
+    line breaks beside punctuation); it must be at least `min_chars` long.
+    Exact case is tried before case-folding, as in `_verify_quotes`. Every
+    proposal needs exactly one supported location under the folding that
+    matched, and the stored excerpt is always the source's characters,
+    widened only to complete a word an omission mark cut."""
+    if literal:
+        core, leading, trailing = _WHITESPACE.sub(" ", quote).strip(), False, False
+    else:
+        parts = _strip_omission(quote)
+        if parts is None:
+            return None
+        core, leading, trailing = parts
+    occurrences: list[tuple[str | None, int, int, int]] = []
+    for casefold in (False, True):
+        key, _ = _folded_index(core, casefold=casefold)
+        if not key or (not literal and len(key) < min_chars):
+            return None
+        for index, ((_text, spans), (haystack, positions)) in enumerate(
+            zip(layouts, folded(casefold), strict=True)
+        ):
+            found = haystack.find(key)
+            while found != -1:
+                first, last = positions[found], positions[found + len(key) - 1] + 1
+                occurrences.append(
+                    (_anchor_at_position(first, spans, anchor_kind), index, first, last)
+                )
+                found = haystack.find(key, found + 1)
+        if occurrences:
+            break
+    locations = {anchor for anchor, *_ in occurrences}
+    if len(locations) != 1 or None in locations:
+        return None
+    anchor, index, start, end = occurrences[0]
+    text = layouts[index][0]
+    if leading:
+        while start > 0 and text[start - 1].isalnum():
+            start -= 1
+    if trailing:
+        while end < len(text) and text[end].isalnum():
+            end += 1
+    return text[start:end], anchor
+
+
+def _resolve_source_excerpts(
+    quotes: list[str],
+    blocks: list[TextBlock],
+    anchor_kind: str,
+    *,
+    scopes: tuple[tuple[TextBlock, ...], ...] | None = None,
+) -> tuple[list[str], list[str]] | None:
+    """The evidence a grading verdict may store: `(quotes, anchors)`, every
+    quote the source's own text at its one supported location
+    (`_source_excerpt`), or `None` when any proposal has none.
+    `_verify_quotes` itself is unchanged; a proposal it accepts must also
+    have one location under the folding applied to every other proposal."""
+    source_scopes = scopes if scopes is not None else (tuple(blocks),)
+    layouts = [_normalized_layout(list(scope), preserve_case=True) for scope in source_scopes]
+    cache: dict[bool, list[tuple[str, list[int]]]] = {}
+
+    def folded(casefold: bool) -> list[tuple[str, list[int]]]:
+        if casefold not in cache:
+            cache[casefold] = [_folded_index(text, casefold=casefold) for text, _ in layouts]
+        return cache[casefold]
+
+    min_chars = get_settings().semantic_omission_core_min_chars
+    resolved_quotes: list[str] = []
+    resolved_anchors: list[str] = []
+    for quote in quotes:
+        literal = _verify_quotes([quote], blocks, anchor_kind, scopes=scopes) is not None
+        excerpt = _source_excerpt(quote, layouts, folded, anchor_kind, min_chars, literal=literal)
+        if excerpt is None:
+            return None
+        resolved_quotes.append(excerpt[0])
+        resolved_anchors.append(excerpt[1])
+    return resolved_quotes, resolved_anchors
+
+
 @dataclass(frozen=True)
 class GradeBatchCandidates:
     """Safely attributed candidates still require source, scale and vote checks."""
@@ -407,9 +549,14 @@ async def _grade_single_criterion(
     verdict = next((v for v in parsed.verdicts if v.index == 0), None)
     if verdict is None:
         return None
-    anchors = _verify_quotes(
+    resolved = _resolve_source_excerpts(
         verdict.evidence_quotes, batch.blocks, anchor_kind, scopes=batch.source_scopes
     )
+    if resolved is None:
+        return verdict, None
+    quotes, anchors = resolved
+    if quotes != verdict.evidence_quotes:
+        verdict = verdict.model_copy(update={"evidence_quotes": quotes})
     return verdict, anchors
 
 
@@ -553,11 +700,14 @@ async def grade_batch_verdicts(
             )
             continue
         quotes = verdict.evidence_quotes if verdict else None
-        anchors = (
-            _verify_quotes(quotes, batch.blocks, anchor_kind, scopes=batch.source_scopes)
+        resolved = (
+            _resolve_source_excerpts(quotes, batch.blocks, anchor_kind, scopes=batch.source_scopes)
             if quotes
             else None
         )
+        anchors = None
+        if resolved is not None:
+            quotes, anchors = resolved
         if anchors is not None:
             quotes, anchors = _drop_claimed_quotes(quotes, anchors, claimed_quotes)
             if not quotes:

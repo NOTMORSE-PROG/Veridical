@@ -2,7 +2,7 @@
 
 import pytest
 
-from app.checks.semantic import _normalize, _verify_quotes
+from app.checks.semantic import _normalize, _resolve_source_excerpts, _verify_quotes
 from app.ingest.schemas import TextBlock
 
 
@@ -134,3 +134,205 @@ async def test_generated_omission_mark_cannot_create_a_second_evidence_owner():
     assert out[1].verdict == "pass"
     assert out[2].verdict is None and out[2].anchors is None
     assert len(llm.calls) == 2
+
+
+SENTENCE = (
+    "The project methodology presents the procedures and processes used to develop "
+    "the tool in a structured and efficient manner, covering design and testing."
+)
+
+
+@pytest.mark.parametrize("mark", ["...", "…", ". . ."])
+def test_trailing_omission_proposal_stores_literal_source_text(mark):
+    blocks = [block("Chapter 3 opening.", page=23), block(SENTENCE, page=24)]
+    proposal = SENTENCE[:115] + mark
+    assert _verify_quotes([proposal], blocks, "page") is None
+    quotes, anchors = _resolve_source_excerpts([proposal], blocks, "page")
+    assert anchors == ["page 24"]
+    stored = quotes[0]
+    assert stored in SENTENCE and not stored.endswith(".") and "…" not in stored
+    # The cut word is completed from the source, never left as a fragment.
+    assert stored.endswith("structured and efficient")
+
+
+def test_leading_omission_proposal_stores_literal_source_text():
+    blocks = [block(SENTENCE, paragraph=7)]
+    # The mark cuts "procedures" mid-word; the stored excerpt completes it.
+    proposal = "..." + SENTENCE[40:]
+    quotes, anchors = _resolve_source_excerpts([proposal], blocks, "paragraph")
+    assert anchors == ["paragraph 7"]
+    assert quotes[0] in SENTENCE and quotes[0].startswith("procedures and processes")
+
+
+def test_literal_proposals_are_stored_unchanged_beside_resolved_ones():
+    blocks = [block("Results", page=2), block(SENTENCE, page=24)]
+    quotes, anchors = _resolve_source_excerpts(["Results", SENTENCE[:90] + "..."], blocks, "page")
+    assert quotes[0] == "Results" and anchors == ["page 2", "page 24"]
+
+
+def test_omission_core_with_two_locations_is_not_guessed():
+    blocks = [block(SENTENCE, page=5), block(SENTENCE, page=9)]
+    assert _resolve_source_excerpts([SENTENCE[:100] + "..."], blocks, "page") is None
+
+
+def test_short_omission_core_remains_rejected():
+    blocks = [block("Measured motor output remained stable across trials.", page=3)]
+    assert _resolve_source_excerpts(["Measured motor output..."], blocks, "page") is None
+
+
+def test_interior_omission_remains_rejected():
+    blocks = [block(SENTENCE, page=24)]
+    proposal = SENTENCE[:50] + " ... " + SENTENCE[60:120] + "..."
+    assert _resolve_source_excerpts([proposal], blocks, "page") is None
+
+
+def test_one_unresolvable_proposal_rejects_the_whole_evidence_set():
+    blocks = [block(SENTENCE, page=24)]
+    assert (
+        _resolve_source_excerpts([SENTENCE[:100] + "...", "Not in source"], blocks, "page") is None
+    )
+
+
+async def test_grading_stores_the_resolved_excerpt_not_the_proposal():
+    from app.checks.semantic import SemanticBatch, grade_batch_verdicts
+    from tests.test_checks_semantic import FakeCriterion
+    from tests.test_semantic_partial_recovery import Scripted
+
+    llm = Scripted(
+        [
+            {
+                "verdicts": [
+                    {
+                        "index": 0,
+                        "verdict": "pass",
+                        "reasoning": "Scripted proposal",
+                        "evidence_quotes": [SENTENCE[:115] + "..."],
+                    }
+                ]
+            }
+        ]
+    )
+    out = await grade_batch_verdicts(
+        SemanticBatch("source", [block(SENTENCE, page=24)]),
+        [FakeCriterion(1, "Methodology is described")],
+        llm,
+        None,
+        "page",
+    )
+    assert out[1].verdict == "pass" and out[1].anchors == ["page 24"]
+    assert out[1].quotes == [SENTENCE[: SENTENCE.index(" manner")]]
+    assert len(llm.calls) == 1
+
+
+async def test_resolved_excerpt_cannot_become_a_second_evidence_owner():
+    from app.checks.semantic import SemanticBatch, grade_batch_verdicts
+    from tests.test_checks_semantic import FakeCriterion
+    from tests.test_semantic_partial_recovery import Scripted
+
+    exact = SENTENCE[: SENTENCE.index(" manner")]
+    llm = Scripted(
+        [
+            {
+                "verdicts": [
+                    {
+                        "index": index,
+                        "verdict": "pass",
+                        "reasoning": "Scripted proposal",
+                        "evidence_quotes": [quote],
+                    }
+                    for index, quote in enumerate((exact, SENTENCE[:115] + "..."))
+                ]
+            },
+            {
+                "verdicts": [
+                    {
+                        "index": 0,
+                        "verdict": "uncertain",
+                        "reasoning": "No independent literal evidence",
+                        "evidence_quotes": [],
+                    }
+                ]
+            },
+        ]
+    )
+    out = await grade_batch_verdicts(
+        SemanticBatch("source", [block(SENTENCE, page=24)]),
+        [FakeCriterion(1, "First requirement"), FakeCriterion(2, "Second requirement")],
+        llm,
+        None,
+        "page",
+    )
+    assert out[1].verdict == "pass"
+    assert out[2].verdict is None and out[2].anchors is None
+
+
+LIGATURE_SOURCE = (
+    "Kulik, J. A., & Fletcher, J. D. (2016). Eﬀectiveness of intelligent tutoring "
+    "systems: A meta-analytic review. Review of Educational Research, 86(1), 42\u2013 78. "
+    "https:// doi.org/10.3102/0034654315581420"
+)
+
+
+def test_rendering_differences_store_the_source_characters():
+    blocks = [block(LIGATURE_SOURCE, page=8)]
+    proposal = (
+        "Kulik, J. A., & Fletcher, J. D. (2016). Effectiveness of intelligent tutoring "
+        "systems: A meta-analytic review. Review of Educational Research, 86(1), 42\u201378. "
+        "https://doi.org/10.3102/0034654315581420"
+    )
+    assert _verify_quotes([proposal], blocks, "page") is None
+    quotes, anchors = _resolve_source_excerpts([proposal], blocks, "page")
+    assert anchors == ["page 8"]
+    assert quotes == [LIGATURE_SOURCE]
+
+
+def test_rendering_tolerance_never_accepts_a_changed_word():
+    blocks = [block(LIGATURE_SOURCE, page=8)]
+    changed = LIGATURE_SOURCE.replace("intelligent", "adaptive").replace("ﬀ", "ff")
+    assert _resolve_source_excerpts([changed], blocks, "page") is None
+
+
+def test_rendering_tolerance_still_requires_one_location():
+    blocks = [block(LIGATURE_SOURCE, page=8), block(LIGATURE_SOURCE, page=9)]
+    proposal = LIGATURE_SOURCE.replace("ﬀ", "ff").replace("https:// ", "https://")
+    assert _resolve_source_excerpts([proposal], blocks, "page") is None
+
+
+# --- Independent backend review, 2026-10-29: the rendering fold never merges
+# letters or digits, and stored evidence is always the source's own text.
+
+
+@pytest.mark.parametrize(
+    ("source", "proposal"),
+    [
+        (
+            "Each learner in the pilot involved 12 50-minute sessions with the tutor over a month.",
+            "Each learner in the pilot involved 1250-minute sessions with the tutor over a month.",
+        ),
+        (
+            "Of the respondents who started the posttest, 1 2 were excluded for missing pages.",
+            "Of the respondents who started the posttest, 12 were excluded for missing pages.",
+        ),
+        (
+            "The therapist reviewed every recorded tutoring session before the final interview.",
+            "The the rapist reviewed every recorded tutoring session before the final interview.",
+        ),
+    ],
+)
+def test_rendering_fold_never_merges_letters_or_digits(source, proposal):
+    assert _resolve_source_excerpts([proposal], [block(source, page=4)], "page") is None
+
+
+def test_case_different_literal_proposal_stores_the_source_casing():
+    source = "THE SYSTEM WAS EVALUATED WITH ONE HUNDRED TWENTY GRADE 7 LEARNERS IN MANILA."
+    quotes, anchors = _resolve_source_excerpts(
+        [source.capitalize()], [block(source, page=2)], "page"
+    )
+    assert quotes == [source] and anchors == ["page 2"]
+
+
+def test_omission_proposal_with_a_ligature_duplicate_elsewhere_is_ambiguous():
+    plain = "The tutoring sessions were effective for most learners in the pilot group."
+    typeset = plain.replace("ff", chr(0xFB00))
+    blocks = [block(plain, page=3), block(typeset, page=9)]
+    assert _resolve_source_excerpts([plain[:60] + "..."], blocks, "page") is None

@@ -341,6 +341,12 @@ class Settings(BaseSettings):
     semantic_batch_max_criteria: int = Field(default=20, ge=1)
     semantic_batch_validation_attempts: int = Field(default=2, ge=1, le=2)
     semantic_item_recovery_max_criteria: int = Field(default=20, ge=0)
+    # An evidence proposal that only adds a leading/trailing omission mark or
+    # differs from the source only by rendering (ligatures, case, line-break
+    # spacing) is stored as the source's own text when the remaining core is
+    # at least this long and has one supported location; shorter cores stay
+    # rejected.
+    semantic_omission_core_min_chars: int = Field(default=40, ge=1)
     semantic_grading_response_contract: str = Field(
         default="indexed-item-recovery-v1", pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$"
     )
