@@ -14,9 +14,11 @@ _STARTED = time.monotonic()
 # for its GRIM summaries and plots. The SPRITE search uses none of them, yet
 # loading them was nearly all of this process's start-up time and memory:
 # about 13 s and 140 MiB per row on the free host. Stand-ins take their
-# place. Any use of one raises, so an unexpected use ends as a library error
-# and an unassessed row, never a quiet result. A library that is already
-# loaded is left alone.
+# place. Reading an ordinary attribute of one raises, and importing a
+# submodule from one fails, so an unexpected use ends as a library error and
+# an unassessed row. Dunder lookups raise AttributeError, so a probe such as
+# getattr(module, "__version__", None) just sees nothing. A library that is
+# already loaded is left alone. Only run this module as its own process.
 _NOT_LOADED = ("pandas", "matplotlib", "matplotlib.pyplot", "seaborn", "scipy")
 
 

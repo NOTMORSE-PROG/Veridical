@@ -1,8 +1,9 @@
 """GRIM/GRIMMER/SPRITE checks (F6.2/F6.3, V-032).
 
-SPRITE (distribution plausibility) wraps `pysprite` directly — a validated,
-actively maintained MIT-licensed Python library (D-003: reuse, never
-reimplement). GRIM (mean-consistency) also wrapped it until 2026-10-07; it is
+SPRITE (distribution plausibility) wraps `pysprite` directly — a validated
+MIT-licensed Python library (D-003: reuse, never reimplement). Its latest
+release is still 1.2.1 (July 2019), so its known limits are ours to work
+around, not fixed upstream. GRIM (mean-consistency) also wrapped it until 2026-10-07; it is
 now the exact rational test in `grim_check`, because pysprite's float
 comparison misjudges exact halfway totals (measured, see that docstring).
 
