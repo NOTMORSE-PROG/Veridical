@@ -810,12 +810,12 @@ async def _run_integrity_stage(
     # `_run_semantic_stage` already uses above.
     existing = (agreement_existing, citation_existing, forensics_existing, reuse_existing)
     # A check saved just before a crash may still lack its unread-pages note;
-    # a resumed stage re-derives the scope to finish it (the rare extra read
-    # BUG-152 otherwise avoids).
+    # a stage resumed with checks left to run finishes it below. With every
+    # check already saved the extraction is not reread at all (BUG-152).
     unannotated = [result for result in existing if _may_lack_unread_note(result)]
     extraction = None
     unread_pages: list[int] = []
-    if None in existing or unannotated:
+    if None in existing:
         extraction = await load_raw_store_async(settings, manuscript.id)
         extraction = bind_analytical_source(extraction, manuscript.content_hash)
         unread_pages = unread_page_scope(extraction, settings.analysis_unread_pages_max_ratio) or []
