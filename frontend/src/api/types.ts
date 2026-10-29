@@ -391,6 +391,12 @@ export interface CriterionSourceCoverage {
 export interface CriterionResultOut extends ResultRowCommon {
   source_coverage?: CriterionSourceCoverage | null;
   resolution: ResolutionOut | null;
+  /** How an automatic grade was chosen (grading policy "decide"); absent
+   * once an instructor records a judgment or when the AI did not grade. */
+  decision_basis?: "single_verified_pass" | "lower_of_two" | "middle_of_three" | null;
+  support_caution?: string | null;
+  agreeing_passes?: number | null;
+  grading_passes?: number | null;
   /** Private write identity; older retained client fixtures may lack these fields. */
   check_result_id?: number;
   judgment_revision?: number | null;

@@ -1,6 +1,7 @@
 import { useContext, useId, useRef, useState, type RefObject } from "react";
 import type { Decision, ReportOut } from "../api/types";
 import { INSTRUCTOR_NOTE_MAX_LENGTH, RESOLUTION_REASON_MIN_LENGTH } from "../config/ui";
+import { automaticGradeLines, fillAutomaticConfirmation } from "../domain/automaticGrade";
 import { DECISION_LABEL } from "../domain/decisionTone";
 import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
@@ -60,6 +61,8 @@ function DecisionDialog({ decision, report, manuscriptLabel, onClose, onSaved, f
   const drafts = useContext(ReviewContext);
   const copy = DECISION_COPY[decision];
   const pendingReturn = decision === "returned" && report.pending_review_count > 0;
+  // Automatic grades left unchanged count as the instructor's agreement.
+  const automaticGrades = report.results.filter(row => !row.resolution && automaticGradeLines(row).length > 0).length;
   const reasonRequired = pendingReturn || STATUSES_REQUIRING_REASON[decision].has(report.status);
   const invalid = attempted && reasonRequired && note.trim().length < RESOLUTION_REASON_MIN_LENGTH;
   function submit() {
@@ -79,6 +82,7 @@ function DecisionDialog({ decision, report, manuscriptLabel, onClose, onSaved, f
       {readFailed && <DecisionReadRecovery retrying={retrying} onRetry={onRetry} />}
       <CurrentAssessmentReview review={review} busy={decide.isPending} onRebind={trigger => followAction(trigger, review.rebind)} />
       <p>This records {manuscriptLabel} as {copy.phrase}{pendingReturn ? ` with ${report.pending_review_count} unresolved criteria. Returning does not grade or exclude them.` : "."} The report becomes read-only until you reopen it with a reason.</p>
+      {automaticGrades > 0 && <p>{fillAutomaticConfirmation(automaticGrades)}</p>}
       {drafts && (drafts.drafts.size > 0 || drafts.revisions.hasDrafts) && <p>Your entered criterion drafts are kept and locked. After reopening, review each current criterion before using its draft.</p>}
       {drafts?.revisions.hasUnknownAttempt && <p>An earlier revision save could not be confirmed. This decision uses the current judgments shown and does not cancel that request.</p>}
       <label><span>{pendingReturn ? "Reason for return (required)" : reasonRequired ? "Reason (required)" : "Note (optional)"}</span>

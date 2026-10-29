@@ -1,3 +1,4 @@
+import { AUTOMATIC_GRADE_COPY } from "../domain/automaticGrade";
 import { ActionAssessmentContext } from "./ReportAssessmentContext";
 // F3.5/F8.3, screens 4h/4w: revise a saved criterion in its evidence context.
 import { useLayoutEffect, useRef, useState } from "react";
@@ -91,8 +92,8 @@ export function RecordedJudgmentTools({ checkRunId, criterionId, criterionText, 
       {!draft && (review.decision
         ? <p>{recording ? "Reopen this report to record an instructor judgment." : "Reopen this report to revise recorded judgments."}</p>
         : <Button ref={reviseRef} variant="secondary" disabled={record?.loading}
-          aria-label={`${recording ? "Record instructor judgment" : "Revise recorded judgment"}: ${criterionText}`} aria-describedby={contextDescription}
-          onClick={event => open(recording ? "record" : "revise", event.currentTarget)}>{recording ? "Record instructor judgment" : "Revise recorded judgment"}</Button>)}
+          aria-label={`${recording ? AUTOMATIC_GRADE_COPY.change : AUTOMATIC_GRADE_COPY.changeAgain}: ${criterionText}`} aria-describedby={contextDescription}
+          onClick={event => open(recording ? "record" : "revise", event.currentTarget)}>{recording ? AUTOMATIC_GRADE_COPY.change : AUTOMATIC_GRADE_COPY.changeAgain}</Button>)}
       {(canonical.resolution || current) && draft?.uncertainRevision === undefined && !record?.abandonedAttempt && <Button variant="quiet" aria-expanded={record?.historyOpen ?? false} aria-controls={`${id}-history`}
         aria-label={`Judgment history: ${criterionText}`} onClick={event => {
           if (record?.historyOpen) scope.closeHistory(criterionId);

@@ -117,7 +117,10 @@ def gate_vote(
     settings = settings or get_settings()
     if majority_verdict is None:
         return ResultOutcome.escalated, None
-    if agreement < settings.escalation_agreement_threshold:
+    if (
+        settings.grading_decision_policy != "decide"
+        and agreement < settings.escalation_agreement_threshold
+    ):
         return ResultOutcome.escalated, None
     outcome, score, _level = outcome_and_score(criterion, majority_verdict)
     return outcome, score

@@ -992,7 +992,12 @@ async def _grade_batch(
         }
         if level is not None:
             detail["level"] = level.as_detail()
-        outcome, detail = apply_support(outcome, detail, support[criterion.id])
+        outcome, detail = apply_support(
+            outcome,
+            detail,
+            support[criterion.id],
+            decide=get_settings().grading_decision_policy == "decide",
+        )
         results.append(await _persist(session, check_run_id, criterion, outcome, detail))
     return results
 

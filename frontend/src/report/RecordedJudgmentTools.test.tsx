@@ -140,7 +140,7 @@ function setup(options: { levelled?: boolean; legacy?: boolean; actualAuthRoute?
     history: (incomplete: boolean, fail = false) => { historyIncomplete = incomplete; failHistory = fail; } };
 }
 async function openRevision() {
-  fireEvent.click(await screen.findByRole("button", { name: /^Revise recorded judgment:/ }));
+  fireEvent.click(await screen.findByRole("button", { name: /^Change grade again:/ }));
   return await screen.findByRole("textbox", { name: "New reason for revision (required)" });
 }
 function review(reason = NEW_REASON) {
@@ -170,7 +170,7 @@ describe("Explicit saved-judgment revision", () => {
         else { client.clear(); client.setQueryData(ME_QUERY_KEY, { id: nextId }); }
       });
       if (nextId === null) await screen.findByText("Sign in");
-      else await screen.findByRole("button", { name: /^Revise recorded judgment:/ });
+      else await screen.findByRole("button", { name: /^Change grade again:/ });
       await waitFor(() => expect(client.isFetching()).toBe(0));
       const replacementAuth = client.getQueryData(ME_QUERY_KEY);
       const replacementReport = client.getQueryData(["report", 5]);
@@ -262,7 +262,7 @@ describe("Explicit saved-judgment revision", () => {
   });
   it("rejects current context whose result identity differs from its coherent report row", async () => {
     const control = setup(); control.wrongReadResult();
-    fireEvent.click(await screen.findByRole("button", { name: /^Revise recorded judgment:/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Change grade again:/ }));
     expect(await screen.findByRole("alert")).toHaveTextContent("The current judgment could not be loaded");
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument(); expect(control.posts).toHaveLength(0);
   });
@@ -401,7 +401,7 @@ describe("Explicit saved-judgment revision", () => {
 describe("revision action provenance", () => {
   it("keeps visible short context on revision entry and inside confirmation actions", async () => {
     const control = setup();
-    const revise = await screen.findByRole("button", { name: /^Revise recorded judgment:/ });
+    const revise = await screen.findByRole("button", { name: /^Change grade again:/ });
     expect(revise).toHaveAccessibleDescription(/AI response mode is unverified/);
     for (const id of revise.getAttribute("aria-describedby")!.split(/\s+/)) expect(document.getElementById(id)).toBeVisible();
     fireEvent.click(revise);

@@ -551,6 +551,15 @@ class Settings(BaseSettings):
     # golden evidence") — V-025's golden-set agreement numbers are what
     # justify lowering it later, never a guess.
     escalation_agreement_threshold: float = 1.0
+    # Owner decision 2026-10-29: "decide" grades every criterion the AI can
+    # ground in the manuscript (majority of passes; a three-way split takes
+    # the middle level; a single verified pass or an unverified tie-break
+    # takes the lower level; an unconfirmed support check stays a disclosed
+    # caution) and the instructor changes any grade they disagree with.
+    # "escalate" keeps the earlier policy: any disagreement or unconfirmed
+    # support waits for the instructor. Nothing is decided without at least
+    # one pass whose quotes are verified in the manuscript.
+    grading_decision_policy: Literal["escalate", "decide"] = "escalate"
 
     # --- Accuracy gates: tier promotion + override alarm (V-025, D-012) ------
     # A shadow Tier 0/1 signal class only starts auto-deciding once its

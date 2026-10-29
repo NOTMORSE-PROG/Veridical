@@ -93,6 +93,33 @@ class VoteResult:
     unverified_quotes: list[str] | None = None
     failure_outcome: ResultOutcome | None = None
     failure_phase: str | None = None
+    # GRADING_DECISION_POLICY="decide": how a grade was chosen when the
+    # passes did not simply agree (shown to the instructor with the grade).
+    decision_basis: str | None = None
+
+
+def _scale_position(criterion: Any, verdict: str) -> float | None:
+    """A verdict's place on the criterion's own scale (its score), or None
+    for a verdict the scale does not name."""
+    return outcome_and_score(criterion, verdict)[1]
+
+
+def _decided_vote(
+    criterion: Any, graded: list[GradedVerdict], votes: list[str | None]
+) -> VoteResult | None:
+    """Policy "decide": the middle of three verified verdicts, or the lower
+    of two. None when a verdict is not on the criterion's scale."""
+    placed = []
+    for g in graded:
+        position = _scale_position(criterion, g.verdict) if g.verdict else None
+        if position is None:
+            return None
+        placed.append((position, g))
+    placed.sort(key=lambda item: item[0])
+    winner = placed[1][1] if len(placed) == 3 else placed[0][1]
+    basis = "middle_of_three" if len(placed) == 3 else "lower_of_two"
+    agreement = round(sum(1 for g in graded if g.verdict == winner.verdict) / len(votes), 3)
+    return VoteResult(winner.verdict, agreement, votes, winner, None, decision_basis=basis)
 
 
 def _collect_unverified_quotes(*graded: GradedVerdict) -> list[str] | None:
@@ -157,6 +184,7 @@ async def _vote_for_criterion(
     claimed = claimed_quotes if claimed_quotes is not None else set()
     g1 = _downgrade_if_claimed(g1, claimed)
     g2 = _downgrade_if_claimed(g2, claimed)
+    decide = get_settings().grading_decision_policy == "decide"
     if g1.verdict is None or g2.verdict is None:
         # dict.fromkeys, not a plain list: the two grading passes fail with
         # the SAME reason far more often than not (same manuscript, same
@@ -165,6 +193,16 @@ async def _vote_for_criterion(
         reasons = dict.fromkeys(g.escalation_reason for g in (g1, g2) if g.escalation_reason)
         unverified = _collect_unverified_quotes(g1, g2)
         failure = next((g for g in (g1, g2) if g.failure_outcome is not None), None)
+        verified = [g for g in (g1, g2) if g.verdict is not None]
+        if decide and failure is None and len(verified) == 1:
+            return VoteResult(
+                verified[0].verdict,
+                0.5,
+                [g1.verdict, g2.verdict],
+                verified[0],
+                None,
+                decision_basis="single_verified_pass",
+            )
         return VoteResult(
             None,
             0.0,
@@ -217,6 +255,12 @@ async def _vote_for_criterion(
             ResultOutcome.api_down,
             "tie_break",
         )
+    if tie is None or tie[1] is None:
+        decided = (
+            _decided_vote(criterion, [g1, g2], [g1.verdict, g2.verdict, None]) if decide else None
+        )
+        if decided is not None:
+            return decided
     if tie is None:
         return VoteResult(
             None,
@@ -252,6 +296,10 @@ async def _vote_for_criterion(
         ),
         claimed,
     )
+    if g3.verdict is None and decide:
+        decided = _decided_vote(criterion, [g1, g2], [g1.verdict, g2.verdict, None])
+        if decided is not None:
+            return decided
     if g3.verdict is None:
         # The tie-break reached a real verdict, but every quote it offered
         # was already claimed by an earlier criterion in this batch --
@@ -269,6 +317,10 @@ async def _vote_for_criterion(
         )
     votes = [g1.verdict, g2.verdict, g3.verdict]
     majority, agreement = _tally(votes)
+    if majority is None and decide:
+        decided = _decided_vote(criterion, [g1, g2, g3], votes)
+        if decided is not None:
+            return decided
     winner = next((g for g in (g1, g2, g3) if g.verdict == majority), None)
     return VoteResult(majority, agreement, votes, winner, None)
 
@@ -286,6 +338,8 @@ def _vote_detail(
     }
     if vote.failure_phase:
         detail["failure_phase"] = vote.failure_phase
+    if vote.decision_basis:
+        detail["decision_basis"] = vote.decision_basis
     if vote.winner is not None:
         detail["verdict"] = vote.winner.verdict
         detail["reasoning"] = vote.winner.reasoning
@@ -527,9 +581,12 @@ async def vote_batch(
         and not v.detail.get("injection_suspected")
     ]
     support = await check_support_available(batch, candidates, llm, check_run_id=check_run_id)
+    decide = settings.grading_decision_policy == "decide"
     return [
         VotedCriterion(
-            v.criterion, v.vote, *apply_support(v.outcome, v.detail, support[v.criterion.id])
+            v.criterion,
+            v.vote,
+            *apply_support(v.outcome, v.detail, support[v.criterion.id], decide=decide),
         )
         if v.criterion.id in support
         else v

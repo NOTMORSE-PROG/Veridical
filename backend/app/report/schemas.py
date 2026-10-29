@@ -109,6 +109,13 @@ class CriterionResultOut(BaseModel):
     # the judgment the instructor reads for that row (owner-approved
     # treatment). `None` for every ordinary pass/fail criterion, unchanged.
     level: CriterionLevelOut | None = None
+    # GRADING_DECISION_POLICY="decide" (owner, 2026-10-29): how an automatic
+    # grade was chosen, shown with the grade until an instructor changes it.
+    # Absent on instructor judgments and on rows the AI did not grade.
+    decision_basis: Literal["single_verified_pass", "lower_of_two", "middle_of_three"] | None = None
+    support_caution: str | None = None
+    agreeing_passes: int | None = None
+    grading_passes: int | None = None
 
 
 COVERAGE_REASONS = frozenset(

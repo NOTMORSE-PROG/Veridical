@@ -351,7 +351,32 @@ def _to_criterion_result(
         # `checks/consistency.py`, and `checks/escalation.resolve_escalation`
         # for a levelled criterion's decided result — `None` otherwise.
         level=CriterionLevelOut(**detail["level"]) if detail.get("level") else None,
+        **_automatic_grade(result, detail, resolution_detail),
     )
+
+
+_DECISION_BASES = frozenset({"single_verified_pass", "lower_of_two", "middle_of_three"})
+
+
+def _automatic_grade(result: CheckResult, detail: dict, resolution: object) -> dict:
+    """How an AI-decided grade was chosen; nothing once an instructor judged."""
+    if (
+        resolution
+        or detail.get("basis") != "llm"
+        or result.outcome not in (ResultOutcome.passed, ResultOutcome.failed)
+    ):
+        return {}
+    votes = detail.get("votes")
+    verdict = detail.get("verdict")
+    real = [vote for vote in votes if isinstance(vote, str)] if isinstance(votes, list) else []
+    basis = detail.get("decision_basis")
+    caution = detail.get("support_caution")
+    return {
+        "decision_basis": basis if basis in _DECISION_BASES else None,
+        "support_caution": caution if isinstance(caution, str) and caution.strip() else None,
+        "agreeing_passes": sum(vote == verdict for vote in real) if real and verdict else None,
+        "grading_passes": len(real) or None,
+    }
 
 
 def _statistical_notation_state(detail: dict | None) -> bool | None:

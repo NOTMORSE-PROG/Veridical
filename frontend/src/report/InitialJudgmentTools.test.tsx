@@ -76,7 +76,7 @@ function setup() {
 }
 
 async function open() {
-  fireEvent.click(await screen.findByRole("button", { name: /^Record instructor judgment:/ }));
+  fireEvent.click(await screen.findByRole("button", { name: /^Change grade:/ }));
   return await screen.findByLabelText("Reason for your judgment (required)");
 }
 function propose(choice = "Meets criterion") {
@@ -105,7 +105,7 @@ describe("Initial instructor judgment over a settled assessment", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Save judgment" }));
     expect(await screen.findByRole("heading", { name: "Judgment recorded" })).toBeInTheDocument();
     expect(control.posts).toEqual([{ expected_revision: 0, resolution: "mark_pass", reason: REASON.trim() }]);
-    expect(screen.getByRole("button", { name: /^Revise recorded judgment:/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Change grade again:/ })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /^Judgment history:/ }));
     expect(await screen.findByText("Initial recorded judgment: Current at time of this history read")).toBeInTheDocument();
     const originalSummary = screen.getByText("Original automated assessment");

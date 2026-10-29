@@ -319,14 +319,29 @@ async def check_support_available(batch: Any, candidates: list, llm: Any, **cont
 
 
 def apply_support(
-    outcome: ResultOutcome, detail: dict[str, Any], support: dict[str, Any]
+    outcome: ResultOutcome,
+    detail: dict[str, Any],
+    support: dict[str, Any],
+    *,
+    decide: bool = False,
 ) -> tuple[ResultOutcome, dict[str, Any]]:
-    """Keep location-verified passages, but remove any withheld accepted rating."""
+    """Keep location-verified passages, but remove any withheld accepted rating.
+
+    `decide` (GRADING_DECISION_POLICY): an unconfirmed support check keeps
+    the verified-evidence rating and records the check's reason as a
+    disclosed caution instead; a support outage is still not a rating."""
     updated = {**detail, "support_check": support}
     if support["status"] == "supported":
         updated["support_basis"] = support["reason"]
         updated["grading_reasoning"] = updated.get("reasoning")
         updated["reasoning"] = support["reason"]
+        return outcome, updated
+    if (
+        decide
+        and support.get("failure_outcome") != ResultOutcome.api_down.value
+        and outcome in (ResultOutcome.passed, ResultOutcome.failed)
+    ):
+        updated["support_caution"] = support["reason"]
         return outcome, updated
     if "verdict" in updated:
         updated["proposed_verdict"] = updated.pop("verdict")
