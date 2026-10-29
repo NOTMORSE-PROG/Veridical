@@ -1645,3 +1645,53 @@ async def test_pages_after_an_unclear_reference_list_are_named_not_passed(sessio
     assert result.outcome == ResultOutcome.escalated
     assert result.detail["coverage_reason"] == "reference_end_unclear"
     assert result.detail["pages_not_compared"] == [2, 3, 4]
+    assert result.detail["not_compared_from"] == "p. 2"
+
+
+async def test_a_word_file_with_an_unclear_reference_list_is_not_passed(session_factory):
+    """A Word file has no pages to name, but the text after an unclear
+    reference list is still left out, so the result says where it starts."""
+    from tests.test_ingest_reference_boundaries import as_word_document, unclear_end_manuscript
+
+    manuscript_id, run_id = await _seed_manuscript_and_run(
+        session_factory, group_label="Unclear end, Word"
+    )
+    async with session_factory() as session:
+        result = await _run_with_saved_source(
+            session,
+            manuscript_id,
+            run_id,
+            as_word_document(unclear_end_manuscript()),
+            get_settings(),
+        )
+    assert result.outcome == ResultOutcome.escalated
+    assert result.detail["coverage_reason"] == "reference_end_unclear"
+    assert result.detail["pages_not_compared"] == []
+    assert result.detail["not_compared_from"].startswith("¶")
+
+
+async def test_a_body_that_cannot_be_told_from_its_references_is_named_not_empty(
+    session_factory,
+):
+    """A short paper whose bibliography is ambiguous is not compared at all.
+    That is said as such, with every page that holds text, never as a file
+    with no content."""
+    from tests.test_reuse_unstructured_scope import ancillary_source, block
+
+    extraction = ancillary_source()
+    extraction.blocks[-1:] = [
+        block("[1] Reyes, J. (2024). One work.", 3),
+        block("[1] Santos, A. (2023). A different work.", 3),
+    ]
+    manuscript_id, run_id = await _seed_manuscript_and_run(
+        session_factory, group_label="Short paper, ambiguous list"
+    )
+    async with session_factory() as session:
+        result = await _run_with_saved_source(
+            session, manuscript_id, run_id, extraction, get_settings()
+        )
+    assert result.outcome == ResultOutcome.escalated
+    assert result.detail["coverage_reason"] == "reference_boundary_unclear"
+    assert result.detail["pages_not_compared"] == [1, 2, 3]
+    assert result.detail["comparison_ran"] is False
+    assert "no embeddable content" not in result.detail["note"].casefold()

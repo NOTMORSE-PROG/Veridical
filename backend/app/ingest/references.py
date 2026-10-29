@@ -406,7 +406,7 @@ def non_reference_blocks(
     pass `ambiguous_entries_ok`. Then a bibliography whose entries are
     ambiguous is left out as its whole region, and one whose end is unclear is
     left out together with everything after it, instead of the result being
-    empty. `reference_pages_not_assessed` names those pages. An unknown
+    empty. `reference_region_not_assessed` names that text. An unknown
     bibliography location still returns nothing.
     """
     selection = selection or select_references(result, patterns)
@@ -468,20 +468,40 @@ def _unclear_end_cut(selection: ReferenceSelection) -> tuple[int, int] | None:
     return first.source_block_index, first.source_start
 
 
-def reference_pages_not_assessed(
+@dataclass(frozen=True)
+class RegionNotAssessed:
+    """Text that text-only callers leave out because the bibliography's end
+    is unclear: from where the reference list starts to the end of the
+    document."""
+
+    # Where that text starts, as reports cite it ("p. 157", "¶212"); None if
+    # the source block carries no anchor.
+    start: str | None
+    # PDF pages from there to the end that hold text; empty for Word files.
+    pages: list[int]
+
+
+def reference_region_not_assessed(
     result: ExtractionResult, selection: ReferenceSelection
-) -> list[int]:
-    """Pages text-only callers skip because the bibliography's end is unclear:
-    from where the reference list starts to the end of the document."""
+) -> RegionNotAssessed | None:
+    """None when the bibliography's end is known or no list was found."""
     cut = _unclear_end_cut(selection)
-    if cut is None or result.anchor_kind != "page":
-        return []
-    return sorted(
-        {
-            block.page
-            for block in result.blocks[cut[0] :]
-            if block.page is not None and not block.is_furniture and block.text.strip()
-        }
+    if cut is None:
+        return None
+    first = result.blocks[cut[0]]
+    if result.anchor_kind != "page":
+        return RegionNotAssessed(
+            start=f"¶{first.paragraph}" if first.paragraph is not None else None, pages=[]
+        )
+    return RegionNotAssessed(
+        start=f"p. {first.page}" if first.page is not None else None,
+        pages=sorted(
+            {
+                block.page
+                for block in result.blocks[cut[0] :]
+                if block.page is not None and not block.is_furniture and block.text.strip()
+            }
+        ),
     )
 
 
@@ -1343,7 +1363,7 @@ def _pair_detached_labels(span: list[TextBlock]) -> list[list[TextBlock]] | None
     line holds the label's vertical centre on the same page. Text blocks that
     start no entry continue the entry before them. The labels must stand in
     one column, the text in one column to their right, and the labels must be
-    of one style and strictly ascending. Anything else (a label with no text
+    of one style and numbered without a gap. Anything else (a label with no text
     on its line, two labels on one line, text before the first label, a
     second column) means the entries cannot be trusted, and None is returned.
     """
@@ -1394,7 +1414,11 @@ def _pair_detached_labels(span: list[TextBlock]) -> list[list[TextBlock]] | None
     numbered = [_label_number(group[0].text) for group in groups]
     styles = {style for style, _number in numbered}
     numbers = [number for _style, number in numbered]
-    if len(styles) != 1 or None in numbers or numbers != sorted(set(numbers)):
+    if len(styles) != 1 or None in numbers:
+        return None
+    # A lost label would merge its entry into the one before, so the numbers
+    # must run on without a gap.
+    if numbers != list(range(numbers[0], numbers[0] + len(numbers))):
         return None
     return groups
 

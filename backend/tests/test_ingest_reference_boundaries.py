@@ -1,18 +1,22 @@
 """Omitted bibliography outline nodes must not discard later anchored headings."""
 
+import re
+
 import pytest
 
 from app.ingest.patterns import load_patterns
 from app.ingest.references import (
     ReferenceSelection,
+    RegionNotAssessed,
     _bibliography_continues,
     extract_references,
     non_reference_blocks,
     reference_entry_locations,
-    reference_pages_not_assessed,
+    reference_region_not_assessed,
     select_references,
 )
 from app.ingest.schemas import ExtractionResult, SectionNode, SectionTree, TextBlock
+from tests.native_math_fixtures import record_empty_native_inventory
 
 
 def bibliography(*, later_page=1):
@@ -326,13 +330,56 @@ def test_an_unclear_end_leaves_out_everything_from_the_reference_list_onward():
     assert CHAPTER_TEXT.strip() in kept
     assert not any(reference[:30] in kept for reference in APPENDIX_B_REFERENCES)
     assert "letter of intent" not in kept
-    assert reference_pages_not_assessed(result, selection) == [2, 3, 4]
+    assert reference_region_not_assessed(result, selection) == RegionNotAssessed(
+        start="p. 2", pages=[2, 3, 4]
+    )
 
 
-def test_a_clear_reference_list_leaves_no_pages_unassessed():
+def as_word_document(result: ExtractionResult) -> ExtractionResult:
+    """The same manuscript as a Word file: paragraph ordinals, no pages."""
+    blocks = [
+        block.model_copy(update={"page": None, "bbox": None, "paragraph": index})
+        for index, block in enumerate(result.blocks)
+    ]
+    first_paragraph = {}
+    for block in result.blocks:
+        first_paragraph.setdefault(block.page, blocks[result.blocks.index(block)].paragraph)
+    nodes = [
+        node.model_copy(update={"page": None, "paragraph": first_paragraph.get(node.page)})
+        for node in result.section_tree.nodes
+    ]
+    return record_empty_native_inventory(
+        result.model_copy(
+            update={
+                "anchor_kind": "paragraph",
+                "page_count": 0,
+                "blocks": blocks,
+                "section_tree": result.section_tree.model_copy(update={"nodes": nodes}),
+            }
+        )
+    )
+
+
+def test_a_word_file_with_an_unclear_end_names_where_the_left_out_text_starts():
+    result = as_word_document(unclear_end_manuscript())
+    patterns = load_patterns()
+    selection = select_references(result, patterns)
+    assert "ambiguous_reference_end" in selection.issues
+    kept = "\n".join(
+        b.text for b in non_reference_blocks(result, patterns, ambiguous_entries_ok=True)
+    )
+    assert CHAPTER_TEXT.strip() in kept
+    assert "letter of intent" not in kept
+    region = reference_region_not_assessed(result, selection)
+    assert region is not None and region.pages == []
+    first = min(selection.span, key=lambda f: (f.source_block_index, f.source_start))
+    assert region.start == f"¶{first.paragraph}"
+
+
+def test_a_clear_reference_list_leaves_nothing_unassessed():
     result = body_and_restarted_bibliography()
     selection = select_references(result, load_patterns())
-    assert reference_pages_not_assessed(result, selection) == []
+    assert reference_region_not_assessed(result, selection) is None
 
 
 def _paired(*rows, page=1):
@@ -343,7 +390,7 @@ def _paired(*rows, page=1):
         )
     ]
     for text, x0, top in rows:
-        width = 18 if text.startswith("[") else 400
+        width = 18 if re.fullmatch(r"\[\d+\]|\d+[.)]", text) else 400
         blocks.append(
             TextBlock(
                 page=page,
@@ -416,6 +463,39 @@ CRUZ_ENTRY = "Cruz, M. Mobile queueing for barangay health centers. Notes, 2021.
             (CRUZ_ENTRY, 108, 10),
             (REYES_ENTRY, 108, 30),
             (SANTOS_ENTRY, 108, 60),
+        ],
+        # Entry text in a second column.
+        [
+            ("[1]", 78, 30),
+            ("[2]", 78, 60),
+            ("[3]", 78, 90),
+            (REYES_ENTRY, 108, 30),
+            (SANTOS_ENTRY, 108, 60),
+            (CRUZ_ENTRY, 520, 90),
+        ],
+        # Entry text starting left of the labels' right edge.
+        [
+            ("[1]", 78, 30),
+            ("[2]", 78, 60),
+            (REYES_ENTRY, 108, 30),
+            (SANTOS_ENTRY, 90, 60),
+        ],
+        # Labels of two styles.
+        [
+            ("[1]", 78, 30),
+            ("2.", 78, 60),
+            (REYES_ENTRY, 108, 30),
+            (SANTOS_ENTRY, 108, 60),
+        ],
+        # A lost label: [3]'s entry would merge into [2].
+        [
+            ("[1]", 78, 30),
+            ("[2]", 78, 60),
+            ("[4]", 78, 120),
+            (REYES_ENTRY, 108, 30),
+            (SANTOS_ENTRY, 108, 60),
+            (CRUZ_ENTRY, 108, 90),
+            (REYES_ENTRY, 108, 120),
         ],
     ],
 )

@@ -512,6 +512,67 @@ async def test_v077_report_states_what_the_originality_check_compared_against(
         assert report.originality_scope.not_compared_reason == "no_text"
 
 
+async def test_the_report_says_what_originality_left_out_and_why(session_factory):
+    """Text left out beside an unclear reference list is named, for a Word
+    file by where it starts, and a body that could not be told apart from
+    its references never reads as a file with no text."""
+    async with session_factory() as session:
+        instructor, check_run = await _seed_decidable_run(session)
+        session.add(
+            CheckResult(
+                check_run_id=check_run.id,
+                criterion_id=None,
+                kind=CheckKind.originality_reuse,
+                outcome=ResultOutcome.escalated,
+                detail={
+                    "archive_size_n": 0,
+                    "corpus": "library",
+                    "comparison_ran": False,
+                    "n_flags": 0,
+                    "coverage_reason": "reference_boundary_unclear",
+                    "pages_not_compared": [1, 2, 3],
+                },
+            )
+        )
+        await session.commit()
+        report = await get_report(session, check_run.id, instructor.id)
+        assert report.originality_scope.not_compared_reason == "reference_boundary_unclear"
+        status = next(
+            s for s in report.integrity_check_status if s.check_kind == "originality_reuse"
+        )
+        assert status.coverage_reason == "reference_boundary_unclear"
+        assert status.pages_not_compared == [1, 2, 3]
+
+    async with session_factory() as session:
+        instructor, check_run = await _seed_decidable_run(session)
+        session.add(
+            CheckResult(
+                check_run_id=check_run.id,
+                criterion_id=None,
+                kind=CheckKind.originality_reuse,
+                outcome=ResultOutcome.escalated,
+                detail={
+                    "archive_size_n": 4,
+                    "corpus": "library",
+                    "comparison_ran": True,
+                    "n_flags": 0,
+                    "coverage_reason": "reference_end_unclear",
+                    "pages_not_compared": [],
+                    "not_compared_from": "¶212",
+                },
+            )
+        )
+        await session.commit()
+        report = await get_report(session, check_run.id, instructor.id)
+        assert report.originality_scope.not_compared_reason is None
+        status = next(
+            s for s in report.integrity_check_status if s.check_kind == "originality_reuse"
+        )
+        assert status.coverage_reason == "reference_end_unclear"
+        assert status.not_compared_from == "¶212"
+        assert status.pages_not_compared is None
+
+
 async def test_deciding_an_already_decided_report_is_rejected(session_factory):
     async with session_factory() as session:
         instructor, check_run = await _seed_decidable_run(session)

@@ -734,6 +734,9 @@ async def report_out_for_check_run(
                 page for page in detail.get("pages_not_compared") or [] if isinstance(page, int)
             ]
             or None,
+            not_compared_from=detail.get("not_compared_from")
+            if isinstance(detail.get("not_compared_from"), str)
+            else None,
             n_claim_support_unassessed=detail.get("n_claim_support_unassessed", 0),
             statistical_notation_unassessed=_statistical_notation_state(detail)
             if row.kind == CheckKind.statistical_forensics
@@ -829,6 +832,8 @@ async def report_out_for_check_run(
                 if originality_detail.get("coverage_reason") == "source_reading_order_unresolved"
                 else "no_comparison_archive"
                 if originality_detail.get("coverage_reason") == "no_comparison_archive"
+                else "reference_boundary_unclear"
+                if originality_detail.get("coverage_reason") == "reference_boundary_unclear"
                 else None
                 if ran
                 else "no_text"

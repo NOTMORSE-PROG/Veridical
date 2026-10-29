@@ -137,6 +137,8 @@ COVERAGE_REASONS = frozenset(
         "numeric_citation_scan_limit",
         "reference_list_unavailable",
         "reference_membership_partial",
+        "reference_end_unclear",
+        "reference_boundary_unclear",
         "reference_search_identity_unconfirmed",
         "statement_extraction_unassessed",
         "claim_support_unavailable",
@@ -189,9 +191,14 @@ class IntegrityCheckStatusOut(BaseModel):
     # The 1-based pages behind that count, so an instructor can find them;
     # None where the saved check did not record them.
     source_pages_unassessed: list[int] | None = None
-    # F7: pages left out of the comparison because the reference list's end
-    # could not be found (from the list's start to the end of the document).
+    # F7: pages left out of the comparison. Either the reference list's end
+    # could not be found (from the list's start to the end of the document),
+    # or the body could not be told apart from the list (every page with
+    # text). Word files have no pages; `not_compared_from` names the start.
     pages_not_compared: list[int] | None = None
+    # Where text left out because the list's end is unclear starts, as cited
+    # elsewhere in the report ("p. 157", "¶212").
+    not_compared_from: str | None = None
     n_claim_support_unassessed: int = 0
     reference_list_page: int | None = None
     analysis_coverage: Literal["complete", "partial", "unsupported"] | None = None
@@ -236,9 +243,14 @@ class OriginalityScopeOut(BaseModel):
     corpus: Literal["library", "pre_library"]
     # "no_text": the checked manuscript had no readable text, so no
     # comparison ran at all (distinct from an empty Library).
-    not_compared_reason: Literal["no_text", "no_comparison_archive", "source_unresolved"] | None = (
-        None
-    )
+    # "reference_boundary_unclear": it had text, but the body could not be
+    # told apart from the reference list, so none of it was compared.
+    not_compared_reason: (
+        Literal[
+            "no_text", "no_comparison_archive", "source_unresolved", "reference_boundary_unclear"
+        ]
+        | None
+    ) = None
 
 
 class IntegrityModuleOut(BaseModel):
