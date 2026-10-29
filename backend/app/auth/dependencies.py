@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app import messages
 from app.auth.service import get_instructor_by_token
 from app.config import get_settings
-from app.db import get_session
+from app.db import DbInt, get_session
 from app.errors import ActorContextChangedError, UnauthenticatedError
 from app.models.instructor import Instructor
 
@@ -46,7 +46,7 @@ async def get_current_instructor(
 async def get_upload_instructor(
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
     expected_instructor: Annotated[
-        int | None, Header(alias="X-Veridical-Expected-Instructor", ge=1)
+        DbInt | None, Header(alias="X-Veridical-Expected-Instructor", ge=1)
     ] = None,
 ) -> Instructor:
     """F1/F2/F9: optional intent assertion; authentication remains authoritative.

@@ -4,6 +4,7 @@
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Annotated
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import asyncpg
@@ -16,6 +17,38 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from app.config import get_settings
+
+# The PostgreSQL BIGINT range. Every id, page and revision we look up fits in
+# it, so a request integer outside it cannot match anything. asyncpg refuses to
+# send such a value at all, which used to surface as a 500; route parameters
+# and request fields typed DbInt are refused with a 422 instead (BUG-536).
+BIGINT_MIN = -(2**63)
+BIGINT_MAX = 2**63 - 1
+
+
+class _FitsBigint:
+    """The range check behind DbInt.
+
+    Not a plain `Field(ge=..., le=...)`: pydantic keeps only the last bound of
+    each kind, so `x: DbInt = Field(ge=0)` would silently lose its own `ge=0`.
+    Instead this narrows the int schema to the BIGINT range while keeping any
+    tighter bound the field already has, and a bound added after it (a
+    `Query(le=200)`, say) narrows it further as usual.
+    """
+
+    @classmethod
+    def __get_pydantic_core_schema__(cls, source, handler):
+        schema = handler(source)
+        if schema.get("type") != "int":
+            raise TypeError(f"DbInt must annotate a plain int, not {schema.get('type')}")
+        return {
+            **schema,
+            "ge": max(schema.get("ge", BIGINT_MIN), BIGINT_MIN),
+            "le": min(schema.get("le", BIGINT_MAX), BIGINT_MAX),
+        }
+
+
+DbInt = Annotated[int, _FitsBigint]
 
 
 def sqlalchemy_url(dsn: str) -> str:

@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_instructor
 from app.config import get_settings
-from app.db import get_session
+from app.db import DbInt, get_session
 from app.models.instructor import Instructor
 from app.models.manuscript import Manuscript
 from app.models.rubric import Rubric
@@ -72,7 +72,7 @@ async def create_check_run_route(
 
 @router.get("/check-runs/rerun-estimate", response_model=RerunEstimateOut)
 async def rerun_estimate_route(
-    rubric_id: int,
+    rubric_id: DbInt,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
     manuscript_id: Annotated[list[int] | None, Query()] = None,
@@ -84,7 +84,7 @@ async def rerun_estimate_route(
 
 @router.get("/check-runs/{check_run_id}", response_model=CheckRunOut)
 async def get_check_run_route(
-    check_run_id: int,
+    check_run_id: DbInt,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> CheckRunOut:
@@ -94,7 +94,7 @@ async def get_check_run_route(
 
 @router.post("/check-runs/{check_run_id}/cancel", response_model=CheckRunOut)
 async def cancel_check_run_route(
-    check_run_id: int,
+    check_run_id: DbInt,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> CheckRunOut:

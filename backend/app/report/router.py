@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_instructor
 from app.config import get_settings
-from app.db import get_session
+from app.db import DbInt, get_session
 from app.errors import ConflictError
 from app.flags.schemas import BulkResolveFlagsIn, BulkResolveFlagsOut
 from app.flags.service import bulk_resolve_flags
@@ -107,7 +107,7 @@ router = APIRouter(tags=["report"])
 
 @router.get("/check-runs/{check_run_id}/evidence", response_model=EvidenceManifestOut)
 async def get_evidence_manifest_route(
-    check_run_id: int,
+    check_run_id: DbInt,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> EvidenceManifestOut:
@@ -120,7 +120,7 @@ async def get_evidence_manifest_route(
     "/check-runs/{check_run_id}/evidence/{reference_id}/page", response_model=EvidencePageOut
 )
 async def get_evidence_page_route(
-    check_run_id: int,
+    check_run_id: DbInt,
     reference_id: Annotated[str, Path(pattern=r"^[a-f0-9]{64}$")],
     snapshot_id: Annotated[str, Query(pattern=r"^[a-f0-9]{64}$")],
     session: Annotated[AsyncSession, Depends(get_session)],
@@ -143,7 +143,7 @@ async def get_evidence_page_route(
     response_model=EvidenceLocationOut,
 )
 async def get_evidence_location_route(
-    check_run_id: int,
+    check_run_id: DbInt,
     reference_id: Annotated[str, Path(pattern=r"^[a-f0-9]{64}$")],
     snapshot_id: Annotated[str, Query(pattern=r"^[a-f0-9]{64}$")],
     session: Annotated[AsyncSession, Depends(get_session)],
@@ -158,7 +158,7 @@ async def get_evidence_location_route(
 
 @router.get("/check-runs/{check_run_id}/evidence/source-file")
 async def get_evidence_source_file_route(
-    check_run_id: int,
+    check_run_id: DbInt,
     source_identity: Annotated[str, Query(pattern=r"^[a-f0-9]{64}$")],
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
@@ -194,7 +194,7 @@ async def get_evidence_source_file_route(
     "/check-runs/{check_run_id}/evidence/source-document", response_model=EvidenceDocumentOut
 )
 async def get_evidence_source_document_route(
-    check_run_id: int,
+    check_run_id: DbInt,
     source_identity: Annotated[str, Query(pattern=r"^[a-f0-9]{64}$")],
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
@@ -217,8 +217,8 @@ async def get_evidence_source_document_route(
 
 @router.get("/check-runs/{check_run_id}/evidence/source-images/{image_index}")
 async def get_evidence_source_image_route(
-    check_run_id: int,
-    image_index: Annotated[int, Path(ge=0)],
+    check_run_id: DbInt,
+    image_index: Annotated[DbInt, Path(ge=0)],
     source_identity: Annotated[str, Query(pattern=r"^[a-f0-9]{64}$")],
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
@@ -244,8 +244,8 @@ async def get_evidence_source_image_route(
     "/check-runs/{check_run_id}/criteria/{criterion_id}/judgment", response_model=JudgmentContextOut
 )
 async def judgment_context_route(
-    check_run_id: int,
-    criterion_id: int,
+    check_run_id: DbInt,
+    criterion_id: DbInt,
     response: Response,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
@@ -259,14 +259,14 @@ async def judgment_context_route(
     response_model=JudgmentHistoryOut,
 )
 async def judgment_history_route(
-    check_run_id: int,
-    criterion_id: int,
+    check_run_id: DbInt,
+    criterion_id: DbInt,
     response: Response,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
-    expected_revision: Annotated[int, Query(ge=0)],
-    expected_judgment_revision: Annotated[int, Query(ge=0)],
-    page_size: Annotated[int | None, Query(ge=1)] = None,
+    expected_revision: Annotated[DbInt, Query(ge=0)],
+    expected_judgment_revision: Annotated[DbInt, Query(ge=0)],
+    page_size: Annotated[DbInt | None, Query(ge=1)] = None,
     cursor: str | None = None,
 ) -> JudgmentHistoryOut:
     response.headers["Cache-Control"] = "no-store"
@@ -287,8 +287,8 @@ async def judgment_history_route(
     response_model=JudgmentRevisionOut,
 )
 async def judgment_revision_route(
-    check_run_id: int,
-    criterion_id: int,
+    check_run_id: DbInt,
+    criterion_id: DbInt,
     body: JudgmentRevisionIn,
     response: Response,
     session: Annotated[AsyncSession, Depends(get_session)],
@@ -304,8 +304,8 @@ async def judgment_revision_route(
     response_model=JudgmentRecordOut,
 )
 async def judgment_record_route(
-    check_run_id: int,
-    criterion_id: int,
+    check_run_id: DbInt,
+    criterion_id: DbInt,
     body: JudgmentRecordIn,
     response: Response,
     session: Annotated[AsyncSession, Depends(get_session)],
@@ -318,7 +318,7 @@ async def judgment_record_route(
 
 @router.get("/check-runs/{check_run_id}/report", response_model=ReportOut)
 async def get_report_route(
-    check_run_id: int,
+    check_run_id: DbInt,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> ReportOut:
@@ -329,7 +329,7 @@ async def get_report_route(
 
 @router.get("/check-runs/{check_run_id}/report/export.pdf")
 async def export_report_pdf_route(
-    check_run_id: int,
+    check_run_id: DbInt,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> Response:
@@ -366,7 +366,7 @@ async def export_report_pdf_route(
     "/check-runs/{check_run_id}/report/export-jobs", response_model=ExportJobOut, status_code=202
 )
 async def prepare_report_pdf_route(
-    check_run_id: int,
+    check_run_id: DbInt,
     body: PrepareExportIn,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
@@ -380,7 +380,7 @@ async def prepare_report_pdf_route(
 
 @router.get("/check-runs/{check_run_id}/report/export-jobs/{job_id}", response_model=ExportJobOut)
 async def report_pdf_job_route(
-    check_run_id: int,
+    check_run_id: DbInt,
     job_id: str,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
@@ -413,7 +413,7 @@ class PreparedPdfResponse(FileResponse):
 
 @router.get("/check-runs/{check_run_id}/report/export-jobs/{job_id}/file")
 async def prepared_report_pdf_route(
-    check_run_id: int,
+    check_run_id: DbInt,
     job_id: str,
     session: Annotated[AsyncSession, Depends(get_session, scope="request")],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
@@ -432,7 +432,7 @@ async def prepared_report_pdf_route(
 
 @router.get("/check-runs/{check_run_id}/escalated", response_model=list[EscalatedItemOut])
 async def list_escalated_route(
-    check_run_id: int,
+    check_run_id: DbInt,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> list[EscalatedItemOut]:
@@ -441,7 +441,7 @@ async def list_escalated_route(
 
 @router.get("/check-runs/{check_run_id}/flags", response_model=list[FlagSummaryOut])
 async def list_flags_route(
-    check_run_id: int,
+    check_run_id: DbInt,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> list[FlagSummaryOut]:
@@ -450,7 +450,7 @@ async def list_flags_route(
 
 @router.post("/check-runs/{check_run_id}/flags/bulk-resolve", response_model=BulkResolveFlagsOut)
 async def bulk_resolve_flags_route(
-    check_run_id: int,
+    check_run_id: DbInt,
     body: BulkResolveFlagsIn,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
@@ -473,7 +473,7 @@ async def bulk_resolve_flags_route(
 
 @router.get("/check-runs/{check_run_id}/document", response_model=ManuscriptViewerOut)
 async def get_manuscript_viewer_route(
-    check_run_id: int,
+    check_run_id: DbInt,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> ManuscriptViewerOut:
@@ -485,7 +485,7 @@ async def get_manuscript_viewer_route(
 
 @router.get("/check-runs/{check_run_id}/document/reuse-matches", response_model=ReuseMatchesOut)
 async def list_reuse_passage_matches_route(
-    check_run_id: int,
+    check_run_id: DbInt,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
     include_reference_list: bool = False,
@@ -506,7 +506,7 @@ async def list_reuse_passage_matches_route(
 
 @router.get("/check-runs/{check_run_id}/document/paragraphs", response_model=DocumentParagraphsOut)
 async def get_manuscript_paragraphs_route(
-    check_run_id: int,
+    check_run_id: DbInt,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> DocumentParagraphsOut:
@@ -519,8 +519,8 @@ async def get_manuscript_paragraphs_route(
 
 @router.get("/check-runs/{check_run_id}/document/page-text", response_model=PdfPageTextOut)
 async def get_manuscript_page_text_route(
-    check_run_id: int,
-    page: Annotated[int, Query(ge=1)],
+    check_run_id: DbInt,
+    page: Annotated[DbInt, Query(ge=1)],
     response: Response,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
@@ -534,8 +534,8 @@ async def get_manuscript_page_text_route(
 
 @router.get("/check-runs/{check_run_id}/document/images/{image_index}")
 async def get_manuscript_docx_image_route(
-    check_run_id: int,
-    image_index: Annotated[int, Path(ge=0)],
+    check_run_id: DbInt,
+    image_index: Annotated[DbInt, Path(ge=0)],
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> Response:
@@ -553,7 +553,7 @@ async def get_manuscript_docx_image_route(
 
 @router.get("/check-runs/{check_run_id}/document/file")
 async def get_manuscript_file_route(
-    check_run_id: int,
+    check_run_id: DbInt,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> FileResponse:
@@ -573,8 +573,8 @@ async def get_manuscript_file_route(
     response_model=ResolveEscalationOut,
 )
 async def resolve_escalation_route(
-    check_run_id: int,
-    check_result_id: int,
+    check_run_id: DbInt,
+    check_result_id: DbInt,
     body: ResolveEscalationIn,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
@@ -595,7 +595,7 @@ async def resolve_escalation_route(
 
 @router.post("/check-runs/{check_run_id}/decision", response_model=ReportOut)
 async def decide_report_route(
-    check_run_id: int,
+    check_run_id: DbInt,
     body: DecisionIn,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
@@ -613,7 +613,7 @@ async def decide_report_route(
 
 @router.post("/check-runs/{check_run_id}/reopen", response_model=ReportOut)
 async def reopen_report_route(
-    check_run_id: int,
+    check_run_id: DbInt,
     body: ReopenIn,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],

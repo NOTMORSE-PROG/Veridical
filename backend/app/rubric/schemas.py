@@ -8,6 +8,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.db import DbInt
+
 
 class ParsedLevel(BaseModel):
     """One rung of a graded performance scale (V-069 AC1) — structured,
@@ -16,7 +18,7 @@ class ParsedLevel(BaseModel):
     source document assigns that rung (not assumed to equal `level` — a
     source could weight its top rung higher than its ordinal position)."""
 
-    level: int = Field(ge=1)
+    level: DbInt = Field(ge=1)
     name: str = Field(min_length=1)
     descriptor: str = Field(min_length=1)
     points: float = Field(ge=0)
@@ -142,7 +144,7 @@ class CriterionIn(BaseModel):
     update an existing criterion; `id` absent/null = a new one the
     instructor added by hand."""
 
-    id: int | None = None
+    id: DbInt | None = None
     type: Literal["structural", "semantic", "not_assessable"]
     text: str = Field(min_length=1)
     evidence: str | None = None
@@ -167,7 +169,7 @@ class SetRubricFamilyProgramRequest(BaseModel):
     """PUT /rubric-families/{family_id}/program body (V-064, AC1).
     `program_id: null` explicitly clears it back to "Not set"."""
 
-    program_id: int | None
+    program_id: DbInt | None
 
 
 class UpdateCriteriaRequest(BaseModel):

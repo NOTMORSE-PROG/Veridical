@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app import messages
 from app.auth.dependencies import get_current_instructor, get_upload_instructor
 from app.config import get_settings
-from app.db import get_session
+from app.db import DbInt, get_session
 from app.groups.selection import SelectGroupRequest, SelectGroupResponse, select_saved_group
 from app.groups.service import DEFAULT_GROUP_LABEL, program_name_for
 from app.ingest.schemas import (
@@ -45,6 +45,7 @@ router = APIRouter(tags=["ingestion"])
 _settings = get_settings()
 _MANUSCRIPT_LIST_DEFAULT_PAGE_SIZE = _settings.manuscript_list_default_page_size
 _MANUSCRIPT_LIST_MAX_PAGE_SIZE = _settings.manuscript_list_max_page_size
+_LIST_MAX_PAGE = _settings.list_max_page
 
 # Streaming read size for uploads; purely an I/O buffer, not a policy knob.
 _CHUNK_BYTES = 1024 * 1024
@@ -116,7 +117,7 @@ async def ingest_manuscript_upload(
     response_model=DismissedManuscriptOut,
 )
 async def dismiss_failed_manuscript_route(
-    manuscript_id: int,
+    manuscript_id: DbInt,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> DismissedManuscriptOut:
@@ -130,7 +131,7 @@ async def dismiss_failed_manuscript_route(
 
 @router.get("/manuscripts/{manuscript_id}/group-proposal", response_model=TitlePageProposalOut)
 async def get_group_proposal_route(
-    manuscript_id: int,
+    manuscript_id: DbInt,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> TitlePageProposalOut:
@@ -144,7 +145,7 @@ async def get_group_proposal_route(
 
 @router.get("/manuscripts/{manuscript_id}/group", response_model=ManuscriptGroupOut)
 async def get_manuscript_group_route(
-    manuscript_id: int,
+    manuscript_id: DbInt,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> ManuscriptGroupOut:
@@ -153,7 +154,7 @@ async def get_manuscript_group_route(
 
 @router.patch("/manuscripts/{manuscript_id}/group", response_model=ConfirmGroupResponse)
 async def confirm_manuscript_group_route(
-    manuscript_id: int,
+    manuscript_id: DbInt,
     body: ConfirmGroupRequest,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
@@ -184,7 +185,7 @@ async def confirm_manuscript_group_route(
 
 @router.post("/manuscripts/{manuscript_id}/group-selection", response_model=SelectGroupResponse)
 async def select_saved_group_route(
-    manuscript_id: int,
+    manuscript_id: DbInt,
     body: SelectGroupRequest,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
@@ -196,9 +197,9 @@ async def select_saved_group_route(
 async def list_manuscripts_route(
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
-    page: Annotated[int, Query(ge=1)] = 1,
+    page: Annotated[DbInt, Query(ge=1, le=_LIST_MAX_PAGE)] = 1,
     # Existing New Check requests 200 until its picker is server-paginated.
-    page_size: Annotated[int, Query(ge=1, le=_MANUSCRIPT_LIST_MAX_PAGE_SIZE)] = (
+    page_size: Annotated[DbInt, Query(ge=1, le=_MANUSCRIPT_LIST_MAX_PAGE_SIZE)] = (
         _MANUSCRIPT_LIST_DEFAULT_PAGE_SIZE
     ),
     q: str | None = None,

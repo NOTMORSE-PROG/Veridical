@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, mod
 
 from app.checks.citations.history_review import CitationMetadataReviewWarning
 from app.config import get_settings
+from app.db import DbInt
 from app.report.schemas import FlagSummaryOut, ReportOut
 
 
@@ -218,12 +219,12 @@ class AnnotateFlagIn(BaseModel):
 
 
 class OverrideFlagIn(BaseModel):
-    expected_revision: int = Field(strict=True, ge=0)
+    expected_revision: DbInt = Field(strict=True, ge=0)
     reason: str = Field(min_length=1)
 
 
 class ConfirmCitationSourceIn(BaseModel):
-    expected_revision: int = Field(strict=True, ge=0)
+    expected_revision: DbInt = Field(strict=True, ge=0)
     # BUG-078: instructor-authored (design review spec: "Where you verified
     # this"), same required-reason discipline as OverrideFlagIn -- not a
     # fixed/generated string, since this is a MORE consequential action
@@ -253,7 +254,7 @@ class OverrideFlagOut(FlagOut):
 
 
 class ConfirmFindingIn(BaseModel):
-    expected_revision: int = Field(strict=True, ge=0)
+    expected_revision: DbInt = Field(strict=True, ge=0)
     # BUG-518: agreeing with a finding needs no justification; an optional
     # note is kept for the record. Blank is stored as no note.
     note: str | None = None
@@ -270,10 +271,6 @@ class ConfirmCitationSourceOut(FlagOut):
     report: ReportOut
 
 
-# Largest BIGINT identity value; anything above can never name a row.
-_MAX_ID = 2**63 - 1
-
-
 class BulkResolveFlagsIn(BaseModel):
     """V-089: one confirm or dismiss for many findings of one check run.
 
@@ -286,15 +283,15 @@ class BulkResolveFlagsIn(BaseModel):
 
     action: Literal["confirm", "dismiss"]
     # Strict: `true` or "5" must never select a real finding. Ids are BIGINT.
-    flag_ids: list[Annotated[int, Field(strict=True, gt=0, le=_MAX_ID)]] = Field(min_length=1)
-    expected_revision: int = Field(strict=True, ge=0)
+    flag_ids: list[Annotated[DbInt, Field(strict=True, gt=0)]] = Field(min_length=1)
+    expected_revision: DbInt = Field(strict=True, ge=0)
     # Confirm: optional, blank stored as no note (as `ConfirmFindingIn`).
     note: str | None = None
     # Dismiss: required, as `OverrideFlagIn`, and never whitespace only.
     reason: str | None = None
     # How many selected findings the reviewer's screen showed as not yet
     # opened. Stored on each audit entry as client-reported, not verified.
-    unopened_count: int | None = Field(default=None, strict=True, ge=0)
+    unopened_count: DbInt | None = Field(default=None, strict=True, ge=0)
 
     @field_validator("flag_ids", mode="before")
     @classmethod

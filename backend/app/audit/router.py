@@ -11,7 +11,7 @@ from app.audit.schemas import AuditLogDetail, PaginatedAuditLog
 from app.audit.service import get_audit_log_detail, list_audit_log
 from app.auth.dependencies import get_current_instructor
 from app.config import get_settings
-from app.db import get_session
+from app.db import DbInt, get_session
 from app.models.instructor import Instructor
 
 router = APIRouter(prefix="/audit", tags=["audit"])
@@ -26,13 +26,13 @@ _AUDIT_LIST_MAX_PAGE = _settings.audit_list_max_page
 async def list_audit_log_route(
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
-    check_run_id: int | None = None,
+    check_run_id: DbInt | None = None,
     event_type: str | None = None,
     event_type_prefix: str | None = None,
     date_from: datetime | None = None,
     date_to: datetime | None = None,
-    page: Annotated[int, Query(ge=1, le=_AUDIT_LIST_MAX_PAGE)] = 1,
-    page_size: Annotated[int, Query(ge=1, le=_AUDIT_LIST_MAX_PAGE_SIZE)] = (
+    page: Annotated[DbInt, Query(ge=1, le=_AUDIT_LIST_MAX_PAGE)] = 1,
+    page_size: Annotated[DbInt, Query(ge=1, le=_AUDIT_LIST_MAX_PAGE_SIZE)] = (
         _AUDIT_LIST_DEFAULT_PAGE_SIZE
     ),
 ) -> PaginatedAuditLog:
@@ -51,7 +51,7 @@ async def list_audit_log_route(
 
 @router.get("/{audit_id}", response_model=AuditLogDetail)
 async def get_audit_log_detail_route(
-    audit_id: int,
+    audit_id: DbInt,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> AuditLogDetail:

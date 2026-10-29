@@ -5,10 +5,12 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.db import DbInt
+
 
 class CreateCheckRunRequest(BaseModel):
-    manuscript_id: int
-    rubric_id: int
+    manuscript_id: DbInt
+    rubric_id: DbInt
 
 
 class CheckRunOut(BaseModel):

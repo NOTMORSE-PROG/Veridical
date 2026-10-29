@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from app.config import get_settings
-from app.db import get_session_factory
+from app.db import DbInt, get_session_factory
 from app.errors import (
     ConflictError,
     GoneError,
@@ -29,7 +29,7 @@ from app.report.service import get_report_export_data
 
 
 class PrepareExportIn(BaseModel):
-    expected_revision: int = Field(ge=0)
+    expected_revision: DbInt = Field(ge=0)
 
 
 class ExportJobOut(BaseModel):

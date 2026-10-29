@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_instructor
-from app.db import get_session
+from app.db import DbInt, get_session
 from app.groups.schemas import GroupCollisionOut, GroupOut, ProgramOut
 from app.groups.selection import SavedGroupOut, get_saved_group
 from app.groups.service import find_rule3_collision, list_groups, list_programs
@@ -51,7 +51,7 @@ async def check_group_collision_route(
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
     short_name: Annotated[str, Query()],
     member_names: Annotated[list[str] | None, Query()] = None,
-    exclude_group_id: Annotated[int | None, Query(gt=0)] = None,
+    exclude_group_id: Annotated[DbInt | None, Query(gt=0)] = None,
 ) -> GroupCollisionOut:
     collision = await find_rule3_collision(
         session, instructor.id, short_name, member_names or [], exclude_group_id
@@ -63,7 +63,7 @@ async def check_group_collision_route(
 
 @router.get("/groups/{group_id}", response_model=SavedGroupOut)
 async def get_saved_group_route(
-    group_id: int,
+    group_id: DbInt,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> SavedGroupOut:
