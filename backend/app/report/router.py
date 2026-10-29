@@ -10,7 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.dependencies import get_current_instructor
 from app.config import get_settings
 from app.db import get_session
+from app.errors import ConflictError
 from app.models.instructor import Instructor
+from app.models.manuscript import Manuscript
 from app.ratelimit import enforce_action_rate_limit
 from app.report.evidence_images import evidence_image_admission
 from app.report.evidence_service import (
@@ -25,6 +27,12 @@ from app.report.evidence_service import (
     get_private_evidence_source_image,
 )
 from app.report.export import build_report_pdf
+from app.report.export_jobs import (
+    ExportJobOut,
+    PrepareExportIn,
+    export_binding,
+    export_jobs,
+)
 from app.report.judgment_schemas import (
     JudgmentContextOut,
     JudgmentHistoryOut,
@@ -68,6 +76,7 @@ from app.report.service import (
     resolve_escalation_for_run,
 )
 from app.report.source_snapshot import SourceSnapshot
+from app.storage.access import lock_source
 
 
 class SourceSnapshotResponse(FileResponse):
@@ -349,6 +358,74 @@ async def export_report_pdf_route(
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.post(
+    "/check-runs/{check_run_id}/report/export-jobs", response_model=ExportJobOut, status_code=202
+)
+async def prepare_report_pdf_route(
+    check_run_id: int,
+    body: PrepareExportIn,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    instructor: Annotated[Instructor, Depends(get_current_instructor)],
+) -> ExportJobOut:
+    binding = await export_binding(session, check_run_id, instructor.id)
+    if binding.revision != body.expected_revision:
+        raise ConflictError("The assessment changed. Reload the report and export again.")
+    enforce_action_rate_limit(get_settings(), "report_export", instructor.id)
+    return export_jobs.prepare(binding).out()
+
+
+@router.get("/check-runs/{check_run_id}/report/export-jobs/{job_id}", response_model=ExportJobOut)
+async def report_pdf_job_route(
+    check_run_id: int,
+    job_id: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    instructor: Annotated[Instructor, Depends(get_current_instructor)],
+) -> ExportJobOut:
+    return export_jobs.find(
+        job_id, await export_binding(session, check_run_id, instructor.id)
+    ).out()
+
+
+class PreparedPdfResponse(FileResponse):
+    def __init__(self, job):
+        self.job = job
+        job.leases += 1
+        super().__init__(
+            job.path,
+            media_type="application/pdf",
+            filename=f"veridical-report-{job.binding.run}.pdf",
+            headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"},
+        )
+
+    async def __call__(self, scope, receive, send):
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            self.job.leases -= 1
+            export_jobs.expire()
+            if export_jobs.closing or export_jobs.job is not self.job:
+                self.job.cleanup()
+
+
+@router.get("/check-runs/{check_run_id}/report/export-jobs/{job_id}/file")
+async def prepared_report_pdf_route(
+    check_run_id: int,
+    job_id: str,
+    session: Annotated[AsyncSession, Depends(get_session, scope="request")],
+    instructor: Annotated[Instructor, Depends(get_current_instructor)],
+) -> Response:
+    binding = await export_binding(session, check_run_id, instructor.id)
+    manuscript = await session.get(Manuscript, binding.manuscript)
+    await lock_source(session, manuscript)
+    # Retain the source SHARE lock through response completion, including purge
+    # races while a ready PDF is being streamed.
+    binding = await export_binding(session, check_run_id, instructor.id)
+    job = export_jobs.find(job_id, binding)
+    if job.state != "ready" or job.path is None:
+        raise ConflictError(job.message or "The PDF is still preparing. Try again shortly.")
+    return PreparedPdfResponse(job)
 
 
 @router.get("/check-runs/{check_run_id}/escalated", response_model=list[EscalatedItemOut])

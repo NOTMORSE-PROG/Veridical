@@ -241,13 +241,56 @@ export function useReopenReport(checkRunId: number) {
 // failed export from a successful one without a page navigation.
 export function useExportReportPdf(checkRunId: number) {
   const queryClient = useQueryClient();
-  const createRequest = () => ({ runId: checkRunId, owner: reportMutationOwner(queryClient) });
+  const createRequest = () => ({ runId: checkRunId, owner: reportMutationOwner(queryClient),
+    revision: queryClient.getQueryData<ReportOut>(["report", checkRunId])?.assessment_revision });
   const mutation = useMutation({
-    mutationFn: (request: ReturnType<typeof createRequest>) => {
-      if (!request.owner.isCurrent() || !Number.isInteger(request.runId) || request.runId <= 0) {
-        throw new ApiError(401, "unauthorized", "Sign in again before exporting this report.");
+    mutationFn: async (request: ReturnType<typeof createRequest>) => {
+      const requireOwner = () => {
+        if (!request.owner.isCurrent() || !Number.isInteger(request.runId) || request.runId <= 0) {
+          throw new ApiError(401, "unauthorized", "Sign in again before exporting this report.");
+        }
+      };
+      requireOwner();
+      const base = `/check-runs/${request.runId}/report`;
+      let revision = request.revision;
+      if (!isAssessmentRevision(revision)) {
+        const report = await api.get<ReportOut>(base);
+        requireOwner();
+        if (report.check_run_id !== request.runId || !isAssessmentRevision(report.assessment_revision)) {
+          throw new ApiError(502, "invalid_response", "Reload the report before exporting.");
+        }
+        revision = report.assessment_revision;
       }
-      return api.getBlob(`/check-runs/${request.runId}/report/export.pdf`);
+      type Job = { job_id: string; check_run_id: number; assessment_revision: number;
+        state: string; message: string | null; poll_seconds: number; wait_seconds: number };
+      const validate = (job: Job, id?: string) => {
+        if (!job || !/^[a-f0-9]{48}$/.test(job.job_id) || (id && job.job_id !== id)
+          || job.check_run_id !== request.runId || job.assessment_revision !== revision
+          || !["preparing", "ready", "failed", "stale"].includes(job.state)
+          || !Number.isFinite(job.poll_seconds) || job.poll_seconds <= 0
+          || !Number.isFinite(job.wait_seconds) || job.wait_seconds <= 0) {
+          throw new ApiError(502, "invalid_response", "PDF preparation could not be confirmed. Export again.");
+        }
+        return job;
+      };
+      let job = validate(await api.post<Job>(`${base}/export-jobs`, { expected_revision: revision }));
+      const id = job.job_id;
+      const deadline = performance.now() + job.wait_seconds * 1000;
+      const interval = job.poll_seconds * 1000;
+      while (job.state === "preparing") {
+        requireOwner();
+        if (performance.now() >= deadline) {
+          throw new ApiError(408, "export_wait", "The PDF is still preparing. Export again to check its progress.");
+        }
+        await new Promise(resolve => window.setTimeout(resolve, interval));
+        requireOwner();
+        job = validate(await api.get<Job>(`${base}/export-jobs/${id}`), id);
+      }
+      requireOwner();
+      if (job.state !== "ready") {
+        throw new ApiError(409, "export_failed", job.message || "PDF preparation could not finish. Export again.");
+      }
+      return api.getBlob(`${base}/export-jobs/${id}/file`);
     },
     onSuccess: (blob, request) => {
       // A response can outlive its observer. Recheck the invoking auth lifetime

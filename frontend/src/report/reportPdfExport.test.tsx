@@ -13,6 +13,8 @@ let delivered: string[];
 let getBlob: ReturnType<typeof vi.spyOn>;
 beforeEach(() => {
   requests = []; delivered = [];
+  vi.spyOn(api, "get").mockImplementation(async (path: string) => ({ check_run_id: Number(path.split("/")[2]), assessment_revision: 0 }));
+  vi.spyOn(api, "post").mockImplementation(async (path: string) => ({ job_id: "a".repeat(48), check_run_id: Number(path.split("/")[2]), assessment_revision: 0, state: "ready", message: null, poll_seconds: 3, wait_seconds: 900 }));
   getBlob = vi.spyOn(api, "getBlob").mockImplementation(() => new Promise<Blob>((resolve, reject) => requests.push({ resolve, reject })));
   vi.spyOn(document, "hasFocus").mockReturnValue(true);
   vi.stubGlobal("URL", class extends URL {
@@ -31,6 +33,37 @@ function setup(owner: number | null = 1) {
 }
 async function resolve(index = 0) { await act(async () => { requests[index].resolve(new Blob(["synthetic bytes"])); }); }
 async function reject(index = 0) { await act(async () => { requests[index].reject(new Error("Controlled export failure")); }); }
+
+it("prepares once and polls before requesting the completed file", async () => {
+  const c = setup();
+  const ready = { job_id: "b".repeat(48), check_run_id: 11, assessment_revision: 0,
+    state: "ready", message: null, poll_seconds: .001, wait_seconds: 1 };
+  vi.mocked(api.post).mockResolvedValue({ ...ready, state: "preparing" });
+  vi.mocked(api.get).mockImplementation(async (path: string) => path.endsWith("/report")
+    ? { check_run_id: 11, assessment_revision: 0 } : ready);
+  const h = renderHook(() => useExportReportPdf(11), { wrapper: c.wrapper });
+  act(() => h.result.current.mutate(h.result.current.createRequest()));
+  await waitFor(() => expect(getBlob).toHaveBeenCalledWith(`/check-runs/11/report/export-jobs/${ready.job_id}/file`));
+  expect(api.post).toHaveBeenCalledOnce();
+  expect(api.get).toHaveBeenCalledWith(`/check-runs/11/report/export-jobs/${ready.job_id}`);
+  await resolve();
+});
+
+it.each(["foreign run", "changed revision", "changed job", "failed"])("withholds download for %s preparation", async scenario => {
+  const c = setup();
+  const ready = { job_id: "b".repeat(48), check_run_id: 11, assessment_revision: 0,
+    state: "ready", message: null, poll_seconds: .001, wait_seconds: 1 };
+  vi.mocked(api.post).mockResolvedValue({ ...ready, state: "preparing" });
+  const invalid = { ...ready, ...(scenario === "foreign run" ? { check_run_id: 12 }
+    : scenario === "changed revision" ? { assessment_revision: 1 }
+    : scenario === "changed job" ? { job_id: "c".repeat(48) } : { state: "failed" }) };
+  vi.mocked(api.get).mockImplementation(async (path: string) => path.endsWith("/report")
+    ? { check_run_id: 11, assessment_revision: 0 } : invalid);
+  const h = renderHook(() => useExportReportPdf(11), { wrapper: c.wrapper });
+  act(() => h.result.current.mutate(h.result.current.createRequest()));
+  await waitFor(() => expect(h.result.current.isError).toBe(true));
+  expect(getBlob).not.toHaveBeenCalled();
+});
 
 it.each(["account", "relogin", "identity", "signedout"])("suppresses delayed delivery after %s replacement", async change => {
   const c = setup();
@@ -56,7 +89,7 @@ it.each([false, true])("same-owner navigation preserves original run filename, u
   const c = setup();
   const h = renderHook(({ run }) => useExportReportPdf(run), { initialProps: { run: 11 }, wrapper: c.wrapper });
   act(() => h.result.current.mutate(h.result.current.createRequest()));
-  await waitFor(() => expect(getBlob).toHaveBeenCalledWith("/check-runs/11/report/export.pdf"));
+  await waitFor(() => expect(getBlob).toHaveBeenCalledWith(`/check-runs/11/report/export-jobs/${"a".repeat(48)}/file`));
   h.rerender({ run: 22 }); if (unmount) h.unmount();
   await resolve();
   expect(delivered).toEqual(["veridical-report-11.pdf"]);

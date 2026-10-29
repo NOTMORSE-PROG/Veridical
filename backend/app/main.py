@@ -51,6 +51,9 @@ from app.report.router import (
     get_manuscript_paragraphs_route,
     get_manuscript_viewer_route,
     list_reuse_passage_matches_route,
+    prepare_report_pdf_route,
+    prepared_report_pdf_route,
+    report_pdf_job_route,
 )
 from app.report.router import router as report_router
 from app.rubric.router import router as rubric_router
@@ -94,7 +97,14 @@ _PRIVATE_DOCUMENT_ENDPOINTS = frozenset(
         rubric_image_route,
     }
 )
-_PRIVATE_EXPORT_ENDPOINTS = frozenset({export_report_pdf_route})
+_PRIVATE_EXPORT_ENDPOINTS = frozenset(
+    {
+        export_report_pdf_route,
+        prepare_report_pdf_route,
+        report_pdf_job_route,
+        prepared_report_pdf_route,
+    }
+)
 
 
 def _upgrade_to_head() -> None:
@@ -176,6 +186,9 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         await _prewarm_embedding_model_on_boot()
 
     settings = get_settings()
+    from app.report.export_jobs import export_jobs
+
+    export_jobs.closing = False
     preparation_handle = start_preparation_admission(settings)
     task = None
     upload_task = None
@@ -195,6 +208,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     finally:
         retiring = begin_preparation_shutdown(preparation_handle)
         try:
+            await export_jobs.shutdown()
             if upload_task is not None:
                 upload_task.cancel()
                 with suppress(asyncio.CancelledError):

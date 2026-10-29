@@ -802,6 +802,11 @@ class Settings(BaseSettings):
     # page is skipped past the cap gets an honest "skipped" reason (AC3),
     # never a silent drop.
     export_max_page_images: int = 80
+    # F8.6: one disposable prepared PDF, independent of proxy request deadlines.
+    export_job_ttl_seconds: float = Field(default=600, gt=0)
+    export_job_max_bytes: int = Field(default=33_554_432, gt=0)
+    export_job_poll_seconds: float = Field(default=3, ge=1, le=30)
+    export_job_wait_seconds: float = Field(default=900, ge=30, le=3600)
     # Tolerance (PDF points) for merging same-line word-run boxes that
     # `page.search_for()` returns as separate rects into one continuous
     # highlight per line. Measured live (2026-08-25) against a real quoted
