@@ -23,7 +23,7 @@ describe("instructor assessment interpretation", () => {
   it("does not offer acceptance when an explicit support code lacks the optional withholding boolean", async () => {
     await show(record({ review_reason: "support_incomplete", ai_majority_verdict: "pass" }));
     expect(screen.getByText("The separate evidence review did not finish.")).not.toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: /Show how the automatic grade was reached/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Show the grading passes/ }));
     expect(screen.getByText("The separate evidence review did not finish.")).toBeVisible();
     expect(screen.queryByRole("button", { name: /Accept AI suggestion/ })).not.toBeInTheDocument();
   });
@@ -55,7 +55,7 @@ describe("instructor assessment interpretation", () => {
       injection_suspected: true, injection_matched_snippet: null, verdict_unrecognized: true,
     }));
     expect(screen.getByText("Text that may be directed at automated grading needs review.")).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: /Show how the automatic grade was reached/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Show the grading passes/ }));
     expect(screen.getByText("The separate evidence review did not finish.")).toBeVisible();
     expect(screen.getByText("Text that may be directed at automated grading needs review.")).toBeVisible();
     expect(screen.getByText("The recorded suggestion is not a recognized grade for this criterion.")).toBeVisible();
@@ -74,7 +74,7 @@ describe("instructor assessment interpretation", () => {
 
   it("makes raw result entries optional without attaching them to grading controls", async () => {
     await show(record());
-    const toggle = screen.getByRole("button", { name: /Show how the automatic grade was reached/ });
+    const toggle = screen.getByRole("button", { name: /Show the grading passes/ });
     const choice = screen.getByRole("button", { name: "Meets criterion" });
     expect(toggle).toHaveAttribute("aria-expanded", "false");
     fireEvent.click(toggle);
@@ -82,7 +82,7 @@ describe("instructor assessment interpretation", () => {
     expect(within(entries).getByText("Proficient")).toBeVisible();
     expect(within(entries).getByText("No grade was recorded for this pass.")).toBeVisible();
     expect(choice).not.toHaveAccessibleDescription(/Pass 1|No grade was recorded for this pass/);
-    fireEvent.click(screen.getByRole("button", { name: /Hide how the automatic grade was reached/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Hide the grading passes/ }));
     expect(entries).not.toBeVisible();
     expect(choice).not.toHaveAccessibleDescription(/Pass 1|No grade was recorded for this pass/);
   });

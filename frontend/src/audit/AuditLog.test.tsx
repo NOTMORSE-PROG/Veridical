@@ -320,13 +320,13 @@ describe("AuditLogPage", () => {
     renderWithProviders(<AuditLogPage />, { route: "/audit" });
     expect(await screen.findByText("Grouped entries")).toBeInTheDocument();
     expect(screen.queryByText(/events between/)).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Show all" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Show all \d+ / }));
     const table = screen.getByRole("table");
     const rows = within(table).getAllByRole("row");
     expect(rows[2]).toHaveTextContent("Entry #42");
     expect(rows[3]).toHaveTextContent("Entry #38");
     expect(within(table).getAllByRole("button", { name: /^View details for entry #/ })).toHaveLength(2);
-    expect(within(table).getByRole("button", { name: "Hide" })).toHaveAttribute("aria-expanded", "true");
+    expect(within(table).getByRole("button", { name: /^Hide \d+ / })).toHaveAttribute("aria-expanded", "true");
   });
 
   it("BUG (found live): the event-type key for an overridden flag never matched the real backend value, so it always showed a raw string instead of a label", async () => {
@@ -620,11 +620,11 @@ describe("AuditLogPage", () => {
     // Only the desktop toggle is literally named "Show all" -- the mobile
     // one is an aria-hidden +/- glyph inside a button whose accessible
     // name is the group's own summary text, not this fixed string.
-    expect((await screen.findAllByRole("button", { name: "Show all" })).length).toBe(1);
+    expect((await screen.findAllByRole("button", { name: /^Show all \d+ / })).length).toBe(1);
     expect(screen.queryAllByRole("button", { name: /^View details for entry #/ })).toHaveLength(0);
 
     // Shared expand state -- toggling the desktop control expands both.
-    fireEvent.click(screen.getByRole("button", { name: "Show all" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Show all \d+ / }));
     expect(await screen.findAllByRole("button", { name: /^View details for entry #/ })).toHaveLength(3);
   });
 
@@ -643,7 +643,7 @@ describe("AuditLogPage", () => {
     // Two ungrouped single rows, each with its own Detail button -- never
     // one "2 x ..." summary that would have to pick just one mode to state.
     expect((await screen.findAllByRole("button", { name: /^View details for entry #/ })).length).toBe(2);
-    expect(screen.queryByRole("button", { name: "Show all" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Show all \d+ / })).not.toBeInTheDocument();
   });
 
   it("BUG-219: tags a fake-mode row 'Test mode' and an unknown-mode row 'Mode unknown', but a real-mode row gets no tag at all", async () => {

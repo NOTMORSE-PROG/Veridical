@@ -1,4 +1,4 @@
-import { AUTOMATIC_GRADE_COPY, automaticGradeLines } from "../domain/automaticGrade";
+import { AUTOMATIC_GRADE_COPY, automaticGradeCaution, automaticGradeLines } from "../domain/automaticGrade";
 import { RecordedEvidencePage } from "./RecordedEvidencePage";
 import { IntegrityModuleNavigation, selectedIntegrityModule, type IntegrityKind } from "./IntegrityModules";
 import { ActionAssessmentContext, ReportAssessmentContext } from "./ReportAssessmentContext";
@@ -31,7 +31,7 @@ import {
   RESOLUTION_REASON_MIN_LENGTH,
 } from "../config/ui";
 import { isManuscriptQuote } from "../domain/evidenceDisplay";
-import { CRITERION_EXCLUSION_COPY, CRITERION_REVIEW_COPY, REVIEW_DRAFT_COPY, criterionReviewNotices, resolutionRequiresReason, recordedInstructorComment } from "../domain/criterionReview";
+import { CRITERION_EXCLUSION_COPY, CRITERION_REVIEW_COPY, PLAIN_REASON_WORDING, REVIEW_DRAFT_COPY, criterionReviewNotices, resolutionRequiresReason, recordedInstructorComment } from "../domain/criterionReview";
 import { isOptionalComparisonLead } from "../domain/comparisonLeadIdentity";
 import { useViewedFlagIds } from "../domain/flagViewed";
 import { problemLabel } from "../domain/problemLabel";
@@ -55,7 +55,8 @@ import { InWorkspaceBar } from "../document/WorkspaceBar";
 
 // Some recorded notes are two sentences joined with ".;" when stored.
 function readableNote(text: string) {
-  return text.replace(/\.\s*;\s*/g, ". ");
+  const joined = text.replace(/\.\s*;\s*/g, ". ");
+  return PLAIN_REASON_WORDING.reduce((out, [stored, plain]) => out.split(stored).join(plain), joined);
 }
 import { EmptyState } from "../ui/EmptyState";
 import { MODULE_EMPTY_STATE } from "./moduleEmptyState";
@@ -67,6 +68,15 @@ import { criterionReviewSearch, selectedCriterionId, SELECTED_CRITERION_PARAM } 
 import { useEvidenceManifest } from "./useEvidenceSource";
 import type { OpenEvidenceSource } from "./evidenceTypes";
 import { claimFocusContinuation, type FocusContinuation } from "../routing/focusContinuation";
+import { RelatedFindings } from "./RelatedFindings";
+import { readinessExclusionLine } from "../domain/readinessExclusion";
+
+const GRADE_LIST_COPY = {
+  waiting: "Waiting for your judgment",
+  waitingNote: "No grade has been accepted yet. Grade it in step 1, Review criteria.",
+  gradeIt: "Grade this criterion",
+  chipCaution: "evidence not confirmed",
+} as const;
 
 const OUTCOME_COPY: Record<ResultRowCommon["outcome"], { label: string; tone: string }> = {
   passed: { label: "Meets criterion", tone: "meets" },
@@ -246,6 +256,7 @@ function SignalFindingCard({
           {first.confirmed_citation_source && <span className="signal-resolution-state">Source confirmed</span>}
         </div>
         <h3 id={headingId} tabIndex={-1}>{problemLabel(first.problem_kind) ?? first.criterion_text ?? "Possible inconsistency"}</h3>
+        {readinessExclusionLine(first) && <p className="signal-field-hint">{readinessExclusionLine(first)}</p>}
       {flags.some((flag) => flag.citation_metadata_review_warning) && <p className="signal-field-hint"><strong>{CITATION_HISTORY_TITLE}</strong></p>}
         {/* BUG-170: a whole-document/chapter/resubmission reuse flag's
             evidence_excerpt is a system-authored template sentence, never
@@ -288,6 +299,7 @@ function SignalFindingCard({
         {confirmedCount > 0 && <span className="signal-resolution-state">{confirmedCount} source-confirmed location{confirmedCount === 1 ? "" : "s"}</span>}
       </div>
       <h3 id={headingId} tabIndex={-1}>{problemLabel(first.problem_kind) ?? first.criterion_text ?? "Possible inconsistency"}</h3>
+      {readinessExclusionLine(first) && <p className="signal-field-hint">{readinessExclusionLine(first)}</p>}
       {flags.some((flag) => flag.citation_metadata_review_warning) && <p className="signal-field-hint"><strong>{CITATION_HISTORY_TITLE}</strong></p>}
       {first.check_kind === "originality_reuse" && first.matched_ref != null && (
         <p className="signal-flag-finding-context">Possible match with archived manuscript #{first.matched_ref}</p>
@@ -1104,6 +1116,8 @@ export function SignalCriteriaResults({ results, checkRunId, publicView = false,
   const sourceManifest = useEvidenceManifest(checkRunId, review?.assessment?.assessment_revision, Boolean(privateScope));
   const currentManifest = privateScope && review.assessmentCurrent?.() && sourceManifest.isSuccess
     && !sourceManifest.isError && sourceManifest.fetchStatus === "idle" ? sourceManifest.data : undefined;
+  const flagsQuery = useFlags(checkRunId, { enabled: !publicView });
+  const findingsTo = location.pathname === `/report/${checkRunId}` ? `/report/${checkRunId}?section=findings` : workspaceStepPath(checkRunId, "findings");
   const rows = results.filter((row) => {
     const confirmed = privateScope ? review.confirmed.get(row.criterion_id) : undefined;
     return !confirmed || atLeastSavedJudgment(row, confirmed);
@@ -1123,8 +1137,17 @@ export function SignalCriteriaResults({ results, checkRunId, publicView = false,
             <p>This criterion could not be accessed. Its last loaded private details have been cleared.</p>
             <Button variant="secondary" onClick={() => review.revisions.open(row.criterion_id, "current")}>Retry recorded criterion</Button></li>;
         }
+        // A criterion still waiting keeps its place in the list, so the count
+        // and numbering match the required format; grading it happens in step 1.
+        if (row.outcome === "escalated" && !publicView) {
+          return <li key={row.criterion_id} className="signal-result-card signal-result-card--waiting"><div className="signal-result-card__top"><span className="signal-result-card__number">{index + 1}</span><span className="signal-outcome signal-outcome--review">{GRADE_LIST_COPY.waiting}</span></div>
+            <h3 id={criterionRecordId(checkRunId, row.criterion_id)} tabIndex={-1}>{row.text}</h3>
+            <p className="signal-resolution-note">{GRADE_LIST_COPY.waitingNote}</p>
+            <ActionLink to={`${workspaceStepPath(checkRunId, "criteria")}&${SELECTED_CRITERION_PARAM}=${row.criterion_id}`} variant="secondary" aria-label={`${GRADE_LIST_COPY.gradeIt}: ${row.text}`}>{GRADE_LIST_COPY.gradeIt}</ActionLink></li>;
+        }
         const display = resultDisplay(row);
         const assessment = criterionAssessmentDetails(row, publicView);
+        const gradeCaution = !publicView && !row.resolution ? automaticGradeCaution(row as CriterionResultOut) : null;
         const outcome = !publicView && row.resolution?.type === "mark_level" && !row.level?.name?.trim()
           ? { label: "Recorded grade unavailable", tone: "neutral" }
           : row.level ? { label: `Level: ${display.label}`, tone: "neutral" }
@@ -1166,7 +1189,7 @@ export function SignalCriteriaResults({ results, checkRunId, publicView = false,
             }}
           >Open in manuscript: {instructorAnchor(anchor)}</ActionLink>;
         };
-        return <li key={row.criterion_id} className="signal-result-card"><div className="signal-result-card__top"><span className="signal-result-card__number">{publicSelection?.position ?? index + 1}</span><span className={`signal-outcome signal-outcome--${assessment.ruleScopeUnconfirmed && !assessment.instructorRecorded ? "neutral" : outcome.tone}`}>{assessment.ruleScopeUnconfirmed && !assessment.instructorRecorded ? "Previously recorded: " : ""}{outcome.label}</span><span className={`signal-importance signal-importance--${row.weight_importance === "med" ? "medium" : row.weight_importance}`}>{row.weight_importance === "med" ? "Medium" : `${row.weight_importance.slice(0, 1).toUpperCase()}${row.weight_importance.slice(1)}`} importance</span></div><h3 id={criterionRecordId(checkRunId, row.criterion_id)} tabIndex={-1}>{row.text}</h3>{!publicView && !row.resolution && automaticGradeLines(row as CriterionResultOut).map((line) => <p key={line} className="signal-resolution-note">{line}</p>)}{assessment.ruleScopeUnconfirmed && !assessment.instructorRecorded && <RuleScopeNotice />}{!publicView && row.resolution && <p className="signal-resolution-note"><strong>Instructor judgment</strong></p>}{!publicView && row.resolution?.type === "needs_document" && <p className="signal-resolution-note">{CRITERION_EXCLUSION_COPY.recorded}. {CRITERION_EXCLUSION_COPY.noGrade}</p>}{!publicView && row.resolution && <>{row.resolution.type !== "needs_document" && <p className="signal-resolution-note"><strong>Recorded grade:</strong> {recordedGradeLabel(row)}</p>}<p className="signal-resolution-note"><strong>Instructor reason:</strong> {recordedInstructorComment(row.resolution.type, row.resolution.reason) ?? "No instructor reason is available in this record."}</p></>}{/* BUG-065: this summary repeats verbatim once per row -- a screen-reader
+        return <li key={row.criterion_id} className="signal-result-card"><div className="signal-result-card__top"><span className="signal-result-card__number">{publicSelection?.position ?? index + 1}</span><span className={`signal-outcome signal-outcome--${assessment.ruleScopeUnconfirmed && !assessment.instructorRecorded ? "neutral" : gradeCaution ? "warning" : outcome.tone}`}>{assessment.ruleScopeUnconfirmed && !assessment.instructorRecorded ? "Previously recorded: " : ""}{outcome.label}{gradeCaution && <> · {GRADE_LIST_COPY.chipCaution}</>}</span><span className={`signal-importance signal-importance--${row.weight_importance === "med" ? "medium" : row.weight_importance}`}>{row.weight_importance === "med" ? "Medium" : `${row.weight_importance.slice(0, 1).toUpperCase()}${row.weight_importance.slice(1)}`} importance</span></div><h3 id={criterionRecordId(checkRunId, row.criterion_id)} tabIndex={-1}>{row.text}</h3>{!publicView && !row.resolution && automaticGradeLines(row as CriterionResultOut).map((line) => <p key={line} className="signal-resolution-note">{line}</p>)}{gradeCaution && <p className="signal-grade-caution"><span aria-hidden="true">{"⚠"}</span>{gradeCaution}</p>}{!publicView && !row.resolution && flagsQuery.data && automaticGradeLines(row as CriterionResultOut).length > 0 && <RelatedFindings evidence={row.evidence} flags={flagsQuery.data} findingsTo={findingsTo} criterionText={row.text} />}{assessment.ruleScopeUnconfirmed && !assessment.instructorRecorded && <RuleScopeNotice />}{!publicView && row.resolution && <p className="signal-resolution-note"><strong>Instructor judgment</strong></p>}{!publicView && row.resolution?.type === "needs_document" && <p className="signal-resolution-note">{CRITERION_EXCLUSION_COPY.recorded}. {CRITERION_EXCLUSION_COPY.noGrade}</p>}{!publicView && row.resolution && <>{row.resolution.type !== "needs_document" && <p className="signal-resolution-note"><strong>Recorded grade:</strong> {recordedGradeLabel(row)}</p>}<p className="signal-resolution-note"><strong>Instructor reason:</strong> {recordedInstructorComment(row.resolution.type, row.resolution.reason) ?? "No instructor reason is available in this record."}</p></>}{/* BUG-065: this summary repeats verbatim once per row -- a screen-reader
                 links/buttons list can't tell them apart without a per-criterion
                 accessible name, same fix already applied to the flag "Review
                 evidence" links and the escalation resolve-button groups. */}

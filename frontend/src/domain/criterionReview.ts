@@ -38,7 +38,7 @@ export const CRITERION_REVIEW_COPY = {
   unrecognizedGrade: "The recorded suggestion is not a recognized grade for this criterion.",
   notGraded: "A completed grade is not available in this review record.",
   tentativeSuggestion: "A tentative AI suggestion is recorded. Review it against the criterion and manuscript.",
-  details: "how the automatic grade was reached",
+  details: "the grading passes",
   detailsTitle: "Automatic grading passes",
   detailsQualification: "Each pass is one automatic grading attempt on this criterion. Passes can disagree; a pass is not an independent reviewer.",
   entriesLabel: "Automatic grading passes",
@@ -78,3 +78,8 @@ export function criterionReviewNotices(item: EscalatedItemOut): CriterionReviewN
   }
   return notices;
 }
+
+// Stored reasons written in internal terms, said the way the screens say them.
+export const PLAIN_REASON_WORDING: readonly (readonly [string, string])[] = [
+  ["The self-consistency vote reached no majority.", "The grading passes did not agree on a grade."],
+];

@@ -19,16 +19,24 @@ type AutomaticGradeRow = Pick<CriterionResultOut, "decision_basis" | "support_ca
 const fill = (template: string, values: Record<string, string | number>) =>
   template.replace(/\{(\w+)\}/g, (_match, key: string) => String(values[key]));
 
+// How the automatic grade was chosen. Empty when the AI did not grade.
 export function automaticGradeLines(row: AutomaticGradeRow): string[] {
-  const lines: string[] = [];
-  if (row.decision_basis) lines.push(AUTOMATIC_GRADE_COPY[row.decision_basis]);
-  else if (row.grading_passes && row.agreeing_passes) {
-    lines.push(fill(AUTOMATIC_GRADE_COPY.agreed, { agreeing: row.agreeing_passes, passes: row.grading_passes }));
+  if (row.decision_basis) return [AUTOMATIC_GRADE_COPY[row.decision_basis]];
+  if (row.grading_passes && row.agreeing_passes) {
+    return [fill(AUTOMATIC_GRADE_COPY.agreed, { agreeing: row.agreeing_passes, passes: row.grading_passes })];
   }
-  if (lines.length && row.support_caution?.trim()) {
-    lines.push(fill(AUTOMATIC_GRADE_COPY.caution, { reason: row.support_caution.trim() }));
-  }
-  return lines;
+  return [];
+}
+
+// Cautions written before grades were kept could end "no automatic grade was
+// assigned". The grade beside them was kept, so that sentence is left out.
+const STALE_NO_GRADE = /[\s;,.]*no automatic grade was assigned\.?\s*$/i;
+
+// The specific caution on an automatic grade, shown apart from how it was chosen.
+export function automaticGradeCaution(row: AutomaticGradeRow): string | null {
+  const reason = row.support_caution?.replace(STALE_NO_GRADE, "").trim();
+  if (!reason || automaticGradeLines(row).length === 0) return null;
+  return fill(AUTOMATIC_GRADE_COPY.caution, { reason: /[.!?]$/.test(reason) ? reason : `${reason}.` });
 }
 
 export function fillAutomaticConfirmation(count: number): string {

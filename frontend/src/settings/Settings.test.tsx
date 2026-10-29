@@ -249,10 +249,10 @@ describe("SettingsPage", () => {
     await screen.findByText("Prof Cruz");
 
     for (const [linkName, headingName] of [
-      ["Account", "Profile"],
-      ["Personal key", "Personal Gemini key"],
+      ["Profile", "Profile"],
+      ["Personal Gemini key", "Personal Gemini key"],
       ["Local AI budget", "Local AI budget"],
-      ["Review rules", "Review rules and technical record"],
+      ["Review rules and technical record", "Review rules and technical record"],
     ]) {
       const heading = screen.getByRole("heading", { name: headingName });
       expect(heading).toHaveAttribute("tabindex", "-1");

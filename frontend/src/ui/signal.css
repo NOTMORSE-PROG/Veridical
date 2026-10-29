@@ -5432,7 +5432,7 @@
   .signal-settings-nav a {
     border-radius: var(--signal-radius-control);
     padding: var(--signal-space-2) var(--signal-space-3);
-    color: var(--color-signal-link);
+    color: var(--color-signal-ink);
     font-size: var(--signal-type-label);
     font-weight: var(--signal-weight-semibold);
   }
@@ -5451,7 +5451,7 @@
   .signal-settings-stack {
     display: flex;
     flex-wrap: wrap;
-    align-items: flex-start;
+    align-items: stretch;
     gap: var(--signal-space-5);
   }
 
@@ -8991,4 +8991,28 @@
   .signal-upload-background__toggle input { inline-size: var(--signal-space-4); block-size: var(--signal-space-4); accent-color: var(--color-signal-link); }
   .signal-upload-background__format { display: grid; gap: var(--signal-space-2); }
   .signal-upload-background__format label { font-weight: 600; }
+  /* BUG-516: findings on the pages an automatic grade quoted, and what that means. */
+  .signal-related-findings {
+    display: grid;
+    gap: var(--signal-space-2);
+    border-inline-start: var(--signal-border-emphasis) solid var(--color-signal-border-strong);
+    padding-inline-start: var(--signal-space-3);
+  }
+  .signal-related-findings p { margin: 0; color: var(--color-signal-ink-secondary); }
+  .signal-related-findings > .signal-button { justify-self: start; }
+  .signal-report-hero__kpi-note { margin: var(--signal-space-1) 0 0; }
+  /* V-087: one line under a Needs Review band saying why. */
+  .signal-report-hero__reason-line { margin: 0; }
+  /* Grades step review: the specific caution reads as a caution, apart from how the grade was chosen. */
+  .signal-grade-caution {
+    display: flex;
+    gap: var(--signal-space-2);
+    margin: 0;
+    color: var(--color-signal-warning-text);
+    font-weight: var(--signal-weight-semibold);
+  }
+  .signal-result-card--waiting > .signal-button { justify-self: start; }
+  /* Change grade sits at the same height in every card of a row. */
+  #record-panel-grades .signal-result-card > .signal-judgment-tools,
+  .signal-result-list > .signal-result-card > .signal-judgment-tools { margin-block-start: auto; }
 }
