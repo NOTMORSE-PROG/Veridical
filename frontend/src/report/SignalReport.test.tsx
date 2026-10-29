@@ -822,7 +822,7 @@ expect(screen.getByText("Not scored. Does not affect readiness or block your dec
 
     const viewedBadges = await screen.findAllByText("Viewed");
     expect(viewedBadges).toHaveLength(1);
-    expect(screen.getByText("You have reviewed evidence for 1 of 2 open findings.")).toBeInTheDocument();
+    expect(screen.getByText("You have opened 1 of 2 open findings.")).toBeInTheDocument();
     window.localStorage.clear();
   });
 
@@ -842,7 +842,7 @@ expect(screen.getByText("Not scored. Does not affect readiness or block your dec
 
     await screen.findByText("Showing 1 of 1 open finding across 1 location.");
     expect(screen.queryByText("Viewed")).not.toBeInTheDocument();
-    expect(screen.getByText("You have reviewed evidence for 0 of 1 open findings.")).toBeInTheDocument();
+    expect(screen.getByText("You have opened 0 of 1 open findings.")).toBeInTheDocument();
   });
 
   it("keeps near-identical citation evidence separate when problem kinds differ", async () => {

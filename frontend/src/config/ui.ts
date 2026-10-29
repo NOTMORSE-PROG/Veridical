@@ -74,3 +74,6 @@ export const SHARE_EXPIRY_OPTIONS = [
 // so the screen can say so before anything is sent.
 export const BULK_RESOLVE_MAX_LOCATIONS = 200;
 export const BULK_RESOLVE_MAX_TEXT_CHARS = 2000;
+// Below this width (including a zoomed desktop window) the selection bar sits
+// in the page above the list instead of fixed to the screen.
+export const BULK_BAR_INLINE_MEDIA_QUERY = "(max-width: 1023px)";

@@ -11,6 +11,12 @@ export function findingSubject(flag: FlagSummaryOut): string {
   return text.length > EXCERPT_CHARS ? `${text.slice(0, EXCERPT_CHARS).trimEnd()}…` : text;
 }
 
+const SEVERITY: Record<FlagSummaryOut["severity"], string> = { high: "High severity", med: "Medium severity", low: "Low severity" };
+
+export function severityLabel(severity: FlagSummaryOut["severity"]): string {
+  return SEVERITY[severity] ?? "Severity not recorded";
+}
+
 export function findingTitle(flag: FlagSummaryOut): string {
   return problemLabel(flag.problem_kind) ?? flag.criterion_text ?? "Possible inconsistency";
 }

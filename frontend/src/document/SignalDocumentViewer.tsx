@@ -609,10 +609,15 @@ export function SignalDocumentViewerPage() {
     : null;
   const [selectedDetail, setSelectedDetail] = useState<{ run: number; id: number; record: FlagOut | undefined; settled: boolean }>();
   const selectedRecord = selectedDetail?.run === id && selectedDetail.id === selectedLocationId ? selectedDetail.record : undefined;
-  // Opening a finding here is reviewing its evidence, as the old finding page
-  // was: once its record has loaded, it counts as opened.
+  // Opening a finding here counts as opening it, as the old finding page did,
+  // once its record has loaded and while the page is actually on screen (a
+  // tab opened in the background counts only when it is looked at).
   useEffect(() => {
-    if (selectedRecord && selectedRecord.check_run_id === id) markFlagViewed(me?.id, selectedRecord.id);
+    if (!selectedRecord || selectedRecord.check_run_id !== id) return;
+    const mark = () => { if (document.visibilityState === "visible") markFlagViewed(me?.id, selectedRecord.id); };
+    mark();
+    document.addEventListener("visibilitychange", mark);
+    return () => document.removeEventListener("visibilitychange", mark);
   }, [selectedRecord, id, me?.id]);
   const setSelectedRecord = useCallback((record: FlagOut | undefined, settled: boolean) => {
     if (selectedLocationId !== null) setSelectedDetail({ run: id, id: selectedLocationId, record, settled });

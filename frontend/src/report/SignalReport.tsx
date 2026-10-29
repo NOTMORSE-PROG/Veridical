@@ -248,7 +248,7 @@ export function SignalReportPage() {
               <SignalCriteriaResults results={report.results} checkRunId={report.check_run_id} />
             </div>
             <div role="tabpanel" id="record-panel-findings" aria-labelledby="record-tab-findings" hidden={tab !== "findings"}>
-              <SignalFlagsPanel checkRunId={report.check_run_id} unresolvedHighFlagCount={report.unresolved_high_flag_count} originalityScope={report.originality_scope} statisticalScope={report.statistical_check_scope} />
+              <SignalFlagsPanel checkRunId={report.check_run_id} unresolvedHighFlagCount={report.unresolved_high_flag_count} originalityScope={report.originality_scope} statisticalScope={report.statistical_check_scope} active={tab === "findings"} />
             </div>
             <div role="tabpanel" id="record-panel-images" aria-labelledby="record-tab-images" hidden={tab !== "images"}>
               {report.figure_readings?.length ? <FigureReadingsSummary readings={report.figure_readings} checkRunId={report.check_run_id} />

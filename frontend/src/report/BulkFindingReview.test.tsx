@@ -58,7 +58,8 @@ describe("bulk confirm and dismiss", () => {
     expect(within(list).getByText("Cruz, 2020")).toBeInTheDocument();
     expect(within(list).getAllByText("Not opened")).toHaveLength(2);
     expect(within(list).getAllByText("Opened")).toHaveLength(1);
-    const link = within(list).getByRole("link", { name: /Review evidence: .*p\. 46 \(opens in a new tab\)/ });
+    expect(within(list).getAllByText("Medium severity · counts for readiness")).toHaveLength(3);
+    const link = within(list).getByRole("link", { name: /Review evidence: .*p\. 46, Cruz, 2020 \(opens in a new tab\)/ });
     expect(link).toHaveAttribute("href", "/flags/2");
     expect(link).toHaveAttribute("target", "_blank");
   });
@@ -66,10 +67,10 @@ describe("bulk confirm and dismiss", () => {
   it("dismisses only with a real reason and an explicit word for unopened findings, then reports what was left unchanged", async () => {
     const calls = respond({ flags: [flag({ overridden: true }), flag({ id: 2, overridden: true })], unchanged_ids: [3], report: { ...REPORT, assessment_revision: 8 }, batch_id: "b1" });
     const onDone = dialog("dismiss", FLAGS, [1]);
-    expect(screen.getByText("2 selected findings have not been opened yet.")).toBeInTheDocument();
+    expect(screen.getByText("2 selected findings have not been fully opened here.")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Reason for dismissing (required)"), { target: { value: "ok" } });
     fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
-    expect(await screen.findByText(/at least 10 characters/)).toBeInTheDocument();
+    expect(await screen.findByText("Enter a reason of at least 10 characters before dismissing.")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Reason for dismissing (required)"), { target: { value: `  ${REASON}  ` } });
     expect(screen.getByText("36 of 2000 characters")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
@@ -94,18 +95,26 @@ describe("bulk confirm and dismiss", () => {
   it("confirms with an optional note, leaving out confirmed citation sources and saying dismissed ones reopen", async () => {
     const calls = respond({ flags: [flag({ finding_confirmed: true })], unchanged_ids: [], report: { ...REPORT, assessment_revision: 8 }, batch_id: "b2" });
     const onDone = dialog("confirm", [flag(), flag({ id: 2, page_anchor: "p. 46", evidence_excerpt: "Cruz, 2020", confirmed_citation_source: true, overridden: true }),
-      flag({ id: 3, page_anchor: "p. 47", evidence_excerpt: "Reyes, 2019", overridden: true })]);
+      flag({ id: 3, page_anchor: "p. 47", evidence_excerpt: "Reyes, 2019", affects_readiness: false, readiness_exclusion_reason: "unassessed_evidence" })], [1, 3]);
     expect(screen.getByRole("heading", { name: "Confirm 2 findings as real issues?" })).toBeInTheDocument();
     expect(screen.getByText(/1 finding is left out: a confirmed citation source/)).toBeInTheDocument();
-    expect(screen.getByText(/1 selected finding was dismissed; confirming reopens it/)).toBeInTheDocument();
+    expect(screen.getByText("1 of these count for readiness and stay counted; confirming the other 1 does not change readiness.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Confirm as real issues" }));
     await waitFor(() => expect(onDone).toHaveBeenCalledWith("1 finding confirmed."));
-    expect(calls[0].body).toEqual({ action: "confirm", flag_ids: [1, 3], expected_revision: 7, unopened_count: 2, note: null });
+    expect(calls[0].body).toEqual({ action: "confirm", flag_ids: [1, 3], expected_revision: 7, unopened_count: 0, note: null });
+  });
+
+  it("guards confirming unopened findings as firmly as dismissing them", async () => {
+    const calls = respond({ flags: [], unchanged_ids: [], report: { ...REPORT }, batch_id: null });
+    dialog("confirm", FLAGS, [1]);
+    fireEvent.click(screen.getByRole("button", { name: "Confirm as real issues" }));
+    expect(await screen.findByText(/Confirm that you have checked the findings you have not opened here/)).toBeInTheDocument();
+    expect(calls).toHaveLength(0);
   });
 
   it("shows a refusal as given and changes nothing on screen", async () => {
     respond({ error: { code: "conflict", message: "This assessment changed after you reviewed it. Nothing was changed." } }, 409);
-    const onDone = dialog("confirm");
+    const onDone = dialog("confirm", FLAGS, [1, 2, 3]);
     fireEvent.click(screen.getByRole("button", { name: "Confirm as real issues" }));
     expect(await screen.findByText("This assessment changed after you reviewed it. Nothing was changed.")).toBeInTheDocument();
     expect(onDone).not.toHaveBeenCalled();
@@ -125,6 +134,13 @@ describe("bulk confirm and dismiss", () => {
       flag({ id: 5, check_kind: "internal_agreement", problem_kind: null, evidence_excerpt: "Objective and result differ", page_anchor: "p. 12" })]);
     fireEvent.click(await screen.findByRole("button", { name: "Select all open findings in this check" }));
     expect(screen.getByText("3 findings selected")).toBeInTheDocument();
+  });
+
+  it("offers no checkbox for findings already dismissed or confirmed", async () => {
+    panel([flag(), flag({ id: 2, page_anchor: "p. 46", evidence_excerpt: "Cruz, 2020", finding_confirmed: true }),
+      flag({ id: 3, page_anchor: "p. 47", evidence_excerpt: "Reyes, 2019", overridden: true })]);
+    fireEvent.click(await screen.findByRole("button", { name: /^All:/ }));
+    expect(screen.getAllByRole("checkbox", { name: /Select finding/ })).toHaveLength(1);
   });
 
   it("keeps the selection when the instructor leaves and comes back, and clears it on request", async () => {

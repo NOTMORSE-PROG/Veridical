@@ -222,8 +222,14 @@ function viewedSummary(flags: FlagSummaryOut[], viewedIds: ReadonlySet<number>):
   return `Viewed ${viewed.length} of ${unresolved.length} open locations`;
 }
 
+// A finding is open for bulk review while it is neither dismissed nor
+// confirmed; resolved findings are changed one at a time.
+function isOpenForBulk(cluster: FlagFindingCluster) {
+  return cluster.flags.some((flag) => !flag.overridden && !flag.finding_confirmed);
+}
+
 function SelectFinding({ cluster, selection }: { cluster: FlagFindingCluster; selection?: FindingSelection }) {
-  if (!selection) return null;
+  if (!selection || !isOpenForBulk(cluster)) return null;
   const first = cluster.flags[0];
   // Named on the input itself: the excerpt it repeats is already on the card.
   return <label className="signal-bulk-check">
@@ -565,7 +571,7 @@ function SignalFlagList({
             // screen reader in THIS tab -- same `role`/`aria-live` as its
             // sibling status line above.
             <p className="signal-field-hint" role="status" aria-live="polite">
-              You have reviewed evidence for {openViewed} of {openTotal} open findings.
+              You have opened {openViewed} of {openTotal} open findings.
             </p>
           ) : null;
         })()}
@@ -1052,7 +1058,10 @@ export function SignalFlagsPanel({
   unresolvedHighFlagCount,
   originalityScope,
   statisticalScope,
+  active = true,
 }: {
+  // False while its tab is hidden, so the selection bar shows only beside the list.
+  active?: boolean;
   checkRunId: number;
   unresolvedHighFlagCount: number;
   originalityScope?: OriginalityScopeValue | null;
@@ -1088,7 +1097,8 @@ export function SignalFlagsPanel({
   // A typed reason or comment survives closing the dialog.
   const [bulkDrafts, setBulkDrafts] = useState<Record<BulkAction, string>>({ confirm: "", dismiss: "" });
   const allClusters = clusterFlagFindings(allOtherFlags ?? []);
-  const selectedClusters = allClusters.filter((cluster) => cluster.flags.every((flag) => selectedIds.has(flag.id)));
+  // A finding resolved elsewhere since it was selected drops out of the selection.
+  const selectedClusters = allClusters.filter((cluster) => isOpenForBulk(cluster) && cluster.flags.every((flag) => selectedIds.has(flag.id)));
   const selectedLocations = selectedClusters.reduce((total, cluster) => total + cluster.flags.length, 0);
   const selection: FindingSelection = {
     isSelected: (cluster) => cluster.flags.every((flag) => selectedIds.has(flag.id)),
@@ -1100,9 +1110,9 @@ export function SignalFlagsPanel({
     }),
     // Both select only open findings, and only in the check on screen.
     selectMany: (clusters) => setSelectedIds((current) => new Set([...current,
-      ...clusters.filter((cluster) => cluster.flags.some((flag) => !flag.overridden)).flatMap((cluster) => cluster.flags.map((flag) => flag.id))])),
+      ...clusters.filter(isOpenForBulk).flatMap((cluster) => cluster.flags.map((flag) => flag.id))])),
     selectAllInCheck: () => setSelectedIds((current) => new Set([...current,
-      ...clusterFlagFindings(otherFlags ?? []).filter((cluster) => cluster.flags.some((flag) => !flag.overridden)).flatMap((cluster) => cluster.flags.map((flag) => flag.id))])),
+      ...clusterFlagFindings(otherFlags ?? []).filter(isOpenForBulk).flatMap((cluster) => cluster.flags.map((flag) => flag.id))])),
   };
   const shownKeys = new Set(clusterFlagFindings(otherFlags ?? []).map((cluster) => cluster.key));
   const selectedElsewhere = selectedClusters.filter((cluster) => !shownKeys.has(cluster.key)).length;
@@ -1142,7 +1152,7 @@ export function SignalFlagsPanel({
         : onlyOptional ? null : optional.state === "success" ? <EmptyState className="signal-integrity-empty" id={`signal-module-empty-${checkRunId}`} title={emptyState.title}><p>{emptyState.description}</p></EmptyState>
           : <p>{optional.state === "error" ? "Other findings could not be loaded." : optional.state === "paused" ? "Waiting to load other findings." : optional.state === "fetching" ? "Loading other findings." : "Other findings are not available."}</p>}
       {selectedModule === "originality_reuse" && <ComparisonLeadList collection={optional} showActions viewedIds={viewedIds} onRetry={() => { void flagsQuery.refetch(); }} />}
-      {review && <BulkSelectionBar findings={selectedClusters.length} locations={selectedLocations} elsewhere={selectedElsewhere} decided={Boolean(review.decision)}
+      {review && active && <BulkSelectionBar findings={selectedClusters.length} locations={selectedLocations} elsewhere={selectedElsewhere} decided={Boolean(review.decision)}
         onAction={(action) => { setBulkMessage(""); setBulkAction(action); }}
         onClear={() => { setSelectedIds(new Set()); document.getElementById("flags-heading")?.focus(); }} />}
       </div>

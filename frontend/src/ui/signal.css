@@ -9051,14 +9051,17 @@
     padding: var(--signal-space-3) var(--signal-space-4);
   }
   .signal-bulk-bar p { margin: 0; }
-  .signal-bulk-bar > .signal-control-cluster { grid-column: 2; grid-row: 1 / span 2; }
+  /* The status reads across the full width; the actions sit on one row below. */
+  .signal-bulk-bar { grid-template-columns: minmax(0, 1fr); }
+  .signal-bulk-bar[data-placement="inline"] { position: static; transform: none; inline-size: auto; box-shadow: none; }
   /* Room below the list so the fixed bar never covers the last finding. */
-  body:has(.signal-bulk-bar) .signal-integrity-review-body { padding-block-end: calc(2 * var(--signal-space-12)); }
+  body:has(.signal-bulk-bar[data-placement="fixed"]) .signal-integrity-review-body { padding-block-end: calc(var(--signal-bulk-bar-height) + 2 * var(--signal-space-4)); }
   .signal-bulk-check { display: inline-flex; align-items: center; min-block-size: var(--signal-control-height); min-inline-size: var(--signal-control-height); justify-content: center; }
   .signal-bulk-check input { inline-size: var(--signal-space-4); block-size: var(--signal-space-4); accent-color: var(--color-signal-link); }
   .signal-bulk-select { margin-block-start: var(--signal-space-2); }
   .signal-bulk-result { margin: 0 0 var(--signal-space-4); font-weight: var(--signal-weight-semibold); }
-  .signal-bulk-dialog__list { display: grid; gap: var(--signal-space-3); max-block-size: var(--signal-passage-inspector-max-height); overflow: auto; margin: 0; padding: 0; list-style: none; }
+  .signal-bulk-dialog__list { display: grid; gap: var(--signal-space-3); margin: 0; padding: 0; list-style: none; }
+  .signal-bulk-dialog__page { white-space: nowrap; }
   .signal-bulk-dialog__list > li { display: grid; gap: var(--signal-space-1); border-block-end: var(--signal-border-hairline) solid var(--color-signal-border); padding-block-end: var(--signal-space-2); }
   .signal-bulk-dialog__subject { color: var(--color-signal-ink-secondary); overflow-wrap: anywhere; }
   .signal-bulk-dialog__meta { display: flex; flex-wrap: wrap; gap: var(--signal-space-3); align-items: center; }
@@ -9066,11 +9069,14 @@
   .signal-bulk-dialog__acknowledge { display: flex; gap: var(--signal-space-2); align-items: flex-start; font-weight: var(--signal-weight-semibold); }
   .signal-bulk-dialog__acknowledge input { margin-block-start: var(--signal-space-1); inline-size: var(--signal-space-4); block-size: var(--signal-space-4); accent-color: var(--color-signal-link); }
   /* Focused controls never sit under the bar. */
-  html:has(.signal-bulk-bar) { scroll-padding-block-end: calc(2 * var(--signal-space-12)); }
+  html:has(.signal-bulk-bar[data-placement="fixed"]) { scroll-padding-block-end: calc(var(--signal-bulk-bar-height) + 2 * var(--signal-space-4)); }
   /* Beside the uploads tray, the bar moves left so neither covers the other. */
   body:has(.signal-upload-tray) .signal-bulk-bar {
     inset-inline-start: var(--signal-space-5);
     transform: none;
     inline-size: min(calc(100% - var(--signal-settings-column-min) - 3 * var(--signal-space-5)), var(--signal-prose-width));
   }
+  /* A text link styled as a link where a plain link would inherit body text. */
+  .signal-text-link { color: var(--color-signal-link); text-decoration: underline; text-underline-offset: var(--signal-link-underline-offset); }
+  .signal-text-link:hover { color: var(--color-signal-link-hover); }
 }

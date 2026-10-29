@@ -1,29 +1,46 @@
 // V-089: many findings can be confirmed as real issues, or dismissed, in one
-// action. The dialog names what is selected and how much of it has not been
-// opened, so a bulk dismissal is never blind.
-import { useId, useRef, useState } from "react";
+// action. The dialog names each finding, whether it was opened and whether it
+// counts for readiness, so neither action is taken blind.
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { ApiError } from "../api/client";
-import type { FlagSummaryOut } from "../api/types";
-import { BULK_RESOLVE_MAX_LOCATIONS, BULK_RESOLVE_MAX_TEXT_CHARS, RESOLUTION_REASON_MIN_LENGTH } from "../config/ui";
+import { BULK_BAR_INLINE_MEDIA_QUERY, BULK_RESOLVE_MAX_LOCATIONS, BULK_RESOLVE_MAX_TEXT_CHARS, RESOLUTION_REASON_MIN_LENGTH } from "../config/ui";
 import { BULK_REVIEW_COPY, plural } from "../domain/bulkReviewCopy";
-import { findingSubject, findingTitle } from "../domain/findingSummary";
+import { findingSubject, findingTitle, severityLabel } from "../domain/findingSummary";
+import { countsForReadiness } from "../domain/readinessExclusion";
 import { instructorAnchor } from "../domain/sourceAnchor";
 import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
+import { useMediaQuery } from "../ui/useMediaQuery";
 import type { FlagFindingCluster } from "./flagClusters";
 import { useBulkResolveFlags, type BulkAction, type BulkResolveOut } from "./useBulkResolve";
+
+// While the bar is fixed to the screen, its measured height keeps focused
+// controls clear of it (scroll padding reads this variable).
+function useBarHeight(node: HTMLElement | null) {
+  useEffect(() => {
+    if (!node || typeof ResizeObserver === "undefined") return;
+    const root = document.documentElement;
+    const observer = new ResizeObserver(() => root.style.setProperty("--signal-bulk-bar-height", `${Math.ceil(node.getBoundingClientRect().height)}px`));
+    observer.observe(node);
+    return () => { observer.disconnect(); root.style.removeProperty("--signal-bulk-bar-height"); };
+  }, [node]);
+}
 
 export function BulkSelectionBar({ findings, locations, elsewhere, decided, onAction, onClear }: {
   findings: number; locations: number; elsewhere: number; decided: boolean; onAction: (action: BulkAction) => void; onClear: () => void;
 }) {
+  // On a narrow window (or a zoomed one) a fixed bar would cover the page, so
+  // it sits in the flow above the list instead.
+  const inline = useMediaQuery(BULK_BAR_INLINE_MEDIA_QUERY, false);
+  const [node, setNode] = useState<HTMLDivElement | null>(null);
+  useBarHeight(inline ? null : node);
   if (findings === 0) return null;
   const tooMany = locations > BULK_RESOLVE_MAX_LOCATIONS;
-  // Rendered on the page body: the bar is fixed to the screen, and the page's
-  // own layout would otherwise carry it along with the content.
-  return createPortal(<div className="signal-bulk-bar" role="region" aria-label="Selected findings">
-    <p role="status" aria-live="polite"><strong>{BULK_REVIEW_COPY.selected(findings, locations)}</strong>{elsewhere > 0 && <> {BULK_REVIEW_COPY.elsewhere(elsewhere)}</>}</p>
+  const bar = <div ref={setNode} className="signal-bulk-bar" data-placement={inline ? "inline" : "fixed"} role="region" aria-label="Selected findings">
+    <p role="status" aria-live="polite"><strong>{BULK_REVIEW_COPY.selected(findings, locations)}</strong>
+      {elsewhere > 0 && <> {elsewhere === findings ? BULK_REVIEW_COPY.noneShown : BULK_REVIEW_COPY.elsewhere(elsewhere)}</>}</p>
     {decided ? <p className="signal-field-hint">{BULK_REVIEW_COPY.decided}</p>
       : tooMany ? <p className="signal-field-hint" role="alert">{BULK_REVIEW_COPY.tooMany(locations)}</p> : null}
     <div className="signal-control-cluster">
@@ -31,7 +48,34 @@ export function BulkSelectionBar({ findings, locations, elsewhere, decided, onAc
       <Button variant="secondary" disabled={decided || tooMany} onClick={() => onAction("dismiss")}>{BULK_REVIEW_COPY.dismiss}</Button>
       <Button variant="quiet" onClick={onClear}>{BULK_REVIEW_COPY.clear}</Button>
     </div>
-  </div>, document.body);
+  </div>;
+  // Fixed bars are rendered on the page body; the page's own layout would
+  // otherwise carry a fixed element along with the content.
+  return inline ? bar : createPortal(bar, document.body);
+}
+
+function openedState(cluster: FlagFindingCluster, viewedIds: ReadonlySet<number>) {
+  const opened = cluster.flags.filter((flag) => viewedIds.has(flag.id)).length;
+  return { opened, complete: opened === cluster.flags.length };
+}
+
+function Row({ cluster, viewedIds }: { cluster: FlagFindingCluster; viewedIds: ReadonlySet<number> }): ReactNode {
+  const first = cluster.flags[0];
+  const { opened, complete } = openedState(cluster, viewedIds);
+  const counted = cluster.flags.some(countsForReadiness);
+  const subject = findingSubject(first);
+  return <li>
+    <span className="signal-bulk-dialog__title"><strong>{findingTitle(first)}</strong> <span className="signal-bulk-dialog__page">· {instructorAnchor(first.page_anchor)}</span>
+      {cluster.flags.length > 1 ? ` (${plural(cluster.flags.length, "location", "locations")})` : ""}</span>
+    <span className="signal-bulk-dialog__subject">{subject}</span>
+    <span className="signal-bulk-dialog__meta">
+      <span>{severityLabel(first.severity)} · {counted ? BULK_REVIEW_COPY.counted : BULK_REVIEW_COPY.notCounted}</span>
+      <span className={complete ? "signal-viewed-state" : "signal-bulk-dialog__unopened"}>
+        {complete ? BULK_REVIEW_COPY.opened : opened > 0 ? BULK_REVIEW_COPY.partlyOpened(opened, cluster.flags.length) : BULK_REVIEW_COPY.notOpened}</span>
+      <a className="signal-text-link" href={`/flags/${first.id}`} target="_blank" rel="noopener"
+        aria-label={`${BULK_REVIEW_COPY.reviewEvidence}: ${findingTitle(first)}, ${instructorAnchor(first.page_anchor)}, ${subject} (${BULK_REVIEW_COPY.opensNewTab})`}>{BULK_REVIEW_COPY.reviewEvidence}</a>
+    </span>
+  </li>;
 }
 
 export function BulkResolveDialog({ action, clusters, checkRunId, expectedRevision, viewedIds, text, onText, onDone, onClose }: {
@@ -49,16 +93,18 @@ export function BulkResolveDialog({ action, clusters, checkRunId, expectedRevisi
   const sourceConfirmed = action === "confirm" ? clusters.filter((cluster) => cluster.flags.some((flag) => flag.confirmed_citation_source)) : [];
   const included = clusters.filter((cluster) => !sourceConfirmed.includes(cluster));
   const flagIds = included.flatMap((cluster) => cluster.flags.map((flag) => flag.id));
-  const unopened = included.filter((cluster) => !cluster.flags.some((flag) => viewedIds.has(flag.id))).length;
-  const reopens = action === "confirm" ? included.filter((cluster) => cluster.flags.some((flag: FlagSummaryOut) => flag.overridden)).length : 0;
+  // A finding counts as opened only when every location was opened, as on the report.
+  const unopened = included.filter((cluster) => !openedState(cluster, viewedIds).complete).length;
+  const counted = included.filter((cluster) => cluster.flags.some(countsForReadiness)).length;
   const trimmed = text.trim();
   const missing = action === "dismiss" && trimmed.length < RESOLUTION_REASON_MIN_LENGTH;
   const tooLong = trimmed.length > BULK_RESOLVE_MAX_TEXT_CHARS;
   // Too long is said as it happens; a missing reason only after trying.
   const invalid = tooLong || (attempted && missing);
-  // Dismissing findings that were never opened here needs an explicit word
-  // that they were checked some other way.
-  const needsAcknowledgement = action === "dismiss" && unopened > 0;
+  // Either action on findings that were not opened here needs an explicit
+  // word that they were checked some other way. Confirming counts against
+  // the student, so it is guarded as firmly as dismissing.
+  const needsAcknowledgement = unopened > 0;
   const unacknowledged = attempted && needsAcknowledgement && !acknowledged;
   const error = resolve.error instanceof ApiError ? resolve.error.message : resolve.error ? "The change could not be confirmed. Review the current findings before trying again." : null;
 
@@ -86,25 +132,12 @@ export function BulkResolveDialog({ action, clusters, checkRunId, expectedRevisi
       <Button variant="brand" busy={resolve.isPending} disabled={included.length === 0} onClick={submit}>
         {action === "confirm" ? BULK_REVIEW_COPY.confirm : BULK_REVIEW_COPY.dismiss}</Button></>}>
     <div className="signal-group-flow signal-bulk-dialog" aria-busy={resolve.isPending}>
-      <ul className="signal-bulk-dialog__list" tabIndex={0} aria-label="Selected findings">
-        {included.map((cluster) => {
-          const first = cluster.flags[0];
-          const opened = cluster.flags.some((flag) => viewedIds.has(flag.id));
-          return <li key={cluster.key}>
-            <span className="signal-bulk-dialog__title"><strong>{findingTitle(first)}</strong> · {instructorAnchor(first.page_anchor)}{cluster.flags.length > 1 ? ` (${plural(cluster.flags.length, "location", "locations")})` : ""}</span>
-            <span className="signal-bulk-dialog__subject">{findingSubject(first)}</span>
-            <span className="signal-bulk-dialog__meta">
-              <span className={opened ? "signal-viewed-state" : "signal-bulk-dialog__unopened"}>{opened ? BULK_REVIEW_COPY.opened : BULK_REVIEW_COPY.notOpened}</span>
-              <a href={`/flags/${first.id}`} target="_blank" rel="noopener"
-                aria-label={`${BULK_REVIEW_COPY.reviewEvidence}: ${findingTitle(first)}, ${instructorAnchor(first.page_anchor)} (${BULK_REVIEW_COPY.opensNewTab})`}>{BULK_REVIEW_COPY.reviewEvidence}</a>
-            </span>
-          </li>;
-        })}
-      </ul>
       <p><strong>{BULK_REVIEW_COPY.unopened(unopened)}</strong></p>
-      <p>{action === "confirm" ? BULK_REVIEW_COPY.confirmCounts : BULK_REVIEW_COPY.dismissCounts}</p>
-      {reopens > 0 && <p>{BULK_REVIEW_COPY.reopens(reopens)}</p>}
+      <p>{action === "confirm" ? BULK_REVIEW_COPY.confirmCounts(counted, included.length) : BULK_REVIEW_COPY.dismissCounts(counted, included.length)}</p>
       {sourceConfirmed.length > 0 && <p className="signal-field-hint">{BULK_REVIEW_COPY.sourceConfirmed(sourceConfirmed.length)}</p>}
+      <ul className="signal-bulk-dialog__list" aria-label="Selected findings">
+        {included.map((cluster) => <Row key={cluster.key} cluster={cluster} viewedIds={viewedIds} />)}
+      </ul>
       <div className="signal-field signal-evidence-field">
         <label htmlFor={fieldId}>{action === "confirm" ? BULK_REVIEW_COPY.note : BULK_REVIEW_COPY.reason}</label>
         <p id={`${fieldId}-hint`} className="signal-field-hint">{action === "confirm" ? BULK_REVIEW_COPY.noteHint : BULK_REVIEW_COPY.reasonHint}</p>

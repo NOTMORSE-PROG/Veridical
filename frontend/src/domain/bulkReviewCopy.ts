@@ -13,12 +13,24 @@ export const BULK_REVIEW_COPY = {
   selectPage: "Select open findings shown",
   selectCheck: "Select all open findings in this check",
   elsewhere: (count: number) => `${plural(count, "of them is", "of them are")} in another check, not shown here.`,
+  noneShown: "None of them are shown here.",
+  counted: "counts for readiness",
+  notCounted: "not counted for readiness",
+  partlyOpened: (opened: number, total: number) => `Opened ${opened} of ${total} locations`,
   decided: "This report has a recorded decision. Reopen it to change findings.",
   confirmTitle: (count: number) => `Confirm ${plural(count, "finding", "findings")} as real issues?`,
   dismissTitle: (count: number) => `Dismiss ${plural(count, "finding", "findings")}?`,
-  confirmCounts: "Confirmed findings stay counted for readiness and show as confirmed, not open.",
-  dismissCounts: "Dismissed findings no longer count for readiness. Each one keeps your reason in its record and in Audit.",
-  unopened: (count: number) => count === 0 ? "You have opened every selected finding." : `${plural(count, "selected finding has", "selected findings have")} not been opened yet.`,
+  confirmCounts: (counted: number, total: number) => counted === total
+    ? "Confirmed findings stay counted for readiness and show as confirmed, not open."
+    : counted === 0
+      ? "None of these count for readiness; confirming records them as real issues and does not change readiness."
+      : `${counted} of these count for readiness and stay counted; confirming the other ${total - counted} does not change readiness.`,
+  dismissCounts: (counted: number, total: number) => (counted === 0
+    ? "None of these count for readiness, so dismissing them does not change readiness."
+    : counted === total ? "Dismissed findings no longer count for readiness."
+      : `${counted} of these count for readiness and will no longer count; the other ${total - counted} already do not.`)
+    + " Each one keeps your reason in its record and in Audit.",
+  unopened: (count: number) => count === 0 ? "You have opened every selected finding." : `${plural(count, "selected finding has", "selected findings have")} not been fully opened here.`,
   reopens: (count: number) => `${plural(count, "selected finding was", "selected findings were")} dismissed; confirming reopens ${count === 1 ? "it" : "them"} as a real issue.`,
   sourceConfirmed: (count: number) => `${plural(count, "finding is", "findings are")} left out: a confirmed citation source cannot also be confirmed as a real issue.`,
   reviewEvidence: "Review evidence",
@@ -30,7 +42,7 @@ export const BULK_REVIEW_COPY = {
   note: "Comment (optional)",
   noteHint: "Copied to each confirmed finding.",
   reason: "Reason for dismissing (required)",
-  reasonHint: "Copied to each dismissed finding. Say what you checked.",
+  reasonHint: `Copied to each dismissed finding. Say what you checked (at least ${RESOLUTION_REASON_MIN_LENGTH} characters).`,
   reasonMissing: `Enter a reason of at least ${RESOLUTION_REASON_MIN_LENGTH} characters before dismissing.`,
   counter: (used: number) => `${used} of ${BULK_RESOLVE_MAX_TEXT_CHARS} characters`,
   tooLong: `Keep it to ${BULK_RESOLVE_MAX_TEXT_CHARS} characters.`,
