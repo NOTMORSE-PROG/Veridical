@@ -20,10 +20,16 @@ from app.ingest.schemas import ExtractionResult, SectionTree
 from app.ingest.service import raw_store_path
 from app.report.document_projection import project_docx_source
 from app.report.evidence_images import EvidenceSourceFile, read_bounded_source_bytes
-from app.report.evidence_placement import EvidencePlacementOut, locate_pdf_evidence, pin_pdf_source
+from app.report.evidence_placement import (
+    EvidencePlacementOut,
+    locate_pdf_evidence,
+    pin_pdf_source,
+    pin_pdf_source_file,
+)
 from app.report.evidence_references import EvidenceSourceReference
 from app.report.schemas import DocumentParagraphsOut
 from app.report.source_files import SourceFormat, manuscript_source_file
+from app.report.source_snapshot import SourceSnapshot
 from app.storage import ensure_local_file, get_storage
 
 
@@ -38,6 +44,11 @@ class BoundEvidenceSource:
     document: DocumentParagraphsOut | None = None
     docx_path: Path | None = None
     extraction: ExtractionResult | None = None
+    pdf_snapshot: SourceSnapshot | None = None
+
+    def close(self):
+        if self.pdf_snapshot is not None:
+            self.pdf_snapshot.close()
 
 
 def _source_identity(run_id, manuscript_id, source_format, digest, document):
@@ -71,6 +82,25 @@ def prepare_bound_evidence_source(
             "The saved source identity is unavailable. Source marks cannot be bound."
         )
     path, source_format = manuscript_source_file(source_file, settings)
+    if (
+        source_format == "pdf"
+        and path.stat().st_size > settings.source_reader_memory_threshold_bytes
+    ):
+        snapshot = SourceSnapshot(path, expected_sha256, settings)
+        try:
+            with pin_pdf_source_file(snapshot, settings):
+                pass
+            return BoundEvidenceSource(
+                check_run_id,
+                manuscript_id,
+                source_format,
+                _source_identity(check_run_id, manuscript_id, source_format, expected_sha256, None),
+                expected_sha256,
+                pdf_snapshot=snapshot,
+            )
+        except BaseException:
+            snapshot.close()
+            raise
     data = read_bounded_source_bytes(path, settings)
     if hashlib.sha256(data).hexdigest() != expected_sha256:
         raise ConflictError("The available source no longer matches this evidence record.")
@@ -167,7 +197,12 @@ def locate_bound_evidence(
     ):
         raise ConflictError("The selected evidence belongs to a different source copy.")
     if source.source_format == "pdf":
-        with pin_pdf_source(source.pdf_bytes, source.source_sha256, settings) as pinned:
+        context = (
+            pin_pdf_source_file(source.pdf_snapshot, settings)
+            if source.pdf_snapshot is not None
+            else pin_pdf_source(source.pdf_bytes, source.source_sha256, settings)
+        )
+        with context as pinned:
             return locate_pdf_evidence(pinned, reference, section_tree, settings)
     anchor = reference.anchor or ""
     paragraph = re.fullmatch(r"paragraph\s+(\d+)", anchor.strip(), flags=re.IGNORECASE)

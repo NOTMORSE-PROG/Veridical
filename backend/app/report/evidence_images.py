@@ -19,13 +19,14 @@ from app.report.evidence_placement import (
     EvidencePlacementOut,
     ReferencePageImage,
     locate_pdf_evidence,
-    pin_pdf_source,
+    pin_pdf_source_file,
     render_pdf_evidence,
 )
 from app.report.evidence_references import EvidenceReferenceSnapshot, EvidenceSourceReference
 from app.report.page_image_disclosure import PageImageUnavailable
 from app.report.schemas import PageEvidenceImageOut, SourceEvidencePrintOut
 from app.report.source_files import manuscript_source_file
+from app.report.source_snapshot import SourceSnapshot
 
 _admission_lock = threading.Lock()
 _active_readers = 0
@@ -55,7 +56,7 @@ class EvidenceSourceFile:
 
 
 def read_bounded_source_bytes(path: Path, settings: Settings) -> bytes:
-    limit = settings.max_upload_mb * 1024 * 1024
+    limit = settings.source_reader_max_mb * 1024 * 1024
     if path.stat().st_size > limit:
         raise ConflictError("The source exceeds the evidence-reading limit.")
     with path.open("rb") as stream:
@@ -89,8 +90,10 @@ def render_recorded_evidence_image(
     if source_format != "pdf":
         # A DOCX paragraph never acquires a fabricated page image.
         return unavailable_image(reference, "location_unavailable")
-    data = read_bounded_source_bytes(path, settings)
-    with pin_pdf_source(data, reference.source_sha256, settings) as source:
+    with (
+        SourceSnapshot(path, reference.source_sha256, settings) as snapshot,
+        pin_pdf_source_file(snapshot, settings) as source,
+    ):
         return render_pdf_evidence(source, reference, section_tree, settings, llm_mode=llm_mode)
 
 
@@ -147,8 +150,10 @@ def build_recorded_evidence_images(
         path, source_format = manuscript_source_file(source_file, settings)
         if source_format != "pdf":
             return missing_all(DOCX_CAPTION)
-        data = read_bounded_source_bytes(path, settings)
-        with pin_pdf_source(data, snapshot.source_sha256, settings) as source:
+        with (
+            SourceSnapshot(path, snapshot.source_sha256, settings) as source_copy,
+            pin_pdf_source_file(source_copy, settings) as source,
+        ):
             results = []
             attempted = used_bytes = used_pixels = 0
             for reference in references:

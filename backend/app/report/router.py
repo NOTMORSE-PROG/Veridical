@@ -67,6 +67,29 @@ from app.report.service import (
     reopen_report,
     resolve_escalation_for_run,
 )
+from app.report.source_snapshot import SourceSnapshot
+
+
+class SourceSnapshotResponse(FileResponse):
+    def __init__(self, snapshot: SourceSnapshot, identity: str):
+        self.snapshot = snapshot
+        super().__init__(
+            snapshot.path,
+            media_type="application/pdf",
+            headers={
+                "X-Evidence-Source-Identity": identity,
+                "X-Content-Type-Options": "nosniff",
+                "Referrer-Policy": "no-referrer",
+                "Cache-Control": "private, no-store",
+            },
+        )
+
+    async def __call__(self, scope, receive, send):
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            self.snapshot.close()
+
 
 router = APIRouter(tags=["report"])
 
@@ -134,10 +157,17 @@ async def get_evidence_source_file_route(
     source = await get_private_evidence_reader_source(
         session, check_run_id, instructor.id, source_identity, settings
     )
-    if source.source_format != "pdf" or source.pdf_bytes is None:
+    if source.source_format != "pdf" or (source.pdf_bytes is None and source.pdf_snapshot is None):
+        source.close()
         from app.errors import ConflictError
 
         raise ConflictError("This source is not a PDF. Open its extracted manuscript text.")
+    if source.pdf_snapshot is not None:
+        try:
+            return SourceSnapshotResponse(source.pdf_snapshot, source.source_identity)
+        except BaseException:
+            source.close()
+            raise
     return Response(
         source.pdf_bytes,
         media_type="application/pdf",
@@ -164,10 +194,14 @@ async def get_evidence_source_document_route(
         session, check_run_id, instructor.id, source_identity, settings
     )
     if source.source_format != "docx" or source.document is None:
+        source.close()
         from app.errors import ConflictError
 
         raise ConflictError("This source is not DOCX. Open its original PDF pages.")
-    return EvidenceDocumentOut(source_identity=source.source_identity, document=source.document)
+    try:
+        return EvidenceDocumentOut(source_identity=source.source_identity, document=source.document)
+    finally:
+        source.close()
 
 
 @router.get("/check-runs/{check_run_id}/evidence/source-images/{image_index}")

@@ -49,11 +49,17 @@ def render_stubs(monkeypatch):
     calls = []
     closed = []
     monkeypatch.setattr(images, "manuscript_source_file", lambda *args: (Path("unused"), "pdf"))
-    monkeypatch.setattr(images, "read_bounded_source_bytes", lambda *args: SOURCE)
 
     @contextmanager
-    def pinned(data, digest, settings):
-        assert data == SOURCE and digest == hashlib.sha256(SOURCE).hexdigest()
+    def snapshot(path, digest, settings):
+        assert path == Path("unused")
+        assert digest == hashlib.sha256(SOURCE).hexdigest()
+        yield object()
+
+    monkeypatch.setattr(images, "SourceSnapshot", snapshot)
+
+    @contextmanager
+    def pinned(snapshot, settings):
         try:
             yield object()
         finally:
@@ -79,7 +85,7 @@ def render_stubs(monkeypatch):
             png,
         )
 
-    monkeypatch.setattr(images, "pin_pdf_source", pinned)
+    monkeypatch.setattr(images, "pin_pdf_source_file", pinned)
     monkeypatch.setattr(images, "render_pdf_evidence", render)
     monkeypatch.setattr(
         images,
@@ -205,7 +211,11 @@ def test_encoded_byte_rejection_does_not_refund_raster_pixel_work(render_stubs, 
         raster_calls.append(True)
         return raster
 
-    monkeypatch.setattr(images, "pin_pdf_source", pinned)
+    monkeypatch.setattr(
+        images,
+        "pin_pdf_source_file",
+        lambda snapshot, settings: pinned(SOURCE, hashlib.sha256(SOURCE).hexdigest(), settings),
+    )
     monkeypatch.setattr(images, "render_pdf_evidence", placement.render_pdf_evidence)
     monkeypatch.setattr(placement, "locate_pdf_evidence", images.locate_pdf_evidence)
     monkeypatch.setattr(placement, "_render_page_png", rendered)

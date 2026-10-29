@@ -328,11 +328,23 @@ async def _read_bound_reader_source(
             bound = prepare_bound_evidence_source(
                 source_file, run_id, manuscript_id, digest, tree, settings
             )
-            return consume(bound, tree) if consume is not None else bound
+            try:
+                return consume(bound, tree) if consume is not None else bound
+            except BaseException:
+                bound.close()
+                raise
 
         return await asyncio.to_thread(work)
 
-    return await read_source(session, manuscript, reader)
+    def cleanup(value):
+        if isinstance(value, BoundEvidenceSource):
+            value.close()
+        elif isinstance(value, tuple):
+            for item in value:
+                if isinstance(item, BoundEvidenceSource):
+                    item.close()
+
+    return await read_source(session, manuscript, reader, on_cancel=cleanup)
 
 
 async def get_private_evidence_location(
@@ -375,17 +387,23 @@ async def get_private_evidence_location(
                     locate_bound_evidence(source, reference, tree, settings),
                 ),
             )
-        current_run = await authorize_evidence_run(session, **authority)
-        current = await recorded_evidence_assessment(session, current_run, "private", settings)
-        if current.snapshot_id != assessment.snapshot_id:
-            raise ConflictError("This assessment changed. Reload its evidence before continuing.")
-        return EvidenceLocationOut(
-            snapshot_id=assessment.snapshot_id,
-            source_identity=bound.source_identity if bound is not None else None,
-            source_format=bound.source_format if bound is not None else None,
-            placement=placement,
-            caption=reader_location_caption(placement.state, placement.reason),
-        )
+        try:
+            current_run = await authorize_evidence_run(session, **authority)
+            current = await recorded_evidence_assessment(session, current_run, "private", settings)
+            if current.snapshot_id != assessment.snapshot_id:
+                raise ConflictError(
+                    "This assessment changed. Reload its evidence before continuing."
+                )
+            return EvidenceLocationOut(
+                snapshot_id=assessment.snapshot_id,
+                source_identity=bound.source_identity if bound is not None else None,
+                source_format=bound.source_format if bound is not None else None,
+                placement=placement,
+                caption=reader_location_caption(placement.state, placement.reason),
+            )
+        finally:
+            if bound is not None:
+                bound.close()
 
 
 async def get_private_evidence_reader_source(
@@ -441,10 +459,19 @@ async def _private_reader_content(
         bound, content = await _read_bound_reader_source(
             session, run, manuscript, lambda: manuscript.content_hash, settings, consume=read
         )
-        current_run = await authorize_evidence_run(session, **authority)
-        if (
-            current_run.manuscript_id != bound.manuscript_id
-            or source_identity != bound.source_identity
-        ):
-            raise ConflictError("This source copy changed. Review its current evidence location.")
-        return content
+        try:
+            current_run = await authorize_evidence_run(session, **authority)
+            if (
+                current_run.manuscript_id != bound.manuscript_id
+                or source_identity != bound.source_identity
+            ):
+                raise ConflictError(
+                    "This source copy changed. Review its current evidence location."
+                )
+            return content
+        except BaseException:
+            bound.close()
+            raise
+        finally:
+            if content is not bound:
+                bound.close()

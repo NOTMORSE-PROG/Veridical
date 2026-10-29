@@ -96,7 +96,7 @@ async def get_manuscript_page_text(
 
 def _source_hash(path: Path, settings: Settings) -> str | None:
     # Bound actual streamed bytes too, not only a potentially stale stat.
-    remaining = settings.max_upload_mb * 1024 * 1024
+    remaining = settings.source_reader_max_mb * 1024 * 1024
     if path.stat().st_size > remaining:
         return None
     digest = hashlib.sha256()

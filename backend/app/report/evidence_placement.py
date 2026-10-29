@@ -10,6 +10,7 @@ import struct
 from contextlib import contextmanager
 from dataclasses import dataclass
 from math import isfinite
+from pathlib import Path
 from typing import Literal
 
 import pymupdf
@@ -24,7 +25,7 @@ from app.report.evidence_references import EvidenceSourceReference
 from app.report.export import _LLM_MODE_DISCLOSURE
 from app.report.page_image_disclosure import PageImageUnavailable, disclosure_layout
 from app.report.page_images import _render_page_png, planned_page_image_pixels
-from app.report.source_files import open_source_pdf_bytes
+from app.report.source_files import open_source_pdf, open_source_pdf_bytes
 
 Bbox = tuple[float, float, float, float]
 
@@ -74,13 +75,14 @@ class PinnedPdfSource:
 
     document: pymupdf.Document
     source_sha256: str
-    source_bytes: bytes
+    source_bytes: bytes | None
+    source_path: Path | None = None
 
 
 @contextmanager
 def pin_pdf_source(data: bytes, expected_sha256: str, settings: Settings):
     pinned = bytes(data)
-    if len(pinned) > settings.max_upload_mb * 1024 * 1024:
+    if len(pinned) > settings.source_reader_max_mb * 1024 * 1024:
         raise ConflictError("The source exceeds the evidence-reading limit.")
     digest = hashlib.sha256(pinned).hexdigest()
     if digest != expected_sha256:
@@ -92,6 +94,19 @@ def pin_pdf_source(data: bytes, expected_sha256: str, settings: Settings):
         yield PinnedPdfSource(doc, digest, pinned)
     finally:
         doc.close()
+
+
+@contextmanager
+def pin_pdf_source_file(snapshot, settings: Settings):
+    # The unique private copy stays alive until both native documents close.
+    with snapshot.path.open("rb") as reader:
+        digest = hashlib.file_digest(reader, "sha256").hexdigest()
+    if digest != snapshot.sha256:
+        raise ConflictError("The manuscript source no longer matches this evidence record.")
+    with open_source_pdf(snapshot.path) as doc:
+        if doc.page_count > settings.ingest_max_pages:
+            raise ConflictError("The source exceeds the evidence-reading page limit.")
+        yield PinnedPdfSource(doc, digest, None, snapshot.path)
 
 
 def _unique(text: str, quote: str) -> bool:
@@ -153,7 +168,11 @@ def locate_pdf_evidence(
     # Use a disposable extraction handle so the pinned rendering handle stays
     # clean and its mutation guard continues to detect caller-side changes.
     try:
-        with open_source_pdf_bytes(source.source_bytes) as extraction:
+        with (
+            open_source_pdf(source.source_path)
+            if source.source_path is not None
+            else open_source_pdf_bytes(source.source_bytes)
+        ) as extraction:
             return _locate_quote(extraction[region.page - 1], quote, coarse, settings)
     except (ConflictError, RuntimeError, ValueError, TypeError, AttributeError):
         return EvidencePlacementOut(**coarse, reason="quote_geometry_unverified")

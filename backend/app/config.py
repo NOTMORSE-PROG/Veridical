@@ -921,6 +921,8 @@ class Settings(BaseSettings):
     # preserves the existing production layout; maintenance access is explicit.
     storage_namespace: str = ""
     storage_allow_unscoped_access: bool = False
+    source_reader_max_mb: int = Field(default=256, gt=0)
+    source_reader_memory_threshold_bytes: int = Field(default=1_048_576, ge=0)
 
     @field_validator("storage_namespace")
     @classmethod
