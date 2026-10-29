@@ -9,7 +9,8 @@
     "Counters can include a provider-limit closure hold and are not physical API-attempt counts.",
     "Requested model identity remains the hash/replay input; provider version is optional response metadata.",
     "Apply the additive cache migration and drain old writers before starting this routing policy.",
-    "No real provider call or fresh capacity/admission/accuracy measurement accompanied this review."
+    "No real provider call or fresh capacity/admission/accuracy measurement accompanied this review.",
+    "tpm (2026-10-29): conservative local pacing of INPUT tokens per minute for full-manuscript prompts. Google no longer publishes per-model free-tier TPM (rate-limits page updated 2026-10-28: limits are per project in AI Studio); 250000 is unverified for this project."
   ],
   "verified_on": "2026-07-26",
   "verified_with": "tools/probe_gemini_quota.py",
@@ -18,6 +19,7 @@
       "model": "gemini-3.5-flash-lite",
       "rpm": 15,
       "daily_quota": 200,
+      "tpm": 250000,
       "vision": true,
       "note": "Workhorse. Measured 2026-07-26: ~227 successful calls in one Pacific day with NO per-day 429 (200-call probe ran to completion; the probe was capped, the quota was not exhausted) at 15/min. Configured at 200 — a proven floor with margin, not a ceiling. JSON mode and an image call both verified live."
     },
@@ -25,6 +27,7 @@
       "model": "gemini-3.1-flash-lite",
       "rpm": 10,
       "daily_quota": 20,
+      "tpm": 250000,
       "vision": true,
       "note": "First reserve. JSON mode and an image call verified live 2026-07-26; RPD not measured, so it carries a deliberately conservative floor."
     },
@@ -32,6 +35,7 @@
       "model": "gemini-3-flash-preview",
       "rpm": 5,
       "daily_quota": 20,
+      "tpm": 250000,
       "vision": false,
       "note": "JSON mode verified live 2026-07-26; RPD and image support not measured — text-only until they are."
     },
@@ -39,6 +43,7 @@
       "model": "gemini-3.6-flash",
       "rpm": 5,
       "daily_quota": 20,
+      "tpm": 250000,
       "vision": false,
       "note": "Newest Flash. RPM measured at exactly 5/min (quotaValue '5') on 2026-07-26 — hence the low rpm. JSON verified; RPD and image support not measured."
     }

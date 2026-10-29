@@ -335,9 +335,16 @@ class Settings(BaseSettings):
     # `llm_response_cache` as normal, so a probe run leaves the cache in a
     # normal, usable state afterward rather than disturbing it.
     llm_cache_bypass: bool = False
+    # Input-token estimate used only to pace calls under a model's per-minute
+    # token budget (model_pool.json "tpm"); conservative, not a measurement.
+    llm_chars_per_token: float = Field(default=4.0, gt=0)
+    llm_tokens_per_image: int = Field(default=258, ge=0)
     # Full-source semantic review is never silently truncated. Larger inputs
     # remain explicitly unassessed until a source-bound retrieval path exists.
-    semantic_context_max_chars: int = Field(default=200_000, ge=1)
+    # 450k characters covers a ~250-page capstone (a real 187-page capstone
+    # measured 254k on 2026-10-29); large prompts are paced by the model
+    # pool's per-minute token budget.
+    semantic_context_max_chars: int = Field(default=450_000, ge=1)
     semantic_batch_max_criteria: int = Field(default=20, ge=1)
     semantic_batch_validation_attempts: int = Field(default=2, ge=1, le=2)
     semantic_item_recovery_max_criteria: int = Field(default=20, ge=0)

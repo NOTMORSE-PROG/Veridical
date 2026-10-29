@@ -77,3 +77,41 @@ class RateGovernor:
                     return
                 wait = self._timestamps[0] + 60.0 - now
                 await self._sleep(max(wait, 0.01))
+
+
+class TokenGovernor:
+    """Sliding 60s window of estimated input tokens for one model.
+
+    Gemini's per-minute limit counts input tokens, so a full-manuscript
+    grading prompt (tens of thousands of tokens) can exhaust it in a few
+    calls even when the request rate is far below RPM. A call larger than
+    the whole budget is admitted alone into an empty window rather than
+    blocked forever. `clock`/`sleep` are injectable for tests.
+    """
+
+    def __init__(
+        self,
+        tokens_per_minute: int,
+        *,
+        clock: ClockFn | None = None,
+        sleep: SleepFn | None = None,
+    ) -> None:
+        if tokens_per_minute <= 0:
+            raise ValueError("A token budget must be positive.")
+        self.tokens_per_minute = tokens_per_minute
+        self._clock = clock or time.monotonic
+        self._sleep = sleep or _default_sleep
+        self._lock = asyncio.Lock()
+        self._window: deque[tuple[float, int]] = deque()
+
+    async def acquire(self, tokens: int) -> None:
+        async with self._lock:
+            while True:
+                now = self._clock()
+                while self._window and self._window[0][0] < now - 60.0:
+                    self._window.popleft()
+                used = sum(spent for _, spent in self._window)
+                if not self._window or used + tokens <= self.tokens_per_minute:
+                    self._window.append((now, tokens))
+                    return
+                await self._sleep(max(self._window[0][0] + 60.0 - now, 0.01))

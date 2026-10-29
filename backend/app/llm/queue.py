@@ -10,6 +10,7 @@ Nothing outside `app/llm/` may call a transport directly (CODING.md §2).
 import asyncio
 import hashlib
 import json
+import math
 from datetime import datetime, timedelta
 from typing import Any, Protocol
 from zoneinfo import ZoneInfo
@@ -24,7 +25,7 @@ from app.llm.pool import ModelSpec, pool_daily_capacity
 from app.llm.result import GenerationResult, generation_result
 from app.models.audit import AuditLog
 from app.models.llm import LLMQuotaCounter, LLMResponseCache
-from app.rate_governor import ClockFn, RateGovernor, SleepFn, _default_sleep
+from app.rate_governor import ClockFn, RateGovernor, SleepFn, TokenGovernor, _default_sleep
 
 __all__ = [
     "ClockFn",
@@ -172,6 +173,13 @@ class LLMQueue:
         }
         if governor is not None:  # explicit injection (tests) applies to the primary
             self._governors[pool[0].model] = governor
+        # Gemini also meters INPUT tokens per minute; a full-manuscript prompt
+        # can spend that budget in a few calls far below the request rate.
+        self._token_governors: dict[str, TokenGovernor] = {
+            spec.model: TokenGovernor(spec.tpm, clock=clock, sleep=self._sleep)
+            for spec in pool
+            if spec.tpm
+        }
 
     @property
     def _model(self) -> str:
@@ -812,6 +820,8 @@ class LLMQueue:
     ) -> GenerationResult:
         last_exc: Exception | None = None
         for attempt in range(self._max_retries):
+            if (tokens := self._token_governors.get(spec.model)) is not None:
+                await tokens.acquire(_estimated_input_tokens(prompt, context))
             await self._governors[spec.model].acquire()
             async with self._session_factory() as session:
                 reserved = await self._try_reserve_quota(session, spec)
@@ -851,3 +861,13 @@ class LLMQueue:
         raise ApiDownError(
             f"Gemini did not respond after {self._max_retries} attempts."
         ) from last_exc
+
+
+def _estimated_input_tokens(prompt: str, context: dict[str, Any]) -> int:
+    """Conservative input-token estimate for per-minute pacing (characters
+    per token and per-image tokens are configured, never measured here)."""
+    settings = get_settings()
+    images = context.get("images") or ()
+    return math.ceil(len(prompt) / settings.llm_chars_per_token) + (
+        len(images) * settings.llm_tokens_per_image
+    )

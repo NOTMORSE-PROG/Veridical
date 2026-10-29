@@ -25,6 +25,9 @@ class ModelSpec:
     vision: bool
     note: str = ""
     budget_aliases: tuple[str, ...] = ()
+    # Optional per-minute INPUT token budget used to pace large prompts (a
+    # full manuscript for grading). Absent = request-rate pacing only.
+    tpm: int | None = None
 
 
 class ModelPoolError(ValueError):
@@ -64,6 +67,9 @@ def load_model_pool(path: Path | None = None) -> tuple[ModelSpec, ...]:
         daily_quota = int(entry["daily_quota"])
         if rpm < 1 or daily_quota < 1:
             raise ModelPoolError(f"Model pool entry {model!r} has a non-positive rpm/daily_quota.")
+        tpm = entry.get("tpm")
+        if tpm is not None and (type(tpm) is not int or tpm < 1):
+            raise ModelPoolError(f"Model pool entry {model!r} has an invalid tpm.")
         specs.append(
             ModelSpec(
                 model=model,
@@ -71,6 +77,7 @@ def load_model_pool(path: Path | None = None) -> tuple[ModelSpec, ...]:
                 daily_quota=daily_quota,
                 vision=bool(entry.get("vision", False)),
                 note=str(entry.get("note", "")),
+                tpm=tpm,
             )
         )
     aliases = raw.get("budget_aliases", {})
