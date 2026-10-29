@@ -319,6 +319,9 @@ class BulkResolveFlagsIn(BaseModel):
         limit = get_settings().flag_bulk_resolve_max_text_chars
         if value is not None and len(value.strip()) > limit:
             raise ValueError(f"keep the note or reason to {limit} characters")
+        # PostgreSQL text cannot store NUL; refuse it here instead of failing at save.
+        if value is not None and "\x00" in value:
+            raise ValueError("the note or reason contains a character that cannot be saved")
         return value
 
     @model_validator(mode="after")
