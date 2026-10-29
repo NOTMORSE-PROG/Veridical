@@ -46,7 +46,7 @@ async def _cleanup_staging(session, settings):
     storage = get_storage(settings)
     try:
         for attempt in rows:
-            if attempt.multipart_upload_id and attempt.status == "pending":
+            if attempt.multipart_upload_id and attempt.status in ("pending", "expired"):
                 await asyncio.to_thread(
                     storage.abort_multipart, attempt.staging_key, attempt.multipart_upload_id
                 )

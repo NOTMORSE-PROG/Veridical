@@ -19,8 +19,11 @@ class UploadAttempt(Base):
     staging_key: Mapped[str] = mapped_column(String(1024), unique=True)
     source_etag: Mapped[str | None] = mapped_column(String(255))
     upload_transport: Mapped[str] = mapped_column(String(8), server_default="r2")
-    # Set when the browser sends the file to storage in parallel parts.
+    # Set when the browser sends the file to storage in parallel parts. The
+    # part size is fixed when the attempt begins, so a configuration change
+    # can never re-cut parts that are already stored.
     multipart_upload_id: Mapped[str | None] = mapped_column(String(1024))
+    multipart_part_bytes: Mapped[int | None] = mapped_column(BigInteger)
     staging_deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     status: Mapped[str] = mapped_column(String(24), index=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

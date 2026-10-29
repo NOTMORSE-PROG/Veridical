@@ -8,11 +8,22 @@ class FakeRequest {
   static mostOpen = 0;
   static sent: { url: string; size: number }[] = [];
   static failures = new Map<string, number>();
+  static delays = new Map<string, number>();
+  static aborted: string[] = [];
   upload: { onprogress: ((event: { loaded: number }) => void) | null } = { onprogress: null };
   onload: (() => void) | null = null;
   onerror: (() => void) | null = null;
+  onabort: (() => void) | null = null;
   status = 0;
   url = "";
+  private timer: ReturnType<typeof setTimeout> | undefined;
+
+  abort() {
+    clearTimeout(this.timer);
+    FakeRequest.open -= 1;
+    FakeRequest.aborted.push(this.url);
+    this.onabort?.();
+  }
 
   open(_method: string, url: string) { this.url = url; }
 
@@ -21,7 +32,7 @@ class FakeRequest {
   send(body: Blob) {
     FakeRequest.open += 1;
     FakeRequest.mostOpen = Math.max(FakeRequest.mostOpen, FakeRequest.open);
-    setTimeout(() => {
+    this.timer = setTimeout(() => {
       this.upload.onprogress?.({ loaded: Math.floor(body.size / 2) });
       FakeRequest.open -= 1;
       const remaining = FakeRequest.failures.get(this.url) ?? 0;
@@ -33,7 +44,7 @@ class FakeRequest {
       FakeRequest.sent.push({ url: this.url, size: body.size });
       this.status = 200;
       this.onload?.();
-    }, 1);
+    }, FakeRequest.delays.get(this.url) ?? 1);
   }
 }
 
@@ -51,6 +62,8 @@ beforeEach(() => {
   FakeRequest.mostOpen = 0;
   FakeRequest.sent = [];
   FakeRequest.failures = new Map();
+  FakeRequest.delays = new Map();
+  FakeRequest.aborted = [];
   vi.stubGlobal("XMLHttpRequest", FakeRequest);
 });
 
@@ -90,6 +103,16 @@ describe("parallel part transfer", () => {
     await expect(uploadParts(file(25), { parts: plan([5, 5, 5, 5, 5]), concurrency: 1, retries: 1 }))
       .rejects.toMatchObject({ code: "upload_transport" });
     expect(FakeRequest.sent).toEqual([]);
+  });
+
+  it("cancels the other parts in flight once one part is out of retries", async () => {
+    FakeRequest.failures.set("https://storage.example/part-1", 5);
+    FakeRequest.delays.set("https://storage.example/part-2", 200);
+    await expect(uploadParts(file(10), { parts: plan([5, 5]), concurrency: 2, retries: 0 }))
+      .rejects.toMatchObject({ code: "upload_transport" });
+    expect(FakeRequest.aborted).toEqual(["https://storage.example/part-2"]);
+    expect(FakeRequest.sent).toEqual([]);
+    expect(FakeRequest.open).toBe(0);
   });
 
   it("refuses a part that arrives without a signed address", async () => {

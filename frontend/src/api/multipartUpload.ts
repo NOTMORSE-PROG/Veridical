@@ -20,15 +20,18 @@ export interface PartPlan {
 
 const TRANSFER_FAILED = "The file transfer did not finish. Retry this upload to check its saved status.";
 
-function putPart(url: string, body: Blob, onSent: (bytes: number) => void): Promise<void> {
+function putPart(url: string, body: Blob, active: Set<XMLHttpRequest>, onSent: (bytes: number) => void): Promise<void> {
   return new Promise((resolve, reject) => {
     const request = new XMLHttpRequest();
+    const settle = (finish: () => void) => { active.delete(request); finish(); };
+    active.add(request);
     request.open("PUT", url);
     request.upload.onprogress = (event) => onSent(event.loaded);
-    request.onload = () => (request.status >= 200 && request.status < 300
+    request.onload = () => settle(() => (request.status >= 200 && request.status < 300
       ? resolve()
-      : reject(new ApiError(request.status, "upload_transport", TRANSFER_FAILED)));
-    request.onerror = () => reject(new ApiError(0, "upload_transport", TRANSFER_FAILED));
+      : reject(new ApiError(request.status, "upload_transport", TRANSFER_FAILED))));
+    request.onerror = () => settle(() => reject(new ApiError(0, "upload_transport", TRANSFER_FAILED)));
+    request.onabort = () => settle(() => reject(new ApiError(0, "upload_transport", TRANSFER_FAILED)));
     request.send(body);
   });
 }
@@ -45,6 +48,7 @@ export async function uploadParts(file: File, plan: PartPlan, onProgress?: (perc
     onProgress(Math.min(99, Math.floor((total / file.size) * 100)));
   };
   const waiting = plan.parts.filter((part) => !part.done);
+  const active = new Set<XMLHttpRequest>();
   let failed = false;
 
   const sendPart = async (part: SignedPart) => {
@@ -53,7 +57,7 @@ export async function uploadParts(file: File, plan: PartPlan, onProgress?: (perc
     const body = file.slice(start, start + part.size);
     for (let attempt = 0; ; attempt += 1) {
       try {
-        await putPart(part.url, body, (bytes) => { sent.set(part.number, bytes); report(); });
+        await putPart(part.url, body, active, (bytes) => { sent.set(part.number, bytes); report(); });
         sent.set(part.number, part.size);
         report();
         return;
@@ -71,7 +75,12 @@ export async function uploadParts(file: File, plan: PartPlan, onProgress?: (perc
       try {
         await sendPart(part);
       } catch (error) {
-        failed = true;
+        if (!failed) {
+          failed = true;
+          // Stop the other parts too: a retry starts a fresh run, and a
+          // late failure of an old part could replace one storage holds.
+          for (const request of [...active]) request.abort();
+        }
         throw error;
       }
     }

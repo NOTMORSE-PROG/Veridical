@@ -488,6 +488,26 @@ def test_relay_failures_abort_storage_and_leave_no_partial_file(
     assert list((tmp_path / "upload_staging").iterdir()) == []
 
 
+class StallingRequest(StreamRequest):
+    async def stream(self):
+        yield self._chunks[0]
+        await asyncio.sleep(30)
+        yield self._chunks[1]
+
+
+def test_a_stalled_relay_is_dropped_after_the_idle_deadline(tmp_path, monkeypatch):
+    store = FakeR2()
+    data = os.urandom(6 * MIB)
+    request = StallingRequest(_chunks(data, size=3 * MIB))
+    with pytest.raises(ConflictError, match="stopped sending data"):
+        _relay(
+            tmp_path, monkeypatch, store, request, len(data), direct_upload_relay_idle_seconds=0.3
+        )
+    assert store.uploads == {}
+    assert ("abort_multipart", "upload_staging/k") in store.calls
+    assert list((tmp_path / "upload_staging").iterdir()) == []
+
+
 def test_relay_part_failure_surfaces_and_cleans_up(tmp_path, monkeypatch):
     store = FakeR2()
     store.fail_part = 2
@@ -719,23 +739,35 @@ def test_relay_body_then_worker_moves_no_extra_bytes(wired, monkeypatch):
     staging_key = next(call[1] for call in wired.store.calls if call[0] == "create_multipart")
     assert wired.store.objects[staging_key] == data
 
+    from sqlalchemy import text
+
     import app.ingest.service as ingest_service
 
     seen_sessions, transaction_states = [], []
     real_client_for = ingest_service.get_llm_client_for
 
     async def recording_client_for(session, settings, instructor_id):
+        # In fake mode the key lookup returns before touching the database;
+        # read once here as the real lookup does, so a missing commit after
+        # it would leave a transaction open and fail this test.
+        await session.execute(text("SELECT 1"))
         seen_sessions.append(session)
         return await real_client_for(session, settings, instructor_id)
 
     real_read_images = ingest_service.vision.read_images
 
     async def checking_read_images(*args, **kwargs):
-        transaction_states.append(seen_sessions[-1].in_transaction())
+        transaction_states.append(("images", seen_sessions[-1].in_transaction()))
         return await real_read_images(*args, **kwargs)
+
+    async def checking_read_figures(*args, **kwargs):
+        transaction_states.append(("figures", seen_sessions[-1].in_transaction()))
 
     monkeypatch.setattr(ingest_service, "get_llm_client_for", recording_client_for)
     monkeypatch.setattr(ingest_service.vision, "read_images", checking_read_images)
+    # Make the figure branch run too; its reading is replaced by the check.
+    monkeypatch.setattr(ingest_service.figures, "prepare_figures", lambda *a, **k: [0])
+    monkeypatch.setattr(ingest_service.figures, "read_figures", checking_read_figures)
     tc.__exit__(None, None, None)
     wired.store.calls.clear()
 
@@ -753,8 +785,9 @@ def test_relay_body_then_worker_moves_no_extra_bytes(wired, monkeypatch):
     assert downloads.count(durable) == 1
     assert ("put_file", durable) not in wired.store.calls
     assert not local.exists()
-    # No transaction is held open while images are read (server idle limit).
-    assert transaction_states == [False]
+    # No transaction is held open while images or figures are read (the
+    # database ends transactions left idle for 5 minutes).
+    assert transaction_states == [("images", False), ("figures", False)]
 
 
 @live
@@ -894,6 +927,62 @@ def test_browser_parts_are_signed_resumed_and_completed_from_storage(wired):
     assert wired.store.objects[upload["key"]] == data
     again = tc.post(f"/manuscripts/uploads/{attempt_id}/complete")
     assert again.status_code == 200 and again.json()["status"] == "queued"
+
+
+@live
+def test_a_lost_completion_reply_resumes_at_completion(wired):
+    tc = wired.client("r2")
+    data = os.urandom(11 * MIB)
+    attempt_id = str(uuid4())
+    _begin(tc, wired.instructor_id, data, transports="parts", attempt_id=attempt_id)
+    (upload_id, upload) = next(iter(wired.store.uploads.items()))
+    for number, (start, end) in enumerate(((0, 5 * MIB), (5 * MIB, 10 * MIB), (10 * MIB, None)), 1):
+        wired.store.put_part(upload["key"], upload_id, number, data[start:end])
+    # Storage assembled the file, but the reply never reached the browser.
+    wired.store.complete_multipart(upload["key"], upload_id, [{"PartNumber": n} for n in (1, 2, 3)])
+    resumed = _begin(tc, wired.instructor_id, data, transports="parts", attempt_id=attempt_id)
+    assert [p["done"] for p in resumed["parts"]] == [True, True, True]
+    assert all("url" not in p for p in resumed["parts"])
+    done = tc.post(f"/manuscripts/uploads/{attempt_id}/complete")
+    assert done.status_code == 200 and done.json()["status"] == "queued", done.text
+
+
+@live
+def test_part_size_is_fixed_when_the_attempt_begins(wired, monkeypatch):
+    tc = wired.client("r2")
+    data = os.urandom(11 * MIB)
+    attempt_id = str(uuid4())
+    first = _begin(tc, wired.instructor_id, data, transports="parts", attempt_id=attempt_id)
+    monkeypatch.setenv("DIRECT_UPLOAD_PART_MB", "6")
+    get_settings.cache_clear()
+    again = _begin(tc, wired.instructor_id, data, transports="parts", attempt_id=attempt_id)
+    assert [p["size"] for p in again["parts"]] == [p["size"] for p in first["parts"]]
+    (upload_id, upload) = next(iter(wired.store.uploads.items()))
+    for part in again["parts"]:
+        start = (part["number"] - 1) * 5 * MIB
+        wired.store.put_part(
+            upload["key"], upload_id, part["number"], data[start : start + part["size"]]
+        )
+    done = tc.post(f"/manuscripts/uploads/{attempt_id}/complete")
+    assert done.status_code == 200 and done.json()["status"] == "queued", done.text
+
+
+@live
+def test_choosing_the_same_file_again_replaces_the_older_attempt(wired, monkeypatch):
+    monkeypatch.setenv("DIRECT_UPLOAD_PENDING_PER_INSTRUCTOR", "1")
+    tc = wired.client("relay")
+    data = os.urandom(MIB)
+    older = _begin(tc, wired.instructor_id, data)["attempt_id"]
+    newer = _begin(tc, wired.instructor_id, data)["attempt_id"]
+    assert newer != older
+    replaced, _ = _attempt(wired, older)
+    assert replaced.status == "expired"
+    assert replaced.error == "A newer upload of this file replaced this attempt."
+    other_file = tc.post(
+        "/manuscripts/uploads",
+        json={"attempt_id": str(uuid4()), "filename": "other.pdf", "size": len(data)},
+    )
+    assert other_file.status_code == 429, other_file.text
 
 
 @live

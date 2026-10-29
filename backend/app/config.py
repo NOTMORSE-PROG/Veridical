@@ -1040,6 +1040,9 @@ class Settings(BaseSettings):
     # Relay streaming: parts waiting behind the one being stored. Bounds memory
     # to (this + 2) x STORAGE_TRANSFER_CHUNK_BYTES while a client is sending.
     direct_upload_relay_queued_parts: int = Field(default=1, ge=1, le=4)
+    # A streamed upload that sends nothing for this long is dropped, so a
+    # stalled or closed client cannot keep the relay slot.
+    direct_upload_relay_idle_seconds: float = Field(default=60, gt=0)
     # Whole-file SHA-256 results reused while the file is unchanged on disk.
     source_digest_memo_entries: int = Field(default=64, ge=1)
     direct_upload_pending_per_instructor: int = Field(default=3, gt=0)

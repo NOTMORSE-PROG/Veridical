@@ -14,7 +14,7 @@ from uuid import UUID, uuid4
 from botocore.exceptions import ClientError
 from fastapi import APIRouter, Depends, Header, Request, UploadFile
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from sqlalchemy import and_, case, func, select, text
+from sqlalchemy import and_, case, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_upload_instructor
@@ -52,25 +52,41 @@ def _capabilities(header: str | None) -> set[str]:
     return {item.strip() for item in (header or "").split(",") if item.strip()}
 
 
-def _part_layout(settings, size: int) -> list[tuple[int, int]]:
+def _part_layout(part_bytes: int, size: int) -> list[tuple[int, int]]:
     """(number, length) for every part. R2 needs equal sizes except the last."""
-    part_bytes = settings.direct_upload_part_mb * 1024 * 1024
     count = math.ceil(size / part_bytes)
     return [(n, min(part_bytes, size - (n - 1) * part_bytes)) for n in range(1, count + 1)]
 
 
-def _signed_parts(storage, attempt, settings, ttl: int) -> list[dict]:
+def _no_such_upload(exc: ClientError) -> bool:
+    return exc.response.get("Error", {}).get("Code") == "NoSuchUpload"
+
+
+def _staged_object_complete(storage, attempt) -> bool:
+    try:
+        metadata = storage.object_metadata(attempt.staging_key)
+    except ClientError:
+        return False
+    return metadata.get("ContentLength") == attempt.source_bytes
+
+
+def _signed_parts(storage, attempt, ttl: int) -> list[dict]:
+    layout = _part_layout(attempt.multipart_part_bytes, attempt.source_bytes)
     try:
         stored = {
             part["PartNumber"]: part["Size"]
             for part in storage.list_parts(attempt.staging_key, attempt.multipart_upload_id)
         }
     except ClientError as exc:
-        if exc.response.get("Error", {}).get("Code") == "NoSuchUpload":
-            raise ConflictError("This upload link expired. Start a new upload attempt.") from None
-        raise
+        if not _no_such_upload(exc):
+            raise
+        # Storage already assembled the file (a lost completion reply):
+        # nothing is left to send, so the client goes straight to complete.
+        if _staged_object_complete(storage, attempt):
+            return [{"number": n, "size": length, "done": True} for n, length in layout]
+        raise ConflictError("This upload link expired. Start a new upload attempt.") from None
     parts = []
-    for number, length in _part_layout(settings, attempt.source_bytes):
+    for number, length in layout:
         item = {"number": number, "size": length, "done": stored.get(number) == length}
         if not item["done"]:
             item["url"] = storage.presign_part(
@@ -80,8 +96,8 @@ def _signed_parts(storage, attempt, settings, ttl: int) -> list[dict]:
     return parts
 
 
-def _verified_parts(storage, attempt, settings) -> list[dict]:
-    expected = _part_layout(settings, attempt.source_bytes)
+def _verified_parts(storage, attempt) -> list[dict]:
+    expected = _part_layout(attempt.multipart_part_bytes, attempt.source_bytes)
     stored = storage.list_parts(attempt.staging_key, attempt.multipart_upload_id)
     if [(p["PartNumber"], p["Size"]) for p in stored] != expected:
         raise ConflictError(
@@ -143,7 +159,18 @@ async def _stream_relay(request: Request, key: str, size: int, settings):
         upload_id = await asyncio.to_thread(storage.create_multipart, key)
         consumer = asyncio.create_task(consume(upload_id))
         buffer, number, received = bytearray(), 0, 0
-        async for chunk in request.stream():
+        body = request.stream().__aiter__()
+        while True:
+            try:
+                chunk = await asyncio.wait_for(
+                    body.__anext__(), timeout=settings.direct_upload_relay_idle_seconds
+                )
+            except StopAsyncIteration:
+                break
+            except TimeoutError:
+                raise ConflictError(
+                    "The upload stopped sending data for too long. Retry the upload."
+                ) from None
             received += len(chunk)
             if received > size:
                 raise ConflictError("The transferred file does not match the selected file size.")
@@ -266,7 +293,9 @@ async def owned_attempt(session, instructor_id, attempt_id, *, lock=False):
         UploadAttempt.id == attempt_id, UploadAttempt.instructor_id == instructor_id
     )
     if lock:
-        query = query.with_for_update()
+        # A locked read is a re-read: refresh the row even if this session
+        # already holds an older copy of it.
+        query = query.with_for_update().execution_options(populate_existing=True)
     attempt = await session.scalar(query)
     if attempt is None:
         raise NotFoundError("Upload attempt not found.")
@@ -319,6 +348,23 @@ async def begin_upload(
             raise ConflictError("This upload identity belongs to another selected file.")
         attempt = existing
     else:
+        # Choosing the same file again replaces this instructor's older
+        # unfinished attempt for it instead of counting against their limit.
+        await session.execute(
+            update(UploadAttempt)
+            .where(
+                UploadAttempt.instructor_id == instructor.id,
+                UploadAttempt.status == "pending",
+                UploadAttempt.filename == filename,
+                UploadAttempt.source_bytes == body.size,
+                UploadAttempt.id != body.attempt_id,
+            )
+            .values(
+                status="expired",
+                error="A newer upload of this file replaced this attempt.",
+                expires_at=now,
+            )
+        )
         staging_reservation = case(
             (UploadAttempt.staging_deleted_at.is_(None), UploadAttempt.source_bytes), else_=0
         )
@@ -374,18 +420,15 @@ async def begin_upload(
             expires_at=now + timedelta(seconds=settings.direct_upload_url_ttl_seconds),
         )
         if attempt.upload_transport == "r2" and PARTS in capabilities:
-            # Created under the admission lock, so a repeated begin for this
-            # attempt finds the same upload instead of starting another.
-            storage = get_storage(settings)
-            try:
-                assert isinstance(storage, R2Storage)
-                attempt.multipart_upload_id = await asyncio.to_thread(
-                    storage.create_multipart, attempt.staging_key
-                )
-            finally:
-                storage.close()
+            attempt.multipart_part_bytes = settings.direct_upload_part_mb * 1024 * 1024
         session.add(attempt)
     await session.commit()
+    if (
+        attempt.status == "pending"
+        and attempt.multipart_part_bytes
+        and not (attempt.multipart_upload_id)
+    ):
+        await _attach_multipart(session, attempt, settings)
     response = status_response(attempt)
     if attempt.status == "pending":
         ttl = int((attempt.expires_at - now).total_seconds())
@@ -395,9 +438,7 @@ async def begin_upload(
             storage = get_storage(settings)
             try:
                 assert isinstance(storage, R2Storage)
-                response["parts"] = await asyncio.to_thread(
-                    _signed_parts, storage, attempt, settings, ttl
-                )
+                response["parts"] = await asyncio.to_thread(_signed_parts, storage, attempt, ttl)
             finally:
                 storage.close()
             response["part_concurrency"] = settings.direct_upload_part_concurrency
@@ -546,17 +587,25 @@ async def complete_upload(
 ):
     settings = enabled_settings()
     attempt = await owned_attempt(session, instructor.id, attempt_id, lock=True)
+    if attempt.status != "pending":
+        response = status_response(attempt)
+        await session.commit()
+        return response
+    if attempt.expires_at <= datetime.now(UTC):
+        raise ConflictError("This upload link expired. Start a new upload attempt.")
+    # No row lock is held while storage works (the database closes sessions
+    # idle in a transaction); the state is checked again before it changes.
+    await session.commit()
+    storage = get_storage(settings)
+    try:
+        assert isinstance(storage, R2Storage)
+        if attempt.multipart_upload_id:
+            await asyncio.to_thread(_complete_parts, storage, attempt)
+        metadata = await asyncio.to_thread(storage.object_metadata, attempt.staging_key)
+    finally:
+        storage.close()
+    attempt = await owned_attempt(session, instructor.id, attempt_id, lock=True)
     if attempt.status == "pending":
-        if attempt.expires_at <= datetime.now(UTC):
-            raise ConflictError("This upload link expired. Start a new upload attempt.")
-        storage = get_storage(settings)
-        try:
-            assert isinstance(storage, R2Storage)
-            if attempt.multipart_upload_id:
-                await asyncio.to_thread(_complete_parts, storage, attempt, settings)
-            metadata = await asyncio.to_thread(storage.object_metadata, attempt.staging_key)
-        finally:
-            storage.close()
         if (
             type(metadata.get("ContentLength")) is not int
             or metadata.get("ContentLength") != attempt.source_bytes
@@ -566,16 +615,41 @@ async def complete_upload(
             raise ConflictError("The stored upload does not match the selected file size.")
         attempt.source_etag = metadata["ETag"]
         attempt.status = "queued"
+    response = status_response(attempt)
+    await session.commit()
+    return response
+
+
+async def _attach_multipart(session, attempt, settings) -> None:
+    """Start the storage-side multipart upload outside every database lock,
+    then attach it only if no concurrent begin attached one first."""
+    storage = get_storage(settings)
+    try:
+        assert isinstance(storage, R2Storage)
+        upload_id = await asyncio.to_thread(storage.create_multipart, attempt.staging_key)
+        attached = await session.scalar(
+            update(UploadAttempt)
+            .where(UploadAttempt.id == attempt.id, UploadAttempt.multipart_upload_id.is_(None))
+            .values(multipart_upload_id=upload_id)
+            .returning(UploadAttempt.id)
+        )
         await session.commit()
-    return status_response(attempt)
+        if attached is None:
+            with suppress(Exception):
+                await asyncio.to_thread(storage.abort_multipart, attempt.staging_key, upload_id)
+            await session.refresh(attempt)
+        else:
+            attempt.multipart_upload_id = upload_id
+    finally:
+        storage.close()
 
 
-def _complete_parts(storage, attempt, settings) -> None:
+def _complete_parts(storage, attempt) -> None:
     # Only parts storage confirms are used; the client sends no part list.
     try:
-        parts = _verified_parts(storage, attempt, settings)
+        parts = _verified_parts(storage, attempt)
     except ClientError as exc:
-        if exc.response.get("Error", {}).get("Code") == "NoSuchUpload":
+        if _no_such_upload(exc):
             # Already completed by an earlier request whose reply was lost;
             # the object metadata check that follows decides.
             return
