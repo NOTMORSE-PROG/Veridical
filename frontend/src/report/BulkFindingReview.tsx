@@ -28,15 +28,18 @@ function useBarHeight(node: HTMLElement | null) {
   }, [node]);
 }
 
-export function BulkSelectionBar({ findings, locations, elsewhere, decided, onAction, onClear }: {
+// Rendered twice by the findings panel: "before" the list draws the bar when
+// it sits in the page, "after" draws it when it is fixed to the screen.
+export function BulkSelectionBar({ slot, findings, locations, elsewhere, decided, onAction, onClear }: {
+  slot: "before" | "after";
   findings: number; locations: number; elsewhere: number; decided: boolean; onAction: (action: BulkAction) => void; onClear: () => void;
 }) {
   // On a narrow window (or a zoomed one) a fixed bar would cover the page, so
   // it sits in the flow above the list instead.
   const inline = useMediaQuery(BULK_BAR_INLINE_MEDIA_QUERY, false);
   const [node, setNode] = useState<HTMLDivElement | null>(null);
-  useBarHeight(inline ? null : node);
-  if (findings === 0) return null;
+  useBarHeight(inline || slot !== "after" ? null : node);
+  if (findings === 0 || (inline ? slot !== "before" : slot !== "after")) return null;
   const tooMany = locations > BULK_RESOLVE_MAX_LOCATIONS;
   const bar = <div ref={setNode} className="signal-bulk-bar" data-placement={inline ? "inline" : "fixed"} role="region" aria-label="Selected findings">
     <p role="status" aria-live="polite"><strong>{BULK_REVIEW_COPY.selected(findings, locations)}</strong>
@@ -69,7 +72,7 @@ function Row({ cluster, viewedIds }: { cluster: FlagFindingCluster; viewedIds: R
       {cluster.flags.length > 1 ? ` (${plural(cluster.flags.length, "location", "locations")})` : ""}</span>
     <span className="signal-bulk-dialog__subject">{subject}</span>
     <span className="signal-bulk-dialog__meta">
-      <span>{severityLabel(first.severity)} · {counted ? BULK_REVIEW_COPY.counted : BULK_REVIEW_COPY.notCounted}</span>
+      <span>{severityLabel(first)} · {counted ? BULK_REVIEW_COPY.counted : BULK_REVIEW_COPY.notCounted}</span>
       <span className={complete ? "signal-viewed-state" : "signal-bulk-dialog__unopened"}>
         {complete ? BULK_REVIEW_COPY.opened : opened > 0 ? BULK_REVIEW_COPY.partlyOpened(opened, cluster.flags.length) : BULK_REVIEW_COPY.notOpened}</span>
       <a className="signal-text-link" href={`/flags/${first.id}`} target="_blank" rel="noopener"

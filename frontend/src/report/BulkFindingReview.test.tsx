@@ -76,7 +76,7 @@ describe("bulk confirm and dismiss", () => {
     fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
     expect(await screen.findByText(/Confirm that you have checked the findings you have not opened here/)).toBeInTheDocument();
     expect(calls).toHaveLength(0);
-    fireEvent.click(screen.getByRole("checkbox", { name: /I have checked these findings, including the 2 I have not opened here/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /I have checked these findings, including the 2 I have not fully opened here/ }));
     fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
     await waitFor(() => expect(onDone).toHaveBeenCalledWith("2 findings dismissed · 1 was already resolved and was left unchanged."));
     expect(calls[0].url).toContain("/check-runs/3/flags/bulk-resolve");
@@ -98,7 +98,7 @@ describe("bulk confirm and dismiss", () => {
       flag({ id: 3, page_anchor: "p. 47", evidence_excerpt: "Reyes, 2019", affects_readiness: false, readiness_exclusion_reason: "unassessed_evidence" })], [1, 3]);
     expect(screen.getByRole("heading", { name: "Confirm 2 findings as real issues?" })).toBeInTheDocument();
     expect(screen.getByText(/1 finding is left out: a confirmed citation source/)).toBeInTheDocument();
-    expect(screen.getByText("1 of these count for readiness and stay counted; confirming the other 1 does not change readiness.")).toBeInTheDocument();
+    expect(screen.getByText("1 of these counts for readiness and stays counted; confirming the other 1 does not change readiness.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Confirm as real issues" }));
     await waitFor(() => expect(onDone).toHaveBeenCalledWith("1 finding confirmed."));
     expect(calls[0].body).toEqual({ action: "confirm", flag_ids: [1, 3], expected_revision: 7, unopened_count: 0, note: null });
@@ -121,10 +121,10 @@ describe("bulk confirm and dismiss", () => {
   });
 
   it("will not act on more locations than one action takes, or on a decided report", () => {
-    const { rerender } = renderWithProviders(<BulkSelectionBar findings={3} locations={201} elsewhere={0} decided={false} onAction={vi.fn()} onClear={vi.fn()} />);
+    const { rerender } = renderWithProviders(<BulkSelectionBar slot="after" findings={3} locations={201} elsewhere={0} decided={false} onAction={vi.fn()} onClear={vi.fn()} />);
     expect(screen.getByRole("alert")).toHaveTextContent("201 locations are selected. One action takes at most 200");
     expect(screen.getByRole("button", { name: "Dismiss" })).toBeDisabled();
-    rerender(<BulkSelectionBar findings={3} locations={3} elsewhere={0} decided onAction={vi.fn()} onClear={vi.fn()} />);
+    rerender(<BulkSelectionBar slot="after" findings={3} locations={3} elsewhere={0} decided onAction={vi.fn()} onClear={vi.fn()} />);
     expect(screen.getByText(/Reopen it to change findings/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Confirm as real issues" })).toBeDisabled();
   });
@@ -132,8 +132,15 @@ describe("bulk confirm and dismiss", () => {
   it("selects all open findings of the check on screen only, never another check's or resolved ones", async () => {
     panel([...FLAGS, flag({ id: 4, page_anchor: "p. 50", overridden: true, evidence_excerpt: "Dismissed one" }),
       flag({ id: 5, check_kind: "internal_agreement", problem_kind: null, evidence_excerpt: "Objective and result differ", page_anchor: "p. 12" })]);
-    fireEvent.click(await screen.findByRole("button", { name: "Select all open findings in this check" }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Select all \d+ open findings? in this check/ }));
     expect(screen.getByText("3 findings selected")).toBeInTheDocument();
+  });
+
+  it("says how many select-all takes, including those not shown on screen", async () => {
+    panel(Array.from({ length: 11 }, (_, i) => flag({ id: i + 1, page_anchor: `p. ${i + 1}`, evidence_excerpt: `Entry ${i + 1}` })));
+    expect(await screen.findByRole("button", { name: "Select all 11 open findings in this check, including 3 not shown" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^Select all 11 open findings/ }));
+    expect(screen.getByText("11 findings selected")).toBeInTheDocument();
   });
 
   it("offers no checkbox for findings already dismissed or confirmed", async () => {

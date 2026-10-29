@@ -121,10 +121,16 @@ const FLAG_VIEWS: ReadonlyArray<{ id: FlagView; label: string }> = [
   { id: "all", label: "All" },
 ];
 
+// Open means neither dismissed nor confirmed: confirming a finding as a real
+// issue resolves it, though it keeps counting for readiness.
+function isOpenFinding(flag: FlagSummaryOut): boolean {
+  return !flag.overridden && !flag.finding_confirmed;
+}
+
 function flagMatchesView(flag: FlagSummaryOut, view: FlagView): boolean {
   if (view === "all") return true;
-  if (view === "resolved") return flag.overridden;
-  if (view === "open") return !flag.overridden;
+  if (view === "resolved") return !isOpenFinding(flag);
+  if (view === "open") return isOpenFinding(flag);
   return !flag.overridden && flag.severity === view;
 }
 
@@ -214,12 +220,12 @@ function ViewedIcon() {
 // the resolution-state pills are mutually exclusive by construction,
 // never competing for attention on the same row.
 function viewedSummary(flags: FlagSummaryOut[], viewedIds: ReadonlySet<number>): string | null {
-  const unresolved = flags.filter((flag) => !flag.overridden);
+  const unresolved = flags.filter(isOpenFinding);
   const viewed = unresolved.filter((flag) => viewedIds.has(flag.id));
   if (unresolved.length === 0 || viewed.length === 0) return null;
-  if (unresolved.length === 1) return "Viewed this location";
-  if (viewed.length === unresolved.length) return `Viewed all ${unresolved.length} open locations`;
-  return `Viewed ${viewed.length} of ${unresolved.length} open locations`;
+  if (unresolved.length === 1) return "Opened this location";
+  if (viewed.length === unresolved.length) return `Opened all ${unresolved.length} open locations`;
+  return `Opened ${viewed.length} of ${unresolved.length} open locations`;
 }
 
 // A finding is open for bulk review while it is neither dismissed nor
@@ -304,7 +310,7 @@ function SignalFindingCard({
           <SelectFinding cluster={cluster} selection={selection} />
           <span className={`signal-severity signal-severity--${first.affects_readiness === false ? "low" : first.severity}`}>{first.affects_readiness === false ? "Review lead: not scored" : SEVERITY_LABEL[first.severity]}</span>
           {!first.overridden && viewedIds.has(first.id) && (
-            <span className="signal-viewed-state"><ViewedIcon />Viewed</span>
+            <span className="signal-viewed-state"><ViewedIcon />Opened</span>
           )}
           {first.overridden && <span className="signal-resolution-state">Resolved by instructor</span>}
           {!first.overridden && first.finding_confirmed && <span className="signal-resolution-state">Confirmed by instructor</span>}
@@ -428,7 +434,7 @@ function SignalFindingCard({
                 <span>{instructorAnchor(flag.page_anchor)}</span>
                 {mixedSeverity && <span className={`signal-severity signal-severity--${flag.severity}`}>{SEVERITY_LABEL[flag.severity]}</span>}
                 {!flag.overridden && viewedIds.has(flag.id) && (
-                  <span className="signal-viewed-state"><ViewedIcon />Viewed</span>
+                  <span className="signal-viewed-state"><ViewedIcon />Opened</span>
                 )}
                 {flag.overridden && <span className="signal-resolution-state">Resolved by instructor</span>}
                 {flag.confirmed_citation_source && <span className="signal-resolution-state">Source confirmed</span>}
@@ -559,10 +565,11 @@ function SignalFlagList({
           Showing {visible.length} of {filtered.length} {viewLabel} finding{filtered.length === 1 ? "" : "s"} across {locationCount} location{locationCount === 1 ? "" : "s"}.
         </p>
         {trackViewed && filtered.length > 0 && (() => {
-          const openClustersAll = clusterFlagFindings(flags.filter((flag) => !flag.overridden));
+          const openClustersAll = clusterFlagFindings(flags.filter(isOpenFinding));
           const openTotal = openClustersAll.length;
+          // Opened means every location was opened, as the bulk dialog counts it.
           const openViewed = openClustersAll.filter((cluster) =>
-            cluster.flags.some((flag) => viewedIds.has(flag.id))
+            cluster.flags.every((flag) => viewedIds.has(flag.id))
           ).length;
           return openTotal > 0 ? (
             // UX review finding (BUG-167 review): another tab marking a
@@ -578,10 +585,15 @@ function SignalFlagList({
         <p className="signal-field-hint">
           One finding can contain both open and resolved locations, so those two filter counts may overlap. All counts each finding once.
         </p>
-        {selection && visible.length > 0 && <div className="signal-control-cluster signal-bulk-select">
-          <Button variant="quiet" onClick={() => selection.selectMany(visible)}>{BULK_REVIEW_COPY.selectPage}</Button>
-          <Button variant="quiet" onClick={selection.selectAllInCheck}>{BULK_REVIEW_COPY.selectCheck}</Button>
-        </div>}
+        {selection && visible.length > 0 && (() => {
+          const openInCheck = canonicalClusters.filter(isOpenForBulk);
+          const shownKeys = new Set(visible.map((cluster) => cluster.key));
+          const notShown = openInCheck.filter((cluster) => !shownKeys.has(cluster.key)).length;
+          return openInCheck.length > 0 && <div className="signal-control-cluster signal-bulk-select">
+            <Button variant="quiet" onClick={() => selection.selectMany(visible)}>{BULK_REVIEW_COPY.selectPage}</Button>
+            <Button variant="quiet" onClick={selection.selectAllInCheck}>{BULK_REVIEW_COPY.selectCheck(openInCheck.length, notShown)}</Button>
+          </div>;
+        })()}
       </div>
 
       {visible.length ? (
@@ -1086,7 +1098,7 @@ export function SignalFlagsPanel({
   const usableFlags = flags !== undefined && (flags.length > 0 || optional.state === "success");
   const hasOptional = selectedModule === "originality_reuse" && Boolean(optional.snapshot?.total);
   const onlyOptional = optional.state === "success" && hasOptional && otherFlags?.length === 0;
-  const openFindingCount = clusterFlagFindings(otherFlags?.filter((flag) => !flag.overridden) ?? []).length;
+  const openFindingCount = clusterFlagFindings(otherFlags?.filter(isOpenFinding) ?? []).length;
   // BUG-167: defaults the FILTER to the worst unresolved severity present,
   // not the declaration order -- see `defaultFlagView`'s own comment for
   // why this is a filter-default decision, not a reorder.
@@ -1138,6 +1150,9 @@ export function SignalFlagsPanel({
         onDone={(message) => { setBulkAction(null); setSelectedIds(new Set()); setBulkDrafts({ confirm: "", dismiss: "" }); setBulkMessage(message); }} />}
       {selectedModule === "statistical_forensics" && <StatisticalCheckScope scope={statisticalScope} />}
       {selectedModule === "originality_reuse" && <OriginalityScope scope={originalityScope} showAddAction />}
+      {review && active && <BulkSelectionBar slot="before" findings={selectedClusters.length} locations={selectedLocations} elsewhere={selectedElsewhere} decided={Boolean(review.decision)}
+        onAction={(action) => { setBulkMessage(""); setBulkAction(action); }}
+        onClear={() => { setSelectedIds(new Set()); document.getElementById("flags-heading")?.focus(); }} />}
       {otherFlags && otherFlags.length > 0
         ? (
           <SignalFlagList
@@ -1152,7 +1167,7 @@ export function SignalFlagsPanel({
         : onlyOptional ? null : optional.state === "success" ? <EmptyState className="signal-integrity-empty" id={`signal-module-empty-${checkRunId}`} title={emptyState.title}><p>{emptyState.description}</p></EmptyState>
           : <p>{optional.state === "error" ? "Other findings could not be loaded." : optional.state === "paused" ? "Waiting to load other findings." : optional.state === "fetching" ? "Loading other findings." : "Other findings are not available."}</p>}
       {selectedModule === "originality_reuse" && <ComparisonLeadList collection={optional} showActions viewedIds={viewedIds} onRetry={() => { void flagsQuery.refetch(); }} />}
-      {review && active && <BulkSelectionBar findings={selectedClusters.length} locations={selectedLocations} elsewhere={selectedElsewhere} decided={Boolean(review.decision)}
+      {review && active && <BulkSelectionBar slot="after" findings={selectedClusters.length} locations={selectedLocations} elsewhere={selectedElsewhere} decided={Boolean(review.decision)}
         onAction={(action) => { setBulkMessage(""); setBulkAction(action); }}
         onClear={() => { setSelectedIds(new Set()); document.getElementById("flags-heading")?.focus(); }} />}
       </div>
