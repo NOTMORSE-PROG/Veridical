@@ -6,7 +6,7 @@ import { clearPdfReading, sameSourceTask } from "./usePdfPageText";
 import { useQueryClient } from "@tanstack/react-query";
 import { ReviewDeskReturnLink } from "../routing/ReviewDeskReturnLink";
 import { type KeyboardEvent, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { useLocation, useParams, useSearchParams } from "react-router";
+import { useLocation, useNavigationType, useParams, useSearchParams } from "react-router";
 import { ApiError } from "../api/client";
 import type { FlagOut, FlagRegionOut, ReportOut } from "../api/types";
 import { CRITERION_ANCHOR_REGION_ID, COMPARISON_LEAD_PAGE_SIZE } from "../config/ui";
@@ -545,6 +545,17 @@ export function SignalDocumentViewerPage() {
     : flagsQuery.isPending ? undefined
     : { pendingCriteria: 0, openFindings: openFindingCount ?? stepReport.unresolved_high_flag_count });
   const isDecision = !isExploring && step !== "findings";
+  const navigationType = useNavigationType();
+  const previousStep = useRef(step);
+  // Back/Forward between steps would otherwise leave focus on <body>; only
+  // claim it when nothing else on the page holds focus.
+  useEffect(() => {
+    const changed = previousStep.current !== null && step !== null && previousStep.current !== step;
+    previousStep.current = step;
+    if (!changed || navigationType !== "POP" || !step) return;
+    if (document.activeElement && document.activeElement !== document.body) return;
+    requestAnimationFrame(() => document.getElementById(STEP_FOCUS_TARGET[step])?.focus());
+  }, [step, navigationType]);
   const selectedFinding = isDecision ? null : findingForFlag(findings, requestedFlagId);
   const selectedModule = selectedIntegrityModule(selectedFinding?.representative.check_kind ?? searchParams.get("module") ?? findings[0]?.representative.check_kind ?? null);
   const moduleFindings = otherFindings.filter(finding => finding.representative.check_kind === selectedModule);
@@ -996,7 +1007,7 @@ export function SignalDocumentViewerPage() {
   const modeDisclosureId = useId();
   const modeRecord = selectedRecord?.id === selectedLocationId && selectedRecord.check_run_id === id
     && selectedRecord.llm_mode !== "real" && (!isCitationMetadataFinding(selectedRecord) || selectedRecord.llm_mode === "fake") ? selectedRecord : null;
-  const reviewContext = ["Review.", reportQuery.data && `${reportQuery.data.pending_review_count} criteria awaiting judgment.`,
+  const reviewContext = ["Review.", reportQuery.data && `${reportQuery.data.pending_review_count} ${reportQuery.data.pending_review_count === 1 ? "criterion" : "criteria"} awaiting judgment.`,
     optional.snapshot && `${optional.lastLoaded ? "Last loaded: " : ""}${optional.snapshot.total} optional comparison leads.`,
     flags && otherFindings.length > 0 && `${optional.state !== "success" ? "Last loaded: " : ""}${otherFindings.filter((finding) => !finding.isResolved).length} other open findings.`]
     .filter(Boolean).join(" ");
@@ -1011,9 +1022,6 @@ export function SignalDocumentViewerPage() {
       {!validId ? <Alert title="This manuscript address is invalid" tone="error" role="alert"><ReviewDeskReturnLink variant="secondary">Return to Review Desk</ReviewDeskReturnLink></Alert>
         : (<>
           {modeRecord && <FindingModeDisclosure id={modeDisclosureId} mode={modeRecord.llm_mode} registry={isCitationMetadataFinding(modeRecord)} />}
-          {/* The step navigation covers every other move; only a finding or
-              the match explorer needs a way back to its list. */}
-          {(isExploring || selectedFinding) && <nav aria-label="Workspace return"><Button variant="quiet" onClick={showQueue}>Back to findings list</Button></nav>}
           <section ref={workspace.frame} className="signal-document-workbench" aria-label="Manuscript and review" aria-describedby={modeRecord ? modeDisclosureId : undefined} data-layout={workspace.split ? "split" : "single"} data-reading={fullWidthReading ? "full" : undefined} data-source-available={viewer?.available === false ? "false" : "true"}>
             <span ref={workspace.threshold} className="signal-review-workspace-threshold" aria-hidden="true" />
             <div role="tablist" aria-label="Manuscript review view" className="signal-document-tabs">
@@ -1048,7 +1056,10 @@ export function SignalDocumentViewerPage() {
               <aside ref={inspectorRef} tabIndex={-1} id="review-panel" role="tabpanel" aria-labelledby="review-tab" data-active={activeTab === "review"} className="signal-document-inspector">
                 <WorkspaceStepNavigation current={step} onSelect={goToStep} counts={{
                   pendingCriteria: stepReport?.pending_review_count, openFindings: openFindingCount,
-                  recordedGrades: stepReport?.results.filter((row) => row.outcome !== "escalated").length, decision: stepReport ? stepReport.decision : undefined }} />
+                  recordedGrades: stepReport?.results.filter((row) => row.outcome !== "escalated").length,
+                  instructorGrades: stepReport?.results.filter((row) => row.outcome !== "escalated" && row.resolution).length,
+                  decision: stepReport ? stepReport.decision : undefined }} />
+                {(isExploring || selectedFinding) && <nav aria-label="Workspace return" className="signal-workspace-return"><Button variant="quiet" onClick={showQueue}>Back to findings list</Button></nav>}
                 {!isExploring && !isDecision && !selectedFinding && <WorkspaceStepHeading step="findings" />}
                 {!isExploring && !isDecision && <div className="signal-document-module-overview">
                   <IntegrityModuleNavigation selected={selectedModule} controls="workspace-module-records" modules={reportQuery.data?.integrity_modules}

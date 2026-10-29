@@ -120,8 +120,9 @@ describe("SignalDocumentViewerPage", () => {
     expect(qualification).toHaveTextContent(/fixtures instead of real AI grading/);
     expect(frame).not.toContainElement(qualification);
     const returnNavigation = screen.getByRole("navigation", { name: "Workspace return" });
-    expect(qualification.nextElementSibling).toBe(returnNavigation);
-    expect(returnNavigation.nextElementSibling).toBe(frame);
+    expect(qualification.nextElementSibling).toBe(frame);
+    // The way back to the list sits in the review pane, under the steps.
+    expect(document.getElementById("review-panel")).toContainElement(returnNavigation);
     expect(document.querySelectorAll(".signal-flag-mode")).toHaveLength(1);
     expect(document.querySelector(".signal-document-selection-strip")).toBeNull();
   });
@@ -270,7 +271,7 @@ describe("SignalDocumentViewerPage", () => {
     }));
     renderWithProviders(<SignalDocumentViewerPage />, { route: "/report/5/document?view=decision&step=grades&pane=review", path: "/report/:checkRunId/document" });
     expect(await screen.findByRole("heading", { name: "Criterion records" })).toBeVisible();
-    expect(screen.getByRole("button", { name: /^Step 3: Check recorded grades\. 5 recorded/ })).toHaveAttribute("aria-current", "step");
+    expect(screen.getByRole("button", { name: /^Step 3: Check recorded grades\. 5 grades · 0 yours/ })).toHaveAttribute("aria-current", "step");
     expect(screen.getAllByText("Not assessed: capacity reached")).toHaveLength(5);
     expect(screen.queryByText("All assessed criteria")).not.toBeInTheDocument();
   });

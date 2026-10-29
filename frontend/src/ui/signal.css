@@ -2589,14 +2589,13 @@
     width: var(--signal-mark-size);
   }
 
-  .signal-report-header .signal-eyebrow { color: var(--color-signal-brand); }
   .signal-report-header__status { display: grid; justify-items: end; gap: var(--signal-space-2); }
   .signal-report-hero__summary { min-inline-size: 0; }
   .signal-report-hero .signal-rule-scope { margin-block-start: var(--signal-space-3); }
   .signal-report-hero .signal-rule-scope :is(p, summary) { color: var(--color-signal-surface-muted); }
   .signal-report-hero .signal-report-task-actions { margin-block-start: var(--signal-space-4); }
-  .signal-report-hero .signal-report-task-actions a { color: var(--color-signal-brand); }
-  .signal-report-hero .signal-report-task-actions a:hover { color: var(--color-signal-brand-hover); }
+  .signal-report-hero .signal-report-task-actions a:not(.signal-button) { color: var(--color-signal-brand); }
+  .signal-report-hero .signal-report-task-actions a:not(.signal-button):hover { color: var(--color-signal-brand-hover); }
   .signal-review-workflow { display: grid; gap: var(--signal-space-5); min-inline-size: 0; }
   .signal-review-workflow__status {
     display: flex;
@@ -2715,7 +2714,12 @@
   }
   .signal-workspace-steps__label { font-weight: var(--signal-weight-semibold); }
   .signal-workspace-steps__status { color: var(--color-signal-ink-muted); font-size: var(--signal-type-label); }
+  /* The selected tile's darker background needs the stronger text tone. */
+  .signal-workspace-steps button[aria-current="step"] .signal-workspace-steps__status { color: var(--color-signal-ink-secondary); }
+  /* Keeps focused content clear of the pinned steps (height set by WorkspaceSteps). */
+  .signal-document-inspector { scroll-padding-block-start: var(--signal-workspace-steps-height, 0px); }
   .signal-workspace-step-kicker { margin: 0 0 var(--signal-rhythm-attached); }
+  .signal-workspace-return { padding-inline: var(--signal-space-5); margin-block-end: var(--signal-rhythm-control); }
   .signal-workspace-step-footer {
     display: flex;
     flex-wrap: wrap;
@@ -2725,7 +2729,12 @@
     padding: var(--signal-rhythm-group) var(--signal-space-5);
     border-block-start: var(--signal-border-hairline) solid var(--color-signal-border);
   }
-  .signal-workspace-step-footer > :only-child { margin-inline-start: auto; }
+  /* Back stays left and Continue right, so each sits in the same place on every step. */
+  .signal-workspace-step-footer > .signal-button--primary { margin-inline-start: auto; }
+  /* In a short window (or at high zoom) pinned steps would take half the pane. */
+  @media (max-height: 600px) {
+    .signal-workspace-steps { position: static; }
+  }
   .signal-report-record { gap: var(--signal-rhythm-related); }
   .signal-report-pending-list { margin: 0; padding-inline-start: var(--signal-space-5); }
 
@@ -2949,7 +2958,7 @@
     padding-block-start: 0;
   }
 
-  .signal-report-task-actions a {
+  .signal-report-task-actions a:not(.signal-button) {
     display: inline-flex;
     align-items: center;
     min-block-size: var(--signal-control-height);

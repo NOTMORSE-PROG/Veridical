@@ -1,3 +1,4 @@
+import { useLayoutEffect, useRef } from "react";
 import type { ReportOut } from "../api/types";
 import { DECISION_LABEL } from "../domain/decisionTone";
 import { REPORT_STEPS, type ReportStep } from "../report/reviewStep";
@@ -7,6 +8,7 @@ export interface WorkspaceStepCounts {
   pendingCriteria: number | undefined;
   openFindings: number | undefined;
   recordedGrades: number | undefined;
+  instructorGrades: number | undefined;
   decision: ReportOut["decision"] | undefined;
 }
 
@@ -15,12 +17,31 @@ export interface WorkspaceStepCounts {
 function stepStatus(step: ReportStep, counts: WorkspaceStepCounts): string {
   if (step === "criteria") return counts.pendingCriteria === undefined ? "Loading" : counts.pendingCriteria ? `${counts.pendingCriteria} left` : "None left";
   if (step === "findings") return counts.openFindings === undefined ? "Loading" : counts.openFindings ? `${counts.openFindings} open` : "None open";
-  if (step === "grades") return counts.recordedGrades === undefined ? "Loading" : `${counts.recordedGrades} recorded`;
+  // Say how many grades are the instructor's own, so automatic grades are not
+  // read as work already checked.
+  if (step === "grades") return counts.recordedGrades === undefined ? "Loading"
+    : `${counts.recordedGrades} ${counts.recordedGrades === 1 ? "grade" : "grades"} · ${counts.instructorGrades ?? 0} yours`;
   return counts.decision ? DECISION_LABEL[counts.decision] : "Not recorded";
 }
 
 export function WorkspaceStepNavigation({ current, counts, onSelect }: { current: ReportStep | null; counts: WorkspaceStepCounts; onSelect: (step: ReportStep) => void }) {
-  return <nav className="signal-workspace-steps" aria-label="Review steps">
+  const ref = useRef<HTMLElement>(null);
+  // Publish the pinned height to the scrolling pane so focus and scrolling
+  // never leave a target hidden underneath the steps.
+  useLayoutEffect(() => {
+    const nav = ref.current;
+    const pane = nav?.parentElement;
+    if (!nav || !pane) return;
+    const measure = () => {
+      const pinned = getComputedStyle(nav).position === "sticky";
+      pane.style.setProperty("--signal-workspace-steps-height", pinned ? `${nav.getBoundingClientRect().height}px` : "0px");
+    };
+    measure();
+    const observer = new ResizeObserver(measure); observer.observe(nav);
+    window.addEventListener("resize", measure);
+    return () => { observer.disconnect(); window.removeEventListener("resize", measure); pane.style.removeProperty("--signal-workspace-steps-height"); };
+  }, []);
+  return <nav ref={ref} className="signal-workspace-steps" aria-label="Review steps">
     <ol>{REPORT_STEPS.map((step, index) => {
       const status = stepStatus(step.id, counts);
       return <li key={step.id}>
