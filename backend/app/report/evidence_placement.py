@@ -186,11 +186,16 @@ def _textbox_reader(page):
     work. This reads the same text page once, keeps each character's box,
     and applies the same rules per rectangle: a character counts when its
     box overlaps the rectangle, and lines that contributed text are joined
-    with line breaks.
+    with line breaks. Like get_textbox it compares in single precision and
+    reports an unpaired surrogate as U+FFFD.
     """
     textpage = page.get_textpage()
     lines = [
-        [(char["c"], char["bbox"]) for span in line["spans"] for char in span["chars"]]
+        [
+            ("�" if "\ud800" <= char["c"] <= "\udfff" else char["c"], char["bbox"])
+            for span in line["spans"]
+            for char in span["chars"]
+        ]
         for block in textpage.extractRAWDICT()["blocks"]
         if block["type"] == 0
         for line in block["lines"]
@@ -203,7 +208,7 @@ def _textbox_reader(page):
         return lambda rect: page.get_textbox(rect, textpage=textpage)
 
     def textbox(rect) -> str:
-        x0, y0, x1, y1 = rect
+        x0, y0, x1, y1 = struct.unpack("4f", struct.pack("4f", *rect))
         parts = []
         pending_break = False
         for chars in lines:

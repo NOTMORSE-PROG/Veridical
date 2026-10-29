@@ -522,3 +522,37 @@ def test_a_page_with_an_incomplete_character_listing_is_read_the_exact_way():
     page = Row(get_textpage=lambda: textpage, get_textbox=get_textbox)
     assert _textbox_reader(page)((0, 0, 1, 1)) == "exact"
     assert calls == [((0, 0, 1, 1), textpage)]
+
+
+def test_a_zero_width_glyph_left_out_of_the_listing_is_still_read():
+    line = "Zero width tail check line"
+    with pymupdf.open() as built:
+        page = built.new_page()
+        page.insert_text((60, 80), line, fontname="helv", fontsize=11)
+        end = 60 + pymupdf.get_text_length(line, "helv", 11)
+        page.insert_text((end, 80), "x", fontname="tiro", fontsize=11)
+        times = next(font[0] for font in page.get_fonts() if "Times" in font[3])
+        built.xref_set_key(times, "FirstChar", "120")
+        built.xref_set_key(times, "LastChar", "120")
+        built.xref_set_key(times, "Widths", "[0]")
+        data = built.tobytes()
+    with pymupdf.open(stream=data, filetype="pdf") as document:
+        page = document[0]
+        textbox = _textbox_reader(page)
+        for rect in (
+            pymupdf.Rect(end - 3, 60, end + 3, 90),
+            pymupdf.Rect(55, 60, end + 3, 90),
+            page.rect,
+        ):
+            assert textbox(rect) == page.get_textbox(rect)
+
+
+def test_rectangles_are_compared_in_single_precision_like_pymupdf(sources):
+    _path, data = sources["text"]
+    with pymupdf.open(stream=data, filetype="pdf") as document:
+        page = document[0]
+        textbox = _textbox_reader(page)
+        word = pymupdf.Rect(page.get_text("words")[0][:4])
+        nudged = pymupdf.Rect(word.x0, word.y0, word.x1, word.y1)
+        nudged.x0 = word.x1 - 1e-9
+        assert textbox(nudged) == page.get_textbox(nudged)
