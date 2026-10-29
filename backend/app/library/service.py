@@ -40,7 +40,6 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Literal
 
-import numpy as np
 from sqlalchemy import Text, and_, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -523,6 +522,9 @@ async def _own_possible_duplicate(
     ).all()
     if not rows:
         return None
+    # Imported here so an idle server never loads numpy (BUG-532).
+    import numpy as np
+
     query = np.asarray(whole_document, dtype=np.float64)
     query_norm = np.linalg.norm(query)
     if query_norm == 0:
