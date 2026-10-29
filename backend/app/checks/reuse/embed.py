@@ -505,6 +505,11 @@ def _passage_drafts(
     patterns = load_patterns(settings.ingest_patterns_file)
     source = analytical_source(extraction)
     content_blocks = [b for b in extraction.blocks if not b.is_furniture]
+    selection = select_references(extraction, patterns)
+    if selection.membership_issues:
+        # Whole/chapter vectors use proven body fragments. A complete passage
+        # inventory cannot classify this protected secondary bibliography.
+        return None
     non_ref_ids = {id(b) for b in non_reference_blocks(extraction, patterns)}
     ref_ids = {id(b) for b in content_blocks if id(b) not in non_ref_ids}
     quote_ids = block_quote_block_ids(extraction, settings)

@@ -19,7 +19,11 @@ from app.ingest.schemas import ExtractionResult, SectionTree
 )
 def test_upload_receipt_preserves_reference_boundary_limit(monkeypatch, issues, count, expected):
     monkeypatch.setattr(receipts, "reading_order_ingest_note", lambda *args: None)
-    monkeypatch.setattr(receipts, "select_references", lambda *args: SimpleNamespace(issues=issues))
+    monkeypatch.setattr(
+        receipts,
+        "select_references",
+        lambda *args: SimpleNamespace(issues=issues, membership_issues=()),
+    )
     result = ExtractionResult(
         anchor_kind="page",
         image_only=False,

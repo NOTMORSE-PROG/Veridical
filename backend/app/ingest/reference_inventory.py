@@ -30,13 +30,15 @@ def reference_row_binding_issues(
 
 
 def reference_source_scope_issues(
-    extraction: ExtractionResult, selection: ReferenceSelection
+    extraction: ExtractionResult, selection: ReferenceSelection, *, require_complete: bool = True
 ) -> tuple[str, ...]:
     """Withhold completeness when selected text may omit bibliography content.
 
     This does not establish reading-order authority; consumers apply their own
     existing source-quality and legacy-compatibility policy.
     """
+    if require_complete and selection.membership_issues:
+        return selection.membership_issues
     heading = selection.heading
     if not isinstance(heading, SourceFragment):
         return ("reference_heading_unavailable",)

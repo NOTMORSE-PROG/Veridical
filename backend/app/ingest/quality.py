@@ -23,6 +23,11 @@ SOURCE_REFERENCE_BOUNDARY_INGEST_NOTE = (
     "References were not extracted because VERIDICAL could not reliably separate the entries. "
     "This does not mean the paper has no references. You can still open the original paper."
 )
+SOURCE_REFERENCE_PARTIAL_INGEST_NOTE = (
+    "Entries from the primary reference list were extracted. Later bibliography-like text "
+    "could not be safely classified and was kept outside body-text comparisons. "
+    "Reference coverage is partial; extraction does not verify a source."
+)
 
 
 def reading_order_ingest_note(extraction: ExtractionResult, reference_count: int) -> str | None:

@@ -37,6 +37,36 @@ class OwnedSession:
         )
 
 
+def test_owned_original_recovers_from_durable_storage_after_cache_loss(owned, monkeypatch):
+    client, row, path, settings, _ = owned
+    data = path.read_bytes()
+    expected = hashlib.sha256(data).hexdigest()
+    path.unlink()
+    settings.storage_backend = "r2"
+    settings.storage_namespace = "rubric-cold-control"
+    calls = []
+
+    class DurableSource:
+        def download_to(self, key, target, *, chunk_bytes):
+            calls.append(key)
+            assert key == "rubric-cold-control/rubric_uploads/41.pdf"
+            for start in range(0, len(data), chunk_bytes):
+                target.write(data[start : start + chunk_bytes])
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(documents, "get_storage", lambda _: DurableSource())
+    response = client.get("/rubrics/41/document")
+    assert response.status_code == 200
+    assert response.json()["available"] is True
+    assert response.json()["source_sha256"] == expected
+    assert path.read_bytes() == data
+    assert len(calls) == 1
+    assert client.get("/rubrics/99/document").status_code == 404
+    assert len(calls) == 1
+
+
 @pytest.fixture
 def owned(tmp_path, monkeypatch):
     settings = get_settings().model_copy(

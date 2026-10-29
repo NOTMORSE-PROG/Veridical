@@ -140,6 +140,11 @@ class ReferenceSelection:
     span: list[TextBlock]
     issues: tuple[str, ...] = ()
     heading: TextBlock | None = None
+    protected_span: list[TextBlock] = field(default_factory=list)
+
+    @property
+    def membership_issues(self) -> tuple[str, ...]:
+        return ("reference_tail_membership_unresolved",) if self.protected_span else ()
 
 
 def select_references(result: ExtractionResult, patterns: HeadingPatterns) -> ReferenceSelection:
@@ -171,8 +176,9 @@ def select_references(result: ExtractionResult, patterns: HeadingPatterns) -> Re
             projected.append(slicer.slice(start, len(block.text)))
     issues: list[str] = []
     headings: list[TextBlock] = []
+    protected: list[TextBlock] = []
     span = _reference_span_blocks(
-        result.model_copy(update={"blocks": projected}), patterns, issues, headings
+        result.model_copy(update={"blocks": projected}), patterns, issues, headings, protected
     )
     for block in span:
         for line in block.text.splitlines():
@@ -210,7 +216,7 @@ def select_references(result: ExtractionResult, patterns: HeadingPatterns) -> Re
             if labels != consumed:
                 issues.append("ambiguous_reference_entry_boundaries")
     return ReferenceSelection(
-        groups, span, tuple(issues), headings[0] if len(headings) == 1 else None
+        groups, span, tuple(issues), headings[0] if len(headings) == 1 else None, protected
     )
 
 
@@ -377,7 +383,7 @@ def non_reference_blocks(
     if selection.issues:
         return []
     excluded: dict[int, list[tuple[int, int]]] = {}
-    intervals = list(selection.span)
+    intervals = [*selection.span, *selection.protected_span]
     if exclude_heading and isinstance(selection.heading, SourceFragment):
         intervals.append(selection.heading)
     for fragment in intervals:
@@ -935,6 +941,7 @@ def _reference_span_blocks(
     patterns: HeadingPatterns,
     issues: list[str],
     headings: list[TextBlock] | None = None,
+    protected: list[TextBlock] | None = None,
 ) -> list[TextBlock]:
     """Blocks strictly between the references heading and the next heading
     of the same or higher rank (document order); [] when no reference
@@ -948,7 +955,7 @@ def _reference_span_blocks(
     if ref_pos is None:
         explicit = flat if result.section_tree.source in {"embedded_toc", "styles"} else []
         return _span_by_bare_heading(
-            blocks, patterns, explicit, result.anchor_kind, issues, headings
+            blocks, patterns, explicit, result.anchor_kind, issues, headings, protected
         )
     node = flat[ref_pos]
     successor = next((n for n in flat[ref_pos + 1 :] if n.level <= node.level), None)
@@ -956,16 +963,19 @@ def _reference_span_blocks(
     start = _block_index_of_heading(blocks, node)
     if start is None:
         return []
-    end = len(blocks)
-    if successor is not None:
-        succ_idx = _block_index_of_heading(blocks, successor, after=start)
-        if succ_idx is not None:
-            end = succ_idx
+    if (
+        successor is not None
+        and parse_reference(successor.title, 0).parse_status == CitationParseStatus.parsed
+    ):
+        successor = None
     return _until_reference_end_heading(
-        _after_heading(blocks, start, end, patterns, issues, headings=headings),
+        _after_heading(blocks, start, len(blocks), patterns, issues, headings=headings),
         patterns,
         blocks[start],
         issues,
+        protected=protected,
+        anchor_kind=result.anchor_kind,
+        outline_end=successor,
     )
 
 
@@ -1024,6 +1034,7 @@ def _span_by_bare_heading(
     anchor_kind: str,
     issues: list[str],
     headings: list[TextBlock] | None = None,
+    protected: list[TextBlock] | None = None,
 ) -> list[TextBlock]:
     """Tree didn't include the reference section (e.g. source='none'):
     fall back to a standalone, unnumbered line naming it. A numbered line
@@ -1046,6 +1057,8 @@ def _span_by_bare_heading(
                 patterns,
                 b,
                 issues,
+                protected=protected,
+                anchor_kind=anchor_kind,
             )
             return _until_explicit_heading(span, explicit_nodes, patterns, anchor_kind)
     return []
@@ -1137,6 +1150,10 @@ def _until_reference_end_heading(
     patterns: HeadingPatterns,
     reference_heading: TextBlock,
     issues: list[str],
+    *,
+    protected: list[TextBlock] | None = None,
+    anchor_kind: str = "page",
+    outline_end: SectionNode | None = None,
 ) -> list[TextBlock]:
     for index, block in enumerate(span):
         # Match an entire original source line, not merely "Received" inside
@@ -1146,24 +1163,48 @@ def _until_reference_end_heading(
         for line in block.text.splitlines(keepends=True):
             start, offset = offset, offset + len(line)
             history = any(p.fullmatch(normalize(line)) for p in patterns.reference_history_lines)
-            end_heading = any(p.fullmatch(normalize(line)) for p in patterns.reference_end_headings)
+            heading_block = slicer.slice(start, offset)
+            outline_match = outline_end is not None and _isolated_heading(
+                heading_block, outline_end, patterns
+            )
+            end_heading = outline_match or any(
+                p.fullmatch(normalize(line)) for p in patterns.reference_end_headings
+            )
             if not (history or end_heading):
                 continue
             prefix = [slicer.slice(0, start)] if block.text[:start].strip() else []
             preceding = [*span[:index], *prefix]
+            tail = [slicer.slice(offset, len(block.text))] if block.text[offset:].strip() else []
             if history and not preceding:
                 continue
             if end_heading:
-                heading_block = slicer.slice(start, offset)
                 if start and heading_block.source_lines is None:
                     issues.append("ambiguous_reference_end_style")
                     return span
-                if not _contrasting_end_heading(
+                if not outline_match and not _contrasting_end_heading(
                     heading_block, preceding, reference_heading, patterns
                 ):
+                    if _bibliography_continues([*tail, *span[index + 1 :]]):
+                        issues.append("ambiguous_reference_end_style")
+                        return span
                     continue
-            tail = [slicer.slice(offset, len(block.text))] if block.text[offset:].strip() else []
             if _bibliography_continues([*tail, *span[index + 1 :]]):
+                # A supported closing heading can bound a complete primary
+                # bibliography without classifying the later appendix. Keep
+                # that entire later region protected from body/linkage use.
+                groups = _segment_blocks(preceding, anchor_kind)
+                if (
+                    end_heading
+                    and protected is not None
+                    and groups
+                    and all(
+                        parse_reference(_merge([part.text for part in group]), order).parse_status
+                        == CitationParseStatus.parsed
+                        for order, group in enumerate(groups)
+                    )
+                ):
+                    protected.extend([slicer.slice(start, len(block.text)), *span[index + 1 :]])
+                    return preceding
                 # A nested bibliography or an appendix containing references:
                 # preserve source and do not turn its entries into body claims.
                 issues.append("ambiguous_reference_end")

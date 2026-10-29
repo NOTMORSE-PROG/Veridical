@@ -58,7 +58,7 @@ def _same(left, right):
 def project_quoted_metadata(citations, extraction, patterns, *, settings=None):
     """Never modify ORM rows or historical findings.
 
-    Admission requires the complete exact source inventory and all persisted
+    Admission requires the complete retained primary source inventory and all persisted
     derived fields to match a current draft or the precise former parser view.
     Only title/venue corrections (or a downgrade to parse_failed) are admitted.
     Identifier recovery uses the identical extraction path for both views.

@@ -6,6 +6,8 @@ rubric with reports pinned to it is never silently mutated or dropped
 (measurement integrity, TESTING.md §2).
 """
 
+import asyncio
+import logging
 import uuid
 from collections.abc import AsyncIterator
 from decimal import Decimal
@@ -27,6 +29,9 @@ from app.models.run import CheckRun
 from app.rubric.decompose import raw_text_for_decomposition
 from app.rubric.schemas import RubricListItem, UpdateCriteriaRequest
 from app.rubric.validate import attempt_decomposition
+from app.storage import get_storage, storage_key_for
+
+_logger = logging.getLogger(__name__)
 
 
 async def create_rubric_from_upload(
@@ -43,17 +48,32 @@ async def create_rubric_from_upload(
     """Share upload admission before a format family/version or stored file changes."""
     settings = settings or get_settings()
     with preparation_scope(settings) as lease:
-        return await _create_rubric_from_upload(
-            session,
-            chunks,
-            filename,
-            title,
-            llm,
-            settings,
-            instructor_id=instructor_id,
-            family_id=family_id,
-            preparation_lease=lease,
+        work = asyncio.create_task(
+            _create_rubric_from_upload(
+                session,
+                chunks,
+                filename,
+                title,
+                llm,
+                settings,
+                instructor_id=instructor_id,
+                family_id=family_id,
+                preparation_lease=lease,
+            )
         )
+        try:
+            return await asyncio.shield(work)
+        except asyncio.CancelledError:
+            while not work.done():
+                try:
+                    await asyncio.shield(work)
+                except asyncio.CancelledError:
+                    continue
+                except Exception:
+                    break
+            if not work.cancelled():
+                work.exception()
+            raise
 
 
 async def _create_rubric_from_upload(
@@ -117,16 +137,36 @@ async def _create_rubric_from_upload(
 
     suffix = Path(filename).suffix.lower()[:8]
     dest = settings.data_dir / settings.rubric_upload_subdir / f"{rubric.id}{suffix}"
+    publication_attempted = False
     try:
         await save_upload(chunks, dest, settings)
+        extractor = select_extractor(detect_format(dest))
+        result = await preparation_lease.run(extractor, str(dest), settings)
+        storage = get_storage(settings)
+        try:
+            publication_attempted = True
+            await preparation_lease.run(
+                storage.put_file, dest, storage_key_for(settings, str(dest))
+            )
+        finally:
+            storage.close()
         rubric.source_file = str(dest)
         await session.commit()
 
-        extractor = select_extractor(detect_format(dest))
-        # Extraction is CPU-bound — off the event loop (CODING.md §2), same
-        # as manuscript ingestion.
-        result = await preparation_lease.run(extractor, str(dest), settings)
     except Exception:
+        if publication_attempted:
+            try:
+                storage = get_storage(settings)
+                try:
+                    await preparation_lease.run(
+                        storage.delete, storage_key_for(settings, str(dest))
+                    )
+                finally:
+                    storage.close()
+            except Exception as cleanup_error:
+                _logger.warning(
+                    "Required-format source cleanup failed (%s)", type(cleanup_error).__name__
+                )
         # BUG-027: an unreadable/corrupt file raises here, before there is
         # anything for the instructor to review (attempt_decomposition
         # below never raises, V-011 — everything after this point always

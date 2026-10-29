@@ -144,7 +144,7 @@
     },
     {
       "id": "record_dont_grade",
-      "regex": "\\b(record|log)\\s+(that\\s+)?(this\\s+)?(prior\\s+)?(finding|result|verdict|approval)\\b|\\bnot\\s+a\\s+(new\\s+)?grading\\s+(judgment|judgement|decision)\\b",
+      "regex": "(?:^\\s*|[.!?:;]\\s+|[\\r\\n]+\\s*|[\"\\u201c]\\s*)(?:(?:[-*\\u2022]+|\\d+[.)])\\s+)?(?:please[,\\s]+)?(?:record|log)\\s+(?:that\\s+)?(?:this\\s+)?(?:prior\\s+)?(?:finding|result|verdict|approval)\\b|\\b(?:you\\s+(?:must|should)|(?:grader|system|assistant)\\s*[:,])\\s+(?:please[,\\s]+)?(?:record|log)\\s+(?:that\\s+)?(?:this\\s+)?(?:prior\\s+)?(?:finding|result|verdict|approval)\\b|\\bnot\\s+a\\s+(new\\s+)?grading\\s+(judgment|judgement|decision)\\b",
       "label": "reframes grading as a data-entry step recording a pre-decided result"
     },
     {

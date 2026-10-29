@@ -32,6 +32,7 @@ from app.ingest.service import detect_format, hash_file_sha256
 from app.models.rubric import Rubric
 from app.report.document_projection import project_docx_source
 from app.report.schemas import DocumentParagraphsOut
+from app.storage import ensure_local_file, get_storage
 
 
 class RubricDocumentOut(BaseModel):
@@ -65,7 +66,9 @@ async def read_rubric_document[T](
     reader: Callable[[RubricSource, Settings], T],
 ) -> T:
     rubric = await session.scalar(
-        select(Rubric).where(Rubric.id == rubric_id, Rubric.instructor_id == instructor_id)
+        select(Rubric)
+        .where(Rubric.id == rubric_id, Rubric.instructor_id == instructor_id)
+        .with_for_update(read=True)
     )
     if rubric is None:
         raise NotFoundError("Required format not found.")
@@ -100,7 +103,11 @@ def _source_path(source: RubricSource, settings: Settings) -> Path:
     if recorded.is_symlink() or path.parent != expected_root or path.name != recorded.name:
         raise GoneError("The original file for this version is unavailable locally.")
     if not path.is_file():
-        raise FileNotFoundError
+        storage = get_storage(settings)
+        try:
+            ensure_local_file(settings, storage, str(recorded))
+        finally:
+            storage.close()
     if path.stat().st_size > settings.max_upload_mb * 1024 * 1024:
         raise FileTooLargeError("The stored format exceeds the supported file size.")
     return path

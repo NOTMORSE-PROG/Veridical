@@ -3,7 +3,11 @@
 from app import messages
 from app.config import get_settings
 from app.ingest.patterns import load_patterns
-from app.ingest.quality import SOURCE_REFERENCE_BOUNDARY_INGEST_NOTE, reading_order_ingest_note
+from app.ingest.quality import (
+    SOURCE_REFERENCE_BOUNDARY_INGEST_NOTE,
+    SOURCE_REFERENCE_PARTIAL_INGEST_NOTE,
+    reading_order_ingest_note,
+)
 from app.ingest.references import select_references
 from app.ingest.schemas import ExistingUploadOut, IngestSummary, TitlePageProposalOut
 
@@ -12,11 +16,11 @@ def ingestion_receipt(manuscript, result, citations, proposal, existing):
     notes = [messages.IMAGE_ONLY_NOTE] if result.image_only else []
     if note := reading_order_ingest_note(result, citations):
         notes.append(note)
-    if (
-        citations == 0
-        and select_references(result, load_patterns(get_settings().ingest_patterns_file)).issues
-    ):
+    selection = select_references(result, load_patterns(get_settings().ingest_patterns_file))
+    if citations == 0 and selection.issues:
         notes.append(SOURCE_REFERENCE_BOUNDARY_INGEST_NOTE)
+    if citations > 0 and selection.membership_issues:
+        notes.append(SOURCE_REFERENCE_PARTIAL_INGEST_NOTE)
     return IngestSummary(
         manuscript_id=manuscript.id,
         group_label=manuscript.group_label,

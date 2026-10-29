@@ -34,6 +34,8 @@ from app.checks.source_quality import persist_source_limitation
 from app.config import Settings
 from app.findings.policy import reuse_reason
 from app.ingest.analytical_source import analytical_source
+from app.ingest.patterns import load_patterns
+from app.ingest.references import select_references
 from app.ingest.schemas import ExtractionResult
 from app.models.enums import CheckKind, FlagSeverity, ResultOutcome
 from app.models.run import CheckResult, Flag
@@ -324,6 +326,8 @@ async def run_originality_reuse_check(
     if source_stop is not None:
         return source_stop
     source = analytical_source(extraction)
+    selection = select_references(extraction, load_patterns(settings.ingest_patterns_file))
+    membership_partial = bool(selection.membership_issues)
     # BUG-152: off the event loop -- this runs the local model2vec encoder
     # over every chapter plus the whole document, real CPU work with no
     # I/O, on the single Render worker that also serves every other
@@ -350,10 +354,19 @@ async def run_originality_reuse_check(
             criterion_id=None,
             kind=CheckKind.originality_reuse,
             outcome=ResultOutcome.escalated
-            if source.limited
+            if source.limited or membership_partial
             else (ResultOutcome.passed if has_resubmission else ResultOutcome.not_applicable),
             detail={
                 **source.detail(),
+                "reference_membership_issues": list(selection.membership_issues),
+                **(
+                    {
+                        "coverage_reason": "reference_membership_partial",
+                        "passage_inventory_status": "not_captured",
+                    }
+                    if membership_partial
+                    else {}
+                ),
                 **(
                     {"coverage_reason": "native_math_comparison_incomplete"}
                     if source.limited
@@ -527,13 +540,17 @@ async def run_originality_reuse_check(
         criterion_id=None,
         kind=CheckKind.originality_reuse,
         outcome=ResultOutcome.escalated
-        if native_limited
+        if native_limited or membership_partial
         else (ResultOutcome.not_applicable if no_comparisons else ResultOutcome.passed),
         detail={
             **source.detail(),
+            "reference_membership_issues": list(selection.membership_issues),
+            "passage_inventory_status": "not_captured" if membership_partial else "available",
             "n_source_candidates_withheld": withheld,
             "coverage_reason": "native_math_comparison_incomplete"
             if native_limited
+            else "reference_membership_partial"
+            if membership_partial
             else ("no_comparison_archive" if no_comparisons else None),
             "comparison_ran": True,
             "archive_size_n": query_result.archive_size_n,

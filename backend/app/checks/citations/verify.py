@@ -501,6 +501,7 @@ async def run_citation_integrity_check(
     native_source = analytical_source(extraction)
     source_limit = source_limitation_detail(extraction)
     selection = select_references(extraction, patterns)
+    membership_partial = bool(selection.membership_issues)
     inventory_issues: list[str] = []
     # An empty inventory keeps its existing no-reference treatment. A nonempty
     # assessment must bind the whole retained list before inferring absence or
@@ -508,7 +509,9 @@ async def run_citation_integrity_check(
     if citations:
         inventory_issues.extend(selection.issues)
         inventory_issues.extend(reference_row_binding_issues(selection.groups, citations))
-        inventory_issues.extend(reference_source_scope_issues(extraction, selection))
+        inventory_issues.extend(
+            reference_source_scope_issues(extraction, selection, require_complete=False)
+        )
     source_projections, canonical_drafts = {}, None
     projection_reason = "reference_source_projection_unbound" if inventory_issues else None
     if not projection_reason:
@@ -532,6 +535,12 @@ async def run_citation_integrity_check(
             if inventory_issues:
                 projection_reason = "reference_source_projection_unbound"
     inventory_detail = {
+        "reference_membership_status": "partial"
+        if membership_partial
+        else "not_established"
+        if projection_reason or not citations
+        else "complete",
+        "reference_membership_issues": list(selection.membership_issues),
         "reference_inventory_status": "bound"
         if citations and not projection_reason
         else "not_captured",
@@ -612,7 +621,9 @@ async def run_citation_integrity_check(
                 session, check_run_id, CheckKind.citation_integrity, extraction
             )
     body_blocks = (
-        [] if metadata_only or projection_reason else non_reference_blocks(extraction, patterns)
+        []
+        if metadata_only or membership_partial or projection_reason
+        else non_reference_blocks(extraction, patterns)
     )
     body_blocks = [block for scope in native_source.scopes_for(body_blocks) for block in scope]
     gaps: set[str] = set()
@@ -638,6 +649,7 @@ async def run_citation_integrity_check(
     # No supported body style or a partial scan cannot prove a reference unused.
     if (
         metadata_only
+        or membership_partial
         or native_source.limited
         or projection_reason
         or gaps
@@ -654,7 +666,7 @@ async def run_citation_integrity_check(
             for ref in (cross.possibly_cited + (cross.uncited if not cross.linked else []))
         }
     ) | native_absence_unassessed
-    if metadata_only or projection_reason or gaps or selection.issues:
+    if metadata_only or membership_partial or projection_reason or gaps or selection.issues:
         unassessed_indexes = {ref.order_index for ref in citations}
     linkage_unassessed = len(unassessed_indexes)
     metadata_unassessed = set()
@@ -725,7 +737,13 @@ async def run_citation_integrity_check(
             *uncited_flags(absence_candidates),
         ]
     )
-    if metadata_only or projection_reason or selection.issues or not citations:
+    if (
+        metadata_only
+        or membership_partial
+        or projection_reason
+        or selection.issues
+        or not citations
+    ):
         flag_drafts = []
     claim_support_pairs: list[ClaimSupportInput] = []
     candidate_by_pair_index: list[int] = []
@@ -950,6 +968,8 @@ async def run_citation_integrity_check(
         if projection_reason
         else "source_reading_order_partial"
         if metadata_only
+        else "reference_membership_partial"
+        if membership_partial
         else "reference_list_unavailable"
         if selection.issues or not citations
         else "native_math_citation_incomplete"
@@ -996,6 +1016,17 @@ async def run_citation_integrity_check(
         detail={
             **native_source.detail(),
             **inventory_detail,
+            **(
+                {
+                    "assessment_scope": "reference_metadata_only",
+                    "analysis_coverage": "partial"
+                    if any(record["lookup_attempted"] for record in verification_records)
+                    else "unsupported",
+                    "n_protected_source_fragments": len(selection.protected_span),
+                }
+                if membership_partial
+                else {}
+            ),
             **(
                 {
                     "analysis_coverage": "partial"
@@ -1047,7 +1078,7 @@ async def run_citation_integrity_check(
             "n_claim_support_checked": claim_support_checked,
             **(
                 {"claim_support_inventory_status": "not_captured"}
-                if metadata_only or not citations
+                if metadata_only or membership_partial or not citations
                 else {
                     "n_claim_support_pairs_total": len(claim_support_pairs),
                     "n_claim_support_candidate_pairs_total": len(claim_occurrences),
