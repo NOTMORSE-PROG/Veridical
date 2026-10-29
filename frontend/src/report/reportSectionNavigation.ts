@@ -20,3 +20,14 @@ export function focusReportSection(event: MouseEvent<HTMLAnchorElement>, locatio
     target?.focus({ preventScroll: true });
   });
 }
+
+// A link to another manuscript review step changes only the query, so the
+// target section mounts on the next render; wait for it before moving focus.
+export function focusAfterStepChange(event: MouseEvent<HTMLAnchorElement>, targetId: string) {
+  if (event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    const target = document.getElementById(targetId);
+    target?.scrollIntoView({ block: "start" });
+    target?.focus({ preventScroll: true });
+  }));
+}

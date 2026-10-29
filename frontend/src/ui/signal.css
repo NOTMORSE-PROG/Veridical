@@ -2655,6 +2655,80 @@
     font-size: var(--signal-type-label);
   }
 
+  /* V-088: manuscript review shows one step at a time. Steps are a 2x2 grid
+     so they fit the review pane beside the manuscript. */
+  /* Pinned to the top of the review pane so the instructor always sees where
+     they are and can move between steps without scrolling back up. */
+  .signal-workspace-steps {
+    position: sticky;
+    inset-block-start: 0;
+    z-index: var(--signal-z-sticky);
+    margin-block-end: var(--signal-rhythm-group);
+    background: var(--color-signal-surface);
+  }
+  .signal-workspace-steps ol {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    overflow: hidden;
+    border: var(--signal-border-hairline) solid var(--color-signal-border);
+    border-radius: var(--signal-radius-panel);
+    background: var(--color-signal-surface);
+  }
+  .signal-workspace-steps li { display: flex; min-inline-size: 0; }
+  .signal-workspace-steps li:nth-child(odd) { border-inline-end: var(--signal-border-hairline) solid var(--color-signal-border); }
+  .signal-workspace-steps li:nth-child(n + 3) { border-block-start: var(--signal-border-hairline) solid var(--color-signal-border); }
+  .signal-workspace-steps button {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: var(--signal-space-3);
+    align-items: center;
+    inline-size: 100%;
+    min-block-size: var(--signal-control-height);
+    border: 0;
+    background: transparent;
+    color: var(--color-signal-ink);
+    padding: var(--signal-space-3) var(--signal-space-4);
+    font: inherit;
+    text-align: start;
+    cursor: pointer;
+  }
+  .signal-workspace-steps button:hover { background: var(--color-signal-surface-muted); }
+  .signal-workspace-steps button:focus-visible { outline: var(--signal-border-emphasis) solid var(--color-signal-link); outline-offset: calc(-1 * var(--signal-border-emphasis)); }
+  .signal-workspace-steps button[aria-current="step"] {
+    background: var(--color-signal-surface-muted);
+    box-shadow: inset 0 calc(-1 * var(--signal-border-emphasis)) var(--color-signal-link);
+  }
+  .signal-workspace-steps__number {
+    display: inline-grid;
+    grid-row: span 2;
+    inline-size: var(--signal-report-jump-number-size);
+    block-size: var(--signal-report-jump-number-size);
+    place-items: center;
+    border-radius: var(--signal-radius-pill);
+    background: var(--color-signal-foundation);
+    color: var(--color-signal-brand);
+    font-family: var(--font-signal-display);
+    font-size: var(--signal-type-label);
+  }
+  .signal-workspace-steps__label { font-weight: var(--signal-weight-semibold); }
+  .signal-workspace-steps__status { color: var(--color-signal-ink-muted); font-size: var(--signal-type-label); }
+  .signal-workspace-step-kicker { margin: 0 0 var(--signal-rhythm-attached); }
+  .signal-workspace-step-footer {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: var(--signal-rhythm-control);
+    margin-block-start: var(--signal-rhythm-related);
+    padding: var(--signal-rhythm-group) var(--signal-space-5);
+    border-block-start: var(--signal-border-hairline) solid var(--color-signal-border);
+  }
+  .signal-workspace-step-footer > :only-child { margin-inline-start: auto; }
+  .signal-report-record { gap: var(--signal-rhythm-related); }
+  .signal-report-pending-list { margin: 0; padding-inline-start: var(--signal-space-5); }
+
   .signal-report-actions {
     display: flex;
     flex-wrap: wrap;

@@ -179,10 +179,11 @@ describe("optional comparison workspace navigation", () => {
     expect(screen.getByText("Comparison lead 31 of 31. Record #69.")).toBeVisible();
   });
   it("starts comparison-only review with the actual evidence index and no empty queue scaffolding", async () => {
-    setup("", false, { ...REPORT, pending_review_count: 0 });
+    setup("&view=queue", false, { ...REPORT, pending_review_count: 0 });
     const heading = await screen.findByRole("heading", { name: "Comparison leads", level: 2 });
     const section = heading.closest("section")!;
     expect(section.parentElement?.firstElementChild).toBe(section);
+    expect(screen.getByRole("button", { name: /^Step 2: Inspect findings/ })).toHaveAttribute("aria-current", "step");
     expect(screen.queryByText("Your review tasks")).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Review queue" })).not.toBeInTheDocument();
     expect(screen.queryByText(/0 other findings|0 resolved|No integrity findings/)).not.toBeInTheDocument();
@@ -197,9 +198,9 @@ describe("optional comparison workspace navigation", () => {
     expect(screen.getByText(/These are optional saved comparison records/)).not.toBeVisible();
   });
   it("keeps five required judgments before 31 optional records without a combined task count", async () => {
-    setup();
-    const criteria = await screen.findByRole("heading", { name: "5 criteria need your judgment" });
-    const leads = screen.getByRole("heading", { name: "Comparison leads" });
+    setup("&view=queue");
+    const criteria = await screen.findByRole("button", { name: /^Step 1: Review criteria\. 5 left/ });
+    const leads = await screen.findByRole("heading", { name: "Comparison leads" });
     expect(criteria.compareDocumentPosition(leads) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByText("31 records")).toBeVisible();
     const tab = screen.getByRole("tab", { name: /Review\. 5 criteria awaiting judgment\. 31 optional comparison leads/ });

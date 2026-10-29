@@ -183,7 +183,7 @@ describe("SignalDocumentViewerPage", () => {
   it.each(["", "&finding=7", "&finding=7&anchor=page%209"])("keeps criterion source context neutral with stale selection %s", async stale => {
     stubViewer();
     renderWithProviders(<SignalDocumentViewerPage />, { route: `/report/5/document?view=decision&pane=review${stale}`, path: "/report/:checkRunId/document" });
-    await screen.findByRole("heading", { name: "Readiness and decision" });
+    await screen.findByRole("heading", { name: "Readiness" });
     const pane = await screen.findByTestId("pdf-pane");
     expect(pane).toHaveAttribute("data-regions", "0");
     expect(pane).toHaveAttribute("data-selection", "");
@@ -205,9 +205,8 @@ describe("SignalDocumentViewerPage", () => {
         blocks: [{ text: "Verified page-four reading text.", is_furniture: false }], saved_block_count: 1, omitted_block_count: 0 },
     });
     vi.stubGlobal("fetch", fetch);
-    renderWithProviders(<SignalDocumentViewerPage />, { route: "/report/5/document?view=decision&pane=review", path: "/report/:checkRunId/document" });
-    await screen.findByText("Recorded criterion results, 1 entry");
-    fireEvent.click(screen.getByText("Recorded criterion results, 1 entry"));
+    renderWithProviders(<SignalDocumentViewerPage />, { route: "/report/5/document?view=decision&step=grades&pane=review", path: "/report/:checkRunId/document" });
+    await screen.findByRole("heading", { name: "Criterion records" });
     const details = document.getElementById("signal-criterion-evidence-5-1");
     expect(details).not.toBeNull(); fireEvent.click(details!);
     const open = await screen.findByRole("link", { name: "Open in manuscript: page 4. Criterion 1: Recorded source control" });
@@ -223,7 +222,7 @@ describe("SignalDocumentViewerPage", () => {
   it.each([undefined, false, true])("shows one record-based support notice and no age/rerun warning when flagged=%s", async (flag) => {
     stubViewer(VIEWER, { ...REPORT, historical_semantic_support_unverified: flag });
     renderWithProviders(<SignalDocumentViewerPage />, { route: "/report/5/document?view=decision&pane=review", path: "/report/:checkRunId/document" });
-    await screen.findByRole("heading", { name: "Readiness and decision" });
+    await screen.findByRole("heading", { name: "Readiness" });
     expect(screen.queryAllByText("AI evidence support needs review")).toHaveLength(flag ? 1 : 0);
     expect(screen.queryByText("Historical AI grades need fresh evidence review")).not.toBeInTheDocument();
     expect(screen.queryByText(/suggestions predate criterion-support validation/)).not.toBeInTheDocument();
@@ -235,7 +234,7 @@ describe("SignalDocumentViewerPage", () => {
       "/check-runs/5/document/reuse-matches": { passage_archive_size_n: 4, matches: [] },
     }));
     renderWithProviders(<SignalDocumentViewerPage />, { route: "/report/5/document?view=decision&pane=review", path: "/report/:checkRunId/document" });
-    await screen.findByText("Recorded criterion results, 0 entries");
+    await screen.findByRole("heading", { name: "Readiness" });
     if (mode === "fake") {
       expect(screen.getByText("Test-mode AI responses")).toBeVisible();
       expect(screen.getByText("These fixture responses are not a real manuscript assessment.")).toBeVisible();
@@ -269,10 +268,9 @@ describe("SignalDocumentViewerPage", () => {
       "/check-runs/5/document": VIEWER, "/check-runs/5/report": { ...REPORT, results },
       "/check-runs/5/escalated": [], "/check-runs/5/flags": [],
     }));
-    renderWithProviders(<SignalDocumentViewerPage />, { route: "/report/5/document?view=decision&pane=review", path: "/report/:checkRunId/document" });
-    const summary = await screen.findByText("Recorded criterion results, 5 entries");
-    fireEvent.click(summary);
-    expect(screen.getByRole("heading", { name: "Criterion records" })).toBeVisible();
+    renderWithProviders(<SignalDocumentViewerPage />, { route: "/report/5/document?view=decision&step=grades&pane=review", path: "/report/:checkRunId/document" });
+    expect(await screen.findByRole("heading", { name: "Criterion records" })).toBeVisible();
+    expect(screen.getByRole("button", { name: /^Step 3: Check recorded grades\. 5 recorded/ })).toHaveAttribute("aria-current", "step");
     expect(screen.getAllByText("Not assessed: capacity reached")).toHaveLength(5);
     expect(screen.queryByText("All assessed criteria")).not.toBeInTheDocument();
   });
@@ -607,17 +605,21 @@ describe("SignalDocumentViewerPage", () => {
     }));
     renderWithProviders(<SignalDocumentViewerPage />, { route: "/report/5/document?pane=analysis", path: "/report/:checkRunId/document" });
 
-    expect(await screen.findByRole("heading", { name: "No recorded evidence items" })).toBeInTheDocument();
-    expect(screen.getByText("This check has no integrity findings or comparison leads. Review assessment limits and readiness before recording your decision.")).toBeVisible();
-    expect(screen.queryByText(REPORT.reason as string)).not.toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Final defense-readiness decision" })).not.toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /^Review/ })).toHaveAttribute("aria-selected", "true");
-    fireEvent.click(screen.getByRole("button", { name: "Review readiness and decision" }));
+    // Nothing is waiting, so the workspace opens on the decision step.
     expect(await screen.findByText(REPORT.reason as string)).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Final defense-readiness decision" })).toBeInTheDocument();
-    for (const link of screen.getAllByRole("link", { name: "Open readiness report" })) {
-      expect(link).toHaveAttribute("href", "/report/5");
-    }
+    expect(screen.getByRole("button", { name: /^Step 4: Record decision/ })).toHaveAttribute("aria-current", "step");
+    expect(screen.getByRole("tab", { name: /^Review/ })).toHaveAttribute("aria-selected", "true");
+    expect(screen.queryByRole("button", { name: /^Continue:/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Back: Check recorded grades" }));
+    expect(await screen.findByRole("heading", { name: "Criterion records" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Final defense-readiness decision" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^Step 2: Inspect findings/ }));
+    expect(await screen.findByRole("heading", { name: "No recorded evidence items" })).toBeInTheDocument();
+    expect(screen.getByText("This check has no integrity findings or comparison leads. Continue to the recorded grades and the decision.")).toBeVisible();
+    expect(screen.queryByText(REPORT.reason as string)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Continue: Check recorded grades" }));
+    expect(await screen.findByRole("heading", { name: "Criterion records" })).toBeInTheDocument();
     // One way to the report from this workspace, not one per panel.
     expect(screen.getAllByRole("link", { name: /readiness report/ })).toHaveLength(1);
   });
@@ -722,18 +724,17 @@ it("retains the workspace record and focus with qualified readiness across a tra
     return base(input, init);
   });
   vi.stubGlobal("fetch", fetch);
-  renderWithProviders(<><QueryAccess /><SignalDocumentViewerPage /></>, { route: "/report/5/document?view=decision&pane=review", path: "/report/:checkRunId/document" });
-  const disclosure = (await screen.findByText("Recorded criterion results, 0 entries")).closest("details")!;
-  disclosure.open = true; const heading = screen.getByRole("heading", { name: "Criterion records" }); heading.focus();
+  renderWithProviders(<><QueryAccess /><SignalDocumentViewerPage /></>, { route: "/report/5/document?view=decision&step=decision&pane=review", path: "/report/:checkRunId/document" });
+  const heading = await screen.findByRole("heading", { name: "Readiness" }); heading.focus();
   failed = true; await act(async () => { await client.invalidateQueries({ queryKey: ["report", 5], exact: true }); });
   await screen.findByText("Could not update this report");
-  expect(heading.isConnected).toBe(true); expect(heading).toHaveFocus(); expect(disclosure.open).toBe(true);
+  expect(heading.isConnected).toBe(true); expect(heading).toHaveFocus();
   expect(screen.getByText("Last loaded system readiness")).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "Return for revision" }));
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   failed = false; fireEvent.click(screen.getAllByRole("button", { name: "Retry report" })[0]);
   await waitFor(() => expect(screen.queryByText("Could not update this report")).not.toBeInTheDocument());
-  expect(heading).toHaveFocus(); expect(disclosure.open).toBe(true);
+  expect(heading).toHaveFocus();
   vi.unstubAllGlobals();
 });
 

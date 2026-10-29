@@ -11,7 +11,6 @@ import { ApiError } from "../api/client";
 import type { FlagOut, FlagRegionOut, ReportOut } from "../api/types";
 import { CRITERION_ANCHOR_REGION_ID, COMPARISON_LEAD_PAGE_SIZE } from "../config/ui";
 import { checkKindMeta, findingVerificationPrompt, isPValueFinding } from "../domain/checkKind";
-import { DECISION_LABEL } from "../domain/decisionTone";
 import { agreementEvidenceType, evidenceDisplayState } from "../domain/evidenceDisplay";
 import { manuscriptIdentity } from "../domain/manuscriptLabel";
 import { problemLabel } from "../domain/problemLabel";
@@ -38,6 +37,8 @@ import { SignalDecisionPanel } from "../report/SignalDecisionPanel";
 import { RuleScopeSummary } from "../report/RuleScopeNotice";
 import { unconfirmedAutomaticRuleRows } from "../domain/ruleScope";
 import { ReportReadNotice } from "../report/ReportReadNotice";
+import { ReportAssessmentContext } from "../report/ReportAssessmentContext";
+import { reportAssessmentNotices } from "../domain/reportAssessmentContext";
 import { recoverableReadError, usableReport } from "../report/reportReadState";
 import { SignalCriteriaResults, SignalEscalatedPanel, type CriterionSourceOpen, type CriterionSourceTarget } from "../report/SignalReviewSections";
 import { coverageItems } from "../report/reportCoverage";
@@ -73,6 +74,8 @@ import { RecordedEvidenceReader } from "./RecordedEvidenceReader";
 import { FindingSourceComparison } from "./FindingSourceComparison";
 import type { EvidenceSourceRequest, OpenEvidenceSource } from "../report/evidenceTypes";
 import { RecordedFindingSources } from "../report/RecordedEvidencePage";
+import { WORKSPACE_STEP_PARAM, workspaceStep, type ReportStep } from "../report/reviewStep";
+import { WorkspaceStepFooter, WorkspaceStepHeading, WorkspaceStepNavigation } from "./WorkspaceSteps";
 
 type ReviewFilter = "open" | "resolved" | "all";
 
@@ -122,7 +125,7 @@ function regionForFinding(finding: ReviewFinding, regions: FlagRegionOut[]): Fla
     ?? null;
 }
 
-function ReviewQueue({ findings, regions, sourceAvailability, report, collection, viewedIds, filter, invalidSelection, onFilter, onSelect, onExplore, onDecision, onRetry, showComparisons = true }: {
+function ReviewQueue({ findings, regions, sourceAvailability, report, collection, viewedIds, filter, invalidSelection, onFilter, onSelect, onExplore, onRetry, showComparisons = true }: {
   findings: ReviewFinding[];
   regions: FlagRegionOut[];
   sourceAvailability?: SourceAvailability;
@@ -136,7 +139,6 @@ function ReviewQueue({ findings, regions, sourceAvailability, report, collection
   onFilter: (filter: ReviewFilter) => void;
   onSelect: (id: number) => void;
   onExplore: () => void;
-  onDecision: (target: "criteria" | "readiness") => void;
 }) {
   const open = findings.filter((finding) => !finding.isResolved);
   const resolved = findings.filter((finding) => finding.isResolved);
@@ -145,13 +147,7 @@ function ReviewQueue({ findings, regions, sourceAvailability, report, collection
   return (
     <div className="signal-document-review-queue">
       {invalidSelection && <Alert title="That finding is no longer available" tone="warning" role="status">The review queue is open.</Alert>}
-      {report.pending_review_count > 0 && (
-        <section className="signal-document-criterion-task" aria-labelledby="criterion-task-heading">
-          <div><h2 id="criterion-task-heading">{report.pending_review_count} {report.pending_review_count === 1 ? "criterion needs" : "criteria need"} your judgment</h2></div>
-          <Button variant="secondary" onClick={() => onDecision("criteria")}>Review criteria</Button>
-        </section>
-      )}
-      {findings.length === 0 && !showComparisons && collection.state === "success" && !collection.snapshot?.total && <section className="signal-document-queue-empty"><h2>No recorded evidence items</h2><p>This check has no integrity findings or comparison leads. Review assessment limits and readiness before recording your decision.</p></section>}
+      {findings.length === 0 && !showComparisons && collection.state === "success" && !collection.snapshot?.total && <section className="signal-document-queue-empty"><h2>No recorded evidence items</h2><p>This check has no integrity findings or comparison leads. Continue to the recorded grades and the decision.</p></section>}
       {findings.length > 0 && (
         <div className="signal-document-inspector__heading"><h2>{collection.lastLoaded ? "Last loaded integrity findings" : "Integrity findings"}</h2></div>
       )}
@@ -165,7 +161,7 @@ function ReviewQueue({ findings, regions, sourceAvailability, report, collection
         </div>
       )}
       {findings.length > 0 && (visible.length === 0 && filter === "open" ? (
-        <Alert title={collection.state !== "success" ? "Last loaded: no open integrity findings" : "No open integrity findings"} tone="info"><p>{collection.state !== "success" ? "Every other finding in the last loaded records has an instructor resolution. Current records have not been confirmed." : "Every recorded integrity finding has an instructor resolution. You can review resolved findings or continue to readiness and decision."}</p><Button variant="secondary" onClick={() => onFilter("resolved")}>Show resolved findings</Button></Alert>
+        <Alert title={collection.state !== "success" ? "Last loaded: no open integrity findings" : "No open integrity findings"} tone="info"><p>{collection.state !== "success" ? "Every other finding in the last loaded records has an instructor resolution. Current records have not been confirmed." : "Every recorded integrity finding has an instructor resolution. You can review resolved findings or continue to the recorded grades."}</p><Button variant="secondary" onClick={() => onFilter("resolved")}>Show resolved findings</Button></Alert>
       ) : (
         <ol className="signal-document-review-list">
           {visible.map((finding) => {
@@ -187,18 +183,6 @@ function ReviewQueue({ findings, regions, sourceAvailability, report, collection
       ))}
       {showComparisons && <ComparisonLeadList collection={collection} workspace={findings.length === 0 && report.pending_review_count === 0} headingLevel={2} showActions viewedIds={viewedIds} onSelect={onSelect} onRetry={onRetry} />}
       {showComparisons && <Button variant="quiet" onClick={onExplore}>Other passage matches not included in readiness</Button>}
-      <section className="signal-document-readiness-card" aria-labelledby="readiness-card-heading">
-        <p className="signal-section-kicker">After the evidence</p>
-        <h3 id="readiness-card-heading">Readiness and decision</h3>
-        <dl>
-          <div><dt>{unconfirmedAutomaticRuleRows(report.results).length ? "Saved readiness band" : "System readiness"}</dt><dd><ReadinessBand status={report.status} /></dd></div>
-          <div><dt>Criteria needing judgment</dt><dd>{report.pending_review_count}</dd></div>
-          <div><dt>Open integrity findings</dt><dd>{collection.state === "success" ? open.length : findings.length > 0 ? `Last loaded: ${open.length}` : "Not confirmed"}</dd></div>
-          <div><dt>Instructor decision</dt><dd>{report.decision ? DECISION_LABEL[report.decision] : "Not recorded"}</dd></div>
-        </dl>
-        <RuleScopeSummary rows={report.results} checkRunId={report.check_run_id} />
-        <div className="signal-document-readiness-card__actions"><Button variant="secondary" onClick={() => onDecision("readiness")}>Review readiness and decision</Button></div>
-      </section>
     </div>
   );
 }
@@ -364,20 +348,19 @@ function ReportUnavailable({ checkRunId, error, onRetry }: { checkRunId: number;
   return <Alert title="Could not load review details" tone="error" role="alert"><p>VERIDICAL could not load the recorded review. The source pane loads separately and may also need to be retried.</p><Button variant="secondary" onClick={onRetry}>Try review again</Button><ReviewDeskReturnLink variant="quiet">Return to Review Desk</ReviewDeskReturnLink></Alert>;
 }
 
-// The unresolved criteria sit at the top of this same view, so the decision
-// prompt only needs to bring them back into view.
-function focusEscalatedCriteria() {
-  const target = document.getElementById("escalated-heading");
-  target?.scrollIntoView({ block: "start" });
-  target?.focus({ preventScroll: true });
-}
+// Each step lands on its own heading so the new content is announced and in
+// view; the findings list has no fixed heading, so its step button is used.
+const STEP_FOCUS_TARGET: Record<ReportStep, string> = {
+  criteria: "escalated-heading", findings: "workspace-step-findings",
+  grades: "criteria-results-heading", decision: "analysis-heading",
+};
 
-function ReadinessDecision({ checkRunId, report: loadedReport, pending, error, retrying, onRetry, sourceTarget, onOpenSource, onOpenEvidenceSource, returnNotice }: { checkRunId: number; report: ReportOut | undefined; pending: boolean; retrying: boolean; error: unknown; onRetry: () => void; onBack: () => void; sourceTarget: CriterionSourceTarget; onOpenSource: CriterionSourceOpen; onOpenEvidenceSource: OpenEvidenceSource; returnNotice?: string }) {
+function ReadinessDecision({ checkRunId, step, report: loadedReport, pending, error, retrying, onRetry, onReviewCriteria, sourceTarget, onOpenSource, onOpenEvidenceSource, returnNotice }: { checkRunId: number; step: Exclude<ReportStep, "findings"> | null; report: ReportOut | undefined; pending: boolean; retrying: boolean; error: unknown; onRetry: () => void; onReviewCriteria: () => void; sourceTarget: CriterionSourceTarget; onOpenSource: CriterionSourceOpen; onOpenEvidenceSource: OpenEvidenceSource; returnNotice?: string }) {
   const [params] = useSearchParams();
   const selectedCriterion = params.has("criterion");
   const report = usableReport(loadedReport, checkRunId, error);
   const readFailed = Boolean(report && error);
-  if (pending && !report) return <div role="status" aria-live="polite" aria-busy="true" className="signal-desk-loading"><span>Loading readiness and decision.</span><i /><i /></div>;
+  if ((pending && !report) || (report && !step)) return <div role="status" aria-live="polite" aria-busy="true" className="signal-desk-loading"><span>Loading the review.</span><i /><i /></div>;
   if (!report) return <ReportUnavailable checkRunId={checkRunId} error={error} onRetry={onRetry} />;
 
   const identity = manuscriptIdentity(report.manuscript_group_label, report.manuscript_original_filename);
@@ -386,29 +369,37 @@ function ReadinessDecision({ checkRunId, report: loadedReport, pending, error, r
   return (
     <div className="signal-document-analysis">
       {readFailed && <ReportReadNotice retrying={retrying} onRetry={onRetry} />}
-      {returnNotice && <p role="status" className="signal-document-precision-note">{returnNotice}</p>}
-      <SignalEscalatedPanel checkRunId={report.check_run_id} sourceTarget={sourceTarget} onOpenSource={onOpenSource} onOpenEvidenceSource={onOpenEvidenceSource} />
-      {!selectedCriterion && <>
-      <details className="signal-document-analysis__criteria"><summary>Recorded criterion results, {criterionRecords.length} {criterionRecords.length === 1 ? "entry" : "entries"}</summary><SignalCriteriaResults results={criterionRecords} checkRunId={report.check_run_id} sourceTarget={sourceTarget} onOpenSource={onOpenSource} /></details>
+      {step && <WorkspaceStepHeading step={step} />}
+      {/* The criteria panel carries these notices itself; grades and the
+          decision must show the same AI-mode and evidence caveats. */}
+      {(step === "grades" || (step === "decision" && !selectedCriterion)) && <ReportAssessmentContext notices={reportAssessmentNotices(report, "manuscript")} />}
+      {step === "criteria" && <>
+        {returnNotice && <p role="status" className="signal-document-precision-note">{returnNotice}</p>}
+        <SignalEscalatedPanel checkRunId={report.check_run_id} sourceTarget={sourceTarget} onOpenSource={onOpenSource} onOpenEvidenceSource={onOpenEvidenceSource} />
+      </>}
+      {step === "grades" && <>
+        {returnNotice && <p role="status" className="signal-document-precision-note">{returnNotice}</p>}
+        <SignalCriteriaResults results={criterionRecords} checkRunId={report.check_run_id} sourceTarget={sourceTarget} onOpenSource={onOpenSource} />
+      </>}
+      {step === "decision" && !selectedCriterion && <>
       <section className="signal-document-analysis__summary" aria-labelledby="analysis-heading" aria-describedby={readFailed ? "report-read-failure" : undefined}>
-        <div className="signal-document-inspector__heading"><p className="signal-section-kicker">After the evidence</p><h2 id="analysis-heading" tabIndex={-1}>Readiness and decision</h2><p>Use this summary after reviewing the evidence. The instructor records the final decision.</p></div>
+        <div className="signal-document-inspector__heading"><h2 id="analysis-heading" tabIndex={-1}>Readiness</h2><p>VERIDICAL's readiness band comes from the recorded grades and findings. You record the final decision below.</p></div>
         <div className="signal-document-analysis__readiness">
           <div><span>{readFailed ? "Last loaded system readiness" : unconfirmedAutomaticRuleRows(report.results).length ? "Saved readiness band" : "System readiness"}</span><ReadinessBand status={report.status} /></div>
           <p>{report.reason ?? "This band comes from the recorded criterion outcomes and integrity findings."}</p>
           <RuleScopeSummary rows={report.results} checkRunId={report.check_run_id} />
-          <dl><div><dt>Criteria needing your judgment</dt><dd>{report.pending_review_count}</dd></div><div><dt>Open high-severity findings</dt><dd>{report.unresolved_high_flag_count}</dd></div><div><dt>Instructor decision</dt><dd>{report.decision ? DECISION_LABEL[report.decision] : "Not recorded"}</dd></div></dl>
           <p className="signal-field-hint">{identity.primary} was checked against {report.rubric_title}.</p>
         </div>
       </section>
-      {coverage.length > 0 && <CoverageStatement state="partial" headingId="workspace-coverage-heading" heading="Assessment limits" intro="Results below cover only the checks that ran. Unchecked content is not treated as passed. Check these parts in the manuscript yourself before you decide." items={coverage} />}
+      {coverage.length > 0 && <CoverageStatement state="partial" headingId="workspace-coverage-heading" kicker="Before you decide" heading="Assessment limits" intro="Results cover only the checks that ran. Unchecked content is not treated as passed. Check these parts in the manuscript yourself before you decide." items={coverage} />}
       <FigureReadingsSummary readings={report.figure_readings} checkRunId={checkRunId} />
-      <SignalDecisionPanel report={report} manuscriptLabel={identity.primary} readFailed={readFailed} retrying={retrying} onRetry={onRetry} onReviewCriteria={focusEscalatedCriteria} />
+      <SignalDecisionPanel report={report} manuscriptLabel={identity.primary} readFailed={readFailed} retrying={retrying} onRetry={onRetry} onReviewCriteria={onReviewCriteria} />
       </>}
     </div>
   );
 }
 
-function ReviewHome({ showComparisons = true, checkRunId, report, reportPending, reportRetrying, reportError, onReportRetry, findings, regions, sourceAvailability, collection, viewedIds, onFlagsRetry, filter, invalidSelection, onFilter, onSelect, onExplore, onDecision }: {
+function ReviewHome({ showComparisons = true, checkRunId, report, reportPending, reportRetrying, reportError, onReportRetry, findings, regions, sourceAvailability, collection, viewedIds, onFlagsRetry, filter, invalidSelection, onFilter, onSelect, onExplore }: {
   showComparisons?: boolean;
   checkRunId: number;
   report: ReportOut | undefined;
@@ -427,12 +418,11 @@ function ReviewHome({ showComparisons = true, checkRunId, report, reportPending,
   onFilter: (filter: ReviewFilter) => void;
   onSelect: (id: number) => void;
   onExplore: () => void;
-  onDecision: (target: "criteria" | "readiness") => void;
 }) {
   if (reportPending) return <div role="status" aria-live="polite" aria-busy="true" className="signal-desk-loading"><span>Loading review queue.</span><i /><i /></div>;
   const availableReport = usableReport(report, checkRunId, reportError);
   if (!availableReport) return <ReportUnavailable checkRunId={checkRunId} error={reportError} onRetry={onReportRetry} />;
-  return <>{Boolean(reportError) && <ReportReadNotice retrying={reportRetrying} onRetry={onReportRetry} />}<ReviewQueue showComparisons={showComparisons} findings={findings} regions={regions} sourceAvailability={sourceAvailability} report={availableReport} collection={collection} viewedIds={viewedIds} onRetry={onFlagsRetry} filter={filter} invalidSelection={invalidSelection} onFilter={onFilter} onSelect={onSelect} onExplore={onExplore} onDecision={onDecision} /></>;
+  return <>{Boolean(reportError) && <ReportReadNotice retrying={reportRetrying} onRetry={onReportRetry} />}<ReviewQueue showComparisons={showComparisons} findings={findings} regions={regions} sourceAvailability={sourceAvailability} report={availableReport} collection={collection} viewedIds={viewedIds} onRetry={onFlagsRetry} filter={filter} invalidSelection={invalidSelection} onFilter={onFilter} onSelect={onSelect} onExplore={onExplore} /></>;
 }
 
 export function SignalDocumentViewerPage() {
@@ -448,7 +438,6 @@ export function SignalDocumentViewerPage() {
   const parsedAnchorRegion = criterionAnchorRegion(recordedAnchor);
   const view = searchParams.get("view");
   const isExploring = view === "matches" || searchParams.get("panel") === "explore";
-  const isDecision = !isExploring && view === "decision";
   const includeReferenceList = searchParams.get("ref") === "1";
   const includeBlockQuote = searchParams.get("quote") === "1";
   const expandedMatchId = searchParams.get("match");
@@ -547,6 +536,15 @@ export function SignalDocumentViewerPage() {
     data: flags, error: flagsQuery.error, fetchStatus: flagsQuery.fetchStatus, isError: flagsQuery.isError, isSuccess: flagsQuery.isSuccess,
   }), [id, flags, flagsQuery.error, flagsQuery.fetchStatus, flagsQuery.isError, flagsQuery.isSuccess]);
   const numbersByFlagId = useMemo(() => findingNumberByFlagId(findings), [findings]);
+  const stepReport = usableReport(reportQuery.data, id, reportQuery.error);
+  const openFindingCount = flags ? otherFindings.filter((finding) => !finding.isResolved).length : undefined;
+  // Wait for the findings before choosing a default step only when no
+  // criterion is waiting, because only then can the findings change it.
+  const step = workspaceStep(searchParams, !stepReport ? undefined
+    : stepReport.pending_review_count > 0 ? { pendingCriteria: stepReport.pending_review_count, openFindings: 0 }
+    : flagsQuery.isPending ? undefined
+    : { pendingCriteria: 0, openFindings: openFindingCount ?? stepReport.unresolved_high_flag_count });
+  const isDecision = !isExploring && step !== "findings";
   const selectedFinding = isDecision ? null : findingForFlag(findings, requestedFlagId);
   const selectedModule = selectedIntegrityModule(selectedFinding?.representative.check_kind ?? searchParams.get("module") ?? findings[0]?.representative.check_kind ?? null);
   const moduleFindings = otherFindings.filter(finding => finding.representative.check_kind === selectedModule);
@@ -887,18 +885,17 @@ export function SignalDocumentViewerPage() {
     });
   }
 
-  function openDecision(target: "criteria" | "readiness") {
+  function goToStep(target: ReportStep) {
+    restoreQueueRef.current = false;
+    // A new step starts at its own top, not at the previous step's scroll depth.
+    if (inspectorRef.current) inspectorRef.current.scrollTop = 0;
     const next = taskParameters((next) => {
-      next.set("view", "decision");
+      next.set("view", target === "findings" ? "queue" : "decision");
+      if (target === "findings") next.delete(WORKSPACE_STEP_PARAM); else next.set(WORKSPACE_STEP_PARAM, target);
       next.set("pane", "review");
-      next.delete("finding");
-      next.delete("flag");
-      next.delete("location");
-      next.delete("anchor");
-      next.delete("panel");
-      next.delete("match");
+      for (const key of ["finding", "flag", "location", "anchor", "panel", "match"]) next.delete(key);
     });
-    ownLeadContinuation(next, target === "criteria" ? "escalated-heading" : "analysis-heading");
+    ownLeadContinuation(next, STEP_FOCUS_TARGET[target]);
     setSearchParams(next);
   }
 
@@ -1014,9 +1011,9 @@ export function SignalDocumentViewerPage() {
       {!validId ? <Alert title="This manuscript address is invalid" tone="error" role="alert"><ReviewDeskReturnLink variant="secondary">Return to Review Desk</ReviewDeskReturnLink></Alert>
         : (<>
           {modeRecord && <FindingModeDisclosure id={modeDisclosureId} mode={modeRecord.llm_mode} registry={isCitationMetadataFinding(modeRecord)} />}
-          {/* On the findings list itself this control would do nothing, and
-              "review queue" was easy to confuse with the Review Desk. */}
-          {(isDecision || isExploring || selectedFinding) && <nav aria-label="Workspace return"><Button variant="quiet" onClick={showQueue}>{isDecision ? "Review integrity findings" : "Back to findings list"}</Button></nav>}
+          {/* The step navigation covers every other move; only a finding or
+              the match explorer needs a way back to its list. */}
+          {(isExploring || selectedFinding) && <nav aria-label="Workspace return"><Button variant="quiet" onClick={showQueue}>Back to findings list</Button></nav>}
           <section ref={workspace.frame} className="signal-document-workbench" aria-label="Manuscript and review" aria-describedby={modeRecord ? modeDisclosureId : undefined} data-layout={workspace.split ? "split" : "single"} data-reading={fullWidthReading ? "full" : undefined} data-source-available={viewer?.available === false ? "false" : "true"}>
             <span ref={workspace.threshold} className="signal-review-workspace-threshold" aria-hidden="true" />
             <div role="tablist" aria-label="Manuscript review view" className="signal-document-tabs">
@@ -1049,6 +1046,10 @@ export function SignalDocumentViewerPage() {
                 </div>
               </div>
               <aside ref={inspectorRef} tabIndex={-1} id="review-panel" role="tabpanel" aria-labelledby="review-tab" data-active={activeTab === "review"} className="signal-document-inspector">
+                <WorkspaceStepNavigation current={step} onSelect={goToStep} counts={{
+                  pendingCriteria: stepReport?.pending_review_count, openFindings: openFindingCount,
+                  recordedGrades: stepReport?.results.filter((row) => row.outcome !== "escalated").length, decision: stepReport ? stepReport.decision : undefined }} />
+                {!isExploring && !isDecision && !selectedFinding && <WorkspaceStepHeading step="findings" />}
                 {!isExploring && !isDecision && <div className="signal-document-module-overview">
                   <IntegrityModuleNavigation selected={selectedModule} controls="workspace-module-records" modules={reportQuery.data?.integrity_modules}
                     counts={new Map(["internal_agreement", "citation_integrity", "statistical_forensics", "originality_reuse"].map(kind => [kind, flags?.filter(flag => flag.check_kind === kind).length ?? 0]))}
@@ -1059,11 +1060,12 @@ export function SignalDocumentViewerPage() {
                 </div>}
                 <div id="workspace-module-records">
                 {isExploring ? <ReuseExplorePanel showBack={false} flags={flags} flagsFetching={flagsQuery.isFetching} flagsError={flagsQuery.isError} flagsSucceeded={flagsQuery.isSuccess} onRetryFlags={() => flagsQuery.refetch()} onSelectFlag={selectFinding} onBack={showQueue} includeReferenceList={includeReferenceList} includeBlockQuote={includeBlockQuote} onToggleReferenceList={(value) => setToggle("ref", value)} onToggleBlockQuote={(value) => setToggle("quote", value)} excludedMatchesQuery={excludedMatchesQuery} expandedMatchId={expandedMatchId} onExpandMatch={setMatch} />
-                  : isDecision ? <ReadinessDecision checkRunId={id} report={reportQuery.data} pending={reportQuery.isPending} error={reportQuery.error} retrying={reportQuery.fetchStatus === "fetching"} onRetry={() => reportQuery.refetch()} onBack={showQueue} sourceTarget={criterionSourceTarget} onOpenSource={openCriterionSource} onOpenEvidenceSource={openRecordedCriterionSource}
+                  : isDecision ? <ReadinessDecision checkRunId={id} step={step === "findings" ? null : step} report={reportQuery.data} pending={reportQuery.isPending} error={reportQuery.error} retrying={reportQuery.fetchStatus === "fetching"} onRetry={() => reportQuery.refetch()} onReviewCriteria={() => goToStep("criteria")} sourceTarget={criterionSourceTarget} onOpenSource={openCriterionSource} onOpenEvidenceSource={openRecordedCriterionSource}
                     returnNotice={criterionReturnNotice?.run === id && criterionReturnNotice.search === sourceQuery ? criterionReturnNotice.message : undefined} />
                     : selectedFinding && selectedLocationId ? <SelectedFinding comparisonHost={comparisonHost} comparisonVisible={workspace.split || activeTab === "manuscript"} onRevealSource={selectedRegion?.kind === "paragraph_only" ? revealRecordedLocation : undefined} activeStatement={statementTarget?.run === id && statementTarget.flag === selectedLocationId ? statementTarget.role : undefined} onRecordReady={setSelectedRecord} onStatementSource={showStatementSource} fullWidth={fullWidthReading} singlePane={singlePaneLayout} onReadingChange={changeReading} finding={selectedFinding} total={otherFindings.length} locationFlagId={selectedLocationId} region={selectedRegion} sourceAvailability={sourceAvailability} sourceAnchor={recordedAnchor} previous={previousFinding} next={nextFinding} collection={optional} outsideFilter={selectedComparison && selectedNavigationIndex < 0 && optional.snapshot !== undefined} filterPosition={selectedNavigationIndex + 1} filterTotal={navigationFindings.length} onAll={() => update((next) => { next.delete("lead_view"); next.delete("lead_visible"); next.delete("lead_return"); next.set("lead_page", String(Math.floor((optional.snapshot?.records.findIndex((record) => record.id === selectedLocationId) ?? 0) / COMPARISON_LEAD_PAGE_SIZE) + 1)); }, true)} onBack={showQueue} onPrevious={() => previousFinding && selectFinding(previousFinding.representative.id, true)} onNext={() => nextFinding && selectFinding(nextFinding.representative.id, true)} onLocation={selectFinding} onExplore={openExplore} />
-                      : <ReviewHome showComparisons={selectedModule === "originality_reuse"} checkRunId={id} report={reportQuery.data} reportPending={reportQuery.isPending} reportRetrying={reportQuery.fetchStatus === "fetching"} reportError={reportQuery.error} onReportRetry={() => reportQuery.refetch()} findings={moduleFindings} regions={viewer?.regions ?? []} sourceAvailability={sourceAvailability} collection={optional} viewedIds={viewedIds} onFlagsRetry={() => { void flagsQuery.refetch(); }} filter={filter} invalidSelection={invalidSelection} onFilter={setFilter} onSelect={selectFinding} onExplore={openExplore} onDecision={openDecision} />}
+                      : <ReviewHome showComparisons={selectedModule === "originality_reuse"} checkRunId={id} report={reportQuery.data} reportPending={reportQuery.isPending} reportRetrying={reportQuery.fetchStatus === "fetching"} reportError={reportQuery.error} onReportRetry={() => reportQuery.refetch()} findings={moduleFindings} regions={viewer?.regions ?? []} sourceAvailability={sourceAvailability} collection={optional} viewedIds={viewedIds} onFlagsRetry={() => { void flagsQuery.refetch(); }} filter={filter} invalidSelection={invalidSelection} onFilter={setFilter} onSelect={selectFinding} onExplore={openExplore} />}
                 </div>
+                {step && !isExploring && !selectedFinding && !searchParams.has("criterion") && <WorkspaceStepFooter current={step} onSelect={goToStep} />}
               </aside>
             </div>
           </section>

@@ -7,7 +7,8 @@ import { CriterionSourceCoverage } from "./CriterionSourceCoverage";
 import { RuleFactsDetails } from "./RuleFactsDetails";
 import { RuleScopeNotice } from "./RuleScopeNotice";
 import { coverageItems } from "./reportCoverage";
-import { focusReportSection } from "./reportSectionNavigation";
+import { focusAfterStepChange } from "./reportSectionNavigation";
+import { workspaceStepPath } from "./reviewStep";
 import { pendingAssessmentRow } from "./pendingAssessmentRow";
 import { clearPdfReading } from "../document/usePdfPageText";
 import { recoverableReadError } from "./reportReadState";
@@ -715,7 +716,7 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, sourceTarget, 
         )}
         {assessment?.ruleScopeUnconfirmed && <RuleScopeNotice />}
         {assessment?.sourceCoverage && <CriterionSourceCoverage value={assessment.sourceCoverage} sourceAction={coverageSourceAction} firstSlot={item.evidence?.length ?? 0} criterionText={item.criterion_text} />}
-        {reportHasLimits && <p className="signal-field-hint"><ActionLink to={{ pathname: `/report/${checkRunId}`, search: location.search, hash: "coverage-statement-heading" }} variant="quiet" onClick={event => focusReportSection(event, location, "coverage-statement-heading")}>Review assessment limits</ActionLink></p>}
+        {reportHasLimits && <p className="signal-field-hint"><ActionLink to={workspaceStepPath(checkRunId, "decision")} variant="quiet" onClick={event => focusAfterStepChange(event, "workspace-coverage-heading")}>Review assessment limits</ActionLink></p>}
         {assessment?.ruleFacts && <RuleFactsDetails facts={assessment.ruleFacts} />}
         {item.reasoning?.trim() && <div className="signal-resolution-context-note"><h4>Assessment and explanation</h4><strong>{assessment?.explanationLabel ?? "Recorded explanation:"}</strong><p>{item.reasoning}</p></div>}
         <Button variant="quiet" aria-expanded={detailsOpen} aria-controls={detailsId}
@@ -752,10 +753,7 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, sourceTarget, 
             {!draftCurrent && !saving && <div className="signal-copy-flow">
               <strong>{review.decision ? "Recorded decision: review is read-only" : "Current review required"}</strong>
               {review.decision ? <><p>Reopen the decision before reviewing this draft.</p>
-                <ActionLink variant="secondary" to={`/report/${checkRunId}#final-decision`} onClick={() => {
-                  const target = document.getElementById("decision-heading");
-                  target?.focus(); target?.scrollIntoView({ block: "nearest" });
-                }}>Go to the recorded decision</ActionLink></>
+                <ActionLink variant="secondary" to={workspaceStepPath(checkRunId, "decision")} onClick={event => focusAfterStepChange(event, "decision-heading")}>Go to the recorded decision</ActionLink></>
                 : <><p>Review the current criterion before using this draft. Confirming remains a separate step.</p>
                   <Button variant="secondary" onClick={() => review.reviewCurrent(item.check_result_id)}>Review current criterion</Button></>}
               {review.canUseCurrentDraft(pending) && <><p>The current criterion and its evidence are shown above. This report is open for instructor review.</p>
@@ -1058,10 +1056,13 @@ export function SignalPublicFlags({
   );
 }
 
-export function SignalCriteriaResults({ results, checkRunId, publicView = false, sourceTarget, onOpenSource, renderEvidence, publicSelection }: {
+// `readOnly` is the readiness report's record view: grades are shown but
+// changed only in manuscript review, beside the manuscript.
+export function SignalCriteriaResults({ results, checkRunId, publicView = false, readOnly = false, sourceTarget, onOpenSource, renderEvidence, publicSelection }: {
   results: ResultRowCommon[];
   checkRunId: number;
   publicView?: boolean;
+  readOnly?: boolean;
   sourceTarget?: CriterionSourceTarget;
   onOpenSource?: CriterionSourceOpen;
   renderEvidence?: (row: ResultRowCommon) => ReactNode;
@@ -1086,6 +1087,7 @@ export function SignalCriteriaResults({ results, checkRunId, publicView = false,
       <div className={publicSelection ? "sr-only" : "signal-review-section__heading"}><div><p className="signal-section-kicker">Criterion record</p><h2 id="criteria-results-heading" tabIndex={-1}>Criterion records</h2></div><span>{publicSelection ? `Criterion ${publicSelection.position} of ${publicSelection.total}` : updating ? "Recorded results updating" : `${rows.length} ${rows.length === 1 ? "record" : "records"}`}</span></div>
       <p className={publicSelection ? "sr-only" : "signal-review-section__intro"}>{publicSelection ? "The selected criterion's recorded assessment and saved evidence are shown below." : "Each row shows the recorded status and any available evidence."} A criterion marked Not assessed has no assessment result. Importance is shown as Low, Medium or High.</p>
       {privateScope && <SavedCriterionDestination checkRunId={checkRunId} results={rows} />}
+      {readOnly && !publicView && rows.length > 0 && <p className="signal-field-hint">To change a grade, open it in manuscript review. <ActionLink to={workspaceStepPath(checkRunId, "grades")} variant="quiet">Change grades in manuscript review</ActionLink></p>}
       {rows.length ? <ol className="signal-result-list">{rows.map((row, index) => {
         if (privateScope && review.revisions.records.get(row.criterion_id)?.unavailable) {
           return <li key={row.criterion_id} className="signal-result-card"><div className="signal-result-card__top" />
@@ -1140,7 +1142,7 @@ export function SignalCriteriaResults({ results, checkRunId, publicView = false,
                 links/buttons list can't tell them apart without a per-criterion
                 accessible name, same fix already applied to the flag "Review
                 evidence" links and the escalation resolve-button groups. */}
-              {privateScope && (row.resolution || (row.type !== "not_assessable" && (row as CriterionResultOut).judgment_revision == null
+              {privateScope && !readOnly && (row.resolution || (row.type !== "not_assessable" && (row as CriterionResultOut).judgment_revision == null
                 && ["structural", "semantic"].includes(row.kind) && ["passed", "failed"].includes(row.outcome)))
                 && <RecordedJudgmentTools checkRunId={checkRunId} criterionId={row.criterion_id} criterionText={row.text} canonical={row} />}
               {assessment.ruleScopeUnconfirmed && assessment.instructorRecorded && <RuleScopeNotice earlier />}
