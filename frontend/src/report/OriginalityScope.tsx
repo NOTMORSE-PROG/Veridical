@@ -6,6 +6,7 @@ import type { OriginalityScope as Scope } from "../api/types";
 import { ActionLink } from "../ui/ActionLink";
 import { Alert } from "../ui/Alert";
 import { LibraryPassageScope } from "./LibraryPassageScope";
+import { ORIGINALITY_NOT_COMPARED } from "./originalityCoverage";
 
 export function OriginalityScope({
   scope,
@@ -17,6 +18,9 @@ export function OriginalityScope({
   if (!scope) return null;
   if (scope.not_compared_reason === "source_unresolved") {
     return <p className="signal-originality-scope">Originality and reuse: not assessed because the manuscript could not be read reliably. The original paper is still available.</p>;
+  }
+  if (scope.not_compared_reason === "reference_boundary_unclear") {
+    return <p className="signal-originality-scope">{ORIGINALITY_NOT_COMPARED.boundaryScope}</p>;
   }
   if (scope.not_compared_reason === "no_text") {
     return (

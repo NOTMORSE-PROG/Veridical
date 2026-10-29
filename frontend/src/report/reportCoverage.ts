@@ -6,6 +6,7 @@ import { nativeMathCoverageItem } from "./nativeMathCoverage";
 import { NATIVE_MATH_HISTORY_TITLE, NATIVE_MATH_HISTORY_LIMIT } from "../domain/nativeMathHistory";
 import { CITATION_HISTORY_REPORT_LIMIT, CITATION_HISTORY_TITLE } from "../domain/citationHistory";
 import { descriptiveAssumptionLimit } from "./statisticalScopeCopy";
+import { originalityNotComparedDetail } from "./originalityCoverage";
 
 const INTEGRITY_LABEL: Record<IntegrityCheckStatusOut["check_kind"], string> = {
   internal_agreement: "Internal agreement",
@@ -69,6 +70,9 @@ function baseIntegrityCoverageItem(status: IntegrityCheckStatusOut, manuscriptId
       ],
     };
   }
+  // Deterministic originality limits: say what was not compared, no rerun.
+  const notCompared = originalityNotComparedDetail(status);
+  if (notCompared) return { key: `${status.check_kind}:${reason}`, label: `${label} · ${reason === "reference_boundary_unclear" ? "Not compared" : "Partly compared"}`, detail: notCompared };
   const coverageCopy: Record<string, string> = {
     ai_not_configured: "AI-dependent parts of this check were not assessed because no usable AI configuration was available. Any independently completed results remain available. Unassessed comparisons or claims are not treated as passed. This is a system limit, not a finding against the manuscript.",
     ai_key_rejected: "AI-dependent parts of this check were not assessed because the configured AI key was rejected during an AI request and no applicable alternative completed that request. Any independently completed results remain available. Unassessed comparisons or claims are not treated as passed. This is a system limit, not a finding against the manuscript.",
@@ -122,7 +126,7 @@ function baseIntegrityCoverageItem(status: IntegrityCheckStatusOut, manuscriptId
       ? "a service interruption"
       : status.outcome === "quota_exhausted"
         ? "a free-capacity limit"
-        : "an unverifiable result";
+        : "a result it could not complete";
   const subIssues: string[] = [];
   if (unavailable > 0) subIssues.push(`${unavailable} item${unavailable === 1 ? "" : "s"} skipped because a service was unavailable.`);
   if (capacity > 0) subIssues.push(`${capacity} item${capacity === 1 ? "" : "s"} skipped because daily AI capacity was spent.`);
