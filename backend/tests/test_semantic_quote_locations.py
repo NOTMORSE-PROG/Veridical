@@ -64,3 +64,21 @@ def test_substring_elsewhere_does_not_silently_win_over_later_heading():
 @pytest.mark.parametrize("quote", ["", "   ", "Not in source"])
 def test_missing_or_empty_quote_remains_rejected(quote):
     assert _verify_quotes([quote], [block("Recorded passage", page=3)], "page") is None
+
+
+def test_trailing_ellipsis_stripped_when_matching_source():
+    blocks = [block("This is an exact quotation from the manuscript.", page=4)]
+    assert _verify_quotes(
+        ["This is an exact quotation from the manuscript..."], blocks, "page"
+    ) == ["page 4"]
+    assert _verify_quotes(["This is an exact quotation from the manuscript…"], blocks, "page") == [
+        "page 4"
+    ]
+
+
+def test_toc_dot_leader_disambiguated_to_heading_page():
+    blocks = [
+        block("CHAPTER 1 INTRODUCTION.............................................6", page=2),
+        block("CHAPTER 1\nINTRODUCTION", page=6),
+    ]
+    assert _verify_quotes(["CHAPTER 1 INTRODUCTION"], blocks, "page") == ["page 6"]

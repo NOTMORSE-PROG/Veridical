@@ -257,23 +257,38 @@ def _verify_quotes(
             return None
         source_layouts = layouts
         if not any(normalized_quote in text for text, _spans in source_layouts):
+            stripped = re.sub(r"(\s*\.{3,}|\s*…)+$", "", normalized_quote).strip()
+            if stripped and any(stripped in text for text, _spans in source_layouts):
+                normalized_quote = stripped
+        if not any(normalized_quote in text for text, _spans in source_layouts):
             # Retain case-insensitive compatibility only when it identifies
             # one supported location. Exact source spelling takes precedence.
             if folded_layouts is None:
                 folded_layouts = [_normalized_layout(list(scope)) for scope in source_scopes]
             source_layouts = folded_layouts
             normalized_quote = normalized_quote.lower()
+            if not any(normalized_quote in text for text, _spans in source_layouts):
+                stripped = re.sub(r"(\s*\.{3,}|\s*…)+$", "", normalized_quote).strip()
+                if stripped and any(stripped in text for text, _spans in source_layouts):
+                    normalized_quote = stripped
         locations: set[str | None] = set()
+        non_toc_locations: set[str | None] = set()
         for source_text, source_spans in source_layouts:
             pos = source_text.find(normalized_quote)
             while pos != -1:
-                locations.add(_anchor_at_position(pos, source_spans, anchor_kind))
+                anchor = _anchor_at_position(pos, source_spans, anchor_kind)
+                locations.add(anchor)
+                q_end = pos + len(normalized_quote)
+                following = source_text[q_end : q_end + 30]
+                if not re.match(r"^\s*(\.{2,}|…+)", following):
+                    non_toc_locations.add(anchor)
                 pos = source_text.find(normalized_quote, pos + 1)
+        effective = non_toc_locations if len(non_toc_locations) == 1 else locations
         # Multiple occurrences on the same page support a page-only anchor,
         # not an exact rectangle. Never choose between different locations.
-        if len(locations) != 1 or None in locations:
+        if len(effective) != 1 or None in effective:
             return None
-        anchors.append(next(iter(locations)))
+        anchors.append(next(iter(effective)))
     return anchors
 
 
