@@ -133,7 +133,10 @@ function ReopenDialog({ report, onClose, onSaved, fallbackFocusRef, readFailed, 
   </Dialog>;
 }
 
-export function SignalDecisionPanel({ report, manuscriptLabel, readFailed, retrying, onRetry }: ReportReadRecovery & { report: ReportOut; manuscriptLabel: string }) {
+// A host that already shows the unresolved criteria on the same screen
+// passes `onReviewCriteria`, so the prompt moves focus there instead of
+// sending the instructor to the other review screen and back.
+export function SignalDecisionPanel({ report, manuscriptLabel, readFailed, retrying, onRetry, onReviewCriteria }: ReportReadRecovery & { report: ReportOut; manuscriptLabel: string; onReviewCriteria?: () => void }) {
   const location = useLocation();
   const criteriaSearch = new URLSearchParams(location.search);
   criteriaSearch.set("review_step", "criteria");
@@ -157,10 +160,12 @@ export function SignalDecisionPanel({ report, manuscriptLabel, readFailed, retry
       <Button variant="secondary" disabled={unavailable} onClick={() => setReopen(true)}>Reopen this decision</Button>
     </div> : <div className="signal-decision-choice">
       <p>VERIDICAL provides a readiness band and checkable evidence. You make the final decision after reviewing the full record above.</p>
-      {pending && <Alert title={`${report.pending_review_count} ${report.pending_review_count === 1 ? "criterion needs" : "criteria need"} your judgment`} tone="warning">You can return this manuscript for revision with a reason. Returning does not grade or exclude these criteria. Approval remains unavailable. <WorkflowLink to={{ pathname: `/report/${report.check_run_id}`, search: criteriaSearch.toString(), hash: "review-criteria" }} onClick={event => {
+      {pending && <Alert title={`${report.pending_review_count} ${report.pending_review_count === 1 ? "criterion needs" : "criteria need"} your judgment`} tone="warning">You can return this manuscript for revision with a reason. Returning does not grade or exclude these criteria. Approval remains unavailable. {onReviewCriteria
+        ? <Button variant="quiet" onClick={onReviewCriteria}>Review unresolved criteria</Button>
+        : <WorkflowLink to={{ pathname: `/report/${report.check_run_id}`, search: criteriaSearch.toString(), hash: "review-criteria" }} onClick={event => {
         if (event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
         requestAnimationFrame(() => { const target = document.getElementById("review-criteria"); target?.scrollIntoView({ block: "start" }); target?.focus({ preventScroll: true }); });
-      }}>Review unresolved criteria.</WorkflowLink></Alert>}
+      }}>Review unresolved criteria.</WorkflowLink>}</Alert>}
       <div className="signal-decision-choice__actions">
         <Button variant="brand" disabled={pending || unavailable} onClick={() => setOpenDecision("approved")}>Approve for defense</Button>
         <Button variant="secondary" disabled={unavailable} onClick={() => setOpenDecision("returned")}>Return for revision</Button>

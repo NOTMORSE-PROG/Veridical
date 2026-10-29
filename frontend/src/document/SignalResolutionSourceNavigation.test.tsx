@@ -44,7 +44,7 @@ it("retires a saved destination when explicitly returning to unresolved criteria
   const control = await setup({ open: false, saved: true });
   const view = await screen.findByRole("button", { name: "View saved judgments (1)" }); view.focus(); fireEvent.click(view);
   await waitFor(() => expect(control.router.state.location.search).toContain("criterion_record=all"));
-  const queue = screen.getByRole("button", { name: "Back to review queue" }); queue.focus(); fireEvent.click(queue);
+  const queue = screen.getByRole("button", { name: "Review integrity findings" }); queue.focus(); fireEvent.click(queue);
   await screen.findByRole("button", { name: "Review criteria" });
   expect(control.router.state.location.search).not.toContain("criterion_record");
   const criteria = screen.getByRole("button", { name: "Review criteria" }); criteria.focus(); fireEvent.click(criteria);
@@ -140,7 +140,7 @@ async function setup({ origin = ORIGIN, open = true, drafts: makeDrafts = true, 
   }
   async function readDraft(id: number) {
     if (router.state.location.pathname === "/report/5" && new URLSearchParams(router.state.location.search).get("review_step") === "grades") {
-      fireEvent.click(screen.getByRole("link", { name: "Open manuscript" }));
+      fireEvent.click(screen.getByRole("link", { name: "Open manuscript review" }));
       await waitFor(() => expect(router.state.location.pathname).toBe("/report/5/document"));
     }
     await select(id);
@@ -184,7 +184,7 @@ afterEach(() => { clearRouteReturnFocus("signal-saved-source-"); clearRouteRetur
 it("retires a source return on an explicit queue task before delayed source data and Back", async () => {
   const control = await setup();
   const list = screen.getByRole("link", { name: "Back to criteria" }); list.focus(); fireEvent.click(list);
-  const queue = screen.getByRole("button", { name: "Back to review queue" }); queue.focus(); fireEvent.click(queue);
+  const queue = screen.getByRole("button", { name: "Review integrity findings" }); queue.focus(); fireEvent.click(queue);
   const criteria = await screen.findByRole("button", { name: "Review criteria" }); criteria.focus();
   await act(async () => control.release(PARAGRAPHS));
   expect(criteria).toHaveFocus();
@@ -488,7 +488,7 @@ it.each(["none", "wheel", "focus"])("waits beyond the ordinary timeout for revie
   const back = screen.getByRole("link", { name: /^Return to criterion review(?:: Criterion 1)?$/ }); back.focus(); fireEvent.click(back);
   await waitFor(() => expect(control.router.state.location.pathname).toBe("/report/5"));
   if (intent === "wheel") fireEvent.wheel(window);
-  const other = screen.getByRole("link", { name: "Open manuscript" });
+  const other = screen.getByRole("link", { name: "Open manuscript review" });
   if (intent === "focus") other.focus();
   const previousFocus = document.activeElement;
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 600)); });

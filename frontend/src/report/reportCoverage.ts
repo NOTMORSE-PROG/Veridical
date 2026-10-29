@@ -29,7 +29,6 @@ function integrityCoverageItem(status: IntegrityCheckStatusOut, manuscriptId: nu
       label: `${label} · ${status.analysis_coverage === "partial" ? "Partially assessed" : "Not assessed"}`,
       detail,
       subIssues: [notationCopy.limit],
-      action: { to: `/report/${checkRunId}/document?view=decision`, label: "Open the paper" },
     };
   }
   const existing = baseIntegrityCoverageItem(status, manuscriptId, checkRunId);
@@ -68,7 +67,6 @@ function baseIntegrityCoverageItem(status: IntegrityCheckStatusOut, manuscriptId
         ...(status.n_metadata_api_down ? [`${status.n_metadata_api_down} source checks could not reach an external service.`] : []),
         "Claim support across the manuscript was not assessed. Unchecked content is not treated as passed.",
       ],
-      action: { to: `/report/${checkRunId}/document?view=decision`, label: "Open the paper" },
     };
   }
   const coverageCopy: Record<string, string> = {
@@ -112,7 +110,6 @@ function baseIntegrityCoverageItem(status: IntegrityCheckStatusOut, manuscriptId
       subIssues: [...subIssues, ...(imageDetails?.subIssues ?? []), ...(native?.subIssues ?? [])],
       sources: [...(imageDetails?.sources ?? []), ...(native?.sources ?? [])],
       detailsLabel: native ? "source assessment details" : imageDetails ? "source and image assessment details" : undefined,
-      action: { to: `/report/${checkRunId}/document?view=decision`, label: "Open the paper" },
     };
   }
   const unavailable = status.n_skipped_api_down;
@@ -145,8 +142,7 @@ export function coverageItems(report: ReportOut): CoverageStatementItem[] {
   const items: CoverageStatementItem[] = [];
   const descriptiveLimit = descriptiveAssumptionLimit(report.statistical_check_scope);
   if (descriptiveLimit) items.push({ key: "statistical_descriptive_assumptions", label: "Statistical forensics · Partially assessed",
-    detail: descriptiveLimit,
-    action: { to: `/report/${report.check_run_id}/document?view=decision`, label: "Open the paper" } });
+    detail: descriptiveLimit });
   if (report.historical_native_math_unverified) {
     items.push({ key: "historical_native_math_unverified", label: NATIVE_MATH_HISTORY_TITLE, detail: NATIVE_MATH_HISTORY_LIMIT });
   }

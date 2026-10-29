@@ -226,7 +226,7 @@ describe("optional comparison workspace navigation", () => {
   it("returns a record beyond the first batch to its exact row with stable ordinal", async () => {
     setup("&view=finding&finding=69");
     await screen.findByText("Actual stored reasoning");
-    const back = screen.getByRole("button", { name: "Back to review queue" }); back.focus(); fireEvent.click(back);
+    const back = screen.getByRole("button", { name: "Back to findings list" }); back.focus(); fireEvent.click(back);
     const row = await screen.findByRole("button", { name: /^Review evidence for Comparison lead 31 of 31\. Record #69\./ });
     expect(row).toHaveFocus();
     expect(screen.getAllByRole("button", { name: /Review evidence for Comparison lead/ })).toHaveLength(7);

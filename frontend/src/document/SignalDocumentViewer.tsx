@@ -197,7 +197,7 @@ function ReviewQueue({ findings, regions, sourceAvailability, report, collection
           <div><dt>Instructor decision</dt><dd>{report.decision ? DECISION_LABEL[report.decision] : "Not recorded"}</dd></div>
         </dl>
         <RuleScopeSummary rows={report.results} checkRunId={report.check_run_id} />
-        <div className="signal-document-readiness-card__actions"><Button variant="secondary" onClick={() => onDecision("readiness")}>Review readiness and decision</Button><ActionLink to={`/report/${report.check_run_id}`} variant="quiet">Open full readiness report</ActionLink></div>
+        <div className="signal-document-readiness-card__actions"><Button variant="secondary" onClick={() => onDecision("readiness")}>Review readiness and decision</Button></div>
       </section>
     </div>
   );
@@ -364,6 +364,14 @@ function ReportUnavailable({ checkRunId, error, onRetry }: { checkRunId: number;
   return <Alert title="Could not load review details" tone="error" role="alert"><p>VERIDICAL could not load the recorded review. The source pane loads separately and may also need to be retried.</p><Button variant="secondary" onClick={onRetry}>Try review again</Button><ReviewDeskReturnLink variant="quiet">Return to Review Desk</ReviewDeskReturnLink></Alert>;
 }
 
+// The unresolved criteria sit at the top of this same view, so the decision
+// prompt only needs to bring them back into view.
+function focusEscalatedCriteria() {
+  const target = document.getElementById("escalated-heading");
+  target?.scrollIntoView({ block: "start" });
+  target?.focus({ preventScroll: true });
+}
+
 function ReadinessDecision({ checkRunId, report: loadedReport, pending, error, retrying, onRetry, sourceTarget, onOpenSource, onOpenEvidenceSource, returnNotice }: { checkRunId: number; report: ReportOut | undefined; pending: boolean; retrying: boolean; error: unknown; onRetry: () => void; onBack: () => void; sourceTarget: CriterionSourceTarget; onOpenSource: CriterionSourceOpen; onOpenEvidenceSource: OpenEvidenceSource; returnNotice?: string }) {
   const [params] = useSearchParams();
   const selectedCriterion = params.has("criterion");
@@ -390,13 +398,11 @@ function ReadinessDecision({ checkRunId, report: loadedReport, pending, error, r
           <RuleScopeSummary rows={report.results} checkRunId={report.check_run_id} />
           <dl><div><dt>Criteria needing your judgment</dt><dd>{report.pending_review_count}</dd></div><div><dt>Open high-severity findings</dt><dd>{report.unresolved_high_flag_count}</dd></div><div><dt>Instructor decision</dt><dd>{report.decision ? DECISION_LABEL[report.decision] : "Not recorded"}</dd></div></dl>
           <p className="signal-field-hint">{identity.primary} was checked against {report.rubric_title}.</p>
-          <ActionLink to={`/report/${report.check_run_id}`} variant="secondary">Open full readiness report</ActionLink>
         </div>
       </section>
-      {coverage.length > 0 && <CoverageStatement state="partial" headingId="workspace-coverage-heading" heading="Assessment limits" intro="Results below cover only the checks that ran. Unchecked content is not treated as passed." items={coverage} />}
+      {coverage.length > 0 && <CoverageStatement state="partial" headingId="workspace-coverage-heading" heading="Assessment limits" intro="Results below cover only the checks that ran. Unchecked content is not treated as passed. Check these parts in the manuscript yourself before you decide." items={coverage} />}
       <FigureReadingsSummary readings={report.figure_readings} checkRunId={checkRunId} />
-      <SignalDecisionPanel report={report} manuscriptLabel={identity.primary} readFailed={readFailed} retrying={retrying} onRetry={onRetry} />
-      <div className="signal-document-analysis__footer"><ActionLink to={`/report/${report.check_run_id}`} variant="secondary">Open full readiness report</ActionLink></div>
+      <SignalDecisionPanel report={report} manuscriptLabel={identity.primary} readFailed={readFailed} retrying={retrying} onRetry={onRetry} onReviewCriteria={focusEscalatedCriteria} />
       </>}
     </div>
   );
@@ -1002,13 +1008,15 @@ export function SignalDocumentViewerPage() {
     <div className="signal-route signal-page-flow signal-document-viewer">
       <header className="signal-route-header signal-document-header">
         <div><nav aria-label="Breadcrumb"><ReviewDeskReturnLink>Review Desk</ReviewDeskReturnLink><span aria-hidden="true">/</span><span>Manuscript review</span></nav><h1 ref={headingRef} tabIndex={-1}>Manuscript review</h1>{viewer?.original_filename && <p className="signal-route-header__intro">{viewer.original_filename}</p>}</div>
-        {validId && <ActionLink to={`/report/${id}`} variant="secondary">Open full readiness report</ActionLink>}
+        {validId && <ActionLink to={`/report/${id}`} variant="secondary">Open readiness report</ActionLink>}
       </header>
 
       {!validId ? <Alert title="This manuscript address is invalid" tone="error" role="alert"><ReviewDeskReturnLink variant="secondary">Return to Review Desk</ReviewDeskReturnLink></Alert>
         : (<>
           {modeRecord && <FindingModeDisclosure id={modeDisclosureId} mode={modeRecord.llm_mode} registry={isCitationMetadataFinding(modeRecord)} />}
-          <nav aria-label="Workspace return"><Button variant="quiet" onClick={showQueue}>Back to review queue</Button></nav>
+          {/* On the findings list itself this control would do nothing, and
+              "review queue" was easy to confuse with the Review Desk. */}
+          {(isDecision || isExploring || selectedFinding) && <nav aria-label="Workspace return"><Button variant="quiet" onClick={showQueue}>{isDecision ? "Review integrity findings" : "Back to findings list"}</Button></nav>}
           <section ref={workspace.frame} className="signal-document-workbench" aria-label="Manuscript and review" aria-describedby={modeRecord ? modeDisclosureId : undefined} data-layout={workspace.split ? "split" : "single"} data-reading={fullWidthReading ? "full" : undefined} data-source-available={viewer?.available === false ? "false" : "true"}>
             <span ref={workspace.threshold} className="signal-review-workspace-threshold" aria-hidden="true" />
             <div role="tablist" aria-label="Manuscript review view" className="signal-document-tabs">

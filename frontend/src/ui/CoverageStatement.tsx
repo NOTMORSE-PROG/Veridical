@@ -91,8 +91,8 @@ export function CoverageStatement({ headingId, kicker = "Assessment coverage", h
           </li>
         ))}
       </ul>
-      {sharedActions.length > 0 && <div className="signal-control-cluster">{sharedActions.map(action => <ActionLink key={`${action.to}:${action.label}:${action.ariaLabel ?? ""}`} to={action.to} variant="quiet" aria-label={action.ariaLabel ?? (action.label === "Open the paper" ? "Open manuscript for manual review" : action.label)}>
-        {action.label === "Open the paper" ? "Open manuscript for manual review" : action.label}
+      {sharedActions.length > 0 && <div className="signal-control-cluster">{sharedActions.map(action => <ActionLink key={`${action.to}:${action.label}:${action.ariaLabel ?? ""}`} to={action.to} variant="quiet" aria-label={action.ariaLabel ?? action.label}>
+        {action.label}
       </ActionLink>)}</div>}
     </section>
   );

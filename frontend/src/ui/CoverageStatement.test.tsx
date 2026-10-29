@@ -27,8 +27,8 @@ it("keeps distinct causes visible while retaining repeated source records in nam
   expect(panel).not.toBeVisible();
 });
 
-it("shares only identical operations and destinations, retaining distinct recovery and source links", () => {
-  const common = { to: "/report/5/document?view=decision", label: "Open the paper" };
+it("shares only identical operations and destinations, keeping each label as written", () => {
+  const common = { to: "/dashboard?rerun=5", label: "Run again" };
   const items: CoverageStatementItem[] = [
     { key: "one", label: "One", detail: "First cause", action: common },
     { key: "two", label: "Two", detail: "Second cause", action: { ...common } },
@@ -37,7 +37,8 @@ it("shares only identical operations and destinations, retaining distinct recove
   ];
   renderWithProviders(<CoverageStatement state="partial" headingId="limits" heading="Assessment limits" intro="Unchecked content is not passed." items={items} />);
   expect(screen.getAllByRole("link")).toHaveLength(3);
-  expect(screen.getByRole("link", { name: "Open manuscript for manual review" })).toHaveAttribute("href", common.to);
+  expect(screen.getByRole("link", { name: "Run again" })).toHaveAttribute("href", common.to);
+  expect(screen.queryByRole("link", { name: /manual review/i })).toBeNull();
   expect(screen.getByRole("link", { name: "Inspect native equation coverage" })).toHaveAttribute("href", "/report/5/document?coverage=native_math");
   expect(screen.getByRole("link", { name: "Start another review" })).toHaveAttribute("href", common.to);
 });
