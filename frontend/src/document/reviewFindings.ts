@@ -1,5 +1,6 @@
 import type { FlagRegionOut, FlagSummaryOut } from "../api/types";
 import { isOptionalComparisonLead } from "../domain/comparisonLeadIdentity";
+import { findingIdentity as reportFindingIdentity } from "../report/flagClusters";
 
 export interface ReviewFinding {
   key: string;
@@ -23,11 +24,12 @@ function reuseBaseKind(kind: string | null): string | null {
   return match?.[1] ?? null;
 }
 
+// Non-reuse findings group exactly as the readiness report groups them, so
+// both screens count the same findings; reuse keeps its own variant merge.
 function findingIdentity(flag: FlagSummaryOut): string {
   if (isOptionalComparisonLead(flag)) return `comparison-record:${flag.id}`;
-  if (flag.check_kind !== "originality_reuse" || flag.matched_ref == null) {
-    return `flag:${flag.id}`;
-  }
+  if (flag.check_kind !== "originality_reuse") return reportFindingIdentity(flag);
+  if (flag.matched_ref == null) return `flag:${flag.id}`;
   const baseKind = reuseBaseKind(flag.problem_kind);
   return baseKind
     ? JSON.stringify([flag.check_kind, baseKind, flag.matched_ref])

@@ -575,7 +575,7 @@ export function PdfPane({
       <div className="signal-document-toolbar">
         <div className="signal-document-toolbar__identity">
           <strong>{documentLabel}</strong>
-          <span>Original PDF · {pagesLabel}{comparisonMarkers && " · L: unscored comparison"}</span>
+          <span>Original PDF · {pagesLabel}{comparisonMarkers && " · L markers are comparison leads (not scored)"}</span>
         </div>
         <div className="signal-document-toolbar__controls" role="group" aria-label="PDF page and zoom controls">
           <div className="signal-document-toolbar__group" role="group" aria-label="PDF reading controls">

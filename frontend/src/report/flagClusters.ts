@@ -6,7 +6,7 @@ export interface FlagFindingCluster {
   flags: FlagSummaryOut[];
 }
 
-function findingIdentity(flag: FlagSummaryOut): string {
+export function findingIdentity(flag: FlagSummaryOut): string {
   if (isOptionalComparisonLead(flag)) return `comparison-record:${flag.id}`;
   if (!flag.problem_kind) return `flag:${flag.id}`;
 

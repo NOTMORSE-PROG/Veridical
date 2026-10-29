@@ -12,6 +12,7 @@ import type { FlagOut, FlagRegionOut, ReportOut } from "../api/types";
 import { CRITERION_ANCHOR_REGION_ID, COMPARISON_LEAD_PAGE_SIZE, LIST_PAGE_SIZE } from "../config/ui";
 import { checkKindMeta, findingVerificationPrompt, isPValueFinding } from "../domain/checkKind";
 import { agreementEvidenceType, evidenceDisplayState } from "../domain/evidenceDisplay";
+import { DECISION_LABEL } from "../domain/decisionTone";
 import { manuscriptIdentity } from "../domain/manuscriptLabel";
 import { problemLabel } from "../domain/problemLabel";
 import { severityLabel } from "../domain/severity";
@@ -25,7 +26,6 @@ import { comparisonLeadCollection, type ComparisonLeadCollection } from "../repo
 import { IntegrityModuleNavigation, IntegrityModuleSummary, selectedIntegrityModule } from "../report/IntegrityModules";
 import { StatisticalCheckScope } from "../report/StatisticalCheckScope";
 import { OriginalityScope } from "../report/OriginalityScope";
-import { FigureReadingsSummary } from "../report/FigureReadings";
 import { useFlag } from "../flags/useFlag";
 import { PValueComparison } from "../flags/PValueComparison";
 import { AgreementComparison, type AgreementStatementRole } from "../flags/AgreementComparison";
@@ -33,7 +33,6 @@ import { CitationComparison } from "../flags/CitationComparison";
 import { CitationSourceLinks } from "../flags/CitationSourceLinks";
 import { CitationHistoryWarning } from "../flags/CitationHistoryWarning";
 import { findingMethodLabel, isCitationMetadataFinding } from "../domain/findingMethod";
-import { SignalDecisionPanel } from "../report/SignalDecisionPanel";
 import { RuleScopeSummary } from "../report/RuleScopeNotice";
 import { unconfirmedAutomaticRuleRows } from "../domain/ruleScope";
 import { ReportReadNotice } from "../report/ReportReadNotice";
@@ -55,7 +54,6 @@ import { claimFocusContinuation, type FocusContinuation } from "../routing/focus
 import { ActionLink } from "../ui/ActionLink";
 import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
-import { CoverageStatement } from "../ui/CoverageStatement";
 import { EmptyState } from "../ui/EmptyState";
 import { clampPage, Pagination, pageOf } from "../ui/Pagination";
 import { moduleEmptyState } from "../report/moduleEmptyState";
@@ -77,8 +75,7 @@ import { RecordedEvidenceReader } from "./RecordedEvidenceReader";
 import { FindingSourceComparison } from "./FindingSourceComparison";
 import type { EvidenceSourceRequest, OpenEvidenceSource } from "../report/evidenceTypes";
 import { RecordedFindingSources } from "../report/RecordedEvidencePage";
-import { WORKSPACE_STEP_PARAM, workspaceStep, workspaceStepPath, type ReportStep } from "../report/reviewStep";
-import { focusAfterStepChange } from "../report/reportSectionNavigation";
+import { WORKSPACE_STEP_PARAM, workspaceStep, type ReportStep } from "../report/reviewStep";
 import { WorkspaceStepFooter, WorkspaceStepHeading, WorkspaceStepNavigation } from "./WorkspaceSteps";
 import { InWorkspaceBar, LeadingChevronIcon, WorkspaceBarContext } from "./WorkspaceBar";
 
@@ -166,7 +163,7 @@ function ReviewQueue({ findings, regions, sourceAvailability, report, collection
       {findings.length === 0 && !showComparisons && collection.state === "success" && (() => {
         const empty = moduleEmptyState(report, moduleKind);
         return <EmptyState id="workspace-module-empty" title={empty.title} action={empty.limits
-          ? <ActionLink to={workspaceStepPath(report.check_run_id, "decision")} variant="secondary" onClick={event => focusAfterStepChange(event, "workspace-coverage-heading")}>Open assessment limits</ActionLink> : undefined}><p>{empty.description}</p></EmptyState>;
+          ? <ActionLink to={`/report/${report.check_run_id}?section=limits`} variant="secondary">Open assessment limits</ActionLink> : undefined}><p>{empty.description}</p></EmptyState>;
       })()}
       {findings.length > 0 && (
         <div className="signal-document-inspector__heading"><h2>{collection.lastLoaded ? "Last loaded integrity findings" : "Integrity findings"}</h2></div>
@@ -316,7 +313,7 @@ function SelectedFindingEvidence({ comparisonHost, comparisonVisible, finding, f
         <section className="signal-document-locations" aria-labelledby="finding-locations-heading">
           <h3 id="finding-locations-heading">Recorded locations and scopes</h3>
           <p>Location {locationIndex + 1} of {finding.flags.length}. These records are presented as one finding; none of the stored data was removed.</p>
-          <div role="group" aria-label={`Locations for Finding ${finding.number}`}>{finding.flags.map((member, index) => <button key={member.id} type="button" aria-pressed={member.id === locationFlagId} onClick={() => onLocation(member.id)}>Location {index + 1}: {instructorAnchor(member.page_anchor)}</button>)}</div>
+          <div role="group" aria-label={`Locations for Finding ${finding.number}`}>{finding.flags.map((member, index) => <button key={member.id} type="button" aria-pressed={member.id === locationFlagId} onClick={() => onLocation(member.id)}>Location {index + 1}: {member.cited_text ? `${member.cited_text}, ${instructorAnchor(member.page_anchor)}` : instructorAnchor(member.page_anchor)}</button>)}</div>
         </section>
       )}
       {!showsManuscriptQuote && <p><strong>Recorded check result:</strong> {systemFindingCopy(flag.evidence_excerpt, flag.ai_verdict_summary, "evidence")}</p>}
@@ -345,15 +342,21 @@ function SelectedFindingEvidence({ comparisonHost, comparisonVisible, finding, f
               : "VERIDICAL did not store two passages that can be compared side by side. Review the recorded scope and technical details before deciding."}
         </Alert>
       )}
+      {!optional && !pValueFinding && (recordedReasoning || flag.cited_text) && <section aria-labelledby="found-heading" className="signal-document-detail-section">
+        <h3 id="found-heading">What the check found</h3>
+        {flag.cited_text && <p><strong>{flag.ai_verdict_summary === "uncited_reference" ? "Reference entry" : "Citation"}:</strong> {flag.cited_text}</p>}
+        {recordedReasoning && <p>{recordedReasoning}</p>}
+        <p className="signal-field-hint">This is the system's explanation. You decide whether it holds.</p>
+      </section>}
       {!wholeComparisonWithoutPair && <section aria-labelledby="verify-heading" className="signal-document-detail-section signal-document-detail-section--verify"><h3 id="verify-heading">What the instructor should verify</h3><p>{verificationPrompt}</p></section>}
-      {(!pValueFinding || flag.p_value_comparison) && <details className="signal-document-recorded-reasoning"><summary>{flag.citation_metadata_review_warning ? "Original recorded explanation and technical details" : "Recorded reasoning and technical details"}</summary>
+      {optional && (!pValueFinding || flag.p_value_comparison) && <details className="signal-document-recorded-reasoning"><summary>{flag.citation_metadata_review_warning ? "Original recorded explanation and technical details" : "Recorded reasoning and technical details"}</summary>
         {optional && <dl className="signal-document-finding-facts">
           <div><dt>Check</dt><dd>{kindMeta.eyebrow}</dd></div>
           <div><dt>Check method</dt><dd>{findingMethodLabel(flag)}</dd></div>
           <div><dt>Evidence type</dt><dd>{flag.passage_pair ? "Recorded passage comparison" : "Comparison without a stored pair"}</dd></div>
           <div><dt>Recorded location</dt><dd>{(sourceAnchor ?? flag.page_anchor).trim() ? instructorAnchor(sourceAnchor ?? flag.page_anchor) : "No location was recorded."}</dd></div>
         </dl>}
-        <p>This is the system's full recorded explanation. It is supporting information, not an instructor decision.</p>{optional && recordedReasoning && recordedReasoning === recordedSummary ? <p>The recorded explanation is shown in the check result above.</p> : recordedReasoning ? <p>{recordedReasoning}</p> : <p>No additional recorded reasoning is available.</p>}</details>}
+        <p>This is the system's explanation. You decide whether it holds.</p>{optional && recordedReasoning && recordedReasoning === recordedSummary ? <p>The recorded explanation is shown in the check result above.</p> : recordedReasoning ? <p>{recordedReasoning}</p> : <p>No additional recorded reasoning is available.</p>}</details>}
       {!optional && <details className="signal-document-recorded-reasoning"><summary>Source and check details</summary><dl className="signal-document-finding-facts">
         <div><dt>Record</dt><dd>#{flag.id}</dd></div>
         <div><dt>Check</dt><dd>{kindMeta.eyebrow}</dd></div>
@@ -376,7 +379,7 @@ const STEP_FOCUS_TARGET: Record<ReportStep, string> = {
   grades: "criteria-results-heading", decision: "analysis-heading",
 };
 
-function ReadinessDecision({ checkRunId, step, report: loadedReport, pending, error, retrying, onRetry, onReviewCriteria, sourceTarget, onOpenSource, onOpenEvidenceSource, returnNotice }: { checkRunId: number; step: Exclude<ReportStep, "findings"> | null; report: ReportOut | undefined; pending: boolean; retrying: boolean; error: unknown; onRetry: () => void; onReviewCriteria: () => void; sourceTarget: CriterionSourceTarget; onOpenSource: CriterionSourceOpen; onOpenEvidenceSource: OpenEvidenceSource; returnNotice?: string }) {
+function ReadinessDecision({ checkRunId, step, report: loadedReport, pending, error, retrying, onRetry, sourceTarget, onOpenSource, onOpenEvidenceSource, returnNotice }: { checkRunId: number; step: Exclude<ReportStep, "findings"> | null; report: ReportOut | undefined; pending: boolean; retrying: boolean; error: unknown; onRetry: () => void; sourceTarget: CriterionSourceTarget; onOpenSource: CriterionSourceOpen; onOpenEvidenceSource: OpenEvidenceSource; returnNotice?: string }) {
   const [params] = useSearchParams();
   const selectedCriterion = params.has("criterion");
   const report = usableReport(loadedReport, checkRunId, error);
@@ -412,9 +415,17 @@ function ReadinessDecision({ checkRunId, step, report: loadedReport, pending, er
           <p className="signal-field-hint">{identity.primary} was checked against {report.rubric_title}.</p>
         </div>
       </section>
-      {coverage.length > 0 && <CoverageStatement state="partial" headingId="workspace-coverage-heading" kicker="Before you decide" heading="Assessment limits" intro="Results cover only the checks that ran. Unchecked content is not treated as passed. Check these parts in the manuscript yourself before you decide." items={coverage} />}
-      <FigureReadingsSummary readings={report.figure_readings} checkRunId={checkRunId} />
-      <SignalDecisionPanel report={report} manuscriptLabel={identity.primary} readFailed={readFailed} retrying={retrying} onRetry={onRetry} onReviewCriteria={onReviewCriteria} />
+      <section className="signal-document-decision-summary" aria-labelledby="decision-summary-heading">
+        <h3 id="decision-summary-heading">Before you decide</h3>
+        <dl className="signal-decision-summary-facts">
+          <div><dt>Criteria needing your judgment</dt><dd>{report.pending_review_count}</dd></div>
+          <div><dt>Open high-severity findings</dt><dd>{report.unresolved_high_flag_count}</dd></div>
+          <div><dt>Assessment limits</dt><dd>{coverage.length}</dd></div>
+          <div><dt>Instructor decision</dt><dd>{report.decision ? DECISION_LABEL[report.decision] : "Not recorded"}</dd></div>
+        </dl>
+        <p className="signal-field-hint">The full record, its assessment limits and the decision are on the readiness report. You record or reopen the decision there.</p>
+        <ActionLink to={`/report/${report.check_run_id}#final-decision`} variant="primary">{report.decision ? "Open the recorded decision" : "Record the decision on the readiness report"}</ActionLink>
+      </section>
       </>}
     </div>
   );
@@ -1104,7 +1115,7 @@ export function SignalDocumentViewerPage() {
                 </div>}
                 <div id="workspace-module-records">
                 {isExploring ? <ReuseExplorePanel showBack={false} flags={flags} flagsFetching={flagsQuery.isFetching} flagsError={flagsQuery.isError} flagsSucceeded={flagsQuery.isSuccess} onRetryFlags={() => flagsQuery.refetch()} onSelectFlag={selectFinding} onBack={showQueue} includeReferenceList={includeReferenceList} includeBlockQuote={includeBlockQuote} onToggleReferenceList={(value) => setToggle("ref", value)} onToggleBlockQuote={(value) => setToggle("quote", value)} excludedMatchesQuery={excludedMatchesQuery} expandedMatchId={expandedMatchId} onExpandMatch={setMatch} />
-                  : isDecision ? <ReadinessDecision checkRunId={id} step={step} report={reportQuery.data} pending={reportQuery.isPending} error={reportQuery.error} retrying={reportQuery.fetchStatus === "fetching"} onRetry={() => reportQuery.refetch()} onReviewCriteria={() => goToStep("criteria")} sourceTarget={criterionSourceTarget} onOpenSource={openCriterionSource} onOpenEvidenceSource={openRecordedCriterionSource}
+                  : isDecision ? <ReadinessDecision checkRunId={id} step={step} report={reportQuery.data} pending={reportQuery.isPending} error={reportQuery.error} retrying={reportQuery.fetchStatus === "fetching"} onRetry={() => reportQuery.refetch()} sourceTarget={criterionSourceTarget} onOpenSource={openCriterionSource} onOpenEvidenceSource={openRecordedCriterionSource}
                     returnNotice={criterionReturnNotice?.run === id && criterionReturnNotice.search === sourceQuery ? criterionReturnNotice.message : undefined} />
                     : selectedFinding && selectedLocationId ? <SelectedFinding comparisonHost={comparisonHost} comparisonVisible={workspace.split || activeTab === "manuscript"} onRevealSource={selectedRegion?.kind === "paragraph_only" ? revealRecordedLocation : undefined} activeStatement={statementTarget?.run === id && statementTarget.flag === selectedLocationId ? statementTarget.role : undefined} onRecordReady={setSelectedRecord} onStatementSource={showStatementSource} fullWidth={fullWidthReading} singlePane={singlePaneLayout} onReadingChange={changeReading} finding={selectedFinding} total={otherFindings.length} locationFlagId={selectedLocationId} region={selectedRegion} sourceAvailability={sourceAvailability} sourceAnchor={recordedAnchor} previous={previousFinding} next={nextFinding} collection={optional} outsideFilter={selectedComparison && selectedNavigationIndex < 0 && optional.snapshot !== undefined} filterPosition={selectedNavigationIndex + 1} filterTotal={navigationFindings.length} onAll={() => update((next) => { next.delete("lead_view"); next.delete("lead_visible"); next.delete("lead_return"); next.set("lead_page", String(Math.floor((optional.snapshot?.records.findIndex((record) => record.id === selectedLocationId) ?? 0) / COMPARISON_LEAD_PAGE_SIZE) + 1)); }, true)} onBack={showQueue} onPrevious={() => previousFinding && selectFinding(previousFinding.representative.id, true)} onNext={() => nextFinding && selectFinding(nextFinding.representative.id, true)} onLocation={selectFinding} onExplore={openExplore} />
                       : <ReviewHome moduleKind={selectedModule} showComparisons={selectedModule === "originality_reuse"} checkRunId={id} report={reportQuery.data} reportPending={reportQuery.isPending} reportRetrying={reportQuery.fetchStatus === "fetching"} reportError={reportQuery.error} onReportRetry={() => reportQuery.refetch()} findings={moduleFindings} regions={viewer?.regions ?? []} sourceAvailability={sourceAvailability} collection={optional} viewedIds={viewedIds} onFlagsRetry={() => { void flagsQuery.refetch(); }} filter={filter} invalidSelection={invalidSelection} onFilter={setFilter} onSelect={selectFinding} onExplore={openExplore} />}

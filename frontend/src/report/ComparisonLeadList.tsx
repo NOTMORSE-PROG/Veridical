@@ -13,6 +13,7 @@ import { claimFocusContinuation, type FocusContinuation } from "../routing/focus
 import { TrailingChevronIcon } from "../ui/ActionLink";
 import { Button } from "../ui/Button";
 import type { ComparisonLeadCollection } from "./comparisonLeadCollection";
+import { PageNumbers } from "../ui/Pagination";
 
 function positiveInteger(value: string | null | undefined) {
   if (!value || !/^[1-9]\d*$/.test(value)) return undefined;
@@ -172,7 +173,7 @@ export function ComparisonLeadList({ collection, showActions, viewedIds, onSelec
             <p>{anchor}</p>{record.first_upload_context && <p>First-upload context: the comparison archive was limited when this signal was created.</p>}
           </details></div>}</li>;
       })}</ol> : state === "success" && <p className="signal-comparison-index__status">No {filter} comparison leads. <button type="button" onClick={() => selectFilter("all")}>Show all</button></p>}
-      {pages > 1 && <nav className="signal-comparison-pagination" aria-label="Comparison lead pages"><button type="button" disabled={page <= 1} onClick={() => selectPage(page - 1)}>Previous</button>{Array.from({ length: pages }, (_, index) => index + 1).map((number) => <button type="button" key={number} aria-label={`Page ${number}`} aria-current={page === number ? "page" : undefined} onClick={() => selectPage(number)}>{number}</button>)}<button type="button" disabled={page >= pages} onClick={() => selectPage(page + 1)}>Next</button></nav>}
+      {pages > 1 && <nav className="signal-comparison-pagination" aria-label="Comparison lead pages"><PageNumbers page={page} pages={pages} onPage={selectPage} /></nav>}
     </>}
     {state === "success" && snapshot?.total === 0 && <p>{workspaceEmpty ? "This check has no integrity findings or comparison leads. Review assessment limits and readiness before recording your decision." : COMPARISON_LEAD_COPY.empty}</p>}
     {lastLoaded && <span className="sr-only">Counts describe last loaded records.</span>}

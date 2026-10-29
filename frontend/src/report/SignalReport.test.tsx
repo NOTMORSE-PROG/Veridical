@@ -115,18 +115,14 @@ function stubReport(report: ReportOut = BASE_REPORT, escalated: EscalatedItemOut
 }
 
 describe("SignalReportPage", () => {
-  it("keeps the report a read-only record and sends grade changes to manuscript review", async () => {
+  it("records the decision on the report and offers grade changes beside the records", async () => {
     stubReport({ ...BASE_REPORT, results: [{ ...BASE_REPORT.results[0],
       resolution: { type: "mark_pass", reason: "Checked against the manuscript.", ai_majority_verdict: null } }] });
     renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
-    const records = await screen.findByRole("region", { name: "Criterion records" });
-    expect(within(records).getByRole("link", { name: "Change grades in manuscript review" }))
-      .toHaveAttribute("href", "/report/5/document?view=decision&step=grades&pane=review");
-    expect(within(records).queryByRole("button", { name: /grade|judgment/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "View saved judgments (1)" })).not.toBeInTheDocument();
-    const decision = screen.getByRole("region", { name: "Instructor decision" });
-    expect(within(decision).getByText(/Not recorded yet/)).toBeVisible();
-    expect(screen.queryByRole("button", { name: "Approve for defense" })).not.toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Final defense-readiness decision" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Approve for defense" })).toBeInTheDocument();
+    const records = screen.getByRole("region", { name: "Criterion records" });
+    expect(within(records).queryByRole("link", { name: "Change grades in manuscript review" })).not.toBeInTheDocument();
     expect(screen.queryByRole("navigation", { name: "Report review order" })).not.toBeInTheDocument();
   });
 
@@ -306,7 +302,8 @@ describe("SignalReportPage", () => {
     expect(screen.getByRole("button", { name: /^Step 1: Review criteria/ })).toHaveAttribute("aria-current", "step");
     expect(screen.getByText(ESCALATED.criterion_text)).toBeInTheDocument();
     expect(screen.getByText("1 unresolved")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /^Step 4: Record decision/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Step 4: Decision summary/ }));
+    fireEvent.click(await screen.findByRole("link", { name: "Record the decision on the readiness report" }));
     expect(await screen.findByRole("button", { name: "Approve for defense" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Return for revision" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Reject manuscript" })).toBeDisabled();
@@ -1019,7 +1016,7 @@ expect(screen.getByText("Not scored. Does not affect readiness or block your dec
 
   it("requires a reason before an instructor can reject a Ready manuscript", async () => {
     stubReport();
-    renderWithProviders(<ReviewRouteFamily />, { route: "/report/5/document?view=decision&step=decision&pane=review", path: "/report/:checkRunId/*" });
+    renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
 
     fireEvent.click(await screen.findByRole("button", { name: "Reject manuscript" }));
     const dialog = screen.getByRole("dialog", { name: "Reject this manuscript?" });
@@ -1047,12 +1044,12 @@ expect(screen.getByText("Not scored. Does not affect readiness or block your dec
     stubReport(staleReport as ReportOut);
     renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
 
-    expect(await screen.findByRole("heading", { name: "Instructor decision" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Final defense-readiness decision" })).toBeInTheDocument();
   });
 });
 
 // Exercise the real route, including its report-read gate and mounted dialogs.
-// The decision and criteria routes are manuscript review steps; "report" is the read-only record.
+// Criteria are graded in manuscript review; the decision is recorded on the report.
 function readFailurePage(initial: ReportOut = BASE_REPORT, escalated: EscalatedItemOut[] = [], entry: "decision" | "criteria" | "report" = "decision") {
   let current = initial;
   let failure = 0;
@@ -1081,7 +1078,7 @@ function readFailurePage(initial: ReportOut = BASE_REPORT, escalated: EscalatedI
       "/check-runs/5/share": null, "/check-runs/5/flags": [] })(input, init);
   });
   vi.stubGlobal("fetch", fetch);
-  const route = entry === "report" ? "/report/5" : entry === "criteria" ? "/report/5/document?view=decision&pane=review" : "/report/5/document?view=decision&step=decision&pane=review";
+  const route = entry === "criteria" ? "/report/5/document?view=decision&pane=review" : "/report/5";
   renderWithProviders(<><QueryAccess /><ReviewRouteFamily /></>, { route, path: "/report/:checkRunId/*" });
   return { fail(status = 503) { failure = status; }, fresh(report = current) { failure = 0; current = report; },
     hold() { hold = true; }, release() { hold = false; release?.(); }, posts: () => postCount,
@@ -1106,7 +1103,7 @@ describe("full report background-read continuity", () => {
     expect(screen.getByText("Last loaded readiness band")).toBeVisible();
     const other = screen.getByRole("link", { name: "View Audit" }); other.focus();
     c.fresh();
-    const retry = screen.getByRole("button", { name: "Retry report" });
+    const retry = screen.getAllByRole("button", { name: "Retry report" })[0];
     await waitFor(() => expect(retry).not.toHaveAttribute("aria-disabled"));
     fireEvent.click(retry);
     await waitFor(() => expect(document.getElementById("criterion-record-5-2")).not.toBeNull());

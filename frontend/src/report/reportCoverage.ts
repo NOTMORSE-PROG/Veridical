@@ -101,7 +101,9 @@ function baseIntegrityCoverageItem(status: IntegrityCheckStatusOut, manuscriptId
     if (status.n_skipped_api_down) subIssues.push(`${status.n_skipped_api_down} items skipped because a service was unavailable.`);
     if (status.n_skipped_quota) subIssues.push(`${status.n_skipped_quota} items skipped because AI capacity was unavailable.`);
     if (status.n_skipped_parse_failure) subIssues.push(`${status.n_skipped_parse_failure} items skipped because the model response could not be validated.`);
-    if (status.n_source_pages_unassessed) subIssues.push(`${status.n_source_pages_unassessed} pages need a source-reading check.`);
+    if (status.n_source_pages_unassessed) subIssues.push(status.source_pages_unassessed?.length
+      ? `${status.source_pages_unassessed.length === 1 ? "Page" : "Pages"} ${status.source_pages_unassessed.join(", ")} could not be read reliably. Check ${status.source_pages_unassessed.length === 1 ? "it" : "them"} in the manuscript yourself.`
+      : `${status.n_source_pages_unassessed} ${status.n_source_pages_unassessed === 1 ? "page" : "pages"} could not be read reliably. This record does not say which; check the manuscript yourself.`);
     if (status.n_metadata_skipped_insufficient) subIssues.push(`${status.n_metadata_skipped_insufficient} ${status.n_metadata_skipped_insufficient === 1 ? "reference" : "references"} unverified`);
     if (status.n_linkage_unassessed) subIssues.push(`${status.n_linkage_unassessed} reference ${status.n_linkage_unassessed === 1 ? "link" : "links"} unassessed`);
     if (status.n_claim_support_unassessed) subIssues.push(`${status.n_claim_support_unassessed} cited ${status.n_claim_support_unassessed === 1 ? "source" : "sources"} with unassessed claim support`);

@@ -33,7 +33,6 @@ export function FigureReadingDetails({ reading }: { reading?: FigureReadingOut |
       <p>{reading.support_reason}</p>
     </>}
     {reading.source_caption && <p><strong>Nearby source caption</strong>: {reading.source_caption}{reading.caption_anchor && <> ({instructorAnchor(reading.caption_anchor)})</>}</p>}
-    {available && <details><summary>Technical record</summary><p>Schema {reading.schema_version}. Cached responses are revalidated; reuse is not instructor verification.</p><pre className="signal-figure-reading-record">{JSON.stringify(reading.source_binding, null, 2)}</pre></details>}
   </details>;
 }
 
@@ -44,27 +43,64 @@ function readingStatus(reading: FigureReadingOut) {
     : reading.status === "needs_review" ? { label: "Needs visual review", tone: "review" } : { label: "Not assessed", tone: "unassessed" };
 }
 
+type ReadingCard =
+  | { kind: "reading"; key: string; reading: FigureReadingOut }
+  | { kind: "page"; key: string; anchor: string | null; count: number; first: FigureReadingOut };
+
+// Unread images are grouped by page: one page can hold many occurrences of
+// the same picture or drawing, and listing each one buries the readings.
+function readingCards(readings: FigureReadingOut[]): ReadingCard[] {
+  const cards: ReadingCard[] = [];
+  const pages = new Map<string, ReadingCard & { kind: "page" }>();
+  for (const reading of readings) {
+    if (reading.status === "available" || reading.status === "needs_review") {
+      cards.push({ kind: "reading", key: `reading-${reading.image_index}`, reading });
+      continue;
+    }
+    const key = `page-${reading.source_anchor ?? "unlocated"}`;
+    const group = pages.get(key);
+    if (group) group.count += 1;
+    else {
+      const card = { kind: "page" as const, key, anchor: reading.source_anchor ?? null, count: 1, first: reading };
+      pages.set(key, card);
+      cards.push(card);
+    }
+  }
+  return cards;
+}
+
 export function FigureReadingsSummary({ readings, checkRunId }: { readings?: FigureReadingOut[] | null; checkRunId: number }) {
   const count = readings?.filter((item) => item.status === "available").length ?? 0;
   const [filter, setFilter] = useState<ReadingFilter>(count > 0 ? "available" : "all");
   const [page, setPage] = useState(1);
   const headingId = useId();
   if (!readings?.length) return null;
-  const shown = readings.filter((item) => filter === "all" || (filter === "available") === (item.status === "available"));
+  const unread = readings.length - count;
+  const shown = readingCards(readings.filter((item) => filter === "all" || (filter === "available") === (item.status === "available")));
   const current = Math.min(page, Math.max(1, Math.ceil(shown.length / LIST_PAGE_SIZE.imageReadings)));
   const choose = (next: ReadingFilter) => { setFilter(next); setPage(1); };
   return <section className="signal-review-section signal-figure-readings" aria-labelledby={headingId}>
-    <div className="signal-review-section__heading"><div><p className="signal-section-kicker">Image evidence</p><h2 id={headingId}>Saved image readings</h2></div><span>{count} of {readings.length} read</span></div>
-    <p className="signal-review-section__intro">Visual readings are available for {count} of {readings.length} image occurrences; {readings.length - count} remain unassessed. Visual readings do not establish that statistical values in images were checked, software works, or rubric criteria were met.</p>
+    <div className="signal-review-section__heading"><div><p className="signal-section-kicker">Image evidence</p><h2 id={headingId}>Saved image readings</h2></div><span>{count.toLocaleString()} of {readings.length.toLocaleString()} read</span></div>
+    <p className="signal-review-section__intro">Visual readings are available for {count.toLocaleString()} of {readings.length.toLocaleString()} image occurrences; {unread.toLocaleString()} remain unassessed. Visual readings do not establish that statistical values in images were checked, software works, or rubric criteria were met.</p>
     <div className="signal-review-section__body">
       <div className="signal-segmented" role="group" aria-label="Show image readings">
-        {([["available", `Readings available (${count})`], ["unassessed", `Not assessed (${readings.length - count})`], ["all", `All (${readings.length})`]] as const).map(([value, label]) =>
+        {([["available", `Readings available (${count.toLocaleString()})`], ["unassessed", `Not assessed (${unread.toLocaleString()})`], ["all", `All (${readings.length.toLocaleString()})`]] as const).map(([value, label]) =>
           <button key={value} type="button" aria-pressed={filter === value} onClick={() => choose(value)}>{label}</button>)}
       </div>
       {shown.length === 0 ? <EmptyState title={filter === "available" ? "No image readings available" : "No unassessed images"}><p>{filter === "available" ? "No image in this check has a saved visual reading." : "Every image occurrence has a saved reading."}</p></EmptyState>
-        : <ol className="signal-figure-reading-grid">{pageOf(shown, current, LIST_PAGE_SIZE.imageReadings).map((reading) => {
+        : <ol className="signal-figure-reading-grid">{pageOf(shown, current, LIST_PAGE_SIZE.imageReadings).map((card) => {
+          if (card.kind === "page") {
+            const where = card.anchor ? instructorAnchor(card.anchor) : "No recorded location";
+            return <li key={card.key} className="signal-figure-reading-card">
+              <div className="signal-figure-reading-card__top"><h3>{where}</h3><span className="signal-figure-reading-status signal-figure-reading-status--unassessed">Not assessed</span></div>
+              <p className="signal-field-hint">{card.count.toLocaleString()} image {card.count === 1 ? "occurrence" : "occurrences"} on this {card.anchor ? "page" : "record"} were not read. Occurrences are not necessarily distinct figures.</p>
+              {card.anchor && <ActionLink variant="secondary" to={`/report/${checkRunId}/document?anchor=${encodeURIComponent(card.anchor)}`}>Open {where}</ActionLink>}
+              <FigureReadingDetails reading={card.first} />
+            </li>;
+          }
+          const reading = card.reading;
           const status = readingStatus(reading);
-          return <li key={reading.image_index} className="signal-figure-reading-card">
+          return <li key={card.key} className="signal-figure-reading-card">
             <div className="signal-figure-reading-card__top"><h3>Image {reading.image_index + 1}</h3><span className={`signal-figure-reading-status signal-figure-reading-status--${status.tone}`}>{status.label}</span></div>
             {reading.source_anchor ? <ActionLink variant="secondary" to={`/report/${checkRunId}/document?anchor=${encodeURIComponent(reading.source_anchor)}`}>Open {instructorAnchor(reading.source_anchor)}</ActionLink>
               : <p className="signal-field-hint">No source location was recorded.</p>}

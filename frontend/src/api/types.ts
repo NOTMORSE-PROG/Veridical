@@ -505,6 +505,8 @@ export interface IntegrityCheckStatusOut {
   n_metadata_skipped_insufficient?: number;
   n_linkage_unassessed?: number;
   n_source_pages_unassessed?: number;
+  // Page numbers behind n_source_pages_unassessed, when the check records them.
+  source_pages_unassessed?: number[] | null;
   n_claim_support_unassessed?: number;
   reference_list_page?: number | null;
   analysis_coverage?: "complete" | "partial" | "unsupported" | null;
@@ -762,6 +764,9 @@ export interface CitationSourceKeyOut {
 }
 
 export interface FlagOut {
+  cited_text?: string | null;
+  cited_authors?: string[] | null;
+  cited_year?: string | null;
   assessment_revision: number | null;
   citation_source_locator?: {
     basis: "saved_reference";
@@ -869,6 +874,11 @@ export interface FlagSummaryOut {
   check_kind: string;
   severity: "high" | "med" | "low";
   criterion_text: string | null;
+  // Citation findings: which in-text citation or reference entry this
+  // location is about. Absent on older records and other check kinds.
+  cited_text?: string | null;
+  cited_authors?: string[] | null;
+  cited_year?: string | null;
   evidence_excerpt: string;
   page_anchor: string;
   overridden: boolean;

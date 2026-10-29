@@ -81,11 +81,15 @@ function RecordedPageSession({ checkRunId, snapshot, reference, cachedPage, cont
     },
   });
   const current = owner.isCurrent() && !query.isError && query.fetchStatus === "idle" ? query.data : undefined;
+  // A whole-document comparison has no single page; showing page 1 would
+  // suggest the evidence is there.
+  const wholeDocument = /^whole (?:document|manuscript)$/i.test(instructorAnchor(reference.anchor ?? "").trim());
   const content = (enlarged: boolean) => <>
     {query.isFetching && <p role="status">Loading the recorded original page.</p>}
     {query.isError && <div role="alert"><p>{query.error instanceof ApiError ? query.error.message : "The original page could not be loaded."}</p>
       <Button variant="secondary" disabled={query.isFetching} onClick={() => { void query.refetch(); }}>Retry original page</Button></div>}
-    {current && <figure className={enlarged ? "signal-evidence-dialog__page" : "signal-criterion-packet__preview"}>
+    {current && wholeDocument && <p className="signal-field-hint">This comparison covers the whole document, so no single page image applies. Read the passage in the manuscript beside this review.</p>}
+    {current && !wholeDocument && <figure className={enlarged ? "signal-evidence-dialog__page" : "signal-criterion-packet__preview"}>
       {current.image_data_url ? <img src={current.image_data_url} alt={`Original source, ${instructorAnchor(reference.anchor ?? "")}`} /> : <p>No original-page image is available for this saved evidence.</p>}
       <figcaption>{current.caption}</figcaption>
     </figure>}

@@ -17,6 +17,8 @@ import { Button } from "../ui/Button";
 import { CoverageStatement } from "../ui/CoverageStatement";
 import { ReadinessBand } from "../ui/ReadinessBand";
 import { SignalCriteriaResults, SignalFlagsPanel } from "./SignalReviewSections";
+import { SignalDecisionPanel } from "./SignalDecisionPanel";
+import { workspaceStepPath } from "./reviewStep";
 import { SignalShareDialog } from "./SignalShareDialog";
 import { coverageItems } from "./reportCoverage";
 import { unconfirmedAutomaticRuleRows } from "../domain/ruleScope";
@@ -51,7 +53,6 @@ function recordTab(search: string, hash: string): RecordTab {
   return params.get("review_step") === "findings" ? "findings" : "grades";
 }
 
-const decidedAtFormatter = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
 
 export function SignalReportPage() {
   const { checkRunId } = useParams<{ checkRunId: string }>();
@@ -63,7 +64,10 @@ export function SignalReportPage() {
     const params = new URLSearchParams(location.search);
     params.delete("review_step");
     params.set(RECORD_TAB_PARAM, next);
-    void navigate({ pathname: location.pathname, search: params.toString(), hash: "" }, { replace: true, state: location.state });
+    // Switching tabs must not move the page; keep the instructor where they are.
+    const scrollY = window.scrollY;
+    void navigate({ pathname: location.pathname, search: params.toString(), hash: "" }, { replace: true, state: location.state, preventScrollReset: true });
+    requestAnimationFrame(() => { window.scrollTo({ top: scrollY }); document.getElementById(`record-tab-${next}`)?.focus({ preventScroll: true }); });
   }
   const pendingJump = useRef<{ destination: string; target: string; scroll: boolean; focus: FocusContinuation } | undefined>(undefined);
   useEffect(() => () => pendingJump.current?.focus.dispose(), []);
@@ -215,15 +219,8 @@ export function SignalReportPage() {
               </> : <EmptyState title="Nothing waiting for you"><p>Every criterion has a recorded grade or assessment limit.</p></EmptyState>}
             </div>
           </section>
-          <section id="final-decision" tabIndex={-1} className="signal-review-section" aria-labelledby="decision-heading">
-            <div className="signal-review-section__heading"><div><p className="signal-section-kicker">Instructor authority</p><h2 id="decision-heading" tabIndex={-1}>Instructor decision</h2></div>{report.decision && <span className={`signal-decision signal-decision--${report.decision}`}>{DECISION_LABEL[report.decision]}</span>}</div>
-            <div className="signal-review-section__body">
-              {report.decision ? <>
-                <p>Recorded by you{report.decided_at ? ` on ${decidedAtFormatter.format(new Date(report.decided_at))}` : ""}. This is the instructor's decision, not an automated approval or block.</p>
-                {report.decision_note && <blockquote className="signal-decision-note"><strong>Decision note</strong><span>{report.decision_note}</span></blockquote>}
-              </> : <EmptyState title="Not recorded yet"><p>You record the decision in manuscript review, after checking the evidence.</p></EmptyState>}
-            </div>
-          </section>
+          <SignalDecisionPanel report={report} manuscriptLabel={identity?.primary ?? report.manuscript_group_label} readFailed={readFailed} retrying={fetchStatus === "fetching"}
+            onRetry={() => { void refetch(); }} onReviewCriteria={() => { void navigate(workspaceStepPath(id, "criteria")); }} />
           </div>
           <section className="signal-report-record" aria-label="Report record">
             <div role="tablist" aria-label="Report record sections" className="signal-record-tabs">
@@ -239,11 +236,10 @@ export function SignalReportPage() {
                     event.preventDefault();
                     const next = RECORD_TABS[(RECORD_TABS.indexOf(value) + move + RECORD_TABS.length) % RECORD_TABS.length];
                     selectTab(next);
-                    requestAnimationFrame(() => document.getElementById(`record-tab-${next}`)?.focus());
                   }}>{label}</button>)}
             </div>
             <div role="tabpanel" id="record-panel-grades" aria-labelledby="record-tab-grades" hidden={tab !== "grades"}>
-              <SignalCriteriaResults readOnly results={report.results.filter((row) => row.outcome !== "escalated")} checkRunId={report.check_run_id} />
+              <SignalCriteriaResults results={report.results.filter((row) => row.outcome !== "escalated")} checkRunId={report.check_run_id} />
             </div>
             <div role="tabpanel" id="record-panel-findings" aria-labelledby="record-tab-findings" hidden={tab !== "findings"}>
               <SignalFlagsPanel checkRunId={report.check_run_id} unresolvedHighFlagCount={report.unresolved_high_flag_count} originalityScope={report.originality_scope} statisticalScope={report.statistical_check_scope} />

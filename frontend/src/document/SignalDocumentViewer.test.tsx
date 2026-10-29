@@ -435,8 +435,8 @@ describe("SignalDocumentViewerPage", () => {
 
     expect((await screen.findAllByText(/possible shared content or reuse/)).length).toBeGreaterThan(0);
     expect(document.querySelector("blockquote")).not.toBeInTheDocument();
-    expect(screen.getByText("Recorded reasoning and technical details")).toBeInTheDocument();
-    expect(document.querySelector("details.signal-document-recorded-reasoning")).not.toHaveAttribute("open");
+    // The system's explanation is shown under its own heading, not hidden in a disclosure.
+    expect(screen.getByRole("heading", { name: "What the check found" })).toBeInTheDocument();
   });
 
   it("BUG-170: shows an honest explanation, not a mislabeled quote, for a resubmission flag with no passage to compare", async () => {
@@ -468,7 +468,7 @@ describe("SignalDocumentViewerPage", () => {
     // #4" tail rather than the shared phrase.
     expect((await screen.findAllByText(/archived manuscript #4/)).length).toBeGreaterThan(0);
     expect(document.querySelector("blockquote")).not.toBeInTheDocument();
-    expect(screen.getByText("Recorded reasoning and technical details")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "What the check found" })).toBeInTheDocument();
     expect(screen.getByText("No passage pair is available")).toBeInTheDocument();
     expect(screen.getByText(/then decide whether the possible overlap has a legitimate source/)).toBeInTheDocument();
     expect(screen.queryByText(/Compare the passages and decide/)).not.toBeInTheDocument();
@@ -613,13 +613,13 @@ describe("SignalDocumentViewerPage", () => {
 
     // Nothing is waiting, so the workspace opens on the decision step.
     expect(await screen.findByText(REPORT.reason as string)).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Final defense-readiness decision" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^Step 4: Record decision/ })).toHaveAttribute("aria-current", "step");
+    expect(screen.getByRole("link", { name: "Record the decision on the readiness report" })).toHaveAttribute("href", "/report/5#final-decision");
+    expect(screen.getByRole("button", { name: /^Step 4: Decision summary/ })).toHaveAttribute("aria-current", "step");
     expect(screen.getByRole("tab", { name: /^Review/ })).toHaveAttribute("aria-selected", "true");
     expect(screen.queryByRole("button", { name: /^Continue:/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Back: Check recorded grades" }));
     expect(await screen.findByRole("heading", { name: "Criterion records" })).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Final defense-readiness decision" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Record the decision on the readiness report" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /^Step 2: Inspect findings/ }));
     expect(await screen.findByRole("heading", { name: "No saved check status" })).toBeInTheDocument();
     expect(screen.getByText(/An empty list does not mean the manuscript passed/)).toBeVisible();
@@ -717,10 +717,9 @@ describe("SignalDocumentViewerPage", () => {
     expect(await screen.findByText("Location 3 of 3. These records are presented as one finding; none of the stored data was removed.")).toBeInTheDocument();
     expect(screen.getByText(/Shaded wording appears in both stored passages/)).toBeInTheDocument();
     const comparison = screen.getByText("Passage comparison", { selector: "h3" });
-    const reasoning = screen.getByText("Recorded reasoning and technical details");
+    const reasoning = screen.getByRole("heading", { name: "What the check found" });
     expect(comparison.compareDocumentPosition(reasoning) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(document.querySelectorAll("mark.reuse-shared-wording").length).toBeGreaterThanOrEqual(2);
-    expect(document.querySelector("details.signal-document-recorded-reasoning")).not.toHaveAttribute("open");
     expect(screen.getByTestId("pdf-pane")).toHaveAttribute("data-selection", "111");
 
     fireEvent.click(screen.getByRole("button", { name: "Back to findings list" }));
@@ -746,8 +745,7 @@ it("retains the workspace record and focus with qualified readiness across a tra
   await screen.findByText("Could not update this report");
   expect(heading.isConnected).toBe(true); expect(heading).toHaveFocus();
   expect(screen.getByText("Last loaded system readiness")).toBeVisible();
-  fireEvent.click(screen.getByRole("button", { name: "Return for revision" }));
-  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Record the decision on the readiness report" })).toBeInTheDocument();
   failed = false; fireEvent.click(screen.getAllByRole("button", { name: "Retry report" })[0]);
   await waitFor(() => expect(screen.queryByText("Could not update this report")).not.toBeInTheDocument());
   expect(heading).toHaveFocus();
