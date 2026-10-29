@@ -10,6 +10,7 @@ import pytest
 from sqlalchemy import update
 
 from app.ingest import compute_client
+from app.ingest import service as ingest_service
 from app.models.enums import IngestStatus
 from app.models.upload_attempt import UploadAttempt
 from tests.test_fragment_guard import _pieces_pdf, _upload
@@ -84,7 +85,9 @@ def test_an_interrupted_upload_names_the_failed_record_it_kept(wired, monkeypatc
         with pytest.raises(asyncio.CancelledError):
             _process(wired)
     attempt, manuscript = _attempt(wired, attempt_id)
-    assert attempt.status == "processing" and manuscript is not None
+    # What retirement relies on: a claimed attempt and a record still preparing.
+    assert attempt.status == "processing" and attempt.lease_id is not None
+    assert manuscript is not None and manuscript.ingest_status == IngestStatus.processing
 
     _expire_processing(wired, attempt_id)
     _process(wired)
@@ -98,10 +101,22 @@ def test_an_interrupted_upload_names_the_failed_record_it_kept(wired, monkeypatc
 
 
 @live
-def test_an_interrupted_upload_that_saved_nothing_says_so(wired):  # noqa: F811
+def test_an_interrupted_upload_that_saved_nothing_says_so(wired, monkeypatch):  # noqa: F811
     tc = wired.client("relay")
     attempt_id = _upload(tc, _pieces_pdf(1))
     tc.__exit__(None, None, None)
+
+    async def killed(*_args, **_kwargs):
+        # Stopped after the attempt was claimed, before any record existed.
+        raise asyncio.CancelledError
+
+    with monkeypatch.context() as patch:
+        patch.setattr(ingest_service, "resolve_or_create_group", killed)
+        with pytest.raises(asyncio.CancelledError):
+            _process(wired)
+    attempt, manuscript = _attempt(wired, attempt_id)
+    assert attempt.status == "processing" and attempt.lease_id is not None
+    assert manuscript is None
 
     _expire_processing(wired, attempt_id)
     _process(wired)
