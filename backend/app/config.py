@@ -348,8 +348,9 @@ class Settings(BaseSettings):
     # Pages whose reading order is unresolved (complex tables, overlapping
     # layouts) are left out of rubric grading and the integrity checks, and
     # disclosed on every result, while they are at most this share of the
-    # manuscript; above it those analyses do not run.
-    analysis_unread_pages_max_ratio: float = Field(default=0.25, ge=0, le=1)
+    # manuscript; above it those analyses do not run. Half: unresolved pages
+    # are mostly complex tables, and long theses can have a third of them.
+    analysis_unread_pages_max_ratio: float = Field(default=0.5, ge=0, le=1)
     semantic_batch_max_criteria: int = Field(default=20, ge=1)
     semantic_batch_validation_attempts: int = Field(default=2, ge=1, le=2)
     semantic_item_recovery_max_criteria: int = Field(default=20, ge=0)
