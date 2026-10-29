@@ -514,6 +514,11 @@ export interface IntegrityCheckStatusOut {
   n_source_pages_unassessed?: number;
   // Page numbers behind n_source_pages_unassessed, when the check records them.
   source_pages_unassessed?: number[] | null;
+  // BUG-533 (originality): text left out of the comparison because the
+  // reference list's limits were unclear. Pages for PDFs (empty for Word),
+  // and where the left-out text starts, as a report anchor.
+  pages_not_compared?: number[] | null;
+  not_compared_from?: string | null;
   n_claim_support_unassessed?: number;
   reference_list_page?: number | null;
   analysis_coverage?: "complete" | "partial" | "unsupported" | null;
@@ -548,7 +553,7 @@ export interface OriginalityScope {
   compared_count: number | null;
   corpus: "library" | "pre_library";
   /** "no_text": no readable text, so no comparison ran at all. */
-  not_compared_reason?: "no_text" | "no_comparison_archive" | "source_unresolved" | null;
+  not_compared_reason?: "no_text" | "no_comparison_archive" | "source_unresolved" | "reference_boundary_unclear" | null;
 }
 
 export interface ReportOut extends ReportCommon {

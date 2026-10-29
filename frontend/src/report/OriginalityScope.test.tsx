@@ -57,3 +57,8 @@ describe("OriginalityScope", () => {
     expect(originalityUnassessed(null)).toBe(false);
   });
 });
+
+it("says no text was compared when the body could not be told apart from the reference list", () => {
+  renderWithProviders(<OriginalityScope scope={{ not_compared_reason: "reference_boundary_unclear" } as never} />);
+  expect(screen.getByText(/the body could not be told apart from the reference list, so no text was compared\. This is not evidence of originality\./)).toBeInTheDocument();
+});
