@@ -11,6 +11,8 @@ from app.auth.dependencies import get_current_instructor
 from app.config import get_settings
 from app.db import get_session
 from app.errors import ConflictError
+from app.flags.schemas import BulkResolveFlagsIn, BulkResolveFlagsOut
+from app.flags.service import bulk_resolve_flags
 from app.models.instructor import Instructor
 from app.models.manuscript import Manuscript
 from app.ratelimit import enforce_action_rate_limit
@@ -444,6 +446,28 @@ async def list_flags_route(
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> list[FlagSummaryOut]:
     return await list_flags_for_run(session, check_run_id, instructor.id)
+
+
+@router.post("/check-runs/{check_run_id}/flags/bulk-resolve", response_model=BulkResolveFlagsOut)
+async def bulk_resolve_flags_route(
+    check_run_id: int,
+    body: BulkResolveFlagsIn,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    instructor: Annotated[Instructor, Depends(get_current_instructor)],
+) -> BulkResolveFlagsOut:
+    """V-089: confirm or dismiss many findings at once (screens 4w, 4h)."""
+    out = await bulk_resolve_flags(
+        session,
+        check_run_id,
+        instructor.id,
+        action=body.action,
+        flag_ids=body.flag_ids,
+        expected_revision=body.expected_revision,
+        note=body.note,
+        reason=body.reason,
+    )
+    out.report = await attach_report_figures(session, out.report)
+    return out
 
 
 @router.get("/check-runs/{check_run_id}/document", response_model=ManuscriptViewerOut)

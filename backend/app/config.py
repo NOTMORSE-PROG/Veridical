@@ -610,6 +610,9 @@ class Settings(BaseSettings):
     # dashboard accuracy alarm (D-012 mechanism #3) — overrides are a
     # labeled ground-truth signal, not just a UI action.
     override_alert_rate: float = 0.15
+    # Most findings one bulk confirm/dismiss may change (V-089). Each gets
+    # its own audit entry inside one transaction, so this bounds that work.
+    flag_bulk_resolve_max_flags: int = Field(default=200, gt=0)
 
     # --- Auth (V-014, F9.1) ---------------------------------------------------
     session_cookie_name: str = "veridical_session"
