@@ -69,7 +69,14 @@ jobs:
           # -- BUG-146's own reproduction artifact, also local-only/
           # gitignored (D-007), same convention as `test_ingest_pdf.py`'s
           # existing `demo_pdf_only` marker already counted in the 9 above.
-          VERIDICAL_MAX_SKIPS: "10"
+          # Raised 10 -> 26 (BUG-497, 2026-10-29), each skip checked:
+          # 16 are Windows-only (10 in test_storage_windows_reader.py for
+          # Windows file-handle sharing, 6 in test_ingest_recovery_process.py
+          # for the Windows Job Object path), which this Linux runner cannot
+          # execute; 7 need local-only D-007 files (4 owner proposal PDF,
+          # 1 oral-presentation rubric, 1 golden rubric decomposition, 1 demo
+          # PDF with golden labels); 3 need a real Gemini key.
+          VERIDICAL_MAX_SKIPS: "26"
       - name: Retain default pytest failure and acceptance receipts
         if: always()
         uses: actions/upload-artifact@v4

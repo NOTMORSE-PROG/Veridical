@@ -15,4 +15,5 @@
 # V-081: frozen provenance identities cover the exact reviewed file bytes.
 /backend/tests/fixtures/v4_source_control_v2/recipe.json -text whitespace=trailing-space,space-before-tab,cr-at-eol
 /backend/tests/fixtures/v4_source_control_v2/provenance.json -text whitespace=trailing-space,space-before-tab,cr-at-eol
+/tools/data/backend_acceptance_v1.json -text whitespace=trailing-space,space-before-tab,cr-at-eol
 /backend/app/report/fonts/LICENSE_DEJAVU -text whitespace=-blank-at-eol
