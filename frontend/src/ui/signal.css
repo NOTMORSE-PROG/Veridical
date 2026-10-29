@@ -8829,4 +8829,29 @@
   .signal-integrity-empty p, .signal-integrity-review-notes p { max-inline-size: var(--signal-prose-width); }
   .signal-integrity-review-notes { display: grid; gap: var(--signal-space-3); min-inline-size: 0; }
   .signal-integrity-review-notes summary { cursor: pointer; font-size: var(--signal-type-label); color: var(--color-signal-ink-secondary); }
+
+  /* V-088 review fixes: these follow every earlier rule they correct. */
+  .signal-version-history__actions .signal-button--secondary {
+    border: var(--signal-border-hairline) solid var(--color-signal-border-strong);
+    text-decoration: none;
+  }
+  .signal-version-history__actions .signal-button--danger { border: 0; text-decoration: none; }
+  .signal-comparison-pagination button:disabled {
+    border-block-end-style: dashed;
+    border-block-end-color: var(--color-signal-border);
+    color: var(--color-signal-ink-muted);
+    cursor: not-allowed;
+  }
+  .signal-review-bar .signal-criterion-navigation { padding: 0; }
+  .signal-review-bar .signal-document-finding-nav { display: flex; gap: var(--signal-rhythm-control); }
+  .signal-review-bar .signal-document-finding-nav > .signal-button { inline-size: auto; }
+  .signal-document-review-queue > .signal-empty-state { margin-inline: var(--signal-space-5); }
+  .signal-flag-row { grid-template-columns: minmax(0, 1fr) var(--signal-flag-action-width); }
+  .signal-flag-row > .signal-button,
+  .signal-flag-row > .signal-flag-row__actions { justify-self: stretch; }
+  .signal-flag-row > .signal-flag-row__actions { display: grid; gap: var(--signal-space-2); }
+  .signal-flag-row > .signal-flag-row__actions > .signal-button,
+  .signal-flag-row > .signal-button { inline-size: 100%; }
+  .signal-stored-files .signal-stored-file__actions > .signal-button--danger { margin-inline-start: auto; }
+  .signal-figure-reading-grid { grid-template-columns: repeat(auto-fit, minmax(var(--signal-evidence-card-min-width), 1fr)); }
 }
