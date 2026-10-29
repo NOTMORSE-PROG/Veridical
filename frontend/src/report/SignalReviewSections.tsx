@@ -716,7 +716,7 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, sourceTarget, 
         )}
         {assessment?.ruleScopeUnconfirmed && <RuleScopeNotice />}
         {assessment?.sourceCoverage && <CriterionSourceCoverage value={assessment.sourceCoverage} sourceAction={coverageSourceAction} firstSlot={item.evidence?.length ?? 0} criterionText={item.criterion_text} />}
-        {reportHasLimits && <p className="signal-field-hint"><ActionLink to={workspaceStepPath(checkRunId, "decision")} variant="quiet" onClick={event => focusAfterStepChange(event, "workspace-coverage-heading")}>Review assessment limits</ActionLink></p>}
+        {reportHasLimits && <p className="signal-field-hint"><ActionLink to={workspaceStepPath(checkRunId, "decision")} variant="quiet" onClick={event => focusAfterStepChange(event, "workspace-coverage-heading")}>See assessment limits in step 4</ActionLink></p>}
         {assessment?.ruleFacts && <RuleFactsDetails facts={assessment.ruleFacts} />}
         {item.reasoning?.trim() && <div className="signal-resolution-context-note"><h4>Assessment and explanation</h4><strong>{assessment?.explanationLabel ?? "Recorded explanation:"}</strong><p>{item.reasoning}</p></div>}
         <Button variant="quiet" aria-expanded={detailsOpen} aria-controls={detailsId}
@@ -731,7 +731,7 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, sourceTarget, 
           {!item.reasoning?.trim() && Boolean(item.evidence?.length) && !assessment?.ruleFacts && (assessment?.source === "ai" || !item.reason?.trim()) && <p>{assessment?.missingExplanation ?? "No explanation is available in this assessment record."}</p>}
           <p>{CRITERION_REVIEW_COPY.detailsQualification}</p>
           {item.votes.length > 0 ? <ol aria-label={CRITERION_REVIEW_COPY.entriesLabel}>{item.votes.map((vote, index) =>
-            <li key={index}><strong>Entry {index + 1}</strong><span>{vote ?? CRITERION_REVIEW_COPY.missingEntry}</span></li>,
+            <li key={index}><strong>Entry {index + 1}</strong>{" "}<span>{vote ?? CRITERION_REVIEW_COPY.missingEntry}</span></li>,
           )}</ol> : <p>{CRITERION_REVIEW_COPY.noEntries}</p>}
         </div>
         <p id={sourceQualificationId} className="signal-field-hint">{RECORDED_GRADE_BASIS.qualification}</p>

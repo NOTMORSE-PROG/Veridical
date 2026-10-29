@@ -39,7 +39,7 @@ function CurrentAssessmentReview({ review, busy, onRebind }: { review: ReturnTyp
     {review.reviewed && <div className="signal-copy-flow"><h3>Current assessment</h3>
       <ReadinessBand status={review.reviewed.status} />
       <RuleScopeSummary rows={review.reviewed.results} checkRunId={review.reviewed.check_run_id} linkToRecords={false} />
-      <p>{review.reviewed.pending_review_count} criteria remain unresolved. Instructor decision: {review.reviewed.decision ? DECISION_LABEL[review.reviewed.decision] : "Not recorded"}.</p>
+      <p>{review.reviewed.pending_review_count} {review.reviewed.pending_review_count === 1 ? "criterion remains" : "criteria remain"} unresolved. Instructor decision: {review.reviewed.decision ? DECISION_LABEL[review.reviewed.decision] : "Not recorded"}.</p>
       <ul>{review.reviewed.results.map(row => <li key={row.criterion_id}>{row.text}: {resultDisplay(row).label}</li>)}</ul>
       {review.canRebind && <Button variant="secondary" disabled={busy} onClick={event => onRebind(event.currentTarget)}>Use my reason with this current assessment</Button>}
     </div>}
@@ -81,7 +81,7 @@ function DecisionDialog({ decision, report, manuscriptLabel, onClose, onSaved, f
       <RuleScopeSummary rows={report.results} checkRunId={report.check_run_id} linkToRecords={false} />
       {readFailed && <DecisionReadRecovery retrying={retrying} onRetry={onRetry} />}
       <CurrentAssessmentReview review={review} busy={decide.isPending} onRebind={trigger => followAction(trigger, review.rebind)} />
-      <p>This records {manuscriptLabel} as {copy.phrase}{pendingReturn ? ` with ${report.pending_review_count} unresolved criteria. Returning does not grade or exclude them.` : "."} The report becomes read-only until you reopen it with a reason.</p>
+      <p>This records {manuscriptLabel} as {copy.phrase}{pendingReturn ? ` with ${report.pending_review_count} unresolved ${report.pending_review_count === 1 ? "criterion" : "criteria"}. Returning does not grade or exclude ${report.pending_review_count === 1 ? "it" : "them"}.` : "."} The report becomes read-only until you reopen it with a reason.</p>
       {automaticGrades > 0 && <p>{fillAutomaticConfirmation(automaticGrades)}</p>}
       {drafts && (drafts.drafts.size > 0 || drafts.revisions.hasDrafts) && <p>Your entered criterion drafts are kept and locked. After reopening, review each current criterion before using its draft.</p>}
       {drafts?.revisions.hasUnknownAttempt && <p>An earlier revision save could not be confirmed. This decision uses the current judgments shown and does not cancel that request.</p>}
