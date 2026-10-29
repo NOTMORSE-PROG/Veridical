@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_instructor
 from app.config import get_settings
-from app.db import DbInt, get_session
+from app.db import DbInt, DbText, get_session
 from app.errors import ConflictError
 from app.flags.schemas import BulkResolveFlagsIn, BulkResolveFlagsOut
 from app.flags.service import bulk_resolve_flags
@@ -121,8 +121,8 @@ async def get_evidence_manifest_route(
 )
 async def get_evidence_page_route(
     check_run_id: DbInt,
-    reference_id: Annotated[str, Path(pattern=r"^[a-f0-9]{64}$")],
-    snapshot_id: Annotated[str, Query(pattern=r"^[a-f0-9]{64}$")],
+    reference_id: Annotated[DbText, Path(pattern=r"^[a-f0-9]{64}$")],
+    snapshot_id: Annotated[DbText, Query(pattern=r"^[a-f0-9]{64}$")],
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> EvidencePageOut:
@@ -144,8 +144,8 @@ async def get_evidence_page_route(
 )
 async def get_evidence_location_route(
     check_run_id: DbInt,
-    reference_id: Annotated[str, Path(pattern=r"^[a-f0-9]{64}$")],
-    snapshot_id: Annotated[str, Query(pattern=r"^[a-f0-9]{64}$")],
+    reference_id: Annotated[DbText, Path(pattern=r"^[a-f0-9]{64}$")],
+    snapshot_id: Annotated[DbText, Query(pattern=r"^[a-f0-9]{64}$")],
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> EvidenceLocationOut:
@@ -159,7 +159,7 @@ async def get_evidence_location_route(
 @router.get("/check-runs/{check_run_id}/evidence/source-file")
 async def get_evidence_source_file_route(
     check_run_id: DbInt,
-    source_identity: Annotated[str, Query(pattern=r"^[a-f0-9]{64}$")],
+    source_identity: Annotated[DbText, Query(pattern=r"^[a-f0-9]{64}$")],
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> Response:
@@ -195,7 +195,7 @@ async def get_evidence_source_file_route(
 )
 async def get_evidence_source_document_route(
     check_run_id: DbInt,
-    source_identity: Annotated[str, Query(pattern=r"^[a-f0-9]{64}$")],
+    source_identity: Annotated[DbText, Query(pattern=r"^[a-f0-9]{64}$")],
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> EvidenceDocumentOut:
@@ -219,7 +219,7 @@ async def get_evidence_source_document_route(
 async def get_evidence_source_image_route(
     check_run_id: DbInt,
     image_index: Annotated[DbInt, Path(ge=0)],
-    source_identity: Annotated[str, Query(pattern=r"^[a-f0-9]{64}$")],
+    source_identity: Annotated[DbText, Query(pattern=r"^[a-f0-9]{64}$")],
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> Response:
@@ -267,7 +267,7 @@ async def judgment_history_route(
     expected_revision: Annotated[DbInt, Query(ge=0)],
     expected_judgment_revision: Annotated[DbInt, Query(ge=0)],
     page_size: Annotated[DbInt | None, Query(ge=1)] = None,
-    cursor: str | None = None,
+    cursor: DbText | None = None,
 ) -> JudgmentHistoryOut:
     response.headers["Cache-Control"] = "no-store"
     return await get_judgment_history(
@@ -381,7 +381,7 @@ async def prepare_report_pdf_route(
 @router.get("/check-runs/{check_run_id}/report/export-jobs/{job_id}", response_model=ExportJobOut)
 async def report_pdf_job_route(
     check_run_id: DbInt,
-    job_id: str,
+    job_id: DbText,
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> ExportJobOut:
@@ -414,7 +414,7 @@ class PreparedPdfResponse(FileResponse):
 @router.get("/check-runs/{check_run_id}/report/export-jobs/{job_id}/file")
 async def prepared_report_pdf_route(
     check_run_id: DbInt,
-    job_id: str,
+    job_id: DbText,
     session: Annotated[AsyncSession, Depends(get_session, scope="request")],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> Response:

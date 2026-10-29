@@ -3,6 +3,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from app.db import DbText
+
 
 class ThresholdsOut(BaseModel):
     ready_min_score: float
@@ -42,4 +44,4 @@ class SettingsOut(BaseModel):
 
 
 class SetApiKeyIn(BaseModel):
-    api_key: str = Field(min_length=1, max_length=200)
+    api_key: DbText = Field(min_length=1, max_length=200)

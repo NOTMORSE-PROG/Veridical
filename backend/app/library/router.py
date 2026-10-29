@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_instructor, get_upload_instructor
 from app.config import get_settings
-from app.db import DbInt, get_session
+from app.db import DbInt, DbText, get_session
 from app.library.schemas import (
     LibraryDecisionIn,
     LibraryEntryStateOut,
@@ -83,8 +83,8 @@ async def list_library_route(
     # query.
     page: Annotated[DbInt, Query(ge=1, le=_LIST_MAX_PAGE)] = 1,
     page_size: Annotated[DbInt, Query(ge=1, le=_LIST_MAX_PAGE_SIZE)] = 50,
-    program: str | None = None,
-    search: str | None = None,
+    program: DbText | None = None,
+    search: DbText | None = None,
     scope: LibraryListScope = "active",
 ) -> PaginatedLibrary:
     return await list_library(

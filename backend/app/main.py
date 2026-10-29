@@ -1,6 +1,7 @@
 """VERIDICAL API entry point."""
 
 import asyncio
+import json
 import logging
 import time
 from collections.abc import AsyncIterator
@@ -9,6 +10,8 @@ from pathlib import Path
 
 from alembic.config import Config
 from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import RequestResponseEndpoint
@@ -304,6 +307,23 @@ async def add_public_share_response_headers(
     ):
         response.headers["Cache-Control"] = _PRIVATE_DOCUMENT_CACHE_CONTROL
     return response
+
+
+class _AsciiJSONResponse(JSONResponse):
+    def render(self, content: object) -> bytes:
+        return json.dumps(
+            content, ensure_ascii=True, allow_nan=False, separators=(",", ":")
+        ).encode("ascii")
+
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_error_handler(
+    request: Request, exc: RequestValidationError
+) -> JSONResponse:
+    """FastAPI's own 422 body, rendered with ASCII escapes. The errors echo the
+    rejected input, and a lone surrogate in it made the default UTF-8 rendering
+    fail with a 500 while reporting a client error (BUG-537)."""
+    return _AsciiJSONResponse(status_code=422, content={"detail": jsonable_encoder(exc.errors())})
 
 
 @app.exception_handler(VeridicalError)

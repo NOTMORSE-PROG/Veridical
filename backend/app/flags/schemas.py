@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, mod
 
 from app.checks.citations.history_review import CitationMetadataReviewWarning
 from app.config import get_settings
-from app.db import DbInt
+from app.db import DbInt, DbText
 from app.report.schemas import FlagSummaryOut, ReportOut
 
 
@@ -215,12 +215,12 @@ class FlagOut(BaseModel):
 
 
 class AnnotateFlagIn(BaseModel):
-    annotation: str = Field(min_length=1)
+    annotation: DbText = Field(min_length=1)
 
 
 class OverrideFlagIn(BaseModel):
     expected_revision: DbInt = Field(strict=True, ge=0)
-    reason: str = Field(min_length=1)
+    reason: DbText = Field(min_length=1)
 
 
 class ConfirmCitationSourceIn(BaseModel):
@@ -229,7 +229,7 @@ class ConfirmCitationSourceIn(BaseModel):
     # this"), same required-reason discipline as OverrideFlagIn -- not a
     # fixed/generated string, since this is a MORE consequential action
     # (durable, cross-manuscript) than an ordinary override, not less.
-    reason: str = Field(min_length=1)
+    reason: DbText = Field(min_length=1)
 
     @field_validator("reason")
     @classmethod
@@ -257,7 +257,7 @@ class ConfirmFindingIn(BaseModel):
     expected_revision: DbInt = Field(strict=True, ge=0)
     # BUG-518: agreeing with a finding needs no justification; an optional
     # note is kept for the record. Blank is stored as no note.
-    note: str | None = None
+    note: DbText | None = None
 
 
 class ConfirmFindingOut(FlagOut):
@@ -286,9 +286,9 @@ class BulkResolveFlagsIn(BaseModel):
     flag_ids: list[Annotated[DbInt, Field(strict=True, gt=0)]] = Field(min_length=1)
     expected_revision: DbInt = Field(strict=True, ge=0)
     # Confirm: optional, blank stored as no note (as `ConfirmFindingIn`).
-    note: str | None = None
+    note: DbText | None = None
     # Dismiss: required, as `OverrideFlagIn`, and never whitespace only.
-    reason: str | None = None
+    reason: DbText | None = None
     # How many selected findings the reviewer's screen showed as not yet
     # opened. Stored on each audit entry as client-reported, not verified.
     unopened_count: DbInt | None = Field(default=None, strict=True, ge=0)
@@ -316,9 +316,6 @@ class BulkResolveFlagsIn(BaseModel):
         limit = get_settings().flag_bulk_resolve_max_text_chars
         if value is not None and len(value.strip()) > limit:
             raise ValueError(f"keep the note or reason to {limit} characters")
-        # PostgreSQL text cannot store NUL; refuse it here instead of failing at save.
-        if value is not None and "\x00" in value:
-            raise ValueError("the note or reason contains a character that cannot be saved")
         return value
 
     @model_validator(mode="after")

@@ -17,7 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.service import write_audit_event
-from app.db import DbInt
+from app.db import DbInt, DbText
 from app.errors import GroupAssignmentChangedError, NotFoundError, SavedGroupChangedError
 from app.models.enums import ManuscriptOrigin
 from app.models.group import Group, GroupMember, Program
@@ -54,7 +54,7 @@ class SelectGroupRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     saved_group_id: Annotated[DbInt, Field(gt=0)]
-    fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    fingerprint: DbText = Field(pattern=r"^[0-9a-f]{64}$")
     # Required even when NULL: the upload's display label is not the current FK.
     expected_group_id: Annotated[DbInt, Field(gt=0)] | None
 

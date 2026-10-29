@@ -20,7 +20,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-from app.db_types import DbInt
+from app.db_types import DbInt, DbText
 from app.ingest.native_math_models import NativeMathInventory
 from app.ingest.native_table_models import NativeTableOrderWitness
 from app.ingest.recovery_models import RecoveryEnvelope
@@ -318,15 +318,15 @@ class ConfirmGroupRequest(BaseModel):
     exactly what the instructor confirmed or edited — this endpoint never
     reads back into the extraction itself, only what's sent here."""
 
-    group_name: str = Field(min_length=1)
-    member_names: list[str] = Field(default_factory=list)
+    group_name: DbText = Field(min_length=1)
+    member_names: list[DbText] = Field(default_factory=list)
     program_id: DbInt | None = Field(default=None, gt=0, strict=True)
     # V-066: the full capstone title shown (read-only, not editable) in the
     # confirm dialog alongside group_name/members -- carried through here
     # exactly like program_id so it can be persisted, same "only set on a
     # NEWLY created group" rule as program_id (see
     # `app.ingest.service.confirm_manuscript_group`).
-    title: str | None = None
+    title: DbText | None = None
     # Omission supports older clients; explicit NULL expects no current FK.
     expected_group_id: DbInt | None = Field(default=None, gt=0, strict=True)
 
