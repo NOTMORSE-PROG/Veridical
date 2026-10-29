@@ -28,6 +28,8 @@ export interface UploadStatus {
   // Set when the upload asked the server to start a check once it is ready.
   check_run_id?: number | null;
   check_start_error?: string | null;
+  // The upload asked the server to start a check once the file is ready.
+  check_requested?: boolean;
 }
 
 const attempts = new WeakMap<File, Map<number, string>>();

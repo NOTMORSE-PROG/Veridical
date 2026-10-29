@@ -200,7 +200,7 @@ export function BackgroundUploadsProvider({ children }: { children: ReactNode })
         const added = shown.filter((status) => !known.has(status.attempt_id)).map((status): BackgroundUpload => ({
           id: `server-${status.attempt_id}`, attemptId: status.attempt_id, fileName: status.filename?.trim() || "Manuscript",
           size: Number.isFinite(status.size) ? status.size ?? 0 : 0, phase: "preparing", percent: null, serverOwned: true,
-          ...fromStatus(status) }));
+          startsCheck: status.check_requested === true, ...fromStatus(status) }));
         return [...current, ...added];
       });
       for (const status of shown) {
@@ -250,7 +250,8 @@ function stateText(item: BackgroundUpload) {
       : "Preparing: reading the pages. You can keep working or close this tab.";
     case "done":
       if (item.checkRunId !== undefined) return "Ready. The check has started.";
-      if (item.checkStartError) return `Ready, but the check did not start: ${item.checkStartError}`;
+      // The server's reason already says what happened and where to go next.
+      if (item.checkStartError) return `Ready. ${item.checkStartError}`;
       return "Ready.";
     case "failed": return item.error;
   }
@@ -271,7 +272,11 @@ function UploadTray({ uploads, canRetry, onDismiss, onRetry }: {
         {item.phase === "failed" && !canRetry(item.id) && <p className="signal-field-hint">Choose the file again in Upload manuscript.</p>}
         <div className="signal-upload-tray__actions">
           {item.phase === "done" && item.checkRunId !== undefined && <ActionLink variant="secondary" to={`/checks/${item.checkRunId}`}>Open the check</ActionLink>}
-          {item.phase === "done" && item.checkRunId === undefined && item.manuscriptId !== undefined
+          {/* A refused start may still have created the check, so the Review Desk is
+              offered instead of a second start. */}
+          {item.phase === "done" && item.checkRunId === undefined && item.checkStartError
+            && <ActionLink variant="secondary" to="/dashboard">Open the Review Desk</ActionLink>}
+          {item.phase === "done" && item.checkRunId === undefined && !item.checkStartError && item.manuscriptId !== undefined
             && <ActionLink variant="secondary" to={`/dashboard?check=${item.manuscriptId}`}>Start a check</ActionLink>}
           {item.phase === "failed" && canRetry(item.id) && <Button variant="secondary" onClick={() => onRetry(item.id)}>Try again</Button>}
           {(item.phase === "done" || item.phase === "failed") && <Button variant="quiet" onClick={() => onDismiss(item.id)} aria-label={`Dismiss ${item.fileName}`}>Dismiss</Button>}

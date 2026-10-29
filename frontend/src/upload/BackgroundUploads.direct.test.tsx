@@ -67,11 +67,12 @@ describe("background uploads that start their check on the server", () => {
   });
 
   it("says plainly when the file is ready but the check could not start", async () => {
-    serve(relay({ check_run_id: null, check_start_error: "Only a confirmed, active rubric version can be used to start a check." }));
+    serve(relay({ check_run_id: null, check_start_error: "The check may not have started. Look for it on the Review Desk before starting it." }));
     await renderWithUploadProviders(<BackgroundUploadsProvider><Starter rubricId={5} /></BackgroundUploadsProvider>);
     choose();
-    expect(await screen.findByText(/Ready, but the check did not start: Only a confirmed, active rubric version/)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Start a check" })).toHaveAttribute("href", "/dashboard?check=42");
+    expect(await screen.findByText("Ready. The check may not have started. Look for it on the Review Desk before starting it.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open the Review Desk" })).toHaveAttribute("href", "/dashboard");
+    expect(screen.queryByRole("link", { name: "Start a check" })).not.toBeInTheDocument();
   });
 
   it("finishes two large files sent one after the other while the first is still on its way", async () => {
