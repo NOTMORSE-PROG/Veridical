@@ -25,7 +25,7 @@ def _selected_indices(
         if result.anchor_kind == "page"
         and img.page is not None
         and img.bbox is not None
-        and _area(img.bbox) >= settings.ingest_vision_min_area_pts
+        and readable_size(img, settings)
     ]
     priority_pages = _priority_page_ranges(result.section_tree.nodes, patterns)
 
@@ -38,6 +38,17 @@ def _selected_indices(
 
 def _area(bbox: tuple[float, float, float, float]) -> float:
     return max(0.0, bbox[2] - bbox[0]) * max(0.0, bbox[3] - bbox[1])
+
+
+def readable_size(image: ImageBlock, settings: Settings) -> bool:
+    """Large enough to be worth reading. An image merged from small pieces
+    (BUG-532) stays small whatever its outline: its pieces were each below
+    the size, and merging them must not start reading what was not read."""
+    return (
+        image.bbox is not None
+        and image.piece_count == 1
+        and _area(image.bbox) >= settings.ingest_vision_min_area_pts
+    )
 
 
 def _priority_page_ranges(
@@ -124,9 +135,7 @@ def prepare_figures(result, patterns, settings, *, enabled=True):
     for index, image in enumerate(result.images):
         caption, anchor = _caption(result, image, patterns, settings, caption_index)
         supported = image.docx_source is not None or (
-            image.page is not None
-            and image.bbox is not None
-            and _area(image.bbox) >= settings.ingest_vision_min_area_pts
+            image.page is not None and image.bbox is not None and readable_size(image, settings)
         )
         useful = caption is not None or (
             image.page is not None and any(a <= image.page <= b for a, b in priority)

@@ -35,8 +35,8 @@ from pydantic import BaseModel, ValidationError
 from app.config import Settings
 from app.errors import ApiDownError, QuotaExhaustedError
 from app.ingest.admission import PreparationLease
-from app.ingest.image_source import _area, _selected_indices
 from app.ingest.image_source import _crop as _native_crop
+from app.ingest.image_source import _selected_indices, readable_size
 from app.ingest.patterns import HeadingPatterns
 from app.ingest.schemas import (
     EquationBlock,
@@ -155,7 +155,7 @@ def prepare_image_readings(
             reason = "vision_disabled"
         elif result.anchor_kind != "page" or image.page is None or image.bbox is None:
             reason = "unsupported_source"
-        elif _area(image.bbox) < settings.ingest_vision_min_area_pts:
+        elif not readable_size(image, settings):
             reason = "size_filter"
         else:
             reason = "not_attempted" if index in selected else "selection_limit"
