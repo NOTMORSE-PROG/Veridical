@@ -60,6 +60,16 @@ describe("grades beside findings on the same pages", () => {
     expect(fetcher).not.toHaveBeenCalledWith(expect.stringContaining("/flags"), expect.anything());
   });
 
+  it("shows the adviser how an automatic grade was chosen, and nothing for an instructor's grade", () => {
+    renderWithProviders(<SignalCriteriaResults checkRunId={3} publicView results={[
+      graded({ decision_basis: "lower_of_two", support_caution: "One quote only." }),
+      graded({ criterion_id: 8, text: "Tone", agreeing_passes: null, grading_passes: null, decision_basis: null }),
+    ]} />, { route: "/shared/abc" });
+    expect(screen.getByText(/the lower of the two grades was used/)).toBeInTheDocument();
+    expect(screen.getByText("Evidence check not confirmed: One quote only.")).toBeInTheDocument();
+    expect(screen.getAllByText(/Graded automatically/)).toHaveLength(1);
+  });
+
   it("explains why a finding is left out of readiness", () => {
     expect(readinessExclusionLine(flag({ affects_readiness: false, readiness_exclusion_reason: "comparison_lead_not_scored" })))
       .toBe("Not counted for readiness: matching text is a lead to compare, not proof of copying, so you judge it from the passages.");
