@@ -131,6 +131,30 @@ def test_a_rubric_that_cannot_run_is_refused_before_any_byte_moves(wired):  # no
 
 
 @live
+def test_resuming_an_attempt_skips_its_check_request(wired):  # noqa: F811 -- imported pytest fixtures
+    # The start-check block (rate limit and rubric refusal) runs only when an
+    # attempt is created; the old placement refused this resume with 409.
+    rubric_id = _rubric(wired)
+    tc = wired.client("relay")
+    data = b"%PDF-1.7 small"
+    attempt_id = str(uuid4())
+    body = {
+        "attempt_id": attempt_id,
+        "filename": "thesis.pdf",
+        "size": len(data),
+        "start_check": {"rubric_id": rubric_id},
+    }
+    headers = {"X-Veridical-Expected-Instructor": str(wired.instructor_id)}
+    first = tc.post("/manuscripts/uploads", json=body, headers=headers)
+    assert first.status_code == 200, first.text
+    # The attempt keeps the rubric it began with; a resume changes nothing.
+    _set_rubric_active(wired, rubric_id, False)
+    resumed = tc.post("/manuscripts/uploads", json=body, headers=headers)
+    assert resumed.status_code == 200, resumed.text
+    assert resumed.json()["attempt_id"] == attempt_id
+
+
+@live
 def test_a_check_that_cannot_start_keeps_the_upload_and_says_why(wired):  # noqa: F811 -- imported pytest fixtures
     rubric_id = _rubric(wired)
     tc = wired.client("relay")

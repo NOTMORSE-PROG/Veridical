@@ -355,9 +355,6 @@ async def begin_upload(
     settings = enabled_settings()
     capabilities = _capabilities(transports)
     enforce_action_rate_limit(settings, "manuscript_ingest", instructor.id)
-    if body.start_check is not None:
-        enforce_action_rate_limit(settings, "check_run", instructor.id)
-        await _checkable_rubric(session, instructor.id, body.start_check.rubric_id)
     if body.size > settings.direct_manuscript_upload_max_mb * 1024 * 1024:
         raise FileTooLargeError(
             f"Choose a manuscript no larger than {settings.direct_manuscript_upload_max_mb} MB."
@@ -380,6 +377,11 @@ async def begin_upload(
             raise ConflictError("This upload identity belongs to another selected file.")
         attempt = existing
     else:
+        # Only a new attempt asks for a check: resuming one (a repeated begin
+        # for the same attempt) neither charges the limit nor re-checks it.
+        if body.start_check is not None:
+            enforce_action_rate_limit(settings, "check_run", instructor.id)
+            await _checkable_rubric(session, instructor.id, body.start_check.rubric_id)
         # Choosing the same file again replaces this instructor's older
         # unfinished attempt for it instead of counting against their limit.
         await session.execute(
