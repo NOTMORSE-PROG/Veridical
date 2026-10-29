@@ -795,6 +795,26 @@ def test_relay_body_refuses_a_wrong_length_before_reading(wired):
 
 
 @live
+def test_relay_body_accepts_a_chunked_body_and_holds_it_to_the_size(wired):
+    tc = wired.client("relay")
+    data = os.urandom(6 * MIB + 3)
+
+    def chunked(payload):
+        for offset in range(0, len(payload), 256 * 1024):
+            yield payload[offset : offset + 256 * 1024]
+
+    attempt_id = _begin(tc, wired.instructor_id, data, transports="stream")["attempt_id"]
+    too_long = tc.put(f"/manuscripts/uploads/{attempt_id}/body", content=chunked(data + b"x"))
+    assert too_long.status_code == 409, too_long.text
+    assert wired.store.uploads == {}
+    accepted = tc.put(f"/manuscripts/uploads/{attempt_id}/body", content=chunked(data))
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["status"] == "queued"
+    staging_key = next(call[1] for call in wired.store.calls if call[0] == "complete_multipart")
+    assert wired.store.objects[staging_key] == data
+
+
+@live
 def test_relay_body_requires_sign_in_before_any_byte_is_stored(wired):
     tc = wired.client("relay")
     data = os.urandom(MIB)

@@ -438,8 +438,10 @@ async def relay_upload_body(
         return response
     if attempt.expires_at <= datetime.now(UTC):
         raise ConflictError("This upload link expired. Start a new upload attempt.")
-    declared = request.headers.get("content-length", "")
-    if not declared.isdigit() or int(declared) != attempt.source_bytes:
+    # A proxy may forward the body chunked, without a length. The stream
+    # itself is held to the exact size; a stated length must already match.
+    declared = request.headers.get("content-length")
+    if declared is not None and (not declared.isdigit() or int(declared) != attempt.source_bytes):
         raise ConflictError("The transferred file does not match the selected file size.")
     key, size = attempt.staging_key, attempt.source_bytes
     await session.commit()

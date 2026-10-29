@@ -10,7 +10,7 @@ from sqlalchemy import select, update
 
 from app.config import get_settings
 from app.db import get_session_factory
-from app.errors import VeridicalError
+from app.errors import VeridicalError, failure_summary
 from app.groups.service import DEFAULT_GROUP_LABEL
 from app.ingest.admission import preparation_scope
 from app.ingest.direct_upload import relay_local_path
@@ -212,7 +212,7 @@ async def _process_next_upload(settings, lease):
                     )
                 )
             await session.commit()
-            _logger.warning("Direct upload processing did not complete (%s)", type(exc).__name__)
+            _logger.warning("Direct upload processing did not complete (%s)", failure_summary(exc))
         finally:
             heartbeat.cancel()
             with suppress(asyncio.CancelledError, Exception):
@@ -229,5 +229,5 @@ async def upload_worker_loop():
             try:
                 await process_next_upload(settings)
             except Exception as exc:
-                _logger.warning("Direct upload scheduler unavailable (%s)", type(exc).__name__)
+                _logger.warning("Direct upload scheduler unavailable (%s)", failure_summary(exc))
         await asyncio.sleep(settings.direct_upload_poll_seconds)
