@@ -6,7 +6,8 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator
 
 from app.checks.citations.history_review import CitationMetadataReviewWarning
-from app.report.schemas import ReportOut
+from app.config import get_settings
+from app.report.schemas import FlagSummaryOut, ReportOut
 
 
 class PassagePairOut(BaseModel):
@@ -267,3 +268,51 @@ class ConfirmCitationSourceOut(FlagOut):
     # implemented as a specific kind of override (BUG-078) and recomputes
     # score/status the same way.
     report: ReportOut
+
+
+class BulkResolveFlagsIn(BaseModel):
+    """V-089: one confirm or dismiss for many findings of one check run.
+
+    Each finding is changed exactly as its single-flag action would change
+    it (`confirm-finding`, `override`); the shared note or reason is copied
+    to every one of them.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    action: Literal["confirm", "dismiss"]
+    flag_ids: list[int] = Field(min_length=1)
+    expected_revision: int = Field(strict=True, ge=0)
+    # Confirm: optional, blank stored as no note (as `ConfirmFindingIn`).
+    note: str | None = None
+    # Dismiss: required, as `OverrideFlagIn`, and never whitespace only.
+    reason: str | None = None
+
+    @field_validator("flag_ids")
+    @classmethod
+    def _bounded_batch(cls, value: list[int]) -> list[int]:
+        # Duplicates name one finding twice; it is changed and audited once.
+        unique = list(dict.fromkeys(value))
+        limit = get_settings().flag_bulk_resolve_max_flags
+        if len(unique) > limit:
+            raise ValueError(f"select at most {limit} findings at a time")
+        return unique
+
+    @model_validator(mode="after")
+    def _text_matches_action(self):
+        if self.action == "dismiss":
+            if self.note is not None:
+                raise ValueError("a dismissal takes a reason, not a note")
+            if self.reason is None or not self.reason.strip():
+                raise ValueError("a reason is required to dismiss findings")
+        elif self.reason is not None:
+            raise ValueError("a confirmation takes an optional note, not a reason")
+        return self
+
+
+class BulkResolveFlagsOut(BaseModel):
+    # The changed findings as the report's flags list shows them.
+    flags: list[FlagSummaryOut]
+    report: ReportOut
+    # Carried by every audit entry this action wrote.
+    batch_id: str

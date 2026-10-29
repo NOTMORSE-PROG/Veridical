@@ -14,6 +14,8 @@ by this ticket).
 """
 
 from datetime import UTC, datetime
+from typing import Literal
+from uuid import uuid4
 
 from pydantic import ValidationError
 from sqlalchemy import select
@@ -28,6 +30,7 @@ from app.external import cache
 from app.findings.policy import exclusion_reason, reuse_excerpt, reuse_reasoning
 from app.flags.schemas import (
     AgreementPairOut,
+    BulkResolveFlagsOut,
     CitationMetadataComparisonOut,
     CitationSourceKeyOut,
     ConfirmCitationSourceOut,
@@ -44,7 +47,7 @@ from app.models.run import CheckResult, CheckRun, Flag
 from app.report.assessment import assessment_write, lock_assessment
 from app.report.cited_work import cited_work
 from app.report.scoring import flag_ai_verdict_summary
-from app.report.service import aggregate_and_score, get_report
+from app.report.service import aggregate_and_score, flags_for_check_run, get_report
 
 
 def _passage_pair_from_detail(evidence_excerpt: str, detail: dict) -> PassagePairOut | None:
@@ -332,6 +335,79 @@ async def annotate_flag(
     return await get_flag(session, flag_id, instructor_id)
 
 
+def _dismiss_finding(
+    flag: Flag,
+    result: CheckResult,
+    instructor_id: int,
+    reason: str,
+    *,
+    revision_before: int,
+    revision: int,
+    batch_id: str | None = None,
+) -> AuditLog:
+    """Dismiss one finding and return its audit entry (single or bulk)."""
+    flag.overridden = True
+    flag.override_reason = reason.strip()
+    # Dismissing replaces an earlier confirmation; the audit keeps both.
+    flag.finding_confirmed = False
+    flag.finding_confirm_note = None
+    flag.finding_confirmed_at = None
+    payload = {
+        "flag_id": flag.id,
+        "check_result_id": result.id,
+        "instructor_id": instructor_id,
+        "reason": reason.strip(),
+        "severity": flag.severity.value,
+        "assessment_revision_before": revision_before,
+        "assessment_revision": revision,
+    }
+    if batch_id is not None:
+        payload["batch_id"] = batch_id
+    return AuditLog(
+        event_type="flag_overridden",
+        check_run_id=result.check_run_id,
+        agreement_score=flag.confidence,
+        payload=payload,
+    )
+
+
+def _confirm_finding(
+    flag: Flag,
+    result: CheckResult,
+    instructor_id: int,
+    note: str | None,
+    *,
+    confirmed_at: datetime,
+    revision_before: int,
+    revision: int,
+    batch_id: str | None = None,
+) -> AuditLog:
+    """Confirm one finding as a real issue and return its audit entry."""
+    cleaned = (note or "").strip() or None
+    flag.finding_confirmed = True
+    flag.finding_confirm_note = cleaned
+    flag.finding_confirmed_at = confirmed_at
+    flag.overridden = False
+    flag.override_reason = None
+    payload = {
+        "flag_id": flag.id,
+        "check_result_id": result.id,
+        "instructor_id": instructor_id,
+        "note": cleaned,
+        "severity": flag.severity.value,
+        "assessment_revision_before": revision_before,
+        "assessment_revision": revision,
+    }
+    if batch_id is not None:
+        payload["batch_id"] = batch_id
+    return AuditLog(
+        event_type="flag_finding_confirmed",
+        check_run_id=result.check_run_id,
+        agreement_score=flag.confidence,
+        payload=payload,
+    )
+
+
 async def override_flag(
     session: AsyncSession,
     flag_id: int,
@@ -345,26 +421,14 @@ async def override_flag(
     run_id = initial_result.check_run_id
     async with assessment_write(session, run_id, instructor_id, expected_revision) as report:
         flag, result, manuscript, check_run = await _scoped_flag(session, flag_id, instructor_id)
-        flag.overridden = True
-        flag.override_reason = reason.strip()
-        # Dismissing replaces an earlier confirmation; the audit keeps both.
-        flag.finding_confirmed = False
-        flag.finding_confirm_note = None
-        flag.finding_confirmed_at = None
         session.add(
-            AuditLog(
-                event_type="flag_overridden",
-                check_run_id=run_id,
-                agreement_score=flag.confidence,
-                payload={
-                    "flag_id": flag_id,
-                    "check_result_id": result.id,
-                    "instructor_id": instructor_id,
-                    "reason": reason.strip(),
-                    "severity": flag.severity.value,
-                    "assessment_revision_before": expected_revision,
-                    "assessment_revision": report.assessment_revision,
-                },
+            _dismiss_finding(
+                flag,
+                result,
+                instructor_id,
+                reason,
+                revision_before=expected_revision,
+                revision=report.assessment_revision,
             )
         )
         await session.flush()
@@ -403,26 +467,15 @@ async def confirm_finding(
                 "This finding was cleared by confirming its citation source. "
                 "It cannot also be confirmed as an issue."
             )
-        cleaned = (note or "").strip() or None
-        flag.finding_confirmed = True
-        flag.finding_confirm_note = cleaned
-        flag.finding_confirmed_at = datetime.now(UTC)
-        flag.overridden = False
-        flag.override_reason = None
         session.add(
-            AuditLog(
-                event_type="flag_finding_confirmed",
-                check_run_id=run_id,
-                agreement_score=flag.confidence,
-                payload={
-                    "flag_id": flag_id,
-                    "check_result_id": result.id,
-                    "instructor_id": instructor_id,
-                    "note": cleaned,
-                    "severity": flag.severity.value,
-                    "assessment_revision_before": expected_revision,
-                    "assessment_revision": report.assessment_revision,
-                },
+            _confirm_finding(
+                flag,
+                result,
+                instructor_id,
+                note,
+                confirmed_at=datetime.now(UTC),
+                revision_before=expected_revision,
+                revision=report.assessment_revision,
             )
         )
         await session.flush()
@@ -492,5 +545,94 @@ async def confirm_citation_source(
         )
         out = ConfirmCitationSourceOut(
             **flag_out.model_dump(), report=await get_report(session, run_id, instructor_id)
+        )
+    return out
+
+
+async def bulk_resolve_flags(
+    session: AsyncSession,
+    check_run_id: int,
+    instructor_id: int,
+    *,
+    action: Literal["confirm", "dismiss"],
+    flag_ids: list[int],
+    expected_revision: int,
+    note: str | None = None,
+    reason: str | None = None,
+) -> BulkResolveFlagsOut:
+    """V-089: confirm or dismiss many findings of one run as one action.
+
+    All or nothing: every id must be a finding of this run on this
+    instructor's account, or nothing changes. Each finding is changed and
+    audited exactly as its single-flag action would do it, every audit entry
+    carries the same batch id, and the run is rescored once.
+    """
+    ids = list(dict.fromkeys(flag_ids))
+    if action == "dismiss" and not (reason or "").strip():
+        raise ConflictError("A reason is required to dismiss findings.")
+    batch_id = uuid4().hex
+    async with assessment_write(session, check_run_id, instructor_id, expected_revision) as report:
+        rows = (
+            await session.execute(
+                select(Flag, CheckResult)
+                .join(CheckResult, CheckResult.id == Flag.check_result_id)
+                .join(CheckRun, CheckRun.id == CheckResult.check_run_id)
+                .join(Manuscript, Manuscript.id == CheckRun.manuscript_id)
+                .where(
+                    Flag.id.in_(ids),
+                    CheckResult.check_run_id == check_run_id,
+                    Manuscript.instructor_id == instructor_id,
+                )
+                .execution_options(populate_existing=True)
+            )
+        ).all()
+        found = {flag.id: (flag, result) for flag, result in rows}
+        if len(found) != len(ids):
+            raise NotFoundError(
+                "Some selected findings are not part of this check. Nothing was changed. "
+                "Reload the findings and select again."
+            )
+        if action == "confirm":
+            cleared = sum(1 for flag, _ in found.values() if flag.confirmed_citation_source)
+            if cleared:
+                raise ConflictError(
+                    f"{cleared} of the selected findings were cleared by confirming their "
+                    "citation source and cannot also be confirmed as issues. Nothing was "
+                    "changed. Remove them from the selection and try again."
+                )
+        confirmed_at = datetime.now(UTC)
+        for flag_id in ids:
+            flag, result = found[flag_id]
+            if action == "confirm":
+                entry = _confirm_finding(
+                    flag,
+                    result,
+                    instructor_id,
+                    note,
+                    confirmed_at=confirmed_at,
+                    revision_before=expected_revision,
+                    revision=report.assessment_revision,
+                    batch_id=batch_id,
+                )
+            else:
+                entry = _dismiss_finding(
+                    flag,
+                    result,
+                    instructor_id,
+                    reason or "",
+                    revision_before=expected_revision,
+                    revision=report.assessment_revision,
+                    batch_id=batch_id,
+                )
+            session.add(entry)
+        await session.flush()
+        await aggregate_and_score(session, check_run_id, commit=False)
+        changed = set(ids)
+        out = BulkResolveFlagsOut(
+            flags=[
+                row for row in await flags_for_check_run(session, check_run_id) if row.id in changed
+            ],
+            report=await get_report(session, check_run_id, instructor_id),
+            batch_id=batch_id,
         )
     return out
