@@ -39,11 +39,6 @@ from app.messages import FILE_ENCRYPTED, FILE_UNREADABLE, PDF_TOO_MANY_PAGES
 
 _BOLD_FLAG = 16  # PyMuPDF span flag bit for bold fonts
 _NATIVE_TABLE_LOCK = threading.Lock()
-# Text without image decoding: the "dict" listing would decode every image to
-# PNG bytes that ingestion never reads. The "blocks" listing reports the same
-# image boxes without decoding them.
-_TEXT_FLAGS = pymupdf.TEXTFLAGS_DICT & ~pymupdf.TEXT_PRESERVE_IMAGES
-_IMAGE_BOX_FLAGS = pymupdf.TEXTFLAGS_BLOCKS | pymupdf.TEXT_PRESERVE_IMAGES
 
 
 def _open_document(path: str) -> pymupdf.Document:
@@ -164,14 +159,11 @@ def _extract_open_document(
             _native_tables_in_source_space(page, pno, ordering=table_proposal, settings=settings)
         )
         page_lines: list[Line] = []
-        images.extend(
-            ImageBlock(page=pno, bbox=tuple(block[:4]))
-            for block in page.get_text("blocks", sort=True, flags=_IMAGE_BOX_FLAGS)
-            if block[6] == 1
-        )
-        raw_blocks = page.get_text("dict", sort=True, flags=_TEXT_FLAGS)["blocks"]
+        raw_blocks = page.get_text("dict", sort=True)["blocks"]
         for block_no, block in enumerate(raw_blocks):
+            bbox: Bbox = tuple(block["bbox"])
             if block["type"] == 1:
+                images.append(ImageBlock(page=pno, bbox=bbox))
                 continue
             for line_no, line in enumerate(block.get("lines", [])):
                 spans = [s for s in line.get("spans", []) if s["text"].strip()]
@@ -205,6 +197,8 @@ def _extract_open_document(
         lines_by_page[pno] = page_lines
         page_heights[pno] = page.rect.height
         geometry.append(_page_geometry(page, pno))
+        # Decoded page images stay in MuPDF's process-wide store until it is
+        # emptied; holding every page's images pushed long theses past 512 MiB.
         release_native_cache()
 
     _mark_furniture(lines_by_page, page_heights, patterns, settings)
