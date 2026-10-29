@@ -1670,6 +1670,96 @@ async def test_a_word_file_with_an_unclear_reference_list_is_not_passed(session_
     assert result.detail["not_compared_from"].startswith("¶")
 
 
+def _word_short_paper_with_an_equation() -> ExtractionResult:
+    """A Word short paper whose list end is unclear and which holds one native
+    equation, so the equation limit also applies."""
+    import hashlib
+    from io import BytesIO
+
+    from docx import Document
+    from docx.oxml import parse_xml
+
+    from app.ingest.docx_math import inventory_native_math
+    from tests.test_ingest_reference_boundaries import as_word_document, unclear_end_manuscript
+
+    word = as_word_document(
+        unclear_end_manuscript().model_copy(
+            update={"section_tree": SectionTree(source="none", nodes=[])}
+        )
+    )
+    document = Document()
+    for block in word.blocks:
+        document.add_paragraph(block.text)
+    document.add_paragraph("")._p.append(
+        parse_xml(
+            '<m:oMath xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math">'
+            "<m:r><m:t>s = a + b</m:t></m:r></m:oMath>"
+        )
+    )
+    stream = BytesIO()
+    document.save(stream)
+    digest = hashlib.sha256(stream.getvalue()).hexdigest()
+    return word.model_copy(
+        update={
+            "docx_source_sha256": digest,
+            "native_math_inventory": inventory_native_math(document, digest),
+        }
+    )
+
+
+def _pdf_short_paper_with_an_unresolved_tail() -> ExtractionResult:
+    """Repeated list numbers, and a later appendix whose membership in the
+    list cannot be settled."""
+    rows = [
+        (1, "The clinic booking system was evaluated with twenty staff over six weeks. " * 12),
+        (2, "REFERENCES"),
+        (2, "[1] Reyes, J. (2024). Booking queues in rural clinics. Journal of Examples, 4(2)."),
+        (2, "[1] Santos, A. (2023). Measuring appointment no-shows. Journal of Examples, 5(1)."),
+        (3, "APPENDIX A"),
+        (3, "Cruz, M. (2021). Mobile queueing for barangay health centers. Notes, 7(1), 1-9."),
+    ]
+    blocks = [
+        TextBlock(
+            page=page,
+            bbox=(72, 100 + index * 30, 540, 120 + index * 30),
+            text=text,
+            max_font_size=16 if text.isupper() else 11,
+            bold_ratio=1 if text.isupper() else 0,
+        )
+        for index, (page, text) in enumerate(rows)
+    ]
+    return ExtractionResult(
+        page_count=3,
+        anchor_kind="page",
+        image_only=False,
+        text_chars=sum(len(block.text) for block in blocks),
+        blocks=blocks,
+        images=[],
+        section_tree=SectionTree(source="none", nodes=[]),
+    )
+
+
+@pytest.mark.parametrize(
+    "build", [_word_short_paper_with_an_equation, _pdf_short_paper_with_an_unresolved_tail]
+)
+async def test_a_refused_body_keeps_its_reason_when_another_limit_also_applies(
+    session_factory, build
+):
+    """An equation or an unresolved tail takes over the coverage reason, but
+    the result must still say the body was refused, not that it had no text."""
+    manuscript_id, run_id = await _seed_manuscript_and_run(
+        session_factory, group_label=f"Refused body {build.__name__}"
+    )
+    async with session_factory() as session:
+        result = await _run_with_saved_source(
+            session, manuscript_id, run_id, build(), get_settings()
+        )
+    assert result.outcome == ResultOutcome.escalated
+    assert result.detail["coverage_reason"] != "reference_boundary_unclear"
+    assert result.detail["not_compared_reason"] == "reference_boundary_unclear"
+    assert "no embeddable content" not in result.detail["note"].casefold()
+
+
 async def test_a_body_that_cannot_be_told_from_its_references_is_named_not_empty(
     session_factory,
 ):

@@ -833,7 +833,11 @@ async def report_out_for_check_run(
                 else "no_comparison_archive"
                 if originality_detail.get("coverage_reason") == "no_comparison_archive"
                 else "reference_boundary_unclear"
-                if originality_detail.get("coverage_reason") == "reference_boundary_unclear"
+                if "reference_boundary_unclear"
+                in (
+                    originality_detail.get("not_compared_reason"),
+                    originality_detail.get("coverage_reason"),
+                )
                 else None
                 if ran
                 else "no_text"

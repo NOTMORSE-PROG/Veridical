@@ -368,7 +368,11 @@ async def run_originality_reuse_check(
         has_resubmission = hash_duplicate_id is not None
         # Text that could not be told apart from an unclear reference list was
         # not compared at all, which is not the same as a file with no text.
-        body_refused = bool(selection.issues) and not source.limited and _has_text(extraction)
+        body_refused = (
+            bool(selection.issues)
+            and source.state not in {"not_recorded", "unavailable"}
+            and _has_text(extraction)
+        )
         result = CheckResult(
             check_run_id=check_run_id,
             criterion_id=None,
@@ -380,6 +384,10 @@ async def run_originality_reuse_check(
                 **source.detail(),
                 "reference_membership_issues": list(selection.membership_issues),
                 "pages_not_compared": _text_pages(extraction) if body_refused else [],
+                # Kept apart from coverage_reason, which a native-equation or
+                # membership limit can take over, so the refusal is never
+                # reported as a file with no text.
+                **({"not_compared_reason": "reference_boundary_unclear"} if body_refused else {}),
                 **(
                     {"coverage_reason": "reference_boundary_unclear"}
                     if body_refused and not membership_partial

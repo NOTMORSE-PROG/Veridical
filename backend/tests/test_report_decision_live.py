@@ -543,6 +543,31 @@ async def test_the_report_says_what_originality_left_out_and_why(session_factory
         assert status.coverage_reason == "reference_boundary_unclear"
         assert status.pages_not_compared == [1, 2, 3]
 
+    # Another limit can take over the coverage reason; the refusal still
+    # reaches the scope instead of reading as a file with no text.
+    async with session_factory() as session:
+        instructor, check_run = await _seed_decidable_run(session)
+        session.add(
+            CheckResult(
+                check_run_id=check_run.id,
+                criterion_id=None,
+                kind=CheckKind.originality_reuse,
+                outcome=ResultOutcome.escalated,
+                detail={
+                    "archive_size_n": 0,
+                    "corpus": "library",
+                    "comparison_ran": False,
+                    "n_flags": 0,
+                    "coverage_reason": "reference_membership_partial",
+                    "not_compared_reason": "reference_boundary_unclear",
+                    "pages_not_compared": [1, 2, 3],
+                },
+            )
+        )
+        await session.commit()
+        report = await get_report(session, check_run.id, instructor.id)
+        assert report.originality_scope.not_compared_reason == "reference_boundary_unclear"
+
     async with session_factory() as session:
         instructor, check_run = await _seed_decidable_run(session)
         session.add(
