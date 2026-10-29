@@ -86,7 +86,21 @@ async function requestBoundSource(path: string, sourceIdentity: string, contentT
 }
 
 export const api = {
-  putUpload: async (url: string, file: File, headers: Record<string, string>): Promise<void> => {
+  putUpload: async (url: string, file: File, headers: Record<string, string>, onProgress?: (percent: number) => void): Promise<void> => {
+    if (onProgress) {
+      // XMLHttpRequest is the browser API that reports upload progress.
+      await new Promise<void>((resolve, reject) => {
+        const request = new XMLHttpRequest();
+        request.open("PUT", url);
+        for (const [name, value] of Object.entries(headers)) request.setRequestHeader(name, value);
+        request.upload.onprogress = (event) => { if (event.lengthComputable) onProgress(Math.min(99, Math.floor((event.loaded / event.total) * 100))); };
+        request.onload = () => request.status >= 200 && request.status < 300 ? (onProgress(100), resolve())
+          : reject(new ApiError(request.status, "upload_transport", "The file transfer did not finish. Retry this upload to check its saved status."));
+        request.onerror = () => reject(new ApiError(0, "upload_transport", "The file transfer did not finish. Retry this upload to check its saved status."));
+        request.send(file);
+      });
+      return;
+    }
     const response = await fetch(url, { method: "PUT", body: file, headers,
       credentials: "omit", redirect: "error" });
     if (!response.ok) throw new ApiError(response.status, "upload_transport", "The file transfer did not finish. Retry this upload to check its saved status.");

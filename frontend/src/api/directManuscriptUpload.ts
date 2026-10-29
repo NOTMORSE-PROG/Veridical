@@ -17,7 +17,13 @@ interface UploadStatus {
 
 const attempts = new WeakMap<File, Map<number, string>>();
 
-export async function directManuscriptUpload(file: File, scope: UploadAttemptScope): Promise<unknown> {
+export interface DirectUploadProgress {
+  onProgress?: (percent: number) => void;
+  // The bytes are stored and the server is preparing the file.
+  onPreparing?: () => void;
+}
+
+export async function directManuscriptUpload(file: File, scope: UploadAttemptScope, progress: DirectUploadProgress = {}): Promise<unknown> {
   const ownerAttempts = attempts.get(file) ?? new Map<number, string>();
   attempts.set(file, ownerAttempts);
   const attemptId = ownerAttempts.get(scope.actorId) ?? crypto.randomUUID();
@@ -39,7 +45,7 @@ export async function directManuscriptUpload(file: File, scope: UploadAttemptSco
       state = await api.post<UploadStatus>(`/manuscripts/uploads/${attemptId}/file`, form, headers);
     } else {
       if (!state.upload_url || !state.upload_headers) throw new UnconfirmedUploadError();
-      await api.putUpload(state.upload_url, file, state.upload_headers);
+      await api.putUpload(state.upload_url, file, state.upload_headers, progress.onProgress);
       current();
       await scope.verify();
       current();
@@ -48,6 +54,7 @@ export async function directManuscriptUpload(file: File, scope: UploadAttemptSco
     current();
   }
   const started = Date.now();
+  if (state.status === "queued" || state.status === "processing") progress.onPreparing?.();
   while (state.status === "queued" || state.status === "processing") {
     if (!Number.isFinite(state.poll_after_ms) || state.poll_after_ms <= 0
       || !Number.isFinite(state.poll_timeout_ms) || state.poll_timeout_ms <= 0

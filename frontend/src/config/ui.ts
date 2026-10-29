@@ -41,6 +41,9 @@ export const LIBRARY_PENDING_PAGE_SIZE = 100;
 export const LIBRARY_PAGE_SIZE = 50;
 // V-078: the stored-files list uses the archive endpoint paging contract.
 export const STORED_FILES_PAGE_SIZE = 10;
+// Manuscripts at least this large upload in the background (V-090) so the
+// instructor is not held on the upload dialog while the server prepares them.
+export const BACKGROUND_UPLOAD_MIN_BYTES = 10 * 1024 * 1024;
 export const REVIEW_DESK_PAGE_SIZE = 20;
 export const FLAG_LIST_INITIAL_COUNT = 8;
 export const FLAG_LIST_BATCH_COUNT = 8;

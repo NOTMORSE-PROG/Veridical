@@ -668,6 +668,18 @@ export function DashboardPage() {
     next.delete("rerun");
     setRerunParams(next, { replace: true });
   }, [rerunParams, setRerunParams]);
+  useEffect(() => {
+    const raw = rerunParams.get("check");
+    if (raw === null) return;
+    const manuscriptId = Number(raw);
+    if (Number.isInteger(manuscriptId) && manuscriptId > 0) {
+      setPreselectManuscriptId(manuscriptId);
+      setNewCheckOpen(true);
+    }
+    const next = new URLSearchParams(rerunParams);
+    next.delete("check");
+    setRerunParams(next, { replace: true });
+  }, [rerunParams, setRerunParams]);
 
   const hasActiveRubric = useMemo(
     () => (families ?? []).some((family) => family.is_active),

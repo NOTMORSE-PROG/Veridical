@@ -6,6 +6,7 @@ import { SIGNAL_NAVIGATION } from "../config/signalRoutes";
 import { CoachMark } from "../onboarding/CoachMark";
 import { TourProvider, useTour } from "../onboarding/TourContext";
 import { SignalMark, SignalWordmark } from "../ui/SignalMark";
+import { BackgroundUploadsProvider } from "../upload/BackgroundUploads";
 
 function initials(name: string): string {
   return name
@@ -121,6 +122,7 @@ function AccountDisclosure() {
 export function SignalShell({ children }: { children?: ReactNode }) {
   return (
     <TourProvider>
+      <BackgroundUploadsProvider>
       <div className="signal-theme signal-app" data-design="signal">
         <a href="#main-content" className="signal-skip-link">Skip to main content</a>
 
@@ -144,6 +146,7 @@ export function SignalShell({ children }: { children?: ReactNode }) {
 
         <CoachMark />
       </div>
+      </BackgroundUploadsProvider>
     </TourProvider>
   );
 }
