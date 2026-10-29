@@ -1260,15 +1260,12 @@ async def manuscript_viewer_for(
 def render_flag_page_images_for(
     manuscript: Manuscript, flags: list[FlagSummaryOut], llm_mode: str, settings: Settings
 ) -> dict[int, PageEvidenceImageOut]:
-    """V-070: the page-image half of the PDF export. Shares
-    `_open_manuscript_source` with the manuscript viewer above -- same
-    file-opening/purge-guard logic, never a second copy of it (V-066's own
-    extraction rationale). Synchronous by design: PyMuPDF rendering is
-    CPU-bound, so the caller (`get_report_export_data`) runs this through
-    `run_in_executor` rather than blocking VERIDICAL's single event loop
-    (CODING.md's PyMuPDF/embeddings rule; this export renders full pages
-    via `get_pixmap`, materially heavier than the viewer's
-    `search_for`-only path above)."""
+    """V-070: the former page-image half of the PDF export. The export no
+    longer calls this: `get_report_export_data` renders recorded evidence
+    through `evidence_images.build_recorded_evidence_images` (V-085), so
+    export settings and limits must be applied there. Shares
+    `_open_manuscript_source` with the manuscript viewer above. Synchronous:
+    PyMuPDF rendering is CPU-bound and must run off the event loop."""
     doc, source_format, unavailable_reason = _open_manuscript_source(manuscript, settings)
     section_tree = SectionTree.model_validate(manuscript.section_tree or {"source": "none"})
     try:
@@ -1611,11 +1608,9 @@ async def get_report_export_data(
         else None
     )
 
-    # V-070: the actual submitted page, rendered, per page-anchored flag.
-    # `render_flag_page_images_for` is synchronous PyMuPDF work (`get_pixmap`
-    # over up to `export_max_page_images` full pages) -- run off the event
-    # loop rather than blocking VERIDICAL's single uvicorn worker for the
-    # duration of one export (CODING.md's PyMuPDF/embeddings rule).
+    # The submitted pages behind the recorded evidence are rendered below by
+    # `build_recorded_evidence_images`: synchronous PyMuPDF work over up to
+    # `export_max_page_images` pages, so it runs off the event loop.
     check_run = await _owned_check_run(session, check_run_id, instructor_id)
     manuscript = await session.get(Manuscript, check_run.manuscript_id)
     # Local imports avoid the flags -> report service dependency cycle. Project

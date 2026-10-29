@@ -19,7 +19,6 @@ convention instead -- the same one `search_for()` returns before
 `_search_excerpt` flips it. `_to_mupdf_rect` below undoes that flip.
 """
 
-import time
 from dataclasses import dataclass
 from math import ceil
 from typing import Literal
@@ -349,7 +348,6 @@ def build_page_evidence_images(
         # An attempted distinct page consumes its budget even if no safe image
         # can be produced. Later findings reuse that same explicit reason.
         page_cache[page_no] = None
-        started = time.monotonic()
         try:
             page_cache[page_no] = _render_page_png(
                 doc[page_no - 1],
@@ -359,11 +357,6 @@ def build_page_evidence_images(
             )
         except PageImageUnavailable as exc:
             unavailable_pages[page_no] = str(exc)
-        # On a single small CPU this worker thread competes with the requests
-        # the service must keep answering; pausing between pages leaves them
-        # time, at the cost of a slower export.
-        if settings.export_render_pause_ratio:
-            time.sleep((time.monotonic() - started) * settings.export_render_pause_ratio)
 
     # Pass 4: assemble each flag's own result from the shared page cache.
     results: dict[int, PageEvidenceImageOut] = {}

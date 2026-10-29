@@ -29,3 +29,12 @@ def test_a_failure_outside_our_code_gives_the_class_alone():
         raise ValueError(SECRET)
     except ValueError as exc:
         assert failure_summary(exc) == "ValueError"
+
+
+def test_the_idle_limit_setting_rejects_milliseconds():
+    from pydantic import ValidationError
+
+    from app.config import Settings
+
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, source_read_idle_transaction_timeout_seconds=1_800_000)

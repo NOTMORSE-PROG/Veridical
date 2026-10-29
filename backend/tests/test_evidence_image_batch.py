@@ -231,3 +231,16 @@ def test_encoded_byte_rejection_does_not_refund_raster_pixel_work(render_stubs, 
     assert len(raster_calls) == 2 and len(raster_calls) * 32 * 640 <= 51_200
     assert all(row.placement_state == "unavailable" for row in rows[1:])
     assert sum(len(row.image.image_png or b"") for row in rows) <= len(raster) + 1
+
+
+@pytest.mark.parametrize("ratio", [0.0, 1.5])
+def test_export_pauses_after_each_page_render_only_when_configured(
+    render_stubs, monkeypatch, ratio
+):
+    calls, _ = render_stubs
+    pauses = []
+    monkeypatch.setattr(images.time, "sleep", pauses.append)
+    rows = build(Settings(_env_file=None, export_render_pause_ratio=ratio))
+    assert len(rows) == 3 and len(calls) == 3
+    assert len(pauses) == (len(calls) if ratio else 0)
+    assert all(pause >= 0 for pause in pauses)

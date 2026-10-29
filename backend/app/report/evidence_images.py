@@ -6,6 +6,7 @@ source access until the shielded native work has drained, then recheck access.
 
 import struct
 import threading
+import time
 from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -175,6 +176,7 @@ def build_recorded_evidence_images(
                         )
                     )
                     continue
+                started = time.monotonic()
                 placement = locate_pdf_evidence(source, reference, section_tree, settings)
                 if placement.state == "unavailable" or placement.page is None:
                     results.append(
@@ -229,6 +231,10 @@ def build_recorded_evidence_images(
                         max_print_height=render_settings.export_page_image_max_height,
                     )
                 )
+                # On a host with a fraction of one CPU, back-to-back renders
+                # leave request handling no time to run; give some of it back.
+                if settings.export_render_pause_ratio:
+                    time.sleep((time.monotonic() - started) * settings.export_render_pause_ratio)
             return results
     except GoneError as error:
         return missing_all(str(error))

@@ -196,13 +196,14 @@ def failure_summary(exc: BaseException) -> str:
     """Name a failure for the operator log without its message.
 
     A message can quote manuscript text, so this gives only the exception
-    class and the innermost frame of our own code, for example
-    "InterfaceError at app/storage/access.py:31 (lock_source)".
+    class and the innermost frame of our own code, in the form
+    "InterfaceError at app/report/service.py:<line> (get_report_export_data)".
     """
+    frames = traceback.StackSummary.extract(
+        traceback.walk_tb(exc.__traceback__), lookup_lines=False
+    )
     ours = [
-        frame
-        for frame in traceback.extract_tb(exc.__traceback__)
-        if os.path.abspath(frame.filename).startswith(_APP_DIR + os.sep)
+        frame for frame in frames if os.path.abspath(frame.filename).startswith(_APP_DIR + os.sep)
     ]
     if not ours:
         return type(exc).__name__

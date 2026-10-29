@@ -8,9 +8,10 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
+from app.config import get_settings
 from app.models.manuscript import Manuscript
 from app.models.run import CheckRun
-from app.storage.access import lock_source
+from app.storage import access
 from tests.test_assessment_revision_live import seed
 from tests.test_optional_grade_comments_live import factory as factory
 from tests.test_optional_grade_comments_live import scratch_url as scratch_url
@@ -37,15 +38,29 @@ async def test_the_server_ends_a_transaction_left_idle_past_its_limit(factory):
             await session.execute(text("SELECT 1"))
 
 
+async def _idle_limit_ms(session) -> int:
+    return int(
+        await session.scalar(
+            text(
+                "SELECT setting FROM pg_settings WHERE name = 'idle_in_transaction_session_timeout'"
+            )
+        )
+    )
+
+
 @pytest.mark.asyncio
-async def test_a_source_lock_keeps_its_transaction_past_the_server_limit(factory):
+async def test_a_source_lock_keeps_its_transaction_past_the_server_limit(factory, monkeypatch):
+    configured = get_settings().model_copy(
+        update={"source_read_idle_transaction_timeout_seconds": 120}
+    )
+    monkeypatch.setattr(access, "get_settings", lambda: configured)
     _owner, run, _ids, _ = await seed(factory)
     async with factory() as session:
         await session.execute(text(f"SET idle_in_transaction_session_timeout = '{SERVER_LIMIT}'"))
-        await lock_source(session, await _manuscript(session, run))
-        assert await session.scalar(text("SHOW idle_in_transaction_session_timeout")) == "30min"
+        await access.lock_source(session, await _manuscript(session, run))
+        assert await _idle_limit_ms(session) == 120_000
         await asyncio.sleep(IDLE_SECONDS)
         assert await session.scalar(text("SELECT 1")) == 1
         await session.commit()
         # The longer limit belonged to that transaction only.
-        assert await session.scalar(text("SHOW idle_in_transaction_session_timeout")) == "1s"
+        assert await _idle_limit_ms(session) == 1_000

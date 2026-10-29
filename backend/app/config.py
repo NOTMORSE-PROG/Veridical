@@ -831,16 +831,18 @@ class Settings(BaseSettings):
     #      manuscript, run through the actual `render_flag_page_images_for`
     #      code path: peaked at 316MB working set (~196MB headroom).
     # Both real-manuscript measurements land well under half the 512MB
-    # ceiling. `tests/test_report_export_perf.py::
+    # ceiling. They predate V-085, which moved export rendering to
+    # `evidence_images.build_recorded_evidence_images`; re-measure that path
+    # before relying on them. `tests/test_report_export_perf.py::
     # test_page_image_rendering_stays_within_a_measured_native_memory_bound`
     # is the REPRODUCIBLE backstop for this claim going forward -- run it
     # rather than trusting this comment's numbers as they age.
     # 150dpi is legible print quality without spending that headroom faster
     # than needed.
     export_page_image_dpi: int = Field(default=150, gt=0)
-    # After each page image an export renders, pause for this multiple of the
-    # time it took (0 = no pause). On a host with a fraction of one CPU the
-    # renders otherwise starve request handling and health checks.
+    # After each evidence page an export renders (evidence_images.py), pause
+    # for this multiple of the time it took (0 = no pause). On a host with a
+    # fraction of one CPU the renders otherwise starve request handling.
     export_render_pause_ratio: float = Field(default=0.0, ge=0, le=5)
     export_numeric_detail_decimal_places: int = Field(default=1, ge=0, le=10)
     # Bound each complete source-plus-disclosure RGB raster before allocation.
@@ -991,7 +993,9 @@ class Settings(BaseSettings):
     source_reader_memory_threshold_bytes: int = Field(default=1_048_576, ge=0)
     # Longest a transaction holding a manuscript's source lock may sit idle
     # while the source is rendered or streamed; 0 keeps the server's limit.
-    source_read_idle_transaction_timeout_seconds: int = Field(default=1800, ge=0)
+    # Seconds, not the server's milliseconds: the cap rejects that mix-up at
+    # startup instead of failing every source read.
+    source_read_idle_transaction_timeout_seconds: int = Field(default=1800, ge=0, le=86400)
 
     @field_validator("storage_namespace")
     @classmethod
