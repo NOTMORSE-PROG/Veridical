@@ -53,6 +53,9 @@ class Settings(BaseSettings):
     # Per-attempt timeout for the /health DB probe. Generous because Neon
     # free tier autosuspends and needs time to wake (ENGINEERING.md §7).
     db_health_timeout: float = 5.0
+    # Replace pooled database connections older than this (Neon closes idle
+    # ones server-side); -1 keeps them indefinitely.
+    db_pool_recycle_seconds: int = Field(default=300, ge=-1)
     # Reuse a /health database check this many seconds (0 = check on every
     # request). Platform probes on a small host otherwise pay a new TLS
     # connection each time.

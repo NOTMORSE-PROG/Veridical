@@ -69,8 +69,15 @@ def get_engine() -> AsyncEngine:
         # message and returned over the API — this must never carry real
         # data, the same "never the DSN or credentials" bar check_connectivity
         # already holds itself to above.
+        settings = get_settings()
+        # Neon closes idle connections, and a busy small host can hold one
+        # long enough for that to happen: test each pooled connection before
+        # use and replace old ones, instead of failing the next statement.
         _engine = create_async_engine(
-            sqlalchemy_url(get_settings().database_url), hide_parameters=True
+            sqlalchemy_url(settings.database_url),
+            hide_parameters=True,
+            pool_pre_ping=True,
+            pool_recycle=settings.db_pool_recycle_seconds,
         )
     return _engine
 
