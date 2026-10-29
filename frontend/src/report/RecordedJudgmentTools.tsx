@@ -1,4 +1,5 @@
-import { AUTOMATIC_GRADE_COPY } from "../domain/automaticGrade";
+import type { CriterionResultOut } from "../api/types";
+import { automaticGradeCaution, AUTOMATIC_GRADE_COPY } from "../domain/automaticGrade";
 import { ActionAssessmentContext } from "./ReportAssessmentContext";
 // F3.5/F8.3, screens 4h/4w: revise a saved criterion in its evidence context.
 import { useLayoutEffect, useRef, useState } from "react";
@@ -65,10 +66,12 @@ export function RecordedJudgmentTools({ checkRunId, criterionId, criterionText, 
     setPurpose(next); scope.open(criterionId, next);
   }
   const id = `judgment-revision-${checkRunId}-${criterionId}`;
+  // The page-wide caution repeats on a card only when nothing more specific is
+  // said there. Beside the instructor's own grade it is about the earlier AI assessment.
+  const cardContext = !automaticGradeCaution(canonical as CriterionResultOut);
   const contextDescription = review.assessmentNotices?.length ? `${id}-context` : undefined;
   const editorContextDescription = contextDescription ? `${id}-editor-context` : undefined;
   const confirmContextDescription = contextDescription ? `${id}-confirm-context` : undefined;
-  const reviewContextDescription = contextDescription ? `${id}-review-context` : undefined;
   const writable = draft && scope.canWrite(draft);
   const current = record?.context?.current;
   const recording = draft ? draft.kind === "record" : !canonical.resolution;
@@ -87,12 +90,13 @@ export function RecordedJudgmentTools({ checkRunId, criterionId, criterionText, 
   }
   const proposal = confirmation && scope.proposal(confirmation);
   return <div className="signal-judgment-tools signal-group-flow">
-    {!draft && <ActionAssessmentContext id={`${id}-context`} notices={review.assessmentNotices ?? []} />}
+    {!draft && cardContext && <ActionAssessmentContext id={`${id}-context`} notices={review.assessmentNotices ?? []}
+      about={canonical.resolution ? "About the earlier AI assessment:" : undefined} />}
     <div className="signal-control-cluster">
       {!draft && (review.decision
         ? <p>{recording ? "Reopen this report to record an instructor judgment." : "Reopen this report to revise recorded judgments."}</p>
         : <Button ref={reviseRef} variant="secondary" disabled={record?.loading}
-          aria-label={`${recording ? AUTOMATIC_GRADE_COPY.change : AUTOMATIC_GRADE_COPY.changeAgain}: ${criterionText}`} aria-describedby={contextDescription}
+          aria-label={`${recording ? AUTOMATIC_GRADE_COPY.change : AUTOMATIC_GRADE_COPY.changeAgain}: ${criterionText}`} aria-describedby={cardContext ? contextDescription : undefined}
           onClick={event => open(recording ? "record" : "revise", event.currentTarget)}>{recording ? AUTOMATIC_GRADE_COPY.change : AUTOMATIC_GRADE_COPY.changeAgain}</Button>)}
       {(canonical.resolution || current) && draft?.uncertainRevision === undefined && !record?.abandonedAttempt && <Button variant="quiet" aria-expanded={record?.historyOpen ?? false} aria-controls={`${id}-history`}
         aria-label={`Judgment history: ${criterionText}`} onClick={event => {
@@ -156,8 +160,7 @@ export function RecordedJudgmentTools({ checkRunId, criterionId, criterionText, 
             onChange={event => scope.change(criterionId, { reason: event.target.value })} />
         </div>
         {draft.error && draft.uncertainRevision === undefined && <p id={`${id}-error`} role="alert">{draft.error}</p>}
-        <ActionAssessmentContext id={`${id}-review-context`} notices={review.assessmentNotices ?? []} />
-        <div className="signal-control-cluster"><Button ref={reviewRef} aria-describedby={reviewContextDescription} variant="brand" disabled={!writable} busy={draft.saving}
+        <div className="signal-control-cluster"><Button ref={reviewRef} aria-describedby={editorContextDescription} variant="brand" disabled={!writable} busy={draft.saving}
           onClick={() => { if (scope.review(criterionId)) setConfirmation({ ...draft }); else reasonRef.current?.focus(); }}>{recording ? "Review judgment" : "Review revision"}</Button>
           <Button variant="secondary" disabled={draft.saving || draft.uncertainRevision !== undefined} onClick={event => cancel(event.currentTarget)}>{recording ? "Cancel judgment" : "Cancel revision"}</Button></div>
       </div>}

@@ -8,7 +8,7 @@ export function ReportAssessmentContext({ notices }: { notices: AssessmentNotice
 }
 
 
-export function ActionAssessmentContext({ notices, id }: { notices: AssessmentNotice[]; id: string }) {
+export function ActionAssessmentContext({ notices, id, about }: { notices: AssessmentNotice[]; id: string; about?: string }) {
   if (notices.length === 0) return null;
-  return <p id={id} className="signal-field-hint signal-action-assessment-context"><strong>{notices.map(notice => notice.actionText).join(" ")}</strong></p>;
+  return <p id={id} className="signal-field-hint signal-action-assessment-context">{about && <>{about} </>}<strong>{notices.map(notice => notice.actionText).join(" ")}</strong></p>;
 }

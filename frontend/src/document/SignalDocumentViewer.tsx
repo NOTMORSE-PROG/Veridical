@@ -390,7 +390,7 @@ function ReadinessDecision({ checkRunId, step, report: loadedReport, pending, er
 
   const identity = manuscriptIdentity(report.manuscript_group_label, report.manuscript_original_filename);
   const coverage = coverageItems(report);
-  const criterionRecords = report.results.filter((row) => row.outcome !== "escalated");
+  const criterionRecords = report.results;
   return (
     <div className="signal-document-analysis">
       {readFailed && <ReportReadNotice retrying={retrying} onRetry={onRetry} />}

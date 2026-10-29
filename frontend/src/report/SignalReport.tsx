@@ -34,6 +34,8 @@ import { REPORT_SECTION_TARGETS } from "./reportSectionNavigation";
 import { claimFocusContinuation, type FocusContinuation } from "../routing/focusContinuation";
 import { reviewDeskDestination } from "../routing/reviewDeskReturn";
 import { EmptyState } from "../ui/EmptyState";
+import { uncountedHighLine } from "../domain/readinessExclusion";
+import { needsReviewReason } from "../domain/readinessHeadline";
 
 type RecordTab = "grades" | "findings" | "images" | "limits";
 const RECORD_TAB_PARAM = "section";
@@ -137,6 +139,8 @@ export function SignalReportPage() {
   const highFindingsSearch = new URLSearchParams(location.search);
   highFindingsSearch.set("flags_view", "high");
   highFindingsSearch.delete("review_step");
+  // BUG-516: a high-severity lead that readiness leaves out says why, beside the count.
+  const uncountedHigh = flagsQuery.data?.filter(flag => !flag.overridden && flag.severity === "high" && flag.affects_readiness === false) ?? [];
   const highModule = flagsQuery.data?.find(flag => !flag.overridden && flag.severity === "high" && flag.affects_readiness !== false)?.check_kind;
   if (highModule) highFindingsSearch.set("module", highModule);
 
@@ -166,7 +170,7 @@ export function SignalReportPage() {
           <p role="status" aria-live="polite" className={missingSourceAction ? undefined : "sr-only"}>{missingSourceAction ? "The original source action is no longer available. Review the current report below." : ""}</p>
           <section className="signal-report-hero" aria-labelledby="readiness-band-heading" aria-describedby={readFailed ? "report-read-failure" : undefined}>
             <div className="signal-report-hero__branch" aria-hidden="true"><i /><i /><i /></div>
-            <div className="signal-report-hero__summary"><p className="signal-section-kicker">{readFailed ? "Last loaded readiness band" : scopeUnconfirmed ? "Saved readiness band" : "VERIDICAL readiness band"}</p><h2 id="readiness-band-heading">{report.status === "ready" ? "Ready" : report.status === "conditionally_ready" ? "Conditionally Ready" : report.status === "not_ready" ? "Not Ready" : "Needs Review"}</h2><p>{report.reason ?? "This band is derived from the recorded criterion outcomes and integrity signals. Review the evidence below before deciding."}</p><RuleScopeSummary rows={report.results} checkRunId={id} />
+            <div className="signal-report-hero__summary"><p className="signal-section-kicker">{readFailed ? "Last loaded readiness band" : scopeUnconfirmed ? "Saved readiness band" : "VERIDICAL readiness band"}</p><h2 id="readiness-band-heading">{report.status === "ready" ? "Ready" : report.status === "conditionally_ready" ? "Conditionally Ready" : report.status === "not_ready" ? "Not Ready" : "Needs Review"}</h2>{needsReviewReason(report) && <p className="signal-report-hero__reason-line"><strong>{needsReviewReason(report)}</strong></p>}<p>{report.reason ?? "This band is derived from the recorded criterion outcomes and integrity signals. Review the evidence below before deciding."}</p><RuleScopeSummary rows={report.results} checkRunId={id} />
               <div className="signal-control-cluster signal-report-task-actions">{workRemains && <ActionLink to={reviewPath} variant="brand">Continue review</ActionLink>}
               {limits.length > 0 && <Link to={jumpTo("coverage-statement-heading")} onClick={focusReportJumpTarget}>{limits.length} assessment {limits.length === 1 ? "limit" : "limits"}</Link>}
             </div>
@@ -188,6 +192,7 @@ export function SignalReportPage() {
                     </Link>
                   ) : report.unresolved_high_flag_count}
                 </dd>
+                {uncountedHigh.length > 0 && <p className="signal-field-hint signal-report-hero__kpi-note">{uncountedHighLine(uncountedHigh)}</p>}
               </div>
               <div><dt>Instructor decision</dt><dd>{report.decision ? DECISION_LABEL[report.decision] : "Not recorded"}</dd></div>
             </dl>
@@ -224,7 +229,7 @@ export function SignalReportPage() {
           </div>
           <section className="signal-report-record" aria-label="Report record">
             <div role="tablist" aria-label="Report record sections" className="signal-record-tabs">
-              {([["grades", `Criterion records (${report.results.filter((row) => row.outcome !== "escalated").length})`],
+              {([["grades", `Criterion records (${report.results.length})`],
                 ["findings", `Integrity findings (${flagsQuery.data ? flagsQuery.data.filter(flag => !isOptionalComparisonLead(flag)).length : "…"})`],
                 ["images", `Image readings (${report.figure_readings?.length ?? 0})`],
                 ["limits", `Assessment limits (${limits.length})`]] as const).map(([value, label]) =>
@@ -240,7 +245,7 @@ export function SignalReportPage() {
                   }}>{label}</button>)}
             </div>
             <div role="tabpanel" id="record-panel-grades" aria-labelledby="record-tab-grades" hidden={tab !== "grades"}>
-              <SignalCriteriaResults results={report.results.filter((row) => row.outcome !== "escalated")} checkRunId={report.check_run_id} />
+              <SignalCriteriaResults results={report.results} checkRunId={report.check_run_id} />
             </div>
             <div role="tabpanel" id="record-panel-findings" aria-labelledby="record-tab-findings" hidden={tab !== "findings"}>
               <SignalFlagsPanel checkRunId={report.check_run_id} unresolvedHighFlagCount={report.unresolved_high_flag_count} originalityScope={report.originality_scope} statisticalScope={report.statistical_check_scope} />

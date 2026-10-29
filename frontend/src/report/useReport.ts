@@ -38,11 +38,11 @@ export function useEscalatedItems(checkRunId: number) {
 // BUG-033: its own endpoint, not a field on ReportOut — same shape as
 // useEscalatedItems above (a sibling panel self-fetches; the common case
 // of zero flags on a run never adds dead weight to every report fetch).
-export function useFlags(checkRunId: number) {
+export function useFlags(checkRunId: number, { enabled = true }: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: ["report", checkRunId, "flags"],
     queryFn: () => api.get<FlagSummaryOut[]>(`/check-runs/${checkRunId}/flags`),
-    enabled: Number.isInteger(checkRunId) && checkRunId > 0,
+    enabled: enabled && Number.isInteger(checkRunId) && checkRunId > 0,
   });
 }
 

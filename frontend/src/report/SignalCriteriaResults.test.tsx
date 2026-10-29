@@ -134,7 +134,7 @@ describe("retained assessment provenance", () => {
   });
 
   it("does not attribute an inconsistent not-assessable tuple to AI, including its unresolved branch", () => {
-    renderWithProviders(<SignalCriteriaResults checkRunId={3} results={[row({ type: "not_assessable", basis: "llm", outcome: "escalated", score: null })]} />);
+    renderWithProviders(<SignalCriteriaResults checkRunId={3} publicView results={[row({ type: "not_assessable", basis: "llm", outcome: "escalated", score: null })]} />);
     fireEvent.click(screen.getByText("Recorded assessment details"));
     expect(screen.getByText("Recorded explanation, source not identified:")).toBeVisible();
     expect(screen.queryByText(/AI explanation:/)).not.toBeInTheDocument();
@@ -142,13 +142,21 @@ describe("retained assessment provenance", () => {
   });
 
   it("keeps essential unresolved AI context but uses one empty assessment state", () => {
-    renderWithProviders(<SignalCriteriaResults checkRunId={3} results={[row({ basis: "llm", outcome: "escalated", score: null, reasoning: null })]} />);
+    renderWithProviders(<SignalCriteriaResults checkRunId={3} publicView results={[row({ basis: "llm", outcome: "escalated", score: null, reasoning: null })]} />);
     fireEvent.click(screen.getByText("AI assessment details"));
     expect(screen.getByText("No grade accepted")).toBeVisible();
     expect(screen.getAllByText("No assessment details are available in this record.")).toHaveLength(1);
     expect(screen.queryByText(/No AI explanation is available/)).not.toBeInTheDocument();
     expect(screen.queryByText(/No excerpt is available/)).not.toBeInTheDocument();
   });
+});
+
+it("keeps a criterion still waiting in its place, linked to where it is graded", () => {
+  renderWithProviders(<SignalCriteriaResults checkRunId={3} results={[row(), row({ criterion_id: 2, text: "Bibliography", outcome: "escalated", score: null })]} />);
+  expect(screen.getByText("2 records")).toBeInTheDocument();
+  expect(screen.getByText("Waiting for your judgment")).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Grade this criterion: Bibliography" }))
+    .toHaveAttribute("href", "/report/3/document?view=decision&step=criteria&pane=review&criterion=2");
 });
 
 it("does not present a standalone recorded location as an excerpt", () => {

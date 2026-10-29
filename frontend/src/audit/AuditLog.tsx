@@ -43,6 +43,7 @@ const FILTERS: ReadonlyArray<{ label: string; value?: string; eventType?: string
 
 const EVENT_LABELS: Record<string, string> = {
   llm_call: "AI call",
+  llm_transport_attempt: "AI request attempt",
   llm_cache_hit: "AI call (cached)",
   llm_call_failed: "AI call failed",
   criterion_routing: "Criterion routing",
@@ -687,14 +688,10 @@ function OwnedAuditLogPage({ owner }: { owner: AuditOwner }) {
                         <ExecutionModeTag mode={entry.executionMode} />
                       </span>
                       <span role="cell" className="justify-self-end">
-                        <button
-                          type="button"
-                          aria-expanded={expanded}
-                          onClick={() => toggleGroup(firstId)}
-                          className="inline-flex min-h-8 items-center text-sm font-medium text-link underline hover:text-link-hover"
-                        >
+                        <Button variant="quiet" className="signal-audit-detail" aria-expanded={expanded} onClick={() => toggleGroup(firstId)}
+                          aria-label={`${expanded ? "Hide" : "Show all"} ${entry.rows.length} ${entry.label} events`}>
                           {expanded ? "Hide" : "Show all"}
-                        </button>
+                        </Button>
                       </span>
                     </div>
                     {expanded &&

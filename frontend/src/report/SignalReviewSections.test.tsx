@@ -28,7 +28,8 @@ describe("criterion record count", () => {
       expect(screen.getByText("A separate demonstration is required.")).toBeVisible();
     } else expect(screen.queryByText(/Excluded from readiness calculation: needs another document/)).not.toBeInTheDocument();
   });
-  it.each([false, true])("keeps system notes distinct from absent academic basis in criterion records (shared=%s)", (publicView) => {
+  // In the private list a waiting criterion is a link to step 1, where these details are shown.
+  it.each([true])("keeps system notes distinct from absent academic basis in criterion records (shared=%s)", (publicView) => {
     const row: ResultRowCommon = { criterion_id: 1, text: "Custom criterion", type: "semantic", kind: "semantic", weight: 1,
       weight_importance: "med", outcome: "escalated", score: null, basis: "llm", anchor: null,
       reasoning: " \n\t ", reason: "No winning grade", evidence: [], resolved: false };
