@@ -331,7 +331,7 @@ it("shows a decided-state draft route and requires explicit current review after
   expect(await screen.findByRole("heading", { name: "Unresolved at time of return" })).toBeVisible();
   const root = within(await revisit(1));
   expect(root.queryByRole("button", { name: "Review current criterion" })).not.toBeInTheDocument();
-  expect(root.getByRole("link", { name: "Go to the recorded decision" })).toHaveAttribute("href", "/report/5#final-decision");
+  expect(root.getByRole("link", { name: "Go to the recorded decision" })).toHaveAttribute("href", "/report/5/document?view=decision&step=decision&pane=review");
   expect(root.getByRole("textbox")).toHaveAttribute("readonly");
   expect(screen.queryByText(/Reopening did not save/)).not.toBeInTheDocument();
   await act(async () => { control.client.setQueryData(["report", 5], { check_run_id: 5, assessment_revision: 2, decision: null, results: [], pending_review_count: 3 }); });

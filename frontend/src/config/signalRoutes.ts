@@ -49,7 +49,8 @@ export const AUDIT_RETURN = {
   },
   deskSorts: ["newest", "oldest", "group_asc", "needs_review_desc"],
   enums: {
-    view: ["decision", "matches", "finding"], pane: ["review", "analysis", "manuscript"],
+    view: ["decision", "queue", "matches", "finding"], step: ["criteria", "findings", "grades", "decision"],
+    pane: ["review", "analysis", "manuscript"],
     reading: ["full"], panel: ["explore"], ref: ["1"], quote: ["1"],
     lead_view: ["all", "open", "resolved"], flags_view: ["all", "high", "med", "low", "open", "resolved"],
   },

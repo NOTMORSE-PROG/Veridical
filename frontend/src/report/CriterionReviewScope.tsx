@@ -17,7 +17,7 @@ import { claimFocusContinuation, type FocusContinuation } from "../routing/focus
 import { confirmedJudgment, criterionRecordId, revealCriterionRecord, SAVED_CRITERION_PARAM } from "./savedJudgment";
 import { useJudgmentRevisions } from "./useJudgmentRevisions";
 import type { RevisionDraft } from "./useJudgmentRevisions";
-import { reportStep } from "./reviewStep";
+import { reportStep, WORKSPACE_STEP_PARAM } from "./reviewStep";
 
 // Query identity changes on cache clear, including logout/login to the same
 // instructor. Data identity alone does not distinguish those auth lifetimes.
@@ -139,7 +139,12 @@ export function CriterionReviewProvider({ checkRunId, instructorId, children }: 
       && isAssessmentRevision(draft.reviewedRevision) && draft.reviewedRevision === assessment?.assessment_revision,
     viewSaved(criterionId, trigger) {
       if (!isCurrent()) return;
-      const savedHeading = document.getElementById("criteria-results-heading") ?? document.getElementById("escalated-heading");
+      // In manuscript review the saved records are a separate step, so their
+      // heading mounts after navigation; hold focus on the review pane,
+      // which stays mounted, until the records can take it.
+      const workspace = location.pathname.endsWith("/document");
+      const savedHeading = document.getElementById("criteria-results-heading")
+        ?? (workspace ? document.getElementById("review-panel") : null) ?? document.getElementById("escalated-heading");
       const target = savedHeading && !savedHeading.closest("[hidden]")
         ? savedHeading : document.getElementById("readiness-report-heading") ?? document.querySelector<HTMLElement>("main h1");
       const owned = document.hasFocus() && document.activeElement === trigger;
@@ -149,7 +154,7 @@ export function CriterionReviewProvider({ checkRunId, instructorId, children }: 
       const next = new URLSearchParams(location.search);
       next.delete("criterion");
       next.set(SAVED_CRITERION_PARAM, criterionId === undefined ? "all" : String(criterionId));
-      if (location.pathname.endsWith("/document")) { next.set("view", "decision"); next.set("pane", "review"); }
+      if (workspace) { next.set("view", "decision"); next.set(WORKSPACE_STEP_PARAM, "grades"); next.set("pane", "review"); }
       void navigate({ pathname: location.pathname, search: next.toString(),
         hash: criterionId === undefined ? "criteria-results-heading" : criterionRecordId(checkRunId, criterionId) }, { state: location.state });
     },
