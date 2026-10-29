@@ -328,3 +328,28 @@ def test_a_started_check_wakes_the_scheduler(wired):  # noqa: F811 -- imported p
 
     assert asyncio.run(run()) is True
     assert woken == [True]
+
+
+@live
+def test_a_known_refusal_survives_a_failed_final_write(wired, monkeypatch):  # noqa: F811 -- imported pytest fixtures
+    import app.ingest.upload_worker as upload_worker
+
+    real_finish = upload_worker._finish_done
+    calls = []
+
+    async def first_write_fails(*args, **kwargs):
+        calls.append(True)
+        if len(calls) == 1:
+            raise RuntimeError("connection dropped while recording the outcome")
+        return await real_finish(*args, **kwargs)
+
+    monkeypatch.setattr(upload_worker, "_finish_done", first_write_fails)
+    rubric_id = _rubric(wired)
+    attempt_id = _prepared_upload(wired, rubric_id)
+    _set_rubric_active(wired, rubric_id, False)
+    assert _process(wired) is True
+    attempt, _ = _attempt(wired, attempt_id)
+    assert len(calls) == 2
+    assert attempt.status == "done", attempt.error
+    assert attempt.check_run_id is None
+    assert "active rubric version" in attempt.check_start_error

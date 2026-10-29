@@ -113,6 +113,10 @@ async def _retire_interrupted(session):
 
 
 CHECK_NOT_STARTED = "The check could not be started. Start it from the Review Desk."
+# Used when the server could not even look: the check may exist anyway.
+CHECK_MAY_NOT_HAVE_STARTED = (
+    "The check may not have started. Look for it on the Review Desk before starting it."
+)
 RUBRIC_GONE = (
     "The required format chosen for this check was removed, so the check did not start. "
     "Start it from the Review Desk."
@@ -148,7 +152,7 @@ async def _start_requested_check(session, instructor_id, manuscript_id, rubric_i
             started = await _started_check_id(session, manuscript_id, rubric_id)
         except Exception:  # noqa: BLE001 -- the link is best effort
             await session.rollback()
-            started = None
+            return None, CHECK_MAY_NOT_HAVE_STARTED
         return started, None if started is not None else CHECK_NOT_STARTED
     return check_run.id, None
 
@@ -254,10 +258,11 @@ async def _process_next_upload(settings, lease, wake_pipeline=None):
                         check_run_id = await _started_check_id(
                             session, manuscript_id, start_rubric_id
                         )
+                        if check_run_id is None:
+                            check_start_error = CHECK_NOT_STARTED
                     except Exception:  # noqa: BLE001 -- the link is best effort
                         await session.rollback()
-                    if check_run_id is None:
-                        check_start_error = CHECK_NOT_STARTED
+                        check_start_error = CHECK_MAY_NOT_HAVE_STARTED
                 await _finish_done(
                     session, attempt_id, lease_id, receipt, check_run_id, check_start_error
                 )
