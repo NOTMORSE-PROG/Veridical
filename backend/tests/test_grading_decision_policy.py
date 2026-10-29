@@ -202,7 +202,11 @@ def test_report_rows_explain_an_automatic_grade_until_an_instructor_judges():
         "support_caution": "The quote shows the topic but not the preview.",
         "agreeing_passes": 2,
         "grading_passes": 3,
+        "votes": ["Proficient", "Acceptable", "Proficient"],
     }
+    # A pass that gave no usable grade keeps its place as None.
+    gap = {**detail, "votes": ["Proficient", None, "Proficient"]}
+    assert _automatic_grade(decided, gap, None)["votes"] == ["Proficient", None, "Proficient"]
     split = {**detail, "decision_basis": "middle_of_three"}
     assert _automatic_grade(decided, split, None)["decision_basis"] == "middle_of_three"
     assert _automatic_grade(decided, detail, {"type": "mark_level"}) == {}

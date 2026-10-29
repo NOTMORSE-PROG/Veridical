@@ -119,6 +119,10 @@ class CriterionResultOut(BaseModel):
     support_caution: str | None = None
     agreeing_passes: int | None = None
     grading_passes: int | None = None
+    # What each grading pass chose, in pass order, so the instructor can see
+    # what the passes that did not agree picked. None for a pass that gave no
+    # usable grade. Absent where `decision_basis` is.
+    votes: list[str | None] | None = None
 
 
 COVERAGE_REASONS = frozenset(

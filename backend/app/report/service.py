@@ -385,6 +385,9 @@ def _automatic_grade(result: CheckResult, detail: dict, resolution: object) -> d
         if real and verdict
         else None,
         "grading_passes": len(real) or None,
+        "votes": ([vote if isinstance(vote, str) else None for vote in votes] or None)
+        if isinstance(votes, list)
+        else None,
     }
 
 
