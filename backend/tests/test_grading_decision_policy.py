@@ -204,9 +204,13 @@ def test_report_rows_explain_an_automatic_grade_until_an_instructor_judges():
         "grading_passes": 3,
         "votes": ["Proficient", "Acceptable", "Proficient"],
     }
-    # A pass that gave no usable grade keeps its place as None.
+    # A pass that gave no usable grade keeps its place as None, and anything
+    # stored that is not text reads the same way rather than breaking the row.
     gap = {**detail, "votes": ["Proficient", None, "Proficient"]}
     assert _automatic_grade(decided, gap, None)["votes"] == ["Proficient", None, "Proficient"]
+    odd = {**detail, "votes": ["Proficient", 3, "Proficient"]}
+    assert _automatic_grade(decided, odd, None)["votes"] == ["Proficient", None, "Proficient"]
+    assert _automatic_grade(decided, {**detail, "votes": []}, None)["votes"] is None
     split = {**detail, "decision_basis": "middle_of_three"}
     assert _automatic_grade(decided, split, None)["decision_basis"] == "middle_of_three"
     assert _automatic_grade(decided, detail, {"type": "mark_level"}) == {}

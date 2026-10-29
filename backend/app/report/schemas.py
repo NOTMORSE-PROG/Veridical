@@ -120,8 +120,10 @@ class CriterionResultOut(BaseModel):
     agreeing_passes: int | None = None
     grading_passes: int | None = None
     # What each grading pass chose, in pass order, so the instructor can see
-    # what the passes that did not agree picked. None for a pass that gave no
-    # usable grade. Absent where `decision_basis` is.
+    # what the passes that did not agree picked. A pass with no usable grade
+    # is None, and a pass may have recorded "uncertain". Set on every
+    # AI-decided row (as agreeing_passes is), empty once the instructor
+    # sets the grade.
     votes: list[str | None] | None = None
 
 
