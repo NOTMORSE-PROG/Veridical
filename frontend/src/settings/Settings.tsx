@@ -779,7 +779,7 @@ export function SettingsPage() {
       <header className="signal-route-header">
         <div><p className="signal-eyebrow">Workspace utility</p><h1 ref={headingRef} tabIndex={-1}>Workspace settings</h1><p className="signal-route-header__intro">Manage account access, local AI budget, review rules, and technical records.</p></div>
       </header>
-      <nav aria-label="Settings sections" className="signal-settings-nav"><a href="#profile-heading" onClick={focusSettingsSection}>Account</a><a href="#api-key-heading" onClick={focusSettingsSection}>Personal key</a><a href="#quota-heading" onClick={focusSettingsSection}>Local AI budget</a><a href="#transparency-heading" onClick={focusSettingsSection}>Review rules</a></nav>
+      <nav aria-label="Settings sections" className="signal-settings-nav"><span className="signal-settings-nav__label" aria-hidden="true">Jump to</span><a href="#profile-heading" onClick={focusSettingsSection}>Account</a><a href="#api-key-heading" onClick={focusSettingsSection}>Personal key</a><a href="#quota-heading" onClick={focusSettingsSection}>Local AI budget</a><a href="#transparency-heading" onClick={focusSettingsSection}>Review rules</a></nav>
       <div className="signal-settings-stack signal-page-flow">
         <ProfileSection />
         <PasswordSection />
