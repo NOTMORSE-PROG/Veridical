@@ -32,6 +32,9 @@ import { useBackgroundUploads } from "../upload/BackgroundUploads";
 import { BACKGROUND_UPLOAD_MIN_BYTES } from "../config/ui";
 import { useRubricFamilies } from "../rubric/useRubric";
 import { formatChoiceLabel } from "../domain/formatIdentity";
+import { UploadRefusedError } from "../api/directManuscriptUpload";
+import { UPLOAD_REFUSAL_COPY } from "../domain/uploadRefusal";
+import { ActionLink } from "../ui/ActionLink";
 
 function formatUploadDate(value: string): string {
   return new Date(value).toLocaleString(undefined, {
@@ -510,6 +513,13 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
               >
                 <span className="sr-only">Error: </span>
                 {message}
+              </p>
+            )}
+            {ingest.error instanceof UploadRefusedError && (
+              <p className="text-sm text-ink-secondary">
+                {ingest.error.keptManuscriptId !== null
+                  ? <>{UPLOAD_REFUSAL_COPY.kept} <ActionLink to="/dashboard" variant="secondary">{UPLOAD_REFUSAL_COPY.openDesk}</ActionLink></>
+                  : UPLOAD_REFUSAL_COPY.notKept}
               </p>
             )}
           </div>
