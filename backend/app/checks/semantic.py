@@ -8,10 +8,13 @@ returns persisted results, so N-pass voting can wrap this module later
 without reshaping it.
 """
 
+import json
 import re
 import unicodedata
+from bisect import bisect_right
 from collections.abc import Callable
 from dataclasses import dataclass
+from itertools import groupby
 from pathlib import Path
 from typing import Any
 
@@ -37,7 +40,9 @@ from app.models.run import CheckResult
 PROMPT_TYPE = "semantic_grading"
 # v4 consumes reviewer stances and represents missing evidence as uncertainty.
 # Its new cache identity cannot reuse the earlier v3 judgment contract.
-PROMPT_VERSION = "v5"
+# v6 asks for quotations that occur once (headings repeat in the table of
+# contents) and tells an evidence repair why each earlier quotation failed.
+PROMPT_VERSION = "v6"
 _PROMPT_FILE = Path(__file__).parent / "prompts" / f"{PROMPT_TYPE}_{PROMPT_VERSION}.txt"
 _WHOLE_DOCUMENT_KEY = "__whole_document__"
 
@@ -91,8 +96,101 @@ def _section_span_blocks(
     ]
 
 
+_UNREAD_PAGES_LIMITATION = (
+    "Pages listed in source_coverage.unread_pages are omitted because their reading "
+    "order could not be established. The separate scopes are not continuous quotations. "
+    "Omitted material cannot establish absence, poor quality or fulfilment of an "
+    "obligation. Assess only independently supported evidence; retain uncertainty otherwise."
+)
+
+
+_REPAIR_NOTE = (
+    "--- EVIDENCE REPAIR ---\n"
+    "Your earlier quotations for this criterion could not be used, so no rating was "
+    "accepted. Quote different passages, each one continuous run of source text that "
+    "occurs only once:\n{problems}"
+)
+
+
+def _repair_note(
+    quotes: list[str] | None,
+    batch: SemanticBatch,
+    anchor_kind: str,
+    claimed: set[str] | frozenset[str] = frozenset(),
+) -> str:
+    """Why each rejected quotation was refused, for the one retry that
+    repairs a criterion's evidence: it could not be located, or it is
+    already another criterion's evidence. Empty when neither explains it."""
+    scopes = batch.source_scopes if batch.source_scopes is not None else (tuple(batch.blocks),)
+    layouts = [_normalized_layout(list(scope)) for scope in scopes]
+    problems = []
+    for quote in quotes or ():
+        key = _normalize(quote)
+        places = set()
+        for text, spans in layouts:
+            position = text.find(key) if key else -1
+            while position != -1:
+                places.add(_anchor_at_position(position, spans, anchor_kind))
+                position = text.find(key, position + 1)
+        shown = json.dumps(_WHITESPACE.sub(" ", quote).strip()[:160], ensure_ascii=False)
+        if key in claimed:
+            problems.append(
+                f"- {shown} is already the evidence for another criterion; quote a passage "
+                "that shows this criterion."
+            )
+        elif len(places) > 1:
+            problems.append(f"- {shown} appears in {len(places)} places.")
+        elif not places:
+            problems.append(f"- {shown} is not one continuous passage of the source.")
+    return _REPAIR_NOTE.format(problems="\n".join(problems)) if problems else ""
+
+
+def _split_at_pages(
+    scopes: tuple[tuple[TextBlock, ...], ...], pages: list[int]
+) -> tuple[tuple[TextBlock, ...], ...]:
+    """Starts a new scope wherever an omitted page falls between two blocks,
+    so no quotation can join text across it."""
+    split: list[list[TextBlock]] = []
+    for scope in scopes:
+        split.append([])
+        for block in scope:
+            last = split[-1][-1] if split[-1] else None
+            if (
+                last is not None
+                and last.page is not None
+                and block.page is not None
+                and bisect_right(pages, block.page - 1) > bisect_right(pages, last.page)
+            ):
+                split.append([])
+            split[-1].append(block)
+    return tuple(tuple(scope) for scope in split if scope)
+
+
+def _page_scope_context(scopes: tuple[tuple[TextBlock, ...], ...], coverage: dict) -> str:
+    """The same structured envelope Word sources use when material is
+    omitted: coverage metadata beside the contiguous page scopes."""
+    return json.dumps(
+        {
+            "source_coverage": coverage,
+            "source_limitation": _UNREAD_PAGES_LIMITATION,
+            "contiguous_source_scopes": [
+                [
+                    {"page": page, "text": "\n".join(block.text for block in blocks)}
+                    for page, blocks in groupby(scope, key=lambda block: block.page)
+                ]
+                for scope in scopes
+            ],
+        },
+        ensure_ascii=False,
+    )
+
+
 def build_semantic_batches(
-    criteria: list[Any], extraction: ExtractionResult, *, settings: Settings | None = None
+    criteria: list[Any],
+    extraction: ExtractionResult,
+    *,
+    settings: Settings | None = None,
+    unread_pages: list[int] | None = None,
 ) -> tuple[list[tuple[SemanticBatch, list[Any]]], list[tuple[Any, str]]]:
     """Share full source across bounded batches instead of inferring an
     evidence boundary from one incidental heading word. Returns
@@ -102,6 +200,10 @@ def build_semantic_batches(
     BUG-048 comment), so these are escalated to the instructor by the
     caller, without spending a call, never auto-failed. Same treatment as
     `required_section_present`'s identical situation.
+
+    `unread_pages` (page sources only) are left out of the graded text and
+    named in its coverage. References are still located on the complete
+    extraction, whose own page checks decide whether the list is readable.
     """
     missing: list[tuple[Any, str]] = []
     eligible = []
@@ -118,19 +220,32 @@ def build_semantic_batches(
     settings = settings or get_settings()
     size = settings.semantic_batch_max_criteria
     patterns = load_patterns(settings.ingest_patterns_file)
+    unread = sorted(set(unread_pages or ()))
+
+    def readable(blocks: list[TextBlock]) -> list[TextBlock]:
+        return [b for b in blocks if b.page not in unread] if unread else blocks
+
     selected = select_references(extraction, patterns)
-    body = non_reference_blocks(extraction, patterns, selection=selected, exclude_heading=True)
+    body = readable(
+        non_reference_blocks(extraction, patterns, selection=selected, exclude_heading=True)
+    )
     source = analytical_source(extraction)
-    scopes = source.scopes_for([b for b in extraction.blocks if not b.is_furniture])
+    scopes = source.scopes_for(readable([b for b in extraction.blocks if not b.is_furniture]))
+    coverage = source.detail()
+    context = source.context(extraction.blocks)
+    if unread:
+        scopes = _split_at_pages(scopes, unread)
+        coverage = {**coverage, "unread_pages": unread}
+        context = _page_scope_context(scopes, coverage)
     batch = SemanticBatch(
         "whole document",
         [b for scope in scopes for b in scope],
         source.context(body) if not selected.issues and selected.span else None,
-        source.context(selected.span) if not selected.issues else None,
+        source.context(readable(selected.span)) if not selected.issues else None,
         settings.semantic_evidence_scope_patterns_file,
         source_scopes=scopes,
-        source_context=source.context(extraction.blocks),
-        source_coverage=source.detail(),
+        source_context=context,
+        source_coverage=coverage,
     )
     return [
         (batch, eligible[start : start + size]) for start in range(0, len(eligible), size)
@@ -160,18 +275,21 @@ def _build_prompt(
     *,
     prompt_version: str = PROMPT_VERSION,
     annotator_stance: str = "",
+    repair_note: str = "",
 ) -> str:
     """`prompt_version` is a parameter (not just the module constant) so an
     A/B run can grade the SAME items under two prompts in one process and
     compare them with a paired test (V-054). `annotator_stance` is empty for
     v1, which has no stance slot — replacing an absent placeholder is a no-op,
-    so both versions build correctly from the same call site.
+    so both versions build correctly from the same call site. The same holds
+    for `repair_note`, which only v6 and later carry.
     """
     template = prompt_file_for(prompt_version).read_text(encoding="utf-8")
     return (
         template.replace("{annotator_stance}", annotator_stance)
         .replace("{criteria_list}", _criteria_listing(criteria))
         .replace("{context_label}", batch.label)
+        .replace("{repair_note}", repair_note)
         .replace("{context_text}", batch.context_text)
     )
 
@@ -516,6 +634,8 @@ async def _grade_single_criterion(
     prompt_version: str = PROMPT_VERSION,
     annotator_stance: str = "",
     recovery_phase: str = "single_criterion",
+    rejected_quotes: list[str] | None = None,
+    claimed_quotes: set[str] | None = None,
 ) -> tuple[GradeVerdict, list[str] | None] | None:
     """One-criterion retry, same context — used both when the batch
     response omitted a criterion and when its quotes failed containment,
@@ -532,7 +652,11 @@ async def _grade_single_criterion(
     A bare `None` return means the model produced no usable verdict for
     this criterion at all."""
     prompt = _build_prompt(
-        batch, [criterion], prompt_version=prompt_version, annotator_stance=annotator_stance
+        batch,
+        [criterion],
+        prompt_version=prompt_version,
+        annotator_stance=annotator_stance,
+        repair_note=_repair_note(rejected_quotes, batch, anchor_kind, claimed_quotes or set()),
     )
     try:
         parsed = await _call_grade(
@@ -739,6 +863,8 @@ async def grade_batch_verdicts(
                     prompt_version=prompt_version,
                     annotator_stance=annotator_stance,
                     recovery_phase="criterion_repair",
+                    rejected_quotes=verdict.evidence_quotes if verdict else None,
+                    claimed_quotes=claimed_quotes,
                 )
             except ApiDownError:
                 recovery_unavailable = True

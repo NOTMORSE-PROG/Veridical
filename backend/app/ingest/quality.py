@@ -78,7 +78,19 @@ def reading_order_issues(
             return [{"page": block.page, "reason": "reading_order_source_identity_missing"}]
         by_page.setdefault(block.page, []).extend(block.source_line_ids)
     issues = []
+    unread = set(extraction.unread_pages or ())
     for record in records:
+        if record.page in unread:
+            # Left out of this analysis copy on purpose; only a page whose
+            # order is unresolved may be, and a caller that names it in its
+            # own scope still sees it as unread.
+            if record.status != "unresolved":
+                issues.append({"page": record.page, "reason": "reading_order_scope_invalid"})
+            elif pages is not None and record.page in pages:
+                issues.append(
+                    {"page": record.page, "reason": record.reason or "reading_order_unresolved"}
+                )
+            continue
         ids = record.ordered_source_line_ids
         if not saved_table_witness_valid(extraction, record):
             issues.append({"page": record.page, "reason": "reading_order_table_witness_invalid"})

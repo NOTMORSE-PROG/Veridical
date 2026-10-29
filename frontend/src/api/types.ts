@@ -386,6 +386,8 @@ export interface CriterionSourceCoverage {
   n_native_equations_unlocated: number | null;
   native_math_excluded_paragraphs: number[];
   native_math_coverage_items: { paragraph: number | null; kind: "paragraph" | "table_cell"; n_occurrences: number }[];
+  /** PDF pages left out because their reading order could not be established. */
+  unread_pages?: number[];
 }
 
 export interface CriterionResultOut extends ResultRowCommon {

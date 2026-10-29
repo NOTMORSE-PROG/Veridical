@@ -702,14 +702,17 @@ async def run_citation_integrity_check(
         absence_candidates, identity_unassessed, identifier_leads = guarded_absence_candidates(
             absence_candidates, citations, body_blocks, settings
         )
+    # Text left unread (native Word equations, pages with unresolved order)
+    # may hold the only citation of a reference, so absence stays unassessed.
+    partial_source = native_source.limited or bool(extraction.unread_pages)
     native_absence_unassessed = (
-        {ref.order_index for ref in absence_candidates} if native_source.limited else set()
+        {ref.order_index for ref in absence_candidates} if partial_source else set()
     )
     # No supported body style or a partial scan cannot prove a reference unused.
     if (
         metadata_only
         or membership_partial
-        or native_source.limited
+        or partial_source
         or projection_reason
         or gaps
         or selection.issues

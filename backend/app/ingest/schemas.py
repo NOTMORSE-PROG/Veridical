@@ -488,6 +488,9 @@ class ExtractionResult(BaseModel):
     # Transient expected manuscript identity supplied by an authorized consumer;
     # never written into the extraction or accepted as a stored source witness.
     analytical_source_sha256: str | None = Field(default=None, exclude=True)
+    # Transient: pages an analysis copy leaves out because only their reading
+    # order is unresolved (their text is absent from that copy). Never stored.
+    unread_pages: list[int] | None = Field(default=None, exclude=True)
     docx_omitted_image_occurrences: int = Field(default=0, ge=0)
     tables: list[TableBlock] = Field(default_factory=list)
     equations: list[EquationBlock] = Field(default_factory=list)

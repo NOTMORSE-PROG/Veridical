@@ -93,14 +93,15 @@ def _real_quotes_from_prompt(prompt: str) -> list[str]:
             blocks = []
             for scope in scopes:
                 for block in scope:
-                    if (
-                        not isinstance(block, dict)
-                        or "paragraph" not in block
-                        or not isinstance(block.get("text"), str)
-                        or (
-                            block["paragraph"] is not None
-                            and (type(block["paragraph"]) is not int or block["paragraph"] < 0)
-                        )
+                    if not isinstance(block, dict) or not isinstance(block.get("text"), str):
+                        return []
+                    # Word scopes are keyed by paragraph, PDF scopes by page.
+                    if "page" in block:
+                        if type(block["page"]) is not int or block["page"] < 1:
+                            return []
+                    elif "paragraph" not in block or (
+                        block["paragraph"] is not None
+                        and (type(block["paragraph"]) is not int or block["paragraph"] < 0)
                     ):
                         return []
                     blocks.append(block["text"])

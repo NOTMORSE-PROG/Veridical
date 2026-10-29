@@ -776,26 +776,37 @@ def _pending_semantic_basis_flowables(
     return parts
 
 
+def _page_ranges(pages: list[int]) -> str:
+    """45, 46, 47, 53 -> "45-47, 53"."""
+    runs: list[list[int]] = []
+    for page in sorted(pages):
+        if runs and page == runs[-1][-1] + 1:
+            runs[-1].append(page)
+        else:
+            runs.append([page])
+    return ", ".join(f"{run[0]}-{run[-1]}" if len(run) > 1 else str(run[0]) for run in runs)
+
+
 def _criterion_source_flowables(row: CriterionResultOut, styles: dict[str, ParagraphStyle]) -> list:
     coverage = row.source_coverage
     if coverage is None:
         if row.kind != "semantic":
             return []
         coverage = project_source_coverage(None)
-    state = coverage.native_math_inventory_state
-    if state == "not_applicable" or (state == "not_recorded" and row.kind != "semantic"):
-        return []
-    count = coverage.n_native_equations_unassessed
-    if state == "complete" and count == 0:
-        return []
     copy = _native_source_note_copy()
-    title = Paragraph(
-        escape(copy["criterion_earlier_heading" if row.resolution else "criterion_heading"]),
-        styles["body_bold"],
-    )
-    title.keepWithNext = True
-    parts = [title]
-    if state == "complete":
+    parts = []
+    if coverage.unread_pages:
+        parts.append(
+            Paragraph(
+                escape(
+                    copy["criterion_unread_pages"].format(pages=_page_ranges(coverage.unread_pages))
+                ),
+                styles["body"],
+            )
+        )
+    state = coverage.native_math_inventory_state
+    count = coverage.n_native_equations_unassessed
+    if state == "complete" and count:
         parts.append(
             Paragraph(
                 escape(
@@ -812,9 +823,16 @@ def _criterion_source_flowables(row: CriterionResultOut, styles: dict[str, Parag
         if coverage.n_native_equations_unlocated:
             parts.append(Paragraph(escape(copy["unlocated_limit"]), styles["body"]))
         parts.append(Paragraph(escape(copy["scope"]), styles["caption"]))
-    else:
+    elif state == "unavailable" or (state == "not_recorded" and row.kind == "semantic"):
         parts.append(Paragraph(escape(copy[state]), styles["body"]))
-    return parts
+    if not parts:
+        return []
+    title = Paragraph(
+        escape(copy["criterion_earlier_heading" if row.resolution else "criterion_heading"]),
+        styles["body_bold"],
+    )
+    title.keepWithNext = True
+    return [title, *parts]
 
 
 def _rule_facts_flowables(row: CriterionResultOut, styles: dict[str, ParagraphStyle]) -> list:

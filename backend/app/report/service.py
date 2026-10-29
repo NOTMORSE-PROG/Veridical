@@ -652,6 +652,8 @@ async def report_out_for_check_run(
                             CheckResult.kind == CheckKind.internal_agreement,
                             CheckResult.outcome == ResultOutcome.passed,
                         ),
+                        # A check with findings that still left pages unread.
+                        CheckResult.detail.has_key("unread_pages"),
                         CheckResult.outcome.in_(
                             (
                                 ResultOutcome.escalated,

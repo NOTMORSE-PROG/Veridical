@@ -68,3 +68,16 @@ it("does not invent a Word warning on an unrelated rule's missing coverage", () 
   expect(details.hasDetails).toBe(false); expect(details.sourceCoverage).toBeNull();
   expect(details.summary).toBe("Rule-check details");
 });
+it("names PDF pages left out of an assessment and keeps them on the private row", () => {
+  const unread: Coverage = { ...zero, native_math_inventory_state: "not_applicable", native_math_inventory_scope: null,
+    n_native_equations_unlocated: null, unread_pages: [45, 46, 47, 53] };
+  show(unread);
+  expect(screen.getByText(/Pages 45-47, 53 could not be read in a reliable order/)).toBeVisible();
+  expect(screen.getByText(/Check those pages before relying on it/)).toBeVisible();
+  const details = criterionAssessmentDetails({ ...row, source_coverage: unread }, false);
+  expect(details.sourceCoverage?.unread_pages).toEqual([45, 46, 47, 53]);
+  expect(details.summary).toMatch(/some pages not read/);
+  expect(criterionAssessmentDetails({ ...row, source_coverage: unread }, true).sourceCoverage).toBeNull();
+  expect(privateCriterionCoverage({ ...row, source_coverage: { ...unread, unread_pages: [0] } }, false)?.native_math_inventory_state)
+    .toBe("unavailable");
+});

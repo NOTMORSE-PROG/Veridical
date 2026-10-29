@@ -40,7 +40,7 @@ from app.checks.semantic import (
     grade_batch_verdicts,
 )
 from app.checks.signals import compute_shadow_signals, shadow_signals_as_detail
-from app.checks.source_quality import source_limitation_detail
+from app.checks.source_quality import source_limitation_detail, unread_page_scope
 from app.checks.support import apply_support, check_support_available, context_limitation
 from app.config import Settings, get_settings
 from app.errors import ApiDownError
@@ -634,18 +634,23 @@ async def run_semantic_checks_with_consistency(
     if not criteria:
         return []
     limitation = source_limitation_detail(extraction)
+    unread_pages: list[int] = []
     if limitation is not None:
-        return [
-            await _persist(
-                session,
-                check_run_id,
-                criterion,
-                ResultOutcome.escalated,
-                {"basis": "source-quality", **limitation},
-            )
-            for criterion in criteria
-        ]
-    batches, missing = build_semantic_batches(criteria, extraction, settings=settings)
+        unread_pages = unread_page_scope(extraction, settings.analysis_unread_pages_max_ratio) or []
+        if not unread_pages:
+            return [
+                await _persist(
+                    session,
+                    check_run_id,
+                    criterion,
+                    ResultOutcome.escalated,
+                    {"basis": "source-quality", **limitation},
+                )
+                for criterion in criteria
+            ]
+    batches, missing = build_semantic_batches(
+        criteria, extraction, settings=settings, unread_pages=unread_pages
+    )
     results: list[CheckResult] = []
     for criterion, target in missing:
         # BUG-221: a title-match miss is not proof the section is genuinely

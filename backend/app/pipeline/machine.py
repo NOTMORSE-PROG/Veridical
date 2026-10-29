@@ -49,6 +49,11 @@ from app.checks.reuse.service import (
 from app.checks.router import RouteDecision, apply_routing, decode_routing_plan, route_criteria
 from app.checks.rules.context import build_rule_context
 from app.checks.semantic import record_ungraded
+from app.checks.source_quality import (
+    unread_page_scope,
+    unread_pages_detail,
+    without_unread_pages,
+)
 from app.checks.structural import run_structural_check
 from app.config import Settings, get_settings
 from app.errors import ApiDownError, FileMalformedError, QuotaExhaustedError
@@ -748,6 +753,26 @@ async def _degrade_pending_semantic(
     return len(pending)
 
 
+async def _record_unread_pages(
+    session: AsyncSession, check_run_id: int, result: CheckResult, pages: list[int]
+) -> None:
+    """Records the pages an integrity check left unread. A check that did not
+    read every page never reports the manuscript as passed; its flags stand."""
+    if not pages:
+        return
+    detail = result.detail or {}
+    result.detail = {**detail, **unread_pages_detail(pages, detail)}
+    if result.outcome == ResultOutcome.passed:
+        result.outcome = ResultOutcome.escalated
+    await write_audit_event(
+        session,
+        event_type=f"{result.kind.value}_source_scope_recorded",
+        check_run_id=check_run_id,
+        payload={"unread_pages": pages, "outcome": result.outcome.value},
+    )
+    await session.commit()
+
+
 async def _run_integrity_stage(
     session: AsyncSession,
     check_run: CheckRun,
@@ -773,14 +798,21 @@ async def _run_integrity_stage(
     # most likely to be under load. Same `if pending:` guard
     # `_run_semantic_stage` already uses above.
     extraction = None
+    unread_pages: list[int] = []
     if None in (agreement_existing, citation_existing, forensics_existing, reuse_existing):
         extraction = await load_raw_store_async(settings, manuscript.id)
         extraction = bind_analytical_source(extraction, manuscript.content_hash)
+        unread_pages = unread_page_scope(extraction, settings.analysis_unread_pages_max_ratio) or []
+        if unread_pages:
+            # Check the pages whose reading order is established instead of
+            # none at all; each check records the pages it left out.
+            extraction = without_unread_pages(extraction, unread_pages)
 
     if agreement_existing is None:
         agreement_result = await run_internal_agreement_check(
             session, llm, check_run.id, extraction, settings
         )
+        await _record_unread_pages(session, check_run.id, agreement_result, unread_pages)
         agreement_flags = (
             agreement_result.detail.get("n_flags", 0) if agreement_result.detail else 0
         )
@@ -805,6 +837,7 @@ async def _run_integrity_stage(
             citation_result = await run_citation_integrity_check(
                 session, client, check_run.id, citations, extraction, patterns, settings, llm
             )
+        await _record_unread_pages(session, check_run.id, citation_result, unread_pages)
         citation_flags = citation_result.detail.get("n_flags", 0) if citation_result.detail else 0
     else:
         citation_flags = (
@@ -814,6 +847,7 @@ async def _run_integrity_stage(
 
     if forensics_existing is None:
         forensics_result = await run_statistical_forensics_check(session, check_run.id, extraction)
+        await _record_unread_pages(session, check_run.id, forensics_result, unread_pages)
         forensics_flags = (
             forensics_result.detail.get("n_flags", 0) if forensics_result.detail else 0
         )
@@ -833,6 +867,7 @@ async def _run_integrity_stage(
             instructor_id=manuscript.instructor_id,
             content_hash=manuscript.content_hash,
         )
+        await _record_unread_pages(session, check_run.id, reuse_result, unread_pages)
         reuse_detail = reuse_result.detail or {}
     else:
         reuse_detail = reuse_existing.detail or {}

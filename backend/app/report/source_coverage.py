@@ -2,9 +2,17 @@
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    model_serializer,
+    model_validator,
+)
 
 SourcePosition = Annotated[int, Field(strict=True, ge=0)]
+SourcePage = Annotated[int, Field(strict=True, ge=1)]
 
 
 class CriterionSourceLocationOut(BaseModel):
@@ -25,6 +33,18 @@ class CriterionSourceCoverageOut(BaseModel):
     n_native_equations_unlocated: int | None = Field(default=None, strict=True, ge=0)
     native_math_excluded_paragraphs: list[SourcePosition] = Field(default_factory=list)
     native_math_coverage_items: list[CriterionSourceLocationOut] = Field(default_factory=list)
+    # PDF pages left out of the assessment because their reading order
+    # could not be established; the rest of the manuscript was assessed.
+    unread_pages: list[SourcePage] = Field(default_factory=list)
+
+    @model_serializer(mode="wrap")
+    def omit_unread_pages_when_none(self, handler):
+        # Only a PDF assessed around unreadable pages carries the field, so
+        # earlier saved shapes and Word sources serialize exactly as before.
+        data = handler(self)
+        if not data.get("unread_pages"):
+            data.pop("unread_pages", None)
+        return data
 
     @model_validator(mode="after")
     def recorded_facts_agree(self):

@@ -1,11 +1,19 @@
 import type { ReactNode } from "react";
 import type { CriterionSourceCoverage as Coverage } from "../api/types";
-import { criterionCoverageLocations } from "../domain/criterionSourceCoverage";
+import { criterionCoverageLocations, pageRanges } from "../domain/criterionSourceCoverage";
 import { instructorAnchor } from "../domain/sourceAnchor";
 
 export function CriterionSourceCoverage({ value, sourceAction, firstSlot, criterionText }: {
   value: Coverage; sourceAction: (anchor: string, slot: number) => ReactNode; firstSlot: number; criterionText: string;
 }) {
+  const unread = value.unread_pages?.length ? <p><strong>Some pages not read.</strong>{" "}
+    {value.unread_pages.length === 1 ? "Page" : "Pages"} {pageRanges(value.unread_pages)} could not be read in a reliable order, so this
+    assessment is based on the other pages. Check {value.unread_pages.length === 1 ? "that page" : "those pages"} before relying on it.</p> : null;
+  const native = nativeCoverage(value, sourceAction, firstSlot, criterionText);
+  return unread && native ? <div className="signal-attached-flow">{unread}{native}</div> : unread ?? native;
+}
+
+function nativeCoverage(value: Coverage, sourceAction: (anchor: string, slot: number) => ReactNode, firstSlot: number, criterionText: string) {
   const state = value.native_math_inventory_state;
   if (state === "not_applicable") return null;
   if (state === "not_recorded" || state === "unavailable") return <p><strong>{state === "not_recorded" ? "Automatic equation check not recorded." : "Automatic equation check unavailable."}</strong>{" "}

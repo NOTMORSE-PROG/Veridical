@@ -78,6 +78,25 @@ def test_complete_zero_and_positive_unlocated_keep_measured_facts():
     assert project_source_coverage(data).model_dump() == data
 
 
+def test_unread_pdf_pages_survive_projection():
+    coverage = {
+        **AnalyticalSource("not_applicable", None, (), (), ()).detail(),
+        "unread_pages": [45, 46],
+    }
+    assert project_source_coverage(coverage).model_dump() == coverage
+
+
+@pytest.mark.parametrize("pages", [[0], ["45"], [4.5], "45"])
+def test_malformed_unread_pages_are_unavailable(pages):
+    coverage = {
+        **AnalyticalSource("not_applicable", None, (), (), ()).detail(),
+        "unread_pages": pages,
+    }
+    projected_value = project_source_coverage(coverage)
+    assert projected_value.native_math_inventory_state == "unavailable"
+    assert projected_value.unread_pages == []
+
+
 @pytest.mark.parametrize("value", [None, {}, [], True, {"native_math_coverage_version": "v2"}])
 def test_missing_or_malformed_never_becomes_measured_zero(value):
     projected = project_source_coverage(value)

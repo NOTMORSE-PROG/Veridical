@@ -21,5 +21,6 @@
   "criterion_omitted": "The saved assessment input omitted {count} native Word equation {noun}.",
   "criterion_singular": "occurrence",
   "criterion_plural": "occurrences",
-  "unlocated_limit": "The saved source record does not establish that the remaining text and tables could be used safely."
+  "unlocated_limit": "The saved source record does not establish that the remaining text and tables could be used safely.",
+  "criterion_unread_pages": "Pages {pages} could not be read in a reliable order and were left out. This assessment is based on the other pages; check those pages before relying on it."
 }
