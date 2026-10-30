@@ -4,6 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.schemas import AuditCriterionContext
+from app.db_types import BIGINT_MAX
 from app.models.audit import AuditLog
 from app.models.enums import CheckKind
 from app.models.manuscript import Manuscript
@@ -12,12 +13,10 @@ from app.models.run import CheckResult, CheckRun
 
 _JUDGMENT_EVENTS = frozenset({"escalation_resolved", "judgment_recorded", "judgment_revised"})
 _ID_FIELDS = ("check_run_id", "criterion_id", "check_result_id")
-# Stored identifiers use PostgreSQL's signed BIGINT representation.
-_MAX_DATABASE_ID = (1 << 63) - 1
 
 
 def _recorded_id(value: object) -> bool:
-    return type(value) is int and 0 < value <= _MAX_DATABASE_ID
+    return type(value) is int and 0 < value <= BIGINT_MAX
 
 
 def _binding(event: AuditLog) -> tuple[int, int] | None:
