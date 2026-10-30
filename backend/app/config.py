@@ -1256,10 +1256,10 @@ class Settings(BaseSettings):
         ):
             raise ValueError("pipeline claim lifetime must allow two bounded renewal attempts")
         # Beats keep a fixed cadence and each renewal may take up to one beat:
-        # three beats inside the lease let one renewal fail outright and the
-        # next one be slow before the lease runs out.
-        if 3 * self.direct_upload_heartbeat_seconds > self.direct_upload_lease_seconds:
-            raise ValueError("direct upload lease must cover three heartbeats")
+        # more than three beats inside the lease let one renewal fail outright
+        # and the next one be slow, with time to spare, before it runs out.
+        if 3 * self.direct_upload_heartbeat_seconds >= self.direct_upload_lease_seconds:
+            raise ValueError("direct upload lease must be longer than three heartbeats")
         # backend review finding (BUG-052 review): `weight_importance.py`
         # checks `low_max_ratio` first, then `high_min_ratio`, else `med`
         # -- an operator swapping these in `.env` (or setting them equal)

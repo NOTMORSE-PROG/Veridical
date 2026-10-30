@@ -122,11 +122,47 @@ async def _heartbeat(attempt_id, lease_id, settings, on_lost):
             return
 
 
-async def _retire_interrupted(session):
-    message = (
-        "Document processing was interrupted. "
-        "The stored original and any saved record are retained."
+INTERRUPTED = (
+    "Document processing was interrupted. The stored original and any saved record are retained."
+)
+
+
+async def _fail_record(session, manuscript_id, detail):
+    """Mark a record still preparing as failed (one already ready is kept)."""
+    await session.execute(
+        update(Manuscript)
+        .where(
+            Manuscript.id == manuscript_id,
+            Manuscript.ingest_status.in_((IngestStatus.pending, IngestStatus.processing)),
+            Manuscript.purged_at.is_(None),
+        )
+        .values(
+            ingest_status=IngestStatus.failed,
+            ingest_failure_reason=IngestFailureReason.extraction_failed,
+            ingest_failure_detail=detail,
+        )
     )
+
+
+async def _record_handed_off(session, attempt_id):
+    """Another worker retired this attempt while it was still being prepared.
+
+    A write made here after that (the record marked as preparing) would
+    otherwise leave the record looking busy for good, so it is put back to
+    the same interrupted answer the attempt already gives."""
+    with suppress(Exception):
+        await session.rollback()
+    manuscript_id = await session.scalar(
+        select(UploadAttempt.manuscript_id).where(UploadAttempt.id == attempt_id)
+    )
+    if manuscript_id is not None:
+        await _fail_record(session, manuscript_id, INTERRUPTED)
+    await session.commit()
+    _logger.warning("Upload attempt %s was retired before it finished", attempt_id)
+
+
+async def _retire_interrupted(session):
+    message = INTERRUPTED
     rows = await session.execute(
         update(UploadAttempt)
         .where(
@@ -249,16 +285,9 @@ async def _process_next_upload(settings, lease, wake_pipeline=None):
         await session.commit()
         attempt_id, lease_id = attempt.id, attempt.lease_id
         instructor_id, start_rubric_id = attempt.instructor_id, attempt.start_rubric_id
-        preparing = asyncio.current_task()
         handed_off = asyncio.Event()
         publishing = False
-
-        def stop_preparing():
-            # The attempt was retired while this process still worked on it.
-            # Stop, unless only the fenced final write is left.
-            handed_off.set()
-            if not publishing:
-                preparing.cancel()
+        receipt = manuscript_id = outcome = None
 
         async def still_owned(owner_session):
             # Runs inside the transaction that marks the manuscript ready, so
@@ -266,11 +295,8 @@ async def _process_next_upload(settings, lease, wake_pipeline=None):
             if not await _hold_lease(owner_session, attempt_id, lease_id, settings):
                 raise PreparationHandedOff
 
-        heartbeat = asyncio.create_task(_heartbeat(attempt_id, lease_id, settings, stop_preparing))
-        probe = LoopLagProbe(settings.event_loop_probe_seconds).start()
-        started = asyncio.get_running_loop().time()
-        receipt = manuscript_id = outcome = None
-        try:
+        async def prepare_and_publish():
+            nonlocal receipt, manuscript_id, outcome, publishing
             # The staged object is copied inside storage for the durable
             # original; the bytes reach this host once at most (none when the
             # relay's own copy is still here), hashed as they are written.
@@ -314,16 +340,31 @@ async def _process_next_upload(settings, lease, wake_pipeline=None):
             await _finish_done(
                 session, attempt_id, lease_id, receipt, check_run_id, check_start_error
             )
+
+        # The work runs as its own task so the heartbeat can stop it without
+        # ever cancelling this scheduler task, whatever step it is in.
+        work = asyncio.create_task(prepare_and_publish(), name=f"upload-{attempt_id}")
+
+        def stop_preparing():
+            # The attempt was retired while this process still worked on it.
+            # Stop, unless only the fenced final write is left.
+            handed_off.set()
+            if not publishing:
+                work.cancel()
+
+        heartbeat = asyncio.create_task(_heartbeat(attempt_id, lease_id, settings, stop_preparing))
+        probe = LoopLagProbe(settings.event_loop_probe_seconds).start()
+        started = asyncio.get_running_loop().time()
+        try:
+            await work
         except PreparationHandedOff:
-            await session.rollback()
-            _logger.warning("Upload attempt %s was retired before it finished", attempt_id)
+            await _record_handed_off(session, attempt_id)
         except asyncio.CancelledError:
-            # Only the heartbeat's own stop is absorbed; a shutdown is not.
-            if not handed_off.is_set() or preparing.uncancel() > 0:
+            # A shutdown cancels this task as well; only the heartbeat's stop
+            # of the work alone is absorbed.
+            if asyncio.current_task().cancelling() or not handed_off.is_set():
                 raise
-            with suppress(Exception):
-                await session.rollback()
-            _logger.warning("Upload attempt %s was retired before it finished", attempt_id)
+            await _record_handed_off(session, attempt_id)
         except Exception as exc:
             await session.rollback()
             if receipt is not None:
@@ -373,36 +414,22 @@ async def _process_next_upload(settings, lease, wake_pipeline=None):
                 )
             )
             if linked_id is not None:
-                await session.execute(
-                    update(Manuscript)
-                    .where(
-                        Manuscript.id == linked_id,
-                        Manuscript.ingest_status.in_(
-                            (IngestStatus.pending, IngestStatus.processing)
-                        ),
-                        Manuscript.purged_at.is_(None),
-                    )
-                    .values(
-                        ingest_status=IngestStatus.failed,
-                        ingest_failure_reason=IngestFailureReason.extraction_failed,
-                        ingest_failure_detail=error,
-                    )
-                )
+                await _fail_record(session, linked_id, error)
             await session.commit()
             _logger.warning("Direct upload processing did not complete (%s)", failure_summary(exc))
         finally:
+            # No wait before the cleanup, so a second cancellation cannot skip it.
             heartbeat.cancel()
-            # Wait without absorbing a cancellation aimed at this task.
-            await asyncio.wait([heartbeat])
-            worst = await probe.stop()
+            worst = probe.stop()
+            # A relay copy that was not consumed would only fill the disk.
+            relay_local_path(settings, attempt_id).unlink(missing_ok=True)
             _logger.info(
                 "Upload preparation %s ended after %.1f s; worst event-loop delay %.2f s",
                 attempt_id,
                 asyncio.get_running_loop().time() - started,
                 worst,
             )
-            # A relay copy that was not consumed would only fill the disk.
-            relay_local_path(settings, attempt_id).unlink(missing_ok=True)
+            await asyncio.wait([heartbeat])
         return True
 
 

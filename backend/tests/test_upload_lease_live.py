@@ -17,13 +17,15 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import func, select, text, update
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.config import Settings
 from app.db import sqlalchemy_url
 from app.ingest import upload_worker
 from app.loop_probe import LoopLagProbe
+from app.models.enums import IngestStatus
 from app.models.instructor import Instructor
+from app.models.manuscript import Manuscript
 from app.models.upload_attempt import UploadAttempt
 
 live = pytest.mark.skipif(
@@ -114,13 +116,26 @@ class Harness:
     ):
         attempt_id = upload_attempt.id
         self.calls.append((threading.current_thread().name, attempt_id))
+        # Like real ingestion: a record is created, linked and marked as
+        # preparing before the long work starts.
+        record = Manuscript(
+            instructor_id=upload_attempt.instructor_id,
+            group_label="Lease",
+            file_ref="",
+            ingest_status=IngestStatus.processing,
+        )
+        session.add(record)
+        await session.flush()
+        upload_attempt.manuscript_id = record.id
+        await session.commit()
         if self.prepare is not None:
             await self.prepare()
+        record.ingest_status = IngestStatus.done
         # Where real ingestion marks the manuscript ready.
         await before_finalize(session)
         await session.commit()
         self.finished.append(attempt_id)
-        return (SimpleNamespace(id=None),)
+        return (record,)
 
 
 @pytest.fixture
@@ -341,6 +356,7 @@ async def test_a_stall_longer_than_the_lease_is_retired_and_the_late_finish_is_i
     assert row.status == "failed" and row.error.startswith(INTERRUPTED)
     assert row.response is None
     assert harness.finished == [], "a retired preparation must not mark its record ready"
+    assert (await record_of(harness, attempt_id)).ingest_status == IngestStatus.failed
 
 
 @live
@@ -358,6 +374,10 @@ async def test_a_preparation_retired_while_running_stops_and_starts_no_check(har
     stopped = []
 
     async def prepare():
+        await until_retired(harness, attempt_id)
+        # A write this process makes after the retirement (real ingestion
+        # marks the record as preparing again before its long work).
+        await set_record_status(harness, attempt_id, IngestStatus.processing)
         try:
             await asyncio.sleep(settings.direct_upload_lease_seconds * 4)
         except asyncio.CancelledError:
@@ -371,6 +391,95 @@ async def test_a_preparation_retired_while_running_stops_and_starts_no_check(har
     assert harness.finished == [] and harness.checks_started == []
     row = await attempt_row(harness, attempt_id)
     assert row.status == "failed" and row.error.startswith(INTERRUPTED)
+    record = await record_of(harness, attempt_id)
+    assert record.ingest_status == IngestStatus.failed, "the record must not stay preparing"
+    assert record.ingest_failure_detail.startswith(INTERRUPTED)
+
+
+@live
+async def test_a_hand_off_found_while_recording_it_does_not_stop_the_scheduler(
+    harness, tmp_path, monkeypatch
+):
+    """The preparation finds the retirement itself (at its final step) while
+    the heartbeat finds it again during the bookkeeping that follows. That
+    second stop must not cancel the scheduler task: nothing would restart
+    it, and every later upload would wait forever."""
+    settings = lease_settings(tmp_path)
+    attempt_id = await queued_attempt(harness)
+    beat = settings.direct_upload_heartbeat_seconds
+    # The heartbeats cannot reach the database until well after the lease.
+    first = harness.sessions_opened
+    harness.fail_sessions = {first + n for n in range(1, 7)}
+
+    slow_next_rollback = []
+
+    async def prepare():
+        await until_retired(harness, attempt_id)
+        slow_next_rollback.append(True)
+
+    original = AsyncSession.rollback
+
+    async def slow_rollback(self):
+        # The bookkeeping after the hand-off starts with a rollback; make it
+        # span the heartbeat that finds the loss.
+        if slow_next_rollback and threading.current_thread() is threading.main_thread():
+            slow_next_rollback.clear()
+            await asyncio.sleep(beat * 4)
+        await original(self)
+
+    monkeypatch.setattr(AsyncSession, "rollback", slow_rollback)
+    harness.prepare = prepare
+    with OtherInstance(harness, settings):
+        assert await upload_worker._process_next_upload(settings, None) is True
+    assert asyncio.current_task().cancelling() == 0
+    assert harness.finished == []
+    assert (await record_of(harness, attempt_id)).ingest_status == IngestStatus.failed
+
+
+@live
+async def test_a_shutdown_arriving_with_a_hand_off_still_stops_the_scheduler(harness, tmp_path):
+    """The heartbeat stops the work, and at that moment the server also shuts
+    down. The hand-off must not swallow the shutdown."""
+    settings = lease_settings(tmp_path)
+    attempt_id = await queued_attempt(harness)
+    first = harness.sessions_opened
+    harness.fail_sessions = {first + n for n in range(1, 5)}
+    scheduler = None
+
+    async def prepare():
+        await until_retired(harness, attempt_id)
+        try:
+            await asyncio.sleep(settings.direct_upload_lease_seconds * 4)
+        except asyncio.CancelledError:
+            scheduler.cancel()  # the shutdown lands together with the stop
+            raise
+
+    harness.prepare = prepare
+    with OtherInstance(harness, settings):
+        scheduler = asyncio.create_task(upload_worker._process_next_upload(settings, None))
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(scheduler, 10)
+
+
+async def until_retired(h, attempt_id, timeout=10):
+    deadline = time.monotonic() + timeout
+    while (await attempt_row(h, attempt_id)).status != "failed":
+        assert time.monotonic() < deadline, "the other instance never retired the attempt"
+        await asyncio.sleep(0.05)
+
+
+async def record_of(h, attempt_id):
+    async with h.factories[asyncio.get_running_loop()]() as session:
+        attempt = await session.get(UploadAttempt, attempt_id)
+        return await session.get(Manuscript, attempt.manuscript_id)
+
+
+async def set_record_status(h, attempt_id, status):
+    async with h.factories[asyncio.get_running_loop()]() as session:
+        attempt = await session.get(UploadAttempt, attempt_id)
+        record = await session.get(Manuscript, attempt.manuscript_id)
+        record.ingest_status = status
+        await session.commit()
 
 
 async def test_loop_probe_reports_a_blocked_loop():
@@ -378,10 +487,10 @@ async def test_loop_probe_reports_a_blocked_loop():
     await asyncio.sleep(0.05)
     time.sleep(0.3)
     await asyncio.sleep(0.05)
-    assert await probe.stop() >= 0.25
+    assert probe.stop() >= 0.25
 
 
 async def test_loop_probe_can_be_turned_off():
     probe = LoopLagProbe(0).start()
     time.sleep(0.05)
-    assert await probe.stop() == 0.0
+    assert probe.stop() == 0.0
