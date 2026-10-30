@@ -414,6 +414,28 @@ describe("FlagDetailPage", () => {
     );
   });
 
+  it("shows a refused reason at the field as a definite refusal, and keeps the dismissal open to correct it", async () => {
+    const sentence = "This text contains an invisible character that can't be saved. Retype it or paste it as plain text.";
+    vi.stubGlobal("fetch", stubFetchByPath({ "/flags/5": FLAG,
+      "/flags/5/override": new Response(JSON.stringify({ detail: [{ type: "text_not_storable", loc: ["body", "reason"], msg: sentence, input: "x" }] }), { status: 422 }) }));
+    renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId", reviewRunId: 20 });
+    await screen.findByText(/Wang, S\./);
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss finding" }));
+    const reason = await screen.findByRole("textbox", { name: "Reason (required)" });
+    fireEvent.change(reason, { target: { value: "Checked the cited source myself." } });
+    const confirm = screen.getByRole("button", { name: "Confirm dismissal" });
+    await waitFor(() => expect(confirm).toBeEnabled());
+    fireEvent.click(confirm);
+    expect(await screen.findByText(`${sentence} Nothing was changed.`)).toBeInTheDocument();
+    expect(reason).toHaveAttribute("aria-invalid", "true");
+    expect(reason).toHaveAccessibleDescription(`${sentence} Nothing was changed.`);
+    expect(screen.queryByText("Saving could not be confirmed")).not.toBeInTheDocument();
+    // The review stays open: the instructor corrects the reason and can confirm again.
+    fireEvent.change(reason, { target: { value: "Retyped reason." } });
+    expect(reason).not.toHaveAttribute("aria-invalid");
+    expect(screen.getByRole("button", { name: "Confirm dismissal" })).toBeEnabled();
+  });
+
   it("submits the override with the reason and shows the AI finding + the instructor's own reason side by side afterward", async () => {
     const overriddenFlag = {
       ...FLAG,
