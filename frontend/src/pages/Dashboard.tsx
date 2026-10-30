@@ -29,6 +29,8 @@ import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
 import { ProcessStatus } from "../ui/ProcessStatus";
 import { ReadinessBand } from "../ui/ReadinessBand";
+import { isPagePastEnd } from "../api/fieldRefusal";
+import { PAGE_PAST_END_COPY } from "../domain/pagePastEnd";
 
 const QUEUES: ReadonlyArray<{
   id: ReviewDeskQueue;
@@ -360,7 +362,8 @@ function ReviewDesk({
   const [searchDraft, setSearchDraft] = useState(q ?? "");
   useEffect(() => setSearchDraft(q ?? ""), [q]);
   const query: ReviewDeskQuery = { queue, q, program, sort, page, pageSize: REVIEW_DESK_PAGE_SIZE };
-  const { data, isPending, isError, fetchStatus, refetch } = useReviewDeskPage(query);
+  const { data, isPending, isError, error, fetchStatus, refetch } = useReviewDeskPage(query);
+  const pastEnd = isError && isPagePastEnd(error);
   const queueHeading = useRef<HTMLHeadingElement>(null);
   const [queueAction, setQueueAction] = useState<{
     path: string;
@@ -558,7 +561,13 @@ function ReviewDesk({
             <i /><i /><i />
           </div>
         )}
-        {isError && !loading && (
+        {pastEnd && !loading && (
+          <Alert title={PAGE_PAST_END_COPY.title(page)} tone="info" role="alert">
+            <p>{PAGE_PAST_END_COPY.body}</p>
+            <ActionLink to={{ search: (() => { const next = new URLSearchParams(params); next.delete("page"); return next.toString(); })() }} variant="secondary">{PAGE_PAST_END_COPY.firstPage}</ActionLink>
+          </Alert>
+        )}
+        {isError && !pastEnd && !loading && (
           <Alert title={`Could not load page ${page} in ${queueTitle}`} tone="error" role="alert">
             <p>Your records have not changed.</p>
             <Button variant="secondary" onClick={retryQueue}>Try again</Button>
