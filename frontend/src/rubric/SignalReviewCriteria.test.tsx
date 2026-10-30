@@ -200,6 +200,21 @@ describe("SignalReviewCriteriaPage", () => {
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
   });
 
+  it("shows the server's refusal under the criterion it names, and drops it once that criterion is edited", async () => {
+    const sentence = "This text contains an invisible character that can't be saved. Retype it or paste it as plain text.";
+    vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => init?.method === "PUT"
+      ? new Response(JSON.stringify({ detail: [{ type: "text_not_storable", loc: ["body", "criteria", 0, "text"], msg: sentence, input: "x" }] }), { status: 422 })
+      : new Response(JSON.stringify(RUBRIC), { status: 200 })));
+    renderWithProviders(<SignalReviewCriteriaPage />, { route: "/rubric/5/review", path: "/rubric/:rubricId/review", authInstructorId: 1 });
+    const field = await screen.findByLabelText("Criterion text, criterion 1");
+    fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
+    expect(await screen.findByText(`Criterion 1: ${sentence} Your edits are still on this page.`)).toBeInTheDocument();
+    await waitFor(() => expect(field).toHaveAccessibleDescription(sentence));
+    expect(field).toHaveAttribute("aria-invalid", "true");
+    fireEvent.change(field, { target: { value: "Retyped criterion text" } });
+    expect(field).not.toHaveAttribute("aria-invalid");
+  });
+
   it.each([200, 503, 422])("valid save-and-leave handles HTTP %s without losing edits", async (status) => {
     const next = { ...RUBRIC, id: 6, criteria: [{ ...RUBRIC.criteria[0], text: "New version criterion" }] };
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
