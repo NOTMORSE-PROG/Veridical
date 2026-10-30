@@ -1113,6 +1113,27 @@ def source_image_settings_for(report, settings):
     return measured
 
 
+# BUG-549: touching small PDF image pieces are combined into one image before
+# checking. Same wording as the report screen (frontend report/imageCoverage.ts).
+def _pieces_suffix(count: int, merged: int, pieces: int) -> str:
+    if not merged:
+        return ""
+    stored = f"stored in the PDF as {pieces:,} small touching pieces"
+    return f", {stored}" if merged == count else f"; {merged} {stored}"
+
+
+def _merged_images_line(merged: int, pieces: int) -> str:
+    if merged == 1:
+        return (
+            f"1 listed image occurrence is stored in the PDF as {pieces:,} small touching "
+            "pieces, combined into one image before checking."
+        )
+    return (
+        f"{merged} listed image occurrences are stored in the PDF as small touching pieces "
+        f"({pieces:,} in all), each combined into one image before checking."
+    )
+
+
 def build_report_pdf(data: ReportExportData) -> bytes:
     # File-backed lazy images release their decoded RGB buffers after drawing.
     # The owning build keeps every exact PNG available through all layout passes.
@@ -1749,6 +1770,11 @@ def _build_report_pdf(data: ReportExportData, image_path) -> bytes:
             if coverage.n_images_unassessed:
                 noun = "occurrence" if coverage.n_images_unassessed == 1 else "occurrences"
                 counts.append(f"{coverage.n_images_unassessed} image {noun} unassessed")
+            merged = [
+                item.piece_count for item in coverage.image_coverage_items if item.piece_count > 1
+            ]
+            if merged:
+                counts.append(_merged_images_line(len(merged), sum(merged)).rstrip("."))
             if coverage.n_image_occurrences_omitted:
                 counts.append(
                     f"{coverage.n_image_occurrences_omitted} additional drawing occurrences "
@@ -1778,14 +1804,20 @@ def _build_report_pdf(data: ReportExportData, image_path) -> bytes:
                     else "Source location unavailable"
                 )
                 key = anchor, item.reason
-                count, pieces = image_locations.get(key, (0, 0))
-                image_locations[key] = count + 1, pieces + item.piece_count
-            for (anchor, image_reason), (count, pieces) in image_locations.items():
+                count, merged_here, pieces = image_locations.get(key, (0, 0, 0))
+                # Only merged images count pieces; a plain image is not "a piece".
+                is_merged = item.piece_count > 1
+                image_locations[key] = (
+                    count + 1,
+                    merged_here + int(is_merged),
+                    pieces + (item.piece_count if is_merged else 0),
+                )
+            for (anchor, image_reason), (count, merged_here, pieces) in image_locations.items():
                 label = _image_coverage_labels().get(image_reason, "Image content unassessed")
                 occurrences = "image occurrence" if count == 1 else "image occurrences"
                 # Merged images still say how many pieces they hold, so a page
                 # of tiles never reads as one small picture (BUG-532).
-                made_of = f", made of {pieces:,} touching pieces" if pieces > count else ""
+                made_of = _pieces_suffix(count, merged_here, pieces)
                 flow.append(
                     Paragraph(
                         escape(f"{anchor}: {label} ({count} {occurrences}{made_of})."),

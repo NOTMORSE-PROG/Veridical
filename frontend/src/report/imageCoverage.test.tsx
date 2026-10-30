@@ -42,10 +42,23 @@ describe("saved image assessment coverage", () => {
       { image_index: 1, page: 121, paragraph: null, reason: "size_filter" },
     ] }, 12);
     expect(item.sources!.map((source) => source.label)).toEqual([
-      "Page 120: Outside image-reading size limits (1 image occurrence, made of 9,100 touching pieces)",
+      "Page 120: Outside image-reading size limits (1 image occurrence, stored in the PDF as 9,100 small touching pieces)",
       "Page 121: Outside image-reading size limits (1 image occurrence)",
     ]);
-    expect(item.subIssues).toContain("1 of the listed image occurrences is made of many touching pieces (9,100 pieces in all), prepared as one image each.");
+    expect(item.subIssues).toContain("1 listed image occurrence is stored in the PDF as 9,100 small touching pieces, combined into one image before checking.");
+  });
+
+  it("never counts a plain image as a piece", () => {
+    const item = imageCoverageItem({ ...status, image_coverage_items: [
+      { image_index: 0, page: 120, paragraph: null, reason: "size_filter", piece_count: 9100 },
+      { image_index: 1, page: 120, paragraph: null, reason: "size_filter" },
+      { image_index: 2, page: 121, paragraph: null, reason: "size_filter", piece_count: 3 },
+    ] }, 12);
+    expect(item.sources!.map((source) => source.label)).toEqual([
+      "Page 120: Outside image-reading size limits (2 image occurrences; 1 stored in the PDF as 9,100 small touching pieces)",
+      "Page 121: Outside image-reading size limits (1 image occurrence, stored in the PDF as 3 small touching pieces)",
+    ]);
+    expect(item.subIssues).toContain("2 listed image occurrences are stored in the PDF as small touching pieces (9,103 in all), each combined into one image before checking.");
   });
 
   it("does not mention pieces when every image is a single piece", () => {
