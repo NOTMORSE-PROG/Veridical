@@ -59,7 +59,7 @@ function readableNote(text: string) {
   return PLAIN_REASON_WORDING.reduce((out, [stored, plain]) => out.split(stored).join(plain), joined);
 }
 import { EmptyState } from "../ui/EmptyState";
-import { MODULE_EMPTY_STATE } from "./moduleEmptyState";
+import { MODULE_EMPTY_STATE, moduleEmptyState } from "./moduleEmptyState";
 import { ComparisonLeadList } from "./ComparisonLeadList";
 import { comparisonLeadCollection } from "./comparisonLeadCollection";
 import { resultDisplay } from "./ResultsTable";
@@ -74,6 +74,8 @@ import { BulkResolveDialog, BulkSelectionBar } from "./BulkFindingReview";
 import { findingSubject, findingTitle } from "../domain/findingSummary";
 import { BULK_REVIEW_COPY } from "../domain/bulkReviewCopy";
 import type { BulkAction } from "./useBulkResolve";
+import { OriginalityCoverageNotice } from "./OriginalityCoverageNotice";
+import { originalityCoverageNote } from "./originalityCoverage";
 
 interface FindingSelection {
   isSelected: (cluster: FlagFindingCluster) => boolean;
@@ -1088,7 +1090,9 @@ export function SignalFlagsPanel({
   const selectedModule = selectedIntegrityModule(moduleParams.get("module")
     ?? flags?.find((flag) => !isOptionalComparisonLead(flag))?.check_kind ?? null);
   const moduleState = review?.assessment?.integrity_modules?.find(module => module.check_kind === selectedModule)?.state ?? "not_recorded";
-  const emptyState = MODULE_EMPTY_STATE[moduleState as keyof typeof MODULE_EMPTY_STATE] ?? MODULE_EMPTY_STATE.not_recorded;
+  const emptyState = review?.assessment ? moduleEmptyState(review.assessment, selectedModule)
+    : MODULE_EMPTY_STATE[moduleState as keyof typeof MODULE_EMPTY_STATE] ?? MODULE_EMPTY_STATE.not_recorded;
+  const originalityNote = originalityCoverageNote(review?.assessment);
   const { data: me } = useMe();
   const viewedIds = useViewedFlagIds(me?.id);
   const allOtherFlags = flags?.filter((flag) => !isOptionalComparisonLead(flag));
@@ -1138,6 +1142,7 @@ export function SignalFlagsPanel({
       <div className="signal-integrity-review-body">
       <IntegrityModuleNavigation selected={selectedModule} controls={`signal-selected-module-${checkRunId}`}
         modules={review?.assessment?.integrity_modules}
+        stateLabels={originalityNote ? { originality_reuse: originalityNote.tag } : undefined}
         counts={new Map(["internal_agreement", "citation_integrity", "statistical_forensics", "originality_reuse"].map(kind => [kind, flags?.filter(flag => flag.check_kind === kind).length ?? 0]))}
         onSelect={kind => { const next = new URLSearchParams(moduleParams); next.set("module", kind); next.set("review_step", "findings"); [FLAG_VIEW_PARAM, CLUSTERS_OPEN_PARAM, VISIBLE_COUNT_PARAM].forEach(key => next.delete(key)); setModuleParams(next, { replace: true }); }} />
       <div id={`signal-selected-module-${checkRunId}`}>
@@ -1150,6 +1155,7 @@ export function SignalFlagsPanel({
         onDone={(message) => { setBulkAction(null); setSelectedIds(new Set()); setBulkDrafts({ confirm: "", dismiss: "" }); setBulkMessage(message); }} />}
       {selectedModule === "statistical_forensics" && <StatisticalCheckScope scope={statisticalScope} />}
       {selectedModule === "originality_reuse" && <OriginalityScope scope={originalityScope} showAddAction />}
+      {selectedModule === "originality_reuse" && <OriginalityCoverageNotice report={review?.assessment} />}
       {review && active && <BulkSelectionBar slot="before" findings={selectedClusters.length} locations={selectedLocations} elsewhere={selectedElsewhere} decided={Boolean(review.decision)}
         onAction={(action) => { setBulkMessage(""); setBulkAction(action); }}
         onClear={() => { setSelectedIds(new Set()); document.getElementById("flags-heading")?.focus(); }} />}
@@ -1164,7 +1170,8 @@ export function SignalFlagsPanel({
             selection={review ? selection : undefined}
           />
         )
-        : onlyOptional ? null : optional.state === "success" ? <EmptyState className="signal-integrity-empty" id={`signal-module-empty-${checkRunId}`} title={emptyState.title}><p>{emptyState.description}</p></EmptyState>
+        : onlyOptional ? null : optional.state === "success" ? <EmptyState className="signal-integrity-empty" id={`signal-module-empty-${checkRunId}`} title={emptyState.title}
+          action={emptyState.limits ? <ActionLink to={`/report/${checkRunId}?section=limits`} variant="secondary">Open assessment limits</ActionLink> : undefined}><p>{emptyState.description}</p></EmptyState>
           : <p>{optional.state === "error" ? "Other findings could not be loaded." : optional.state === "paused" ? "Waiting to load other findings." : optional.state === "fetching" ? "Loading other findings." : "Other findings are not available."}</p>}
       {selectedModule === "originality_reuse" && <ComparisonLeadList collection={optional} showActions viewedIds={viewedIds} onRetry={() => { void flagsQuery.refetch(); }} />}
       {review && active && <BulkSelectionBar slot="after" findings={selectedClusters.length} locations={selectedLocations} elsewhere={selectedElsewhere} decided={Boolean(review.decision)}
