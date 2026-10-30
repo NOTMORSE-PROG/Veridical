@@ -324,7 +324,6 @@ async def get_rubric(
     )
     rubric.program = await _program_name(session, rubric.program_id)  # type: ignore[attr-defined]
     rubric.citation_recency_settings = _recency_view(rubric.citation_recency)  # type: ignore[attr-defined]
-
     rubric.source_summary = source_summary(rubric)  # type: ignore[attr-defined]
     return rubric
 
