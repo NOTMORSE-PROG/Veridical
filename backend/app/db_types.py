@@ -60,8 +60,8 @@ DbInt = Annotated[int, _FitsBigint]
 # DbText is refused with a 422 naming the field instead. (Lone surrogates are
 # already refused by pydantic's own str validation.)
 TEXT_NOT_STORABLE = (
-    "This text contains a hidden character that cannot be saved, often from text "
-    "copied out of a PDF. Remove it and try again."
+    "This text contains an invisible character that can't be saved. "
+    "Retype it or paste it as plain text."
 )
 
 
