@@ -101,7 +101,7 @@ function AnnotationPanel({ flag, drafts }: { flag: FlagOut; drafts: Map<string, 
       {dirty && <p className="signal-field-hint">Unsaved note kept for this finding while you stay signed in.</p>}
       {invalid && <p id={errorId} role="alert" className="signal-field-error">Enter a note before saving.</p>}
       {!invalid && refusal && <p id={refusalId} className="signal-field-error">{refusal} {REFUSAL_NOTHING_CHANGED}</p>}
-      {requestRefusal && <RefusalAlert title={REFUSAL_TITLE} message={requestRefusal} />}
+      {requestRefusal && <RefusalAlert title={REFUSAL_TITLE} message={requestRefusal} takeFocus={!refusal} />}
       {annotate.isError && !isValidationRefusal(annotate.error) && <Alert title="Could not save this note" tone="error" role="alert">{annotate.error instanceof ApiError ? annotate.error.message : "Try again."}</Alert>}
       <div className="signal-evidence-actions">
         <Button variant="secondary" aria-describedby={noteHelpId} busy={annotate.isPending} onClick={save}>{annotate.isPending ? "Saving note" : "Save note"}</Button>
@@ -140,7 +140,7 @@ function ConfirmFinding({ flag }: { flag: FlagOut }) {
       aria-invalid={Boolean(refusal) || undefined} aria-describedby={refusal ? refusalId : undefined}
       onChange={event => { if (refusal) confirm.reset(); setNote(event.target.value); }} />
     {refusal && <p id={refusalId} className="signal-field-error">{refusal} {REFUSAL_NOTHING_CHANGED}</p>}
-    {requestRefusal && <RefusalAlert title={REFUSAL_TITLE} message={requestRefusal} />}
+    {requestRefusal && <RefusalAlert title={REFUSAL_TITLE} message={requestRefusal} takeFocus={!refusal} />}
     {confirm.isError && !isValidationRefusal(confirm.error) && <p role="alert" className="signal-field-error">{confirm.error instanceof Error ? confirm.error.message : "The finding could not be confirmed. Try again."}</p>}
     <Button variant="primary" disabled={confirm.isPending || !review.canSubmit} onClick={() => {
       if (!review.isCurrent() || !isAssessmentRevision(review.expectedRevision)) return;
@@ -212,7 +212,7 @@ function OverrideDialog({ flag, onClose, onAccepted, continuationIsCurrent, fall
         </label>
         {invalid && <p id={errorId} role="alert" className="signal-field-error">Enter a reason before confirming.</p>}
         {!invalid && refusal && <p id={refusalId} className="signal-field-error">{refusal} {REFUSAL_NOTHING_CHANGED}</p>}
-        {requestRefusal && <RefusalAlert title={REFUSAL_TITLE} message={requestRefusal} />}
+        {requestRefusal && <RefusalAlert title={REFUSAL_TITLE} message={requestRefusal} takeFocus={!refusal} />}
         {override.isError && !isValidationRefusal(override.error) && <Alert title="Saving could not be confirmed" tone="error" role="alert">Your entered reason is kept. Review the current assessment before trying again.</Alert>}
       </div>
     </Dialog>

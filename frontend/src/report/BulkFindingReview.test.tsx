@@ -157,6 +157,8 @@ describe("bulk confirm and dismiss", () => {
     fireEvent.click(screen.getByRole("button", { name: "Confirm as real issues" }));
     expect(await screen.findByText("This text can't be saved. Nothing was changed.")).toBeInTheDocument();
     expect(screen.getByText("Select at most 200 findings at a time.")).toBeInTheDocument();
+    // The refused comment keeps focus; the selection refusal is still announced.
+    await waitFor(() => expect(screen.getByLabelText("Comment (optional)")).toHaveFocus());
   });
 
   it("never blames the comment with the generic sentence when the request was refused", async () => {
