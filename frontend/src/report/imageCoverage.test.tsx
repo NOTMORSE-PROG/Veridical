@@ -36,6 +36,24 @@ describe("saved image assessment coverage", () => {
     expect(item.action).toBeUndefined();
   });
 
+  it("says how many touching pieces a merged image holds, as the PDF export does", () => {
+    const item = imageCoverageItem({ ...status, image_coverage_items: [
+      { image_index: 0, page: 120, paragraph: null, reason: "size_filter", piece_count: 9100 },
+      { image_index: 1, page: 121, paragraph: null, reason: "size_filter" },
+    ] }, 12);
+    expect(item.sources!.map((source) => source.label)).toEqual([
+      "Page 120: Outside image-reading size limits (1 image occurrence, made of 9,100 touching pieces)",
+      "Page 121: Outside image-reading size limits (1 image occurrence)",
+    ]);
+    expect(item.subIssues).toContain("1 of the listed image occurrences is made of many touching pieces (9,100 pieces in all), prepared as one image each.");
+  });
+
+  it("does not mention pieces when every image is a single piece", () => {
+    const item = imageCoverageItem(status, 12);
+    expect(item.sources![0].label).not.toContain("pieces");
+    expect(item.subIssues!.join(" ")).not.toContain("pieces");
+  });
+
   it("does not call an unread-image manuscript qualitative or passed", () => {
     const item = imageCoverageItem({ ...status, analysis_coverage: "unsupported" }, 12);
     expect(item.label).toContain("Not assessed");

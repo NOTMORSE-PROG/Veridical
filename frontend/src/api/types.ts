@@ -534,7 +534,8 @@ export interface IntegrityCheckStatusOut {
   n_equations_unassessed?: number;
   n_recovery_figures_unassessed?: number;
   n_recovery_tables_unassessed?: number;
-  image_coverage_items?: { image_index: number; page: number | null; paragraph: number | null; reason: string }[];
+  // piece_count > 1: touching small PDF image pieces prepared as one image (BUG-532).
+  image_coverage_items?: { image_index: number; page: number | null; paragraph: number | null; reason: string; piece_count?: number }[];
   native_math_inventory_state?: NativeMathSourceOut["state"] | null;
   n_native_equations_unassessed?: number | null;
   n_native_equations_unlocated?: number | null;
