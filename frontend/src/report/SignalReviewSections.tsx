@@ -76,6 +76,7 @@ import { BULK_REVIEW_COPY } from "../domain/bulkReviewCopy";
 import type { BulkAction } from "./useBulkResolve";
 import { OriginalityCoverageNotice } from "./OriginalityCoverageNotice";
 import { originalityCoverageNote } from "./originalityCoverage";
+import { CitationRecencySummary } from "./CitationRecencySummary";
 
 interface FindingSelection {
   isSelected: (cluster: FlagFindingCluster) => boolean;
@@ -1154,6 +1155,7 @@ export function SignalFlagsPanel({
         onClose={() => setBulkAction(null)}
         onDone={(message) => { setBulkAction(null); setSelectedIds(new Set()); setBulkDrafts({ confirm: "", dismiss: "" }); setBulkMessage(message); }} />}
       {selectedModule === "statistical_forensics" && <StatisticalCheckScope scope={statisticalScope} />}
+      {selectedModule === "citation_integrity" && <CitationRecencySummary recency={review?.assessment?.citation_recency} />}
       {selectedModule === "originality_reuse" && <OriginalityScope scope={originalityScope} showAddAction />}
       {selectedModule === "originality_reuse" && <OriginalityCoverageNotice report={review?.assessment} />}
       {review && active && <BulkSelectionBar slot="before" findings={selectedClusters.length} locations={selectedLocations} elsewhere={selectedElsewhere} decided={Boolean(review.decision)}

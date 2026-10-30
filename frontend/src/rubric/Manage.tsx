@@ -13,6 +13,7 @@ import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import { RerunModal } from "./RerunModal";
 import { UploadRubricModal } from "./UploadRubricModal";
+import { CitationRecencySetting } from "./CitationRecencySetting";
 import {
   useActivateRubric,
   useDeleteRubric,
@@ -216,6 +217,7 @@ export function ManageRubricPage() {
             <VersionState version={displayVersion} latest={latestVersion} />
           </div>
           <ProgramControl familyId={family.rubric_family_id} program={displayVersion.program} />
+          <CitationRecencySetting familyId={family.rubric_family_id} rubricId={displayVersion.id} />
           {!activeVersion && <Alert title="No active version" tone="warning">Review and activate a version before starting manuscript checks.</Alert>}
         </div>
         <div className="signal-active-format__actions">

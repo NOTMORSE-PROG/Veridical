@@ -81,6 +81,7 @@ import { WorkspaceStepFooter, WorkspaceStepHeading, WorkspaceStepNavigation } fr
 import { InWorkspaceBar, LeadingChevronIcon, WorkspaceBarContext } from "./WorkspaceBar";
 import { OriginalityCoverageNotice } from "../report/OriginalityCoverageNotice";
 import { originalityCoverageNote } from "../report/originalityCoverage";
+import { CitationRecencySummary } from "../report/CitationRecencySummary";
 
 type ReviewFilter = "open" | "resolved" | "all";
 const FINDINGS_PAGE_PARAM = "findings_page";
@@ -1205,6 +1206,7 @@ export function SignalDocumentViewerPage() {
                     counts={new Map(["internal_agreement", "citation_integrity", "statistical_forensics", "originality_reuse"].map(kind => [kind, flags?.filter(flag => flag.check_kind === kind).length ?? 0]))}
                     onSelect={kind => { setFindingsListClosed(false); updateTask(next => { next.set("module", kind); ["finding", "flag", "location", "reading", "anchor", "view", "pane", "lead_view", "lead_return", "lead_visible", FINDINGS_PAGE_PARAM].forEach(key => next.delete(key)); next.set("view", "queue"); }); }} />
                   {findingsListClosed ? <p role="status" className="signal-field-hint">Findings list closed. Choose a check to open it again.</p> : <IntegrityModuleSummary kind={selectedModule} />}
+                  {!findingsListClosed && selectedModule === "citation_integrity" && reportQuery.data && <CitationRecencySummary recency={reportQuery.data.citation_recency} />}
                   {!findingsListClosed && selectedModule === "statistical_forensics" && reportQuery.data && <StatisticalCheckScope scope={reportQuery.data.statistical_check_scope} />}
                   {!findingsListClosed && selectedModule === "originality_reuse" && reportQuery.data && <OriginalityScope scope={reportQuery.data.originality_scope} showAddAction />}
                   {!findingsListClosed && selectedModule === "originality_reuse" && reportQuery.data && <OriginalityCoverageNotice report={reportQuery.data} />}

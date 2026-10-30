@@ -47,9 +47,55 @@ export interface Criterion {
   levels?: RubricLevel[] | null;
 }
 
+// V-092: the citation recency note. Each value says where it came from:
+// "format" when this format set it, "default" when the configured default applies.
+export type RecencyReferenceYearBasis = "manuscript_year" | "check_date";
+export type RecencySettingSource = "format" | "default";
+
+export interface CitationRecencySettingsOut {
+  enabled: boolean;
+  window_years: number;
+  reference_year_basis: RecencyReferenceYearBasis;
+  counts_toward_readiness: boolean;
+  setting_sources: Partial<Record<"enabled" | "window_years" | "reference_year_basis" | "counts_toward_readiness", RecencySettingSource>>;
+  // The saved setting no longer validates; checks report recency as unassessed.
+  saved_setting_invalid?: boolean;
+}
+
+export interface CitationRecencySettingsIn {
+  enabled?: boolean | null;
+  window_years?: number | null;
+  reference_year_basis?: RecencyReferenceYearBasis | null;
+  counts_toward_readiness?: boolean | null;
+}
+
+export interface CitationRecencySummaryOut {
+  status: "assessed" | "unassessed" | "off";
+  unassessed_reason?: string | null;
+  enabled_source?: RecencySettingSource | null;
+  window_years?: number | null;
+  window_source?: RecencySettingSource | null;
+  counts_toward_readiness?: boolean | null;
+  reference_year?: number | null;
+  reference_year_basis?: RecencyReferenceYearBasis | null;
+  reference_year_evidence_text?: string | null;
+  reference_year_evidence_anchor?: string | null;
+  reference_year_fallback_reason?: string | null;
+  oldest_year_in_window?: number | null;
+  n_references: number;
+  n_dated: number;
+  n_outside_window: number;
+  n_within_window: number;
+  n_dated_after_reference_year: number;
+  n_year_not_readable: number;
+  year_not_readable_reasons?: Record<string, number>;
+  year_not_readable_reference_numbers?: number[];
+}
+
 export interface Rubric {
   id: number;
   rubric_family_id: string;
+  citation_recency?: CitationRecencySettingsOut | null;
   version: number;
   title: string;
   parse_status: "parsed" | "needs_review";
@@ -472,6 +518,8 @@ export interface ReportCommon {
    * has no originality result. */
   originality_scope?: OriginalityScope | null;
   statistical_check_scope?: StatisticalCheckScopeOut | null;
+  // V-092: null for runs before the recency note existed.
+  citation_recency?: CitationRecencySummaryOut | null;
 }
 
 /** Saved processing/applicability only; findings and coverage remain separate. */
