@@ -251,8 +251,13 @@ def run(label: str, cmd: list[str], cwd: Path) -> CheckResult:
         # Keep every attempt, including failures; never overwrite an older receipt.
         receipt_dir = Path(tempfile.mkdtemp(prefix="veridical-quality-"))
         cmd = [*cmd[:-1], str(receipt_dir)]
-    result = subprocess.run([exe, *cmd[1:]], cwd=cwd, capture_output=True, text=True, env=env)
-    output = result.stdout + result.stderr
+    # Decode as UTF-8 and replace bad bytes: with the Windows default code page a
+    # single undecodable character in test output left stdout as None and
+    # crashed the gate instead of reporting the result.
+    result = subprocess.run(
+        [exe, *cmd[1:]], cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace", env=env
+    )
+    output = (result.stdout or "") + (result.stderr or "")
     if receipt_dir is not None:
         (receipt_dir / "output.log").write_text(output, encoding="utf-8")
         sys.stderr.write(f"receipts: {receipt_dir}\n      ")
