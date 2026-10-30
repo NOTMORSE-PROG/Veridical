@@ -512,6 +512,10 @@ class Settings(BaseSettings):
     pipeline_claim_stale_seconds: float = Field(default=600.0, gt=0, allow_inf_nan=False)
     pipeline_claim_renew_seconds: float = Field(default=30.0, gt=0, allow_inf_nan=False)
     pipeline_coordination_timeout_seconds: float = Field(default=5.0, gt=0, allow_inf_nan=False)
+    # Tick of the probe that records the worst event-loop delay during an
+    # upload preparation or a check (logged when the job ends). The leases
+    # above must stay longer than that delay; 0 turns the probe off.
+    event_loop_probe_seconds: float = Field(default=1.0, ge=0, allow_inf_nan=False)
     # Two-int32 transaction advisory key space, separate from manuscript locks.
     pipeline_admission_lock_namespace: int = Field(default=427, ge=-(2**31), lt=2**31)
     pipeline_admission_lock_key: int = Field(default=1, ge=-(2**31), lt=2**31)
@@ -1132,7 +1136,19 @@ class Settings(BaseSettings):
     direct_upload_tray_max_items: int = Field(default=20, ge=1, le=200)
     direct_upload_pending_per_instructor: int = Field(default=3, gt=0)
     direct_upload_pending_global: int = Field(default=12, gt=0)
-    direct_upload_lease_seconds: int = Field(default=1800, ge=600)
+    # A preparing upload holds a lease the worker renews every heartbeat. A
+    # process that dies (restart, deploy) stops renewing, and the next worker
+    # pass retires the attempt once the lease runs out, so this is how long a
+    # dead preparation can still look alive. A live one is never retired
+    # while its heartbeats land, which is what keeps an overlapping deploy's
+    # old instance from being raced. Keep it well above the longest
+    # event-loop stall (logged at the end of each preparation).
+    direct_upload_lease_seconds: float = Field(default=120, ge=30, allow_inf_nan=False)
+    direct_upload_heartbeat_seconds: float = Field(default=30, gt=0, allow_inf_nan=False)
+    # How long the browser keeps polling a preparing upload before calling
+    # the outcome unconfirmed. Separate from the lease: a large thesis can
+    # legitimately prepare for longer than one lease.
+    direct_upload_poll_timeout_seconds: int = Field(default=1800, ge=60)
     direct_upload_poll_seconds: float = Field(default=3, gt=0)
     direct_upload_staging_subdir: str = "upload_staging"
     direct_upload_staging_retention_seconds: int = Field(default=86400, ge=3600)
@@ -1239,6 +1255,11 @@ class Settings(BaseSettings):
             >= self.pipeline_claim_stale_seconds
         ):
             raise ValueError("pipeline claim lifetime must allow two bounded renewal attempts")
+        # Beats keep a fixed cadence and each renewal may take up to one beat:
+        # three beats inside the lease let one renewal fail outright and the
+        # next one be slow before the lease runs out.
+        if 3 * self.direct_upload_heartbeat_seconds > self.direct_upload_lease_seconds:
+            raise ValueError("direct upload lease must cover three heartbeats")
         # backend review finding (BUG-052 review): `weight_importance.py`
         # checks `low_max_ratio` first, then `high_min_ratio`, else `med`
         # -- an operator swapping these in `.env` (or setting them equal)

@@ -1,6 +1,8 @@
 """F3 short database admission transactions and renewable fencing tokens."""
 
 import asyncio
+import logging
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
@@ -14,6 +16,8 @@ from app.models.manuscript import Manuscript
 from app.models.run import CheckRun
 from app.pipeline.guards import try_guard
 from app.pipeline.machine import is_blocked
+
+logger = logging.getLogger(__name__)
 
 NON_TERMINAL = (
     CheckRunStatus.queued,
@@ -91,6 +95,7 @@ async def admit_next(
     if session.new or session.dirty or session.deleted:
         raise ValueError("Admission requires a clean coordination session")
     attempt_started = asyncio.get_running_loop().time()
+    sent_claim: tuple[int, datetime] | None = None
     try:
         async with asyncio.timeout(settings.pipeline_coordination_timeout_seconds):
             if not await try_guard(session, settings):
@@ -123,19 +128,45 @@ async def admit_next(
                 if locked.status not in NON_TERMINAL or is_blocked(locked, now=eligibility_now):
                     continue
                 locked.claimed_at = now
+                sent_claim = (locked.id, now)
                 await session.commit()
                 return Admission(AdmissionState.admitted, locked, now, attempt_started)
             await session.rollback()
             return Admission(AdmissionState.busy if contended else AdmissionState.idle)
+    except TimeoutError:
+        # A slow host (a stalled event loop, a slow pool) is a busy answer for
+        # the poller, not a crash. If the claim's commit was already sent it
+        # may have landed with nobody running the check; take it back so the
+        # run is not held until the stale window passes.
+        if sent_claim is not None:
+            await _withdraw_unconfirmed_claim(session, settings, *sent_claim)
+        else:
+            await session.rollback()
+        logger.warning("Admission timed out; the scheduler will look again")
+        return Admission(AdmissionState.busy)
     except BaseException:
         await session.rollback()
         raise
 
 
-async def release_claim(session: AsyncSession, run_id: int, token: datetime) -> None:
+async def _withdraw_unconfirmed_claim(
+    session: AsyncSession, settings: Settings, run_id: int, token: datetime
+) -> None:
+    try:
+        async with asyncio.timeout(settings.pipeline_coordination_timeout_seconds):
+            await session.rollback()
+            await release_claim(session, run_id, token)
+    except Exception:  # noqa: BLE001 -- the stale window still frees it
+        with suppress(Exception):
+            await session.rollback()
+        logger.warning("Unconfirmed claim for check run %s is left to expire", run_id)
+
+
+async def release_claim(session: AsyncSession, run_id: int, *tokens: datetime) -> None:
+    """Fenced release: only clears a claim still holding one of our tokens."""
     await session.execute(
         update(CheckRun)
-        .where(CheckRun.id == run_id, CheckRun.claimed_at == token)
+        .where(CheckRun.id == run_id, CheckRun.claimed_at.in_(tokens))
         .values(claimed_at=None)
     )
     await session.commit()

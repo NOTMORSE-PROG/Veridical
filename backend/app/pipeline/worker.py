@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app import db
 from app.config import Settings, get_settings
+from app.loop_probe import LoopLagProbe
 from app.memory import return_freed_memory
 from app.models.run import CheckRun
 from app.pipeline.coordination import Admission, AdmissionState, admit_next, release_claim
@@ -19,8 +20,8 @@ from app.pipeline.machine import run_check_run
 logger = logging.getLogger(__name__)
 
 
-async def _release_claim(session: AsyncSession, check_run_id: int, token: datetime) -> None:
-    await release_claim(session, check_run_id, token)
+async def _release_claim(session: AsyncSession, check_run_id: int, *tokens: datetime) -> None:
+    await release_claim(session, check_run_id, *tokens)
 
 
 async def pick_next_runnable(
@@ -38,6 +39,7 @@ async def _execute(
 ) -> AdmissionState:
     lease = ClaimLease(factory, admission, settings)
     lease.start()
+    probe = LoopLagProbe(settings.event_loop_probe_seconds).start()
     outcome = AdmissionState.admitted
     try:
         async with factory() as session:
@@ -55,10 +57,15 @@ async def _execute(
     finally:
         # Closing the analytical session rolls back unsafe work before cleanup.
         await lease.stop()
+        logger.info(
+            "Check run %s turn ended; worst event-loop delay %.2f s",
+            lease.run_id,
+            await probe.stop(),
+        )
         try:
             async with asyncio.timeout(settings.pipeline_coordination_timeout_seconds):
                 async with factory() as cleanup:
-                    await _release_claim(cleanup, lease.run_id, lease.token)
+                    await _release_claim(cleanup, lease.run_id, *lease.tokens())
         except Exception:
             logger.warning("Claim release deferred for check run %s", lease.run_id)
         # The run's extraction and stage results are freed; return the pages
