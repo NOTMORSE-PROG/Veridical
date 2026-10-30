@@ -664,7 +664,7 @@ export function SignalDocumentViewerPage() {
     const next = new URLSearchParams(searchParams);
     change(next);
     if (["finding", "flag", "location", "anchor", "match"].some((key) => next.get(key) !== searchParams.get(key))) clearPdfReading(next);
-    setSearchParams(next, { replace });
+    setSearchParams(next, { replace, state: findingOrigin ? location.state : undefined });
   }
 
   function taskParameters(change?: (next: URLSearchParams) => void) {
@@ -849,6 +849,15 @@ export function SignalDocumentViewerPage() {
   }, [sourceQuery, id, pendingReviewQuery.data, pendingReviewQuery.isPending, pendingReviewQuery.fetchStatus,
     pendingReviewQuery.isError, reportQuery.data, reportQuery.isPending, reportQuery.fetchStatus, reportQuery.isError, retireCriterionReturn]);
 
+  // BUG-542: moving to another finding keeps the way back to the report's
+  // findings, now pointing at the finding on screen.
+  function carryFindingOrigin(next: URLSearchParams, findingId: number) {
+    if (!findingOrigin) return undefined;
+    const elementId = `signal-flag-review-${findingId}`;
+    rememberRouteReturnFocus(findingOrigin.returnPath, `/report/${id}/document?${next}`, elementId, { armed: true });
+    return { ...findingOrigin.state, routeReturnFocus: { returnPath: findingOrigin.returnPath, elementId } };
+  }
+
   function selectFinding(flagId: number, replace = false) {
     const finding = findingForFlag(findings, flagId);
     if (!finding) return;
@@ -864,7 +873,7 @@ export function SignalDocumentViewerPage() {
       for (const key of ["flag", "anchor", "panel", "match"]) next.delete(key);
       ownLeadContinuation(next, "selected-finding-heading");
       sourceReveal.arm(next.toString(), flagId);
-      setSearchParams(next, { replace });
+      setSearchParams(next, { replace, state: carryFindingOrigin(next, finding.representative.id) });
       return;
     }
     const next = taskParameters((next) => {
@@ -881,7 +890,7 @@ export function SignalDocumentViewerPage() {
     });
     ownLeadContinuation(next, singlePaneLayout ? "manuscript-panel" : "selected-finding-heading");
     sourceReveal.arm(next.toString(), flagId);
-    setSearchParams(next, { replace });
+    setSearchParams(next, { replace, state: carryFindingOrigin(next, finding.representative.id) });
   }
 
   function ownLeadContinuation(next: URLSearchParams, targetId: string) {
