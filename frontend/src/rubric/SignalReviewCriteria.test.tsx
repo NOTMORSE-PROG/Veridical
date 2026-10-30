@@ -216,6 +216,21 @@ describe("SignalReviewCriteriaPage", () => {
     expect(field).not.toHaveAttribute("aria-invalid");
   });
 
+  it("counts every refusal, keeps each level's reason, and names the criterion of one it cannot place", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => init?.method === "PUT"
+      ? new Response(JSON.stringify({ detail: [
+        { type: "string_too_long", loc: ["body", "criteria", 0, "levels", 0, "descriptor"], msg: "String should have at most 2000 characters", input: "x" },
+        { type: "value_error", loc: ["body", "criteria", 0, "levels", 1, "name"], msg: "Value error, level names must not be blank", input: "" },
+        { type: "greater_than", loc: ["body", "criteria", 0, "weight"], msg: "Input should be greater than 0", input: 0 },
+      ] }), { status: 422 })
+      : new Response(JSON.stringify(RUBRIC), { status: 200 })));
+    renderWithProviders(<SignalReviewCriteriaPage />, { route: "/rubric/5/review", path: "/rubric/:rubricId/review", authInstructorId: 1 });
+    await screen.findByLabelText("Criterion text, criterion 1");
+    fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
+    expect(await screen.findByText("Nothing was saved. 3 values need changing. Your edits are still on this page.", { exact: false })).toBeInTheDocument();
+    expect(screen.getByText(/Criterion 1, Relative weight: Some of the information sent was not accepted/)).toBeInTheDocument();
+  });
+
   it("gives each refused field its own reason when one save is refused for several", async () => {
     const sentence = "This text contains an invisible character that can't be saved. Retype it or paste it as plain text.";
     const two = { ...RUBRIC, criteria: [RUBRIC.criteria[0], { ...RUBRIC.criteria[0], id: 99, text: "Second criterion" }] };
