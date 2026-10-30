@@ -13,7 +13,7 @@ import type { ConfirmGroupResponse, CurrentGroup, TitlePageProposal } from "../a
 import type { GroupProposalInput } from "../api/groupAssignmentOutcome";
 import { fieldRefusal, formRefusal, isValidationRefusal, REFUSAL_NOTHING_CHANGED } from "../api/fieldRefusal";
 import { GROUP_REQUEST_REFUSED } from "./groupRefusalCopy";
-import { normalizeName, type GroupDraft } from "./groupDraft";
+import { memberIdentity, normalizeName, type GroupDraft } from "./groupDraft";
 
 export interface GroupProposalController {
   isPending: boolean;
@@ -48,10 +48,6 @@ function PlusCircleIcon() {
       <path d="M12 8v8M8 12h8" />
     </svg>
   );
-}
-
-function memberIdentity(names: string[]) {
-  return [...new Set(names.filter((name) => name.trim()).map(normalizeName))].sort();
 }
 
 interface MemberField {

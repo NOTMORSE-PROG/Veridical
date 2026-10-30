@@ -11,7 +11,7 @@ import type { ManuscriptGroup } from "../api/types";
 import { StaleUploadContextError } from "../api/uploadOutcome";
 import { useUploadScope } from "../auth/useUploadScope";
 import { ownedGroupQueryKey, useGroupQueryOwner } from "./groupQueryOwner";
-import { clearGroupDraft, keepGroupDraft, normalizeName, readGroupDraft } from "./groupDraft";
+import { clearGroupDraft, draftWasSaved, keepGroupDraft, readGroupDraft } from "./groupDraft";
 
 export type AssignmentRecovery = "saved_details" | "current_assignment";
 export type AssignmentState =
@@ -111,7 +111,7 @@ export function useGroupAssignment(manuscriptId: number) {
       client.setQueryData(ownedGroupQueryKey("manuscript-group", readOwner, manuscriptId), current);
       // The read shows the typed group was saved after all: nothing to restore.
       const draft = readGroupDraft(attempt.actorId, manuscriptId);
-      if (draft && current.group && normalizeName(current.group.name) === normalizeName(draft.group_name)) clearGroupDraft(attempt.actorId, manuscriptId);
+      if (draft && current.group && draftWasSaved(draft, current.group)) clearGroupDraft(attempt.actorId, manuscriptId);
       setState({ kind: "unknown", checking: false, current });
     } catch (error) {
       if (!attempt.isCurrent() || error instanceof StaleUploadContextError) return;
