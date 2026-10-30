@@ -1115,22 +1115,29 @@ def source_image_settings_for(report, settings):
 
 # BUG-549: touching small PDF image pieces are combined into one image before
 # checking. Same wording as the report screen (frontend report/imageCoverage.ts).
+# "Drawn", not "stored": the count is of placements on the page, and one
+# stored image can be drawn many times.
 def _pieces_suffix(count: int, merged: int, pieces: int) -> str:
     if not merged:
         return ""
-    stored = f"stored in the PDF as {pieces:,} small touching pieces"
-    return f", {stored}" if merged == count else f"; {merged} {stored}"
+    if merged == 1:
+        lead = "," if count == 1 else "; 1"
+        return f"{lead} drawn in the PDF as {pieces:,} small touching pieces"
+    lead = ", each" if merged == count else f"; {merged}"
+    return f"{lead} drawn in the PDF as small touching pieces, {pieces:,} in all"
 
 
 def _merged_images_line(merged: int, pieces: int) -> str:
     if merged == 1:
         return (
-            f"1 listed image occurrence is stored in the PDF as {pieces:,} small touching "
-            "pieces, combined into one image before checking."
+            f"1 listed image occurrence is drawn in the PDF as {pieces:,} small touching "
+            "pieces. It was combined into one image when the file was prepared; its content "
+            "was not assessed."
         )
     return (
-        f"{merged} listed image occurrences are stored in the PDF as small touching pieces "
-        f"({pieces:,} in all), each combined into one image before checking."
+        f"{merged} listed image occurrences are drawn in the PDF as small touching pieces "
+        f"({pieces:,} in all). Each was combined into one image when the file was prepared; "
+        "their content was not assessed."
     )
 
 

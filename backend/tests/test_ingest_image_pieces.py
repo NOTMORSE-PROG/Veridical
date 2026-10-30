@@ -285,11 +285,48 @@ def test_the_export_says_how_many_pieces_an_unassessed_image_holds():
     data = ReportExportData(report=report(coverage), flags=[], archive_size_n=None)
     with pymupdf.open(stream=build_report_pdf(data), filetype="pdf") as document:
         text = " ".join(page.get_text().replace("\n", " ") for page in document)
-    assert "(1 image occurrence, stored in the PDF as 9,100 small touching pieces)" in text
+    assert "(1 image occurrence, drawn in the PDF as 9,100 small touching pieces)" in text
     assert "Page 121" in text and "(1 image occurrence)." in text
     # A plain image on the same page is not counted as a piece.
-    assert "(2 image occurrences; 1 stored in the PDF as 3 small touching pieces)" in text
+    assert "(2 image occurrences; 1 drawn in the PDF as 3 small touching pieces)" in text
     assert (
-        "2 listed image occurrences are stored in the PDF as small touching pieces (9,103 in all)"
+        "2 listed image occurrences are drawn in the PDF as small touching pieces (9,103 in all)"
         in text
     )
+    assert "their content was not assessed" in text
+
+
+def _export_text(items: list[dict]) -> str:
+    from app.report.export import build_report_pdf
+    from app.report.schemas import IntegrityCheckStatusOut, ReportExportData
+    from tests.test_partial_coverage_reports import report
+
+    coverage = IntegrityCheckStatusOut(
+        check_kind="statistical_forensics",
+        outcome="escalated",
+        n_skipped_quota=0,
+        n_skipped_api_down=0,
+        n_skipped_parse_failure=0,
+        coverage_reason="image_content_unassessed",
+        assessment_scope="available_text_and_tables",
+        analysis_coverage="partial",
+        n_images_unassessed=len(items),
+        image_coverage_items=items,
+    )
+    data = ReportExportData(report=report(coverage), flags=[], archive_size_n=None)
+    with pymupdf.open(stream=build_report_pdf(data), filetype="pdf") as document:
+        return " ".join(page.get_text().replace("\n", " ") for page in document)
+
+
+def test_the_export_words_a_single_merged_image_in_the_singular():
+    text = _export_text(
+        [{"image_index": 0, "page": 5, "reason": "size_filter", "piece_count": 66933}]
+    )
+    assert "1 listed image occurrence is drawn in the PDF as 66,933 small touching pieces" in text
+    assert "its content was not assessed" in text
+
+
+def test_the_export_says_nothing_about_pieces_without_merged_images():
+    text = _export_text([{"image_index": 0, "page": 5, "reason": "size_filter"}])
+    assert "touching pieces" not in text
+    assert "listed image occurrence" not in text

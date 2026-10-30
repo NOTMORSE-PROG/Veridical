@@ -24,16 +24,18 @@ export const IMAGE_COVERAGE_LABELS: Record<string, string> = {
 // before checking. Same wording as the PDF export (report/export.py).
 const formatCount = (value: number) => value.toLocaleString("en-US");
 
+// "Drawn", not "stored": the count is of placements on the page, and one
+// stored image can be drawn many times.
 export function piecesSuffix(count: number, merged: number, pieces: number) {
   if (!merged) return "";
-  const stored = `stored in the PDF as ${formatCount(pieces)} small touching pieces`;
-  return merged === count ? `, ${stored}` : `; ${merged} ${stored}`;
+  if (merged === 1) return `${count === 1 ? "," : "; 1"} drawn in the PDF as ${formatCount(pieces)} small touching pieces`;
+  return `${merged === count ? ", each" : `; ${merged}`} drawn in the PDF as small touching pieces, ${formatCount(pieces)} in all`;
 }
 
 export function mergedImagesLine(merged: number, pieces: number) {
   return merged === 1
-    ? `1 listed image occurrence is stored in the PDF as ${formatCount(pieces)} small touching pieces, combined into one image before checking.`
-    : `${merged} listed image occurrences are stored in the PDF as small touching pieces (${formatCount(pieces)} in all), each combined into one image before checking.`;
+    ? `1 listed image occurrence is drawn in the PDF as ${formatCount(pieces)} small touching pieces. It was combined into one image when the file was prepared; its content was not assessed.`
+    : `${merged} listed image occurrences are drawn in the PDF as small touching pieces (${formatCount(pieces)} in all). Each was combined into one image when the file was prepared; their content was not assessed.`;
 }
 
 export function imageCoverageItem(status: IntegrityCheckStatusOut, checkRunId: number): CoverageStatementItem {
