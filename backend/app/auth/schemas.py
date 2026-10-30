@@ -7,15 +7,15 @@ from app.db import DbText
 
 class LoginRequest(BaseModel):
     email: DbText
-    password: DbText
+    password: str
 
 
 class ChangePasswordIn(BaseModel):
-    current_password: DbText
+    current_password: str
     # 8 = OWASP's own minimum baseline (same security-engineering-constant
     # class as security.py's hasher params, not a business threshold an
     # instructor would ever configure -- see that module's own docstring).
-    new_password: DbText = Field(min_length=8)
+    new_password: str = Field(min_length=8)
 
 
 class InstructorOut(BaseModel):

@@ -11,10 +11,10 @@ from urllib.parse import quote
 
 import pytest
 from fastapi.testclient import TestClient
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, ValidationError
 
 from app.auth.dependencies import get_current_instructor
-from app.db import TEXT_NOT_STORABLE, DbText, get_session
+from app.db import TEXT_NOT_STORABLE, DbText, db_text, get_session
 from app.main import app
 
 NUL = "a\x00b"
@@ -83,7 +83,14 @@ def _text_inputs():
     return found
 
 
-TEXT_INPUTS = _text_inputs()
+# Passwords are only ever hashed, never stored or compared as text, so they
+# stay plain str: refusing one would lock out an account for no reason.
+NOT_STORED = {
+    ("POST /auth/login", "password"),
+    ("POST /auth/password", "current_password"),
+    ("POST /auth/password", "new_password"),
+}
+TEXT_INPUTS = [row for row in _text_inputs() if (row[0], row[2]) not in NOT_STORED]
 
 
 @pytest.fixture
@@ -182,7 +189,7 @@ def test_text_postgres_cannot_store_is_refused_not_a_server_error(
 
 
 class _Note(BaseModel):
-    note: DbText | None = Field(default=None, max_length=10)
+    note: db_text(10) | None = None
 
 
 class _Names(BaseModel):
@@ -226,8 +233,49 @@ def test_a_lone_surrogate_in_json_is_refused_by_the_json_parser(escape):
 
 def test_the_fields_own_limits_still_apply():
     assert _Note(note=None).note is None
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError) as caught:
         _Note(note="x" * 11)
+    assert caught.value.errors()[0]["type"] == "string_too_long"
+
+
+def test_optional_library_text_keeps_its_length_message():
+    from app.library.schemas import LibraryEntryUpdate, LibrarySubmissionIn
+
+    for model in (LibraryEntryUpdate, LibrarySubmissionIn):
+        with pytest.raises(ValidationError) as caught:
+            model(title="x" * 501)
+        error = caught.value.errors()[0]
+        assert error["type"] == "string_too_long", error
+        assert error["msg"] == "String should have at most 500 characters"
+
+
+@pytest.mark.parametrize("path", ["/auth/me", "/manuscripts"])
+def test_a_session_cookie_postgres_cannot_hold_is_no_session(path):
+    # "\000" in a quoted cookie value decodes to U+0000; it must read as
+    # signed out, not reach the session lookup.
+    saved = app.dependency_overrides.copy()
+    app.dependency_overrides[get_session] = lambda: object()
+    try:
+        with TestClient(app, raise_server_exceptions=False) as client:
+            response = client.get(path, headers={"cookie": 'veridical_session="\\000"'})
+    finally:
+        app.dependency_overrides.clear()
+        app.dependency_overrides.update(saved)
+
+    assert response.status_code == 401, response.text
+
+
+def test_signing_out_with_such_a_cookie_does_not_fail():
+    saved = app.dependency_overrides.copy()
+    app.dependency_overrides[get_session] = lambda: object()
+    try:
+        with TestClient(app, raise_server_exceptions=False) as client:
+            response = client.post("/auth/logout", headers={"cookie": 'veridical_session="\\000"'})
+    finally:
+        app.dependency_overrides.clear()
+        app.dependency_overrides.update(saved)
+
+    assert response.status_code < 500, response.text
 
 
 def test_a_surrogate_in_a_text_field_is_reported_as_a_422(client):

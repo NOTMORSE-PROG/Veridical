@@ -20,9 +20,9 @@ from app.config import get_settings
 # Request types live in app.db_types, which has no database imports, so code
 # that must run without a database driver can use them too. Re-exported here
 # for the routers that already import them from app.db.
-from app.db_types import BIGINT_MAX, BIGINT_MIN, TEXT_NOT_STORABLE, DbInt, DbText
+from app.db_types import BIGINT_MAX, BIGINT_MIN, TEXT_NOT_STORABLE, DbInt, DbText, db_text
 
-__all__ = ["BIGINT_MAX", "BIGINT_MIN", "TEXT_NOT_STORABLE", "DbInt", "DbText"]
+__all__ = ["BIGINT_MAX", "BIGINT_MIN", "TEXT_NOT_STORABLE", "DbInt", "DbText", "db_text"]
 
 
 def sqlalchemy_url(dsn: str) -> str:
