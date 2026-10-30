@@ -1,5 +1,6 @@
 import { useEscalatedItems } from "../report/useReport";
 import { criterionSourceReturn } from "../report/criterionSourceReturn";
+import { findingSourceReturn } from "../report/findingSourceReturn";
 import { ManuscriptSourcePane } from "./ManuscriptSourcePane";
 import { FindingModeDisclosure, FlagReviewActions } from "../flags/FlagReviewActions";
 import { clearPdfReading, sameSourceTask } from "./usePdfPageText";
@@ -507,6 +508,7 @@ export function SignalDocumentViewerPage() {
   }, []);
   useEffect(() => () => retireCriterionReturn(), [retireCriterionReturn]);
   const reportOrigin = useMemo(() => criterionSourceReturn(location.state, id), [location.state, id]);
+  const findingOrigin = useMemo(() => reportOrigin ? undefined : findingSourceReturn(location.state, id), [reportOrigin, location.state, id]);
 
   const viewerQuery = useManuscriptViewer(id);
   const reportQuery = useReport(id);
@@ -524,7 +526,7 @@ export function SignalDocumentViewerPage() {
     fallbackElementId: criterionSource.recordCriterionId === undefined ? "escalated-heading" : criterionRecordId(id, criterionSource.recordCriterionId),
     retainOnSearchChange: true,
   } : undefined, [criterionSource, id]);
-  useRouteFocus("Manuscript review - VERIDICAL", headingRef, reportOrigin ?? localSourceReturn, returningToPendingCriterion
+  useRouteFocus("Manuscript review - VERIDICAL", headingRef, reportOrigin ?? findingOrigin ?? localSourceReturn, returningToPendingCriterion
     ? { prefix: "signal-resolution-", pending: pendingReviewQuery.isPending || pendingReviewQuery.fetchStatus !== "idle" || pendingReviewQuery.isError }
     : { prefix: "comparison-lead-", pending: flagsQuery.isPending || flagsQuery.fetchStatus !== "idle" });
   const { data: me } = useMe();
@@ -1069,7 +1071,7 @@ export function SignalDocumentViewerPage() {
     <div className="signal-route signal-page-flow signal-document-viewer">
       <header className="signal-route-header signal-document-header">
         <div><nav aria-label="Breadcrumb"><ReviewDeskReturnLink>Review Desk</ReviewDeskReturnLink><span aria-hidden="true">/</span><span>Manuscript review</span></nav><h1 ref={headingRef} tabIndex={-1}>Manuscript review</h1>{viewer?.original_filename && <p className="signal-route-header__intro">{viewer.original_filename}</p>}</div>
-        {validId && <ActionLink to={`/report/${id}`} variant="secondary">Open readiness report</ActionLink>}
+        {validId && <ActionLink to={findingOrigin ? `${findingOrigin.returnPath}#${findingOrigin.elementId}` : `/report/${id}`} state={findingOrigin?.state} variant="secondary">Open readiness report</ActionLink>}
       </header>
 
       {!validId ? <Alert title="This manuscript address is invalid" tone="error" role="alert"><ReviewDeskReturnLink variant="secondary">Return to Review Desk</ReviewDeskReturnLink></Alert>
@@ -1077,7 +1079,11 @@ export function SignalDocumentViewerPage() {
           {modeRecord && <FindingModeDisclosure id={modeDisclosureId} mode={modeRecord.llm_mode} registry={isCitationMetadataFinding(modeRecord)} />}
           <div ref={setWorkspaceBar} className="signal-review-bar">
             {(isExploring || selectedFinding) && <nav aria-label="Workspace return" className="signal-review-bar__nav">
-              <Button variant="secondary" className="signal-workspace-back" onClick={showQueue}><LeadingChevronIcon />Back to findings list</Button>
+              {/* Opened from the report's findings, the way back is that list, where
+                  a bulk selection may be in progress. */}
+              {findingOrigin && !isExploring
+                ? <ActionLink to={`${findingOrigin.returnPath}#${findingOrigin.elementId}`} state={findingOrigin.state} variant="secondary" className="signal-workspace-back"><LeadingChevronIcon />Back to findings list</ActionLink>
+                : <Button variant="secondary" className="signal-workspace-back" onClick={showQueue}><LeadingChevronIcon />Back to findings list</Button>}
             </nav>}
           </div>
           <WorkspaceBarContext.Provider value={workspaceBar}>

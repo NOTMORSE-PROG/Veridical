@@ -537,6 +537,24 @@ describe("SignalDocumentViewerPage", () => {
     expect(screen.getByTestId("pdf-pane")).toHaveAttribute("data-selection", "7");
   });
 
+  it("leads back to the report findings the finding was opened from", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({
+      "/check-runs/5/document": VIEWER,
+      "/check-runs/5/report": REPORT,
+      "/check-runs/5/escalated": [],
+      "/check-runs/5/flags": [SUMMARY],
+      "/check-runs/5/document/reuse-matches": { passage_archive_size_n: 8, matches: [] },
+      "/flags/7": FLAG,
+    }));
+    const routeReturnFocus = { returnPath: "/report/5?section=findings&module=internal_agreement", elementId: "signal-flag-review-7" };
+    renderWithProviders(<SignalDocumentViewerPage />, { route: "/report/5/document?view=finding&finding=7&location=7", path: "/report/:checkRunId/document", state: { routeReturnFocus } });
+
+    expect(await screen.findByRole("heading", { name: "Possible internal contradiction" })).toBeInTheDocument();
+    const back = "/report/5?section=findings&module=internal_agreement#signal-flag-review-7";
+    expect(screen.getByRole("link", { name: "Back to findings list" })).toHaveAttribute("href", back);
+    expect(screen.getByRole("link", { name: "Open readiness report" })).toHaveAttribute("href", back);
+  });
+
   it("keeps unavailable source content honest while preserving a return to the report", async () => {
     stubViewer({ ...VIEWER, available: false, unavailable_reason: "Stored content was removed by the instructor.", purged_at: null });
     renderWithProviders(<SignalDocumentViewerPage />, { route: "/report/5/document", path: "/report/:checkRunId/document" });
