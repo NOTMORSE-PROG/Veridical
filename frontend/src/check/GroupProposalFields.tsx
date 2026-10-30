@@ -16,7 +16,11 @@ import { GROUP_REQUEST_REFUSED } from "./groupRefusalCopy";
 import { memberIdentity, normalizeName, type GroupDraft } from "./groupDraft";
 
 export interface GroupProposalController {
+  // Fields are locked. Not the same as a request being sent: a refusal can
+  // lock the form until the current assignment is read (BUG-562).
   isPending: boolean;
+  /** A save is in flight. Defaults to isPending. */
+  sending?: boolean;
   isSuccess: boolean;
   data?: ConfirmGroupResponse;
   error?: unknown;
@@ -100,6 +104,7 @@ export function GroupProposalFields({
 }) {
   const { data: programs } = usePrograms();
   const programFieldId = useId();
+  const sending = confirm.sending ?? confirm.isPending;
 
   const [groupName, setGroupName] = useState(draft?.group_name ?? currentGroup?.name ?? proposal.short_name?.value ?? "");
   const [groupNameEdited, setGroupNameEdited] = useState(draft !== undefined || currentGroup !== undefined || proposal.short_name === null);
@@ -539,7 +544,7 @@ export function GroupProposalFields({
       {active && <ProposalActions target={actionsTarget}>
         <button
           type="button"
-          disabled={confirm.isPending}
+          disabled={sending}
           onClick={() => onDone(null)}
           className="flex h-11 items-center justify-center rounded-md border border-border-input bg-panel px-4 text-sm font-bold text-ink hover:bg-status-neutral-bg disabled:opacity-45"
         >
@@ -548,11 +553,11 @@ export function GroupProposalFields({
         <button
           type="button"
           disabled={confirm.isPending || unchanged}
-          aria-busy={confirm.isPending ? "true" : undefined}
+          aria-busy={sending ? "true" : undefined}
           onClick={handleConfirm}
           className="flex h-11 items-center justify-center rounded-md bg-action px-4 text-sm font-bold text-on-action hover:bg-action-hover disabled:opacity-60"
         >
-          {confirm.isPending ? "Confirming." : "Confirm assignment"}
+          {sending ? "Confirming." : "Confirm assignment"}
         </button>
       </ProposalActions>}
     </div>

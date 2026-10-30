@@ -45,3 +45,14 @@ export function useRefusalFocus(refusal: string | null, field: RefObject<HTMLTex
 export function isPagePastEnd(error: unknown): boolean {
   return isValidationRefusal(error) && error.fieldMessages.has("page");
 }
+
+// BUG-555: a 429 or 503 is the service refusing before it acts, not a
+// changed assessment. Nothing was saved and a later try can work.
+export function isServiceBusy(error: unknown): error is ApiError {
+  return error instanceof ApiError && (error.status === 429 || error.status === 503);
+}
+
+export const SERVICE_BUSY_COPY = {
+  title: "The service is busy",
+  body: "Nothing was changed and your reason is kept. Try again in a moment.",
+} as const;

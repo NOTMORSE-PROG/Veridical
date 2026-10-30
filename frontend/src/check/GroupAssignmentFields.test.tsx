@@ -209,6 +209,20 @@ describe("explicit group assignment", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Assign to selected group" })).toBeEnabled());
     expect(control.post).toHaveBeenCalledTimes(1);
   });
+  it("does not say it is confirming while a refusal waits for the current assignment", async () => {
+    const control = mount();
+    control.patch.mockRejectedValue(new ApiError(409, "group_assignment_changed", "This manuscript's assignment changed."));
+    const intent = await screen.findByRole("radio", { name: "Review or enter group details" });
+    await waitFor(() => expect(intent).toBeEnabled()); fireEvent.click(intent);
+    fireEvent.change(screen.getByRole("textbox", { name: "Group name" }), { target: { value: "New team" } });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm assignment" }));
+    await screen.findByRole("heading", { name: "Assignment was not saved" });
+    const confirm = within(control.outlet).getByRole("button", { name: "Confirm assignment" });
+    expect(confirm).toBeDisabled();
+    expect(confirm).not.toHaveAttribute("aria-busy");
+    expect(within(control.outlet).queryByRole("button", { name: "Confirming." })).not.toBeInTheDocument();
+    expect(within(control.outlet).getByRole("button", { name: "Skip for now" })).toBeEnabled();
+  });
   it("a changed manuscript assignment requires current-assignment review, not a selected-team refresh", async () => {
     const control = mount();
     const originalRead = control.get.getMockImplementation()!;

@@ -18,7 +18,7 @@ import { useFlagActionReview } from "./useFlagActionReview";
 import { FlagActionCurrentReview } from "./FlagActionCurrentReview";
 import { useFindingCompletion, useFindingCompletionOwner } from "./useFindingCompletion";
 import { useAuthOwner } from "../auth/queryOwner";
-import { fieldRefusal, formRefusal, isValidationRefusal, REFUSAL_NOTHING_CHANGED, REFUSAL_TITLE, useRefusalFocus } from "../api/fieldRefusal";
+import { fieldRefusal, formRefusal, isValidationRefusal, isServiceBusy, REFUSAL_NOTHING_CHANGED, REFUSAL_TITLE, SERVICE_BUSY_COPY, useRefusalFocus } from "../api/fieldRefusal";
 import { RefusalAlert } from "../ui/RefusalAlert";
 
 const authenticatedLifetimes = new WeakMap<object, number>();
@@ -176,7 +176,7 @@ function OverrideDialog({ flag, onClose, onAccepted, continuationIsCurrent, fall
       },
       // A refusal of the reason is definite and changes nothing: keep the
       // review open so the instructor can correct the reason and try again.
-      onError: (error) => { if (!isValidationRefusal(error)) review.freeze(); },
+      onError: (error) => { if (!isValidationRefusal(error) && !isServiceBusy(error)) review.freeze(); },
     });
   }
 
@@ -213,7 +213,8 @@ function OverrideDialog({ flag, onClose, onAccepted, continuationIsCurrent, fall
         {invalid && <p id={errorId} role="alert" className="signal-field-error">Enter a reason before confirming.</p>}
         {!invalid && refusal && <p id={refusalId} className="signal-field-error">{refusal} {REFUSAL_NOTHING_CHANGED}</p>}
         {requestRefusal && <RefusalAlert title={REFUSAL_TITLE} message={requestRefusal} takeFocus={!refusal} />}
-        {override.isError && !isValidationRefusal(override.error) && <Alert title="Saving could not be confirmed" tone="error" role="alert">Your entered reason is kept. Review the current assessment before trying again.</Alert>}
+        {isServiceBusy(override.error) && <Alert title={SERVICE_BUSY_COPY.title} tone="error" role="alert">{SERVICE_BUSY_COPY.body}</Alert>}
+        {override.isError && !isValidationRefusal(override.error) && !isServiceBusy(override.error) && <Alert title="Saving could not be confirmed" tone="error" role="alert">Your entered reason is kept. Review the current assessment before trying again.</Alert>}
       </div>
     </Dialog>
   );
