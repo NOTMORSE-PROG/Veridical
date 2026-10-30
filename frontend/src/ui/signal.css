@@ -9096,4 +9096,16 @@
   /* BUG-551: each refused criterion field, linked from the save summary. */
   .signal-refused-fields { display: grid; gap: var(--signal-space-1); margin: var(--signal-space-2) 0 0; padding-inline-start: var(--signal-space-5); }
   .signal-refused-fields button { padding: 0; border: 0; background: none; font: inherit; cursor: pointer; }
+  /* BUG-551: a refusal reads as an error inside evidence sections too, and the
+     confirm-finding comment is a bordered field like the others. */
+  .signal-evidence-section .signal-field-error { color: var(--color-signal-not-ready-text); font-weight: var(--signal-weight-semibold); }
+  .signal-finding-confirm textarea {
+    border: var(--signal-border-emphasis) solid var(--color-signal-border-strong);
+    border-radius: var(--signal-radius-control);
+    padding: var(--signal-space-2) var(--signal-space-3);
+    background: var(--color-signal-surface);
+    color: var(--color-signal-ink);
+    font: inherit;
+  }
+  .signal-finding-confirm textarea[aria-invalid="true"] { border-color: var(--color-signal-not-ready-text); }
 }
