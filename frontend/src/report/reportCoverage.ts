@@ -38,10 +38,6 @@ const COVERAGE_COPY: Record<string, string> = {
   native_math_comparison_incomplete: "Some source content or selected Library candidates could not support a verified comparison. Independently supported prose leads remain available; native equations were not compared. This does not establish originality.",
 };
 
-function coverageCopyFor(reason: string): string | undefined {
-  return Object.hasOwn(COVERAGE_COPY, reason) ? COVERAGE_COPY[reason] : undefined;
-}
-
 // BUG-127/BUG-128: one shared coverage projection now serves both the
 // full report and the manuscript-first review workspace. Keeping the
 // wording and recovery destinations here prevents the two surfaces from
@@ -100,9 +96,8 @@ function baseIntegrityCoverageItem(status: IntegrityCheckStatusOut, manuscriptId
   // Deterministic originality limits: say what was not compared, no rerun.
   const note = status.check_kind === "originality_reuse" ? originalityCoverageNote({ integrity_check_status: [status], originality_scope: scope ?? null }) : null;
   if (note) {
-    const other = note.none && reason && reason !== "reference_boundary_unclear" && reason !== "reference_membership_partial" ? coverageCopyFor(reason) : undefined;
     return { key: `${status.check_kind}:${reason}`, label: `${label} · ${note.none ? "Not compared" : "Partly compared"}`, detail: note.sentence,
-      subIssues: [note.also, other].filter((text): text is string => Boolean(text)) };
+      subIssues: note.also ? [note.also] : [], detailsLabel: "originality assessment details" };
   }
   const coverageCopy = COVERAGE_COPY;
   if (reason && coverageCopy[reason]) {

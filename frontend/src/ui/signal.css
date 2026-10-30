@@ -9081,6 +9081,7 @@
   .signal-text-link:hover { color: var(--color-signal-link-hover); }
   /* BUG-553: what originality did not compare, beside its scope line. */
   .signal-originality-coverage {
+    max-inline-size: var(--signal-prose-width);
     display: grid;
     gap: var(--signal-space-2);
     margin-block: var(--signal-space-3);
@@ -9090,6 +9091,6 @@
     background: var(--color-signal-surface);
     padding: var(--signal-space-3);
   }
-  .signal-originality-coverage p { margin: 0; }
+  .signal-originality-coverage p { margin: 0; color: var(--color-signal-ink-secondary); font-size: var(--signal-type-label); }
   .signal-originality-coverage > .signal-button { justify-self: start; }
 }
