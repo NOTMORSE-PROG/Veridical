@@ -11,6 +11,7 @@ import type { ManuscriptGroup } from "../api/types";
 import { StaleUploadContextError } from "../api/uploadOutcome";
 import { useUploadScope } from "../auth/useUploadScope";
 import { ownedGroupQueryKey, useGroupQueryOwner } from "./groupQueryOwner";
+import { clearGroupDraft, keepGroupDraft } from "./groupDraft";
 
 export type AssignmentRecovery = "saved_details" | "current_assignment";
 export type AssignmentState =
@@ -59,9 +60,14 @@ export function useGroupAssignment(manuscriptId: number) {
       await attempt.verify();
       if (!attempt.isCurrent()) return;
       setState({ kind: "saved", result });
+      if (sent.kind === "proposal") clearGroupDraft(attempt.actorId, manuscriptId);
       invalidateViews();
     } catch (error) {
       if (!attempt.isCurrent() || error instanceof StaleUploadContextError) return;
+      if (sent.kind === "proposal") {
+        const { group_name, member_names, program_id } = sent.body;
+        keepGroupDraft(attempt.actorId, manuscriptId, { group_name, member_names, program_id });
+      }
       if (error instanceof ApiError && error.status === 401 && error.code === "unauthenticated") {
         attempt.rejectActor();
         return;

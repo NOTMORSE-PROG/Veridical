@@ -9,6 +9,7 @@ import { useGroupProposal, useManuscriptGroup } from "./useCheckRun";
 import { useGroupAssignment } from "./useGroupAssignment";
 import { formRefusal, isValidationRefusal } from "../api/fieldRefusal";
 import { GROUP_REQUEST_REFUSED } from "./groupRefusalCopy";
+import { readGroupDraft } from "./groupDraft";
 
 const EMPTY: TitlePageProposal = { title: null, short_name: null, members: [], program: null, adviser: null, extraction_failed: false };
 function hasSourceFields(proposal: TitlePageProposal) {
@@ -31,7 +32,10 @@ export function GroupAssignmentFields({ manuscriptId, initialProposal, actionsTa
   const assignment = useGroupAssignment(manuscriptId);
   const current = useManuscriptGroup(manuscriptId);
   const [baseline, setBaseline] = useState<ManuscriptGroup | undefined>();
-  const [intent, setIntent] = useState<"saved" | "proposal" | null>(null);
+  // Details from an earlier save that failed or was not confirmed reopen as
+  // they were typed.
+  const [draft] = useState(() => readGroupDraft(assignment.scope.actorId, manuscriptId) ?? undefined);
+  const [intent, setIntent] = useState<"saved" | "proposal" | null>(draft ? "proposal" : null);
   const [sourceRequested, setSourceRequested] = useState(false);
   const [source, setSource] = useState(initialProposal);
   const [useSource, setUseSource] = useState(initialProposal !== undefined);
@@ -155,8 +159,8 @@ export function GroupAssignmentFields({ manuscriptId, initialProposal, actionsTa
         {useSource && <button type="button" disabled={locked} onClick={() => setUseSource(false)} className="w-fit font-bold text-link underline">Return to entered details</button>}
       </div>}
       {baseline && <>
-        {initialProposal === undefined && <GroupProposalFields manuscriptId={manuscriptId} proposal={EMPTY} currentGroup={changing ? baseline.group ?? undefined : undefined} manualEntry expectedGroupId={baseline.group?.id ?? null} confirm={confirm} cancelLabel={cancelLabel} active={ready && intent === "proposal" && !useSource && state.kind !== "unknown"} onUseSaved={() => setIntent("saved")} onDone={onDone} actionsTarget={actionsTarget} />}
-        {source && <GroupProposalFields manuscriptId={manuscriptId} proposal={source} manualEntry={!hasSourceFields(source)} expectedGroupId={baseline.group?.id ?? null} confirm={confirm} cancelLabel={cancelLabel} active={ready && intent === "proposal" && useSource && state.kind !== "unknown"} onUseSaved={() => setIntent("saved")} onDone={onDone} actionsTarget={actionsTarget} />}
+        {initialProposal === undefined && <GroupProposalFields manuscriptId={manuscriptId} proposal={EMPTY} draft={draft} currentGroup={changing ? baseline.group ?? undefined : undefined} manualEntry expectedGroupId={baseline.group?.id ?? null} confirm={confirm} cancelLabel={cancelLabel} active={ready && intent === "proposal" && !useSource && state.kind !== "unknown"} onUseSaved={() => setIntent("saved")} onDone={onDone} actionsTarget={actionsTarget} />}
+        {source && <GroupProposalFields manuscriptId={manuscriptId} proposal={source} draft={draft} manualEntry={!hasSourceFields(source)} expectedGroupId={baseline.group?.id ?? null} confirm={confirm} cancelLabel={cancelLabel} active={ready && intent === "proposal" && useSource && state.kind !== "unknown"} onUseSaved={() => setIntent("saved")} onDone={onDone} actionsTarget={actionsTarget} />}
       </>}
       {ready && intent === null && state.kind !== "unknown" && <ProposalActions target={actionsTarget}><button type="button" disabled={working} onClick={() => onDone(null)} className={groupSecondary}>{cancelLabel}</button></ProposalActions>}
     </div>
