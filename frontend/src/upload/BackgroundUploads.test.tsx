@@ -35,6 +35,25 @@ describe("background uploads", () => {
     expect(screen.queryByRole("complementary", { name: "Uploads in progress" })).not.toBeInTheDocument();
   });
 
+  it("folds to one line so it stops covering the page, and unfolds for a new upload", async () => {
+    window.localStorage.clear();
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(SUMMARY), { status: 200 })));
+    await renderWithUploadProviders(<BackgroundUploadsProvider><Starter /></BackgroundUploadsProvider>);
+    choose();
+    expect(await screen.findByText("Ready.")).toBeInTheDocument();
+    const hide = screen.getByRole("button", { name: "Hide" });
+    expect(hide).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(hide);
+    expect(screen.getByRole("button", { name: "Show" })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByText("1 ready")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Dismiss large-thesis.pdf" })).not.toBeInTheDocument();
+    expect(window.localStorage.getItem("veridical.uploads-tray-folded.v1")).toBe("true");
+
+    choose("second-thesis.pdf");
+    expect(await screen.findByRole("button", { name: "Hide" })).toHaveAttribute("aria-expanded", "true");
+    window.localStorage.clear();
+  });
+
   it("reports a failed upload honestly and lets the instructor try again", async () => {
     let fail = true;
     vi.stubGlobal("fetch", vi.fn(async () => fail

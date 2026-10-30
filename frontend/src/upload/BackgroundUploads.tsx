@@ -1,6 +1,6 @@
 // V-090: large manuscripts upload and prepare in the background, so the
 // instructor can keep working instead of waiting on the upload dialog.
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../api/client";
 import { directManuscriptUpload, UploadRefusedError, type UploadStatus } from "../api/directManuscriptUpload";
@@ -261,12 +261,51 @@ function stateText(item: BackgroundUpload) {
   }
 }
 
+// BUG-558: kept uploads pile up in the corner and cover page actions, so the
+// tray can be folded to one line. A new upload unfolds it again.
+const TRAY_FOLDED_KEY = "veridical.uploads-tray-folded.v1";
+
+function readFolded() {
+  try { return window.localStorage.getItem(TRAY_FOLDED_KEY) === "true"; } catch { return false; }
+}
+
+function rememberFolded(folded: boolean) {
+  try { window.localStorage.setItem(TRAY_FOLDED_KEY, String(folded)); } catch { /* Not remembered on this device. */ }
+}
+
+const isActive = (item: BackgroundUpload) => item.phase === "waiting" || item.phase === "sending" || item.phase === "preparing";
+
+export function traySummary(uploads: BackgroundUpload[]) {
+  const active = uploads.filter(isActive).length;
+  const ready = uploads.filter((item) => item.phase === "done").length;
+  const failed = uploads.filter((item) => item.phase === "failed").length;
+  return [active && `${active} in progress`, ready && `${ready} ready`, failed && `${failed} not uploaded`].filter(Boolean).join(" · ");
+}
+
 function UploadTray({ uploads, canRetry, onDismiss, onRetry }: {
   uploads: BackgroundUpload[]; canRetry: (id: string) => boolean; onDismiss: (id: string) => void; onRetry: (id: string) => void;
 }) {
-  return <aside className="signal-upload-tray" aria-label="Uploads in progress">
-    <h2 className="signal-upload-tray__title">Uploads</h2>
-    <ul>
+  const listId = useId();
+  const [folded, setFolded] = useState(readFolded);
+  const active = uploads.filter(isActive).length;
+  const seenActive = useRef(active);
+  useEffect(() => {
+    if (active > seenActive.current) setFolded(false);
+    seenActive.current = active;
+  }, [active]);
+  function toggle() {
+    setFolded(!folded);
+    rememberFolded(!folded);
+  }
+  return <aside className="signal-upload-tray" aria-label="Uploads in progress" data-folded={folded ? "true" : undefined}>
+    <div className="signal-upload-tray__header">
+      <h2 className="signal-upload-tray__title">Uploads</h2>
+      <Button variant="quiet" aria-expanded={!folded} aria-controls={listId} onClick={toggle}>{folded ? "Show" : "Hide"}</Button>
+    </div>
+    {/* Folded, the per-upload messages are not on the page, so the summary
+        carries what changed. */}
+    {folded && <p role="status" aria-live="polite" className="signal-upload-tray__summary">{traySummary(uploads)}</p>}
+    <ul id={listId} hidden={folded}>
       {uploads.map((item) => <li key={item.id} className="signal-upload-tray__item" data-phase={item.phase}
         data-attention={item.phase === "done" && item.checkStartError ? "true" : undefined}>
         <div className="signal-upload-tray__name"><strong>{item.fileName}</strong>{sizeLabel(item.size) && <span>{sizeLabel(item.size)}</span>}</div>
