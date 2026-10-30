@@ -11,7 +11,8 @@ import { AnchorPill } from "../components/AnchorPill";
 import { useGroupCollisionCheck, usePrograms } from "../dashboard/useDashboard";
 import type { ConfirmGroupResponse, CurrentGroup, TitlePageProposal } from "../api/types";
 import type { GroupProposalInput } from "../api/groupAssignmentOutcome";
-import { fieldRefusal, isValidationRefusal, REFUSAL_NOTHING_CHANGED } from "../api/fieldRefusal";
+import { fieldRefusal, formRefusal, isValidationRefusal, REFUSAL_NOTHING_CHANGED } from "../api/fieldRefusal";
+import { GROUP_REQUEST_REFUSED } from "./groupRefusalCopy";
 
 export interface GroupProposalController {
   isPending: boolean;
@@ -281,6 +282,7 @@ export function GroupProposalFields({
   // A refusal of a name is shown at that name; the form's own line is for
   // anything else that went wrong.
   const serverError = namesPlaced ? null
+    : isValidationRefusal(confirm.error) ? formRefusal(confirm.error, [], GROUP_REQUEST_REFUSED)
     : confirm.error instanceof ApiError
       ? confirm.error.message
       : confirm.error
