@@ -208,11 +208,32 @@ describe("SignalReviewCriteriaPage", () => {
     renderWithProviders(<SignalReviewCriteriaPage />, { route: "/rubric/5/review", path: "/rubric/:rubricId/review", authInstructorId: 1 });
     const field = await screen.findByLabelText("Criterion text, criterion 1");
     fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
-    expect(await screen.findByText(`Criterion 1: ${sentence} Your edits are still on this page.`)).toBeInTheDocument();
+    expect(await screen.findByText("One value was not saved. Your edits are still on this page.", { exact: false })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Criterion 1, Criterion text" })).toBeInTheDocument();
     await waitFor(() => expect(field).toHaveAccessibleDescription(sentence));
     expect(field).toHaveAttribute("aria-invalid", "true");
     fireEvent.change(field, { target: { value: "Retyped criterion text" } });
     expect(field).not.toHaveAttribute("aria-invalid");
+  });
+
+  it("gives each refused field its own reason when one save is refused for several", async () => {
+    const sentence = "This text contains an invisible character that can't be saved. Retype it or paste it as plain text.";
+    const two = { ...RUBRIC, criteria: [RUBRIC.criteria[0], { ...RUBRIC.criteria[0], id: 99, text: "Second criterion" }] };
+    vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => init?.method === "PUT"
+      ? new Response(JSON.stringify({ detail: [
+        { type: "text_not_storable", loc: ["body", "criteria", 0, "evidence"], msg: sentence, input: "x" },
+        { type: "string_too_short", loc: ["body", "criteria", 1, "text"], msg: "String should have at least 1 character", input: "" },
+      ] }), { status: 422 })
+      : new Response(JSON.stringify(two), { status: 200 })));
+    renderWithProviders(<SignalReviewCriteriaPage />, { route: "/rubric/5/review", path: "/rubric/:rubricId/review", authInstructorId: 1 });
+    await screen.findByLabelText("Criterion text, criterion 2");
+    fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
+    expect(await screen.findByText("2 values were not saved. Your edits are still on this page.", { exact: false })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByLabelText("Evidence expected, criterion 1")).toHaveAccessibleDescription(sentence));
+    expect(screen.getByLabelText("Criterion text, criterion 2")).toHaveAccessibleDescription("Some of the information sent was not accepted. Check what you entered and try again.");
+    expect(screen.getByLabelText("Criterion text, criterion 2")).not.toHaveAccessibleDescription(sentence);
+    fireEvent.click(screen.getByRole("button", { name: "Criterion 2, Criterion text" }));
+    expect(screen.getByLabelText("Criterion text, criterion 2")).toHaveFocus();
   });
 
   it.each([200, 503, 422])("valid save-and-leave handles HTTP %s without losing edits", async (status) => {
