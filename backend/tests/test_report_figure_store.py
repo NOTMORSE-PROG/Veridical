@@ -208,9 +208,9 @@ async def test_the_kept_store_survives_a_restart_through_durable_storage(prepare
     store.unlink()
     assert _from_store(settings, manuscript) == before
     assert parses == [manuscript.id]
-    # Fetch miss, fetch miss under the lock, keep, fetch after the restart:
-    # each with the figure store's own short timeouts.
-    assert trips == [(key, True), (key, True), (key, True), (key, True)]
+    # Fetch miss, keep, fetch after the restart, each with the figure store's
+    # own short timeouts. The re-check under the lock looks only on local disk.
+    assert trips == [(key, True), (key, True), (key, True)]
 
 
 async def test_a_store_from_an_earlier_extraction_is_never_shown(prepared, monkeypatch):
@@ -419,3 +419,103 @@ async def test_purge_deletes_the_store_locally_and_durably(prepared, monkeypatch
     assert not store.exists()
     assert not raw_store_path(settings, manuscript.id).exists()
     assert key not in durable.objects
+
+
+async def test_a_failed_cleanup_still_removes_the_local_copy(prepared, monkeypatch):
+    settings, manuscript, _, _ = prepared
+    _as_older_record(settings, manuscript)
+    load_figure_source(settings, manuscript.id)
+    monkeypatch.setattr(
+        service, "get_storage", real_r2(("delete_object", "ServiceUnavailable", 503))
+    )
+    await report_service._keep_figure_store(Transaction(LOST), settings, manuscript.id)
+    assert not figure_store_path(settings, manuscript.id).exists()
+
+
+async def test_a_cancelled_view_still_finishes_the_keep_and_its_cleanup(prepared, monkeypatch):
+    """The put runs in a thread that cannot be stopped, so a cancelled view
+    waits for it and for the cleanup instead of releasing the lock early."""
+    import asyncio
+
+    settings, manuscript, _, _ = prepared
+    _as_older_record(settings, manuscript)
+    load_figure_source(settings, manuscript.id)
+    durable = Durable()
+    entered, release = threading.Event(), threading.Event()
+    real_put = durable.put_file
+
+    def slow_put(local_path, key):
+        entered.set()
+        release.wait(10)
+        real_put(local_path, key)
+
+    durable.put_file = slow_put
+    monkeypatch.setattr(service, "get_storage", lambda settings, **_: durable)
+    view = asyncio.ensure_future(
+        report_service._finish_even_if_cancelled(
+            report_service._keep_figure_store(Transaction(None, LOST), settings, manuscript.id)
+        )
+    )
+    await asyncio.get_running_loop().run_in_executor(None, entered.wait, 10)
+    view.cancel()
+    await asyncio.sleep(0.1)
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await view
+    # The lock could not be confirmed after the put, so nothing stays behind.
+    assert durable.objects == {}
+    assert not figure_store_path(settings, manuscript.id).exists()
+
+
+async def test_a_damaged_store_is_reported_in_the_log(prepared, monkeypatch, caplog):
+    settings, manuscript, _, _ = prepared
+    figure_store_path(settings, manuscript.id).write_text("{", encoding="utf-8")
+    with caplog.at_level("WARNING"):
+        load_figure_source(settings, manuscript.id)
+    assert "could not be read" in caplog.text
+
+
+async def test_a_cancelled_report_view_does_not_release_the_lock_mid_keep(prepared, monkeypatch):
+    """Through attach_report_figures itself: cancelling the view still waits
+    for the keep and its cleanup."""
+    import asyncio
+    from types import SimpleNamespace
+
+    settings, manuscript, _, _ = prepared
+    _as_older_record(settings, manuscript)
+    source, _ = load_figure_source(settings, manuscript.id)
+    durable = Durable()
+    entered, release = threading.Event(), threading.Event()
+    real_put = durable.put_file
+
+    def slow_put(local_path, key):
+        entered.set()
+        release.wait(10)
+        real_put(local_path, key)
+
+    durable.put_file = slow_put
+    monkeypatch.setattr(service, "get_storage", lambda settings, **_: durable)
+
+    async def derived_now(session, row, reader):
+        return source, True
+
+    monkeypatch.setattr(report_service, "read_source", derived_now)
+
+    class Session(Transaction):
+        async def get(self, model, key, **kwargs):
+            return manuscript
+
+    report = SimpleNamespace(
+        manuscript_id=manuscript.id, model_copy=lambda update: SimpleNamespace(**update)
+    )
+    view = asyncio.ensure_future(
+        report_service.attach_report_figures(Session(None, LOST), report, settings)
+    )
+    await asyncio.get_running_loop().run_in_executor(None, entered.wait, 10)
+    view.cancel()
+    await asyncio.sleep(0.1)
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await view
+    assert durable.objects == {}
+    assert not figure_store_path(settings, manuscript.id).exists()

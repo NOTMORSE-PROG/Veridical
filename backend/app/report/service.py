@@ -518,10 +518,30 @@ async def attach_report_figures(
         # than turning that saved action into an error.
         return report.model_copy(update={"figure_readings": None})
     if derived:
-        await _keep_figure_store(session, settings, manuscript.id)
+        await _finish_even_if_cancelled(_keep_figure_store(session, settings, manuscript.id))
     return report.model_copy(
         update={"figure_readings": saved_figure_readings(source, manuscript.content_hash)}
     )
+
+
+async def _finish_even_if_cancelled(work) -> None:
+    """Run work to the end before letting a cancellation through.
+
+    The keep's put runs in a thread that cannot be stopped. Returning early
+    would release the source lock while that put may still land after a
+    purge, so wait for the keep, which removes the copy itself if it can no
+    longer confirm the lock, the same way `read_source` drains before release.
+    """
+    task = asyncio.ensure_future(work)
+    try:
+        await asyncio.shield(task)
+    except asyncio.CancelledError:
+        while not task.done():
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                continue
+        raise
 
 
 async def _keep_figure_store(session: AsyncSession, settings: Settings, manuscript_id: int) -> None:

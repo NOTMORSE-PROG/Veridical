@@ -429,15 +429,20 @@ async def _ingest_manuscript(
         # the extraction, so a failed copy costs a later view one parse rather
         # than failing this preparation.
         figures_path = figure_store_path(settings, manuscript.id)
+        figure_storage = get_storage(settings, figure_store=True)
         try:
             await preparation_lease.run(
-                storage.put_file, figures_path, storage_key_for(settings, str(figures_path))
+                figure_storage.put_file,
+                figures_path,
+                storage_key_for(settings, str(figures_path)),
             )
         except (OSError, BotoCoreError, ClientError, S3UploadFailedError):
             # boto3 reports a refused upload as S3UploadFailedError, not ClientError.
             logger.warning(
                 "Could not keep the figure store of manuscript %s", manuscript.id, exc_info=True
             )
+        finally:
+            figure_storage.close()
         # Citation replacement and the terminal state are one transaction.
         finalizing = True
         # Explicit fresh ingestion may enter below the upload boundary. Never
@@ -1218,7 +1223,9 @@ def load_figure_source(settings: Settings, manuscript_id: int) -> tuple[FigureSo
     if kept is not None:
         return kept, False
     with _figure_store_fill:
-        kept = _kept_figure_source(settings, path, extraction_sha256)
+        # Another view may have written it while this one waited. Durable
+        # storage was just asked, so only the local copy is worth a look.
+        kept = _kept_figure_source(settings, path, extraction_sha256, fetch=False)
         if kept is not None:
             return kept, False
         try:
@@ -1241,16 +1248,22 @@ def load_figure_source(settings: Settings, manuscript_id: int) -> tuple[FigureSo
 
 
 def _kept_figure_source(
-    settings: Settings, path: Path, extraction_sha256: str
+    settings: Settings, path: Path, extraction_sha256: str, *, fetch: bool = True
 ) -> FigureSource | None:
     """The kept figure store, if it was taken from exactly this extraction."""
+    if not fetch and not path.exists():
+        return None
     try:
-        source = FigureSource.model_validate_json(
-            _local_copy(settings, path, figure_store=True).read_bytes()
-        )
-    except (OSError, ValueError, BotoCoreError, ClientError):
-        # Missing, damaged (a ValidationError is a ValueError), out of reach or
-        # published by a concurrent view: derive it again rather than fail.
+        data = (_local_copy(settings, path, figure_store=True) if fetch else path).read_bytes()
+    except (OSError, BotoCoreError, ClientError):
+        # Missing, out of reach or published by a concurrent view: derive it again.
+        return None
+    try:
+        source = FigureSource.model_validate_json(data)
+    except ValueError:
+        # Every view would quietly parse the whole extraction while this
+        # persists, so say so.
+        logger.warning("Figure store %s could not be read; deriving it again", path.name)
         return None
     return source if source.extraction_sha256 == extraction_sha256 else None
 
@@ -1276,14 +1289,18 @@ def keep_figure_store(settings: Settings, manuscript_id: int) -> None:
 
 
 def discard_figure_store(settings: Settings, manuscript_id: int) -> None:
-    """Remove a figure store, durable copy and local copy."""
+    """Remove a figure store, local copy first, then the durable copy.
+
+    This runs when a purge may already have happened, so it uses the ordinary
+    storage client with its retries rather than the short figure-store bound.
+    """
     path = figure_store_path(settings, manuscript_id)
-    storage = get_storage(settings, figure_store=True)
+    path.unlink(missing_ok=True)
+    storage = get_storage(settings)
     try:
         storage.delete(storage_key_for(settings, str(path)))
     finally:
         storage.close()
-    path.unlink(missing_ok=True)
 
 
 async def load_figure_source_async(

@@ -180,7 +180,7 @@ def client(api_scratch_url, tmp_path, monkeypatch):
     ratelimit._limiters.clear()
 
     shared_storage = FakeStorage()
-    monkeypatch.setattr(ingest_service, "get_storage", lambda settings: shared_storage)
+    monkeypatch.setattr(ingest_service, "get_storage", lambda settings, **_: shared_storage)
     monkeypatch.setattr("app.report.source_files.get_storage", lambda settings: shared_storage)
     monkeypatch.setattr(archive_service, "get_storage", lambda settings: shared_storage)
     monkeypatch.setattr(library_service, "get_storage", lambda settings: shared_storage)
