@@ -7,11 +7,19 @@ import { GroupProposalFields, ProposalActions, type GroupProposalController } fr
 import { groupPrimary, groupSecondary, SavedGroupFacts, SavedGroupFields } from "./SavedGroupFields";
 import { useGroupProposal, useManuscriptGroup } from "./useCheckRun";
 import { useGroupAssignment } from "./useGroupAssignment";
+import { isValidationRefusal } from "../api/fieldRefusal";
 
 const EMPTY: TitlePageProposal = { title: null, short_name: null, members: [], program: null, adviser: null, extraction_failed: false };
 function hasSourceFields(proposal: TitlePageProposal) {
   return proposal.extraction_failed || proposal.title !== null || proposal.short_name !== null
     || proposal.members.length > 0 || proposal.program !== null || proposal.adviser !== null;
+}
+
+// When the server refused names, each one is marked at its field below.
+const GROUP_NAMES_REFUSED = "Some names were not accepted. Each one is marked below. Nothing was saved.";
+
+function namesRefused(error: unknown) {
+  return isValidationRefusal(error) && error.fields.some((field) => field === "group_name" || field.startsWith("member_names."));
 }
 
 export function GroupAssignmentFields({ manuscriptId, initialProposal, actionsTarget, onDone, onBusyChange, changing = false }: {
@@ -49,7 +57,9 @@ export function GroupAssignmentFields({ manuscriptId, initialProposal, actionsTa
     }
   }, [proposal.data, proposal.isSuccess, source, sourceRequested]);
   useEffect(() => { onBusyChange?.(working); return () => onBusyChange?.(false); }, [onBusyChange, working]);
-  useEffect(() => { if (ready && (state.kind === "saved" || state.kind === "unknown" || state.kind === "rejected")) heading.current?.focus(); }, [ready, state.kind]);
+  // A refused name keeps focus at its field; the alert is still announced.
+  const fieldTakesFocus = state.kind === "rejected" && namesRefused(state.error);
+  useEffect(() => { if (ready && !fieldTakesFocus && (state.kind === "saved" || state.kind === "unknown" || state.kind === "rejected")) heading.current?.focus(); }, [ready, state.kind, fieldTakesFocus]);
 
   async function refreshCurrent() {
     if (working || !assignment.scope.isCurrent()) return;
@@ -69,6 +79,9 @@ export function GroupAssignmentFields({ manuscriptId, initialProposal, actionsTa
 
   const confirm: GroupProposalController = {
     isPending: locked || (state.kind === "rejected" && state.recovery === "current_assignment"), isSuccess: false,
+    // Only a refusal of the names goes to the fields; anything else is
+    // reported once, by the alert below.
+    error: state.kind === "rejected" && namesRefused(state.error) ? state.error : undefined,
     mutate: (body) => { if (!locked) void assignment.submit({ kind: "proposal", body }); },
   };
   function assignSaved(reviewed: SavedGroup) {
@@ -123,7 +136,7 @@ export function GroupAssignmentFields({ manuscriptId, initialProposal, actionsTa
       {baseline ? <p className="text-sm text-ink-secondary">Current assignment: {baseline.group ? <><b className="break-words">{baseline.group.name}</b> · Group #{baseline.group.id}</> : "No group assigned"}.</p>
         : <p role="status" className="text-sm text-ink-secondary">Loading the saved assignment.</p>}
       {(current.isError || readError) && <div role="alert" className="flex flex-col gap-2 text-sm text-danger"><p>{readError ?? "Could not load the saved assignment."}</p><button type="button" disabled={refreshing} className="w-fit font-bold underline" onClick={() => { void refreshCurrent(); }}>Try loading saved assignment again</button></div>}
-      {state.kind === "rejected" && <div className="flex flex-col gap-2 text-sm text-danger" role="alert"><h3 ref={heading} tabIndex={-1} className="font-bold">Assignment was not saved</h3><p>{state.message}</p>{state.recovery === "current_assignment" && <button type="button" disabled={refreshing} className="w-fit font-bold underline" onClick={() => { void refreshCurrent(); }}>Check current assignment</button>}</div>}
+      {state.kind === "rejected" && <div className="flex flex-col gap-2 text-sm text-danger" role="alert"><h3 ref={heading} tabIndex={-1} className="font-bold">Assignment was not saved</h3><p>{namesRefused(state.error) ? GROUP_NAMES_REFUSED : state.message}</p>{state.recovery === "current_assignment" && <button type="button" disabled={refreshing} className="w-fit font-bold underline" onClick={() => { void refreshCurrent(); }}>Check current assignment</button>}</div>}
       <fieldset disabled={locked} className="flex flex-col gap-2">
         <legend className="mb-2 text-base font-bold text-ink">Assign manuscript to a group</legend>
         <label className="flex min-h-11 items-center gap-3 text-sm text-ink"><input type="radio" name={intentName} checked={intent === "saved"} onChange={() => setIntent("saved")} />Use a saved group</label>

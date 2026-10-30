@@ -233,4 +233,63 @@ describe("GroupProposalFields", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Could not save this group.");
     await waitFor(() => expect(screen.getByLabelText("Group name")).toHaveValue("VERIDICAL Team"));
   });
+
+  describe("a refused name is shown at its field", () => {
+    function refuseWith(detail: unknown[]) {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const path = new URL(typeof input === "string" ? input : input.toString(), "http://localhost").pathname;
+          if (path === "/programs") return new Response(JSON.stringify([]), { status: 200 });
+          if (path === "/manuscripts/1/group" && init?.method === "PATCH") {
+            return new Response(JSON.stringify({ detail }), { status: 422 });
+          }
+          return new Response("not found", { status: 404 });
+        }),
+      );
+    }
+
+    it("puts a group-name refusal under the group name and focuses it", async () => {
+      refuseWith([{ type: "value_error", loc: ["body", "group_name"], msg: "Value error, Group name cannot contain control characters." }]);
+      renderWithProviders(<GroupProposalFields manuscriptId={1} proposal={FULL_PROPOSAL} onDone={() => {}} />);
+      fireEvent.click(screen.getByRole("button", { name: "Confirm assignment" }));
+
+      const field = screen.getByLabelText("Group name");
+      await waitFor(() => expect(field).toHaveAttribute("aria-invalid", "true"));
+      expect(field).toHaveAccessibleDescription("Group name cannot contain control characters. Nothing was changed.");
+      expect(field).toHaveFocus();
+      // The refusal is not repeated as a form-level failure.
+      expect(screen.queryByText("Some of the information sent was not accepted. Check what you entered and try again.")).not.toBeInTheDocument();
+
+      fireEvent.change(field, { target: { value: "VERIDICAL 2" } });
+      expect(field).not.toHaveAttribute("aria-invalid");
+    });
+
+    it("maps a member refusal past a blank member that was not sent", async () => {
+      refuseWith([{ type: "value_error", loc: ["body", "member_names", 1], msg: "Value error, Member name cannot contain control characters." }]);
+      renderWithProviders(<GroupProposalFields manuscriptId={1} proposal={FULL_PROPOSAL} onDone={() => {}} />);
+      // Blank out the first member: only "Maria Santos" and the added name are sent.
+      const [first] = screen.getAllByLabelText(/^Group member \d+ name$/);
+      fireEvent.change(first, { target: { value: "  " } });
+      fireEvent.click(screen.getByRole("button", { name: "Add member" }));
+      const added = screen.getAllByLabelText(/^Group member \d+ name$/)[2];
+      fireEvent.change(added, { target: { value: "Ana Reyes" } });
+      fireEvent.click(screen.getByRole("button", { name: "Confirm assignment" }));
+
+      await waitFor(() => expect(added).toHaveAttribute("aria-invalid", "true"));
+      expect(added).toHaveAccessibleDescription("Member name cannot contain control characters. Nothing was changed.");
+      expect(added).toHaveFocus();
+      expect(screen.getByDisplayValue("Maria Santos")).not.toHaveAttribute("aria-invalid");
+      expect(first).not.toHaveAttribute("aria-invalid");
+    });
+
+    it("keeps a refusal of a field this form does not show in the form message", async () => {
+      refuseWith([{ type: "value_error", loc: ["body", "title"], msg: "Value error, Title is too long." }]);
+      renderWithProviders(<GroupProposalFields manuscriptId={1} proposal={FULL_PROPOSAL} onDone={() => {}} />);
+      fireEvent.click(screen.getByRole("button", { name: "Confirm assignment" }));
+
+      expect(await screen.findByRole("alert")).toHaveTextContent("Title is too long.");
+      expect(screen.getByLabelText("Group name")).not.toHaveAttribute("aria-invalid");
+    });
+  });
 });

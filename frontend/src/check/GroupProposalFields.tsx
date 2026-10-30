@@ -11,6 +11,7 @@ import { AnchorPill } from "../components/AnchorPill";
 import { useGroupCollisionCheck, usePrograms } from "../dashboard/useDashboard";
 import type { ConfirmGroupResponse, CurrentGroup, TitlePageProposal } from "../api/types";
 import type { GroupProposalInput } from "../api/groupAssignmentOutcome";
+import { fieldRefusal, isValidationRefusal, REFUSAL_NOTHING_CHANGED } from "../api/fieldRefusal";
 
 export interface GroupProposalController {
   isPending: boolean;
@@ -105,6 +106,31 @@ export function GroupProposalFields({
 
   const [groupName, setGroupName] = useState(currentGroup?.name ?? proposal.short_name?.value ?? "");
   const [groupNameEdited, setGroupNameEdited] = useState(currentGroup !== undefined || proposal.short_name === null);
+  // BUG-551: the members that were sent, in order, and which refused fields
+  // have been changed since.
+  const sentMemberIds = useRef<number[]>([]);
+  const memberInputRefs = useRef(new Map<number, HTMLInputElement>());
+  const [editedSinceRefusal, setEditedSinceRefusal] = useState<ReadonlySet<string>>(() => new Set());
+  const groupNameRefusal = editedSinceRefusal.has("group_name") ? null : fieldRefusal(confirm.error, "group_name");
+  const memberRefusals = new Map<number, string>();
+  // Whether any refused name has a field on this form, edited since or not.
+  let namesPlaced = groupNameRefusal !== null || (isValidationRefusal(confirm.error) && confirm.error.fieldMessages.has("group_name"));
+  if (isValidationRefusal(confirm.error)) {
+    for (const [field, message] of confirm.error.fieldMessages) {
+      const match = /^member_names\.(\d+)$/.exec(field);
+      const id = match ? sentMemberIds.current[Number(match[1])] : undefined;
+      if (id === undefined) continue;
+      namesPlaced = true;
+      if (!editedSinceRefusal.has(`member:${id}`)) memberRefusals.set(id, message);
+    }
+  }
+  const firstRefusal = groupNameRefusal ? "group_name" : [...memberRefusals.keys()][0] ?? null;
+  useEffect(() => {
+    if (firstRefusal === null) return;
+    (firstRefusal === "group_name" ? groupNameRef.current : memberInputRefs.current.get(firstRefusal))?.focus();
+    // Only when a refusal arrives, not as the instructor edits.
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
+  }, [confirm.error]);
   const [members, setMembers] = useState<MemberField[]>(() =>
     currentGroup ? currentGroup.member_names.map((name) => newMemberField(name, null))
       : proposal.members.map((m) => newMemberField(m.value, m.anchor)),
@@ -230,7 +256,12 @@ export function GroupProposalFields({
       groupNameRef.current?.focus();
       return;
     }
-    const memberNames = members.map((m) => m.value.trim()).filter((v) => v.length > 0);
+    const sent = members.filter((m) => m.value.trim().length > 0);
+    const memberNames = sent.map((m) => m.value.trim());
+    // Blank members are not sent, so the server's member_names.N counts only
+    // these; keep which on-screen member each one was.
+    sentMemberIds.current = sent.map((m) => m.id);
+    setEditedSinceRefusal(new Set());
     // Deliberately no onSuccess callback here -- `onDone` fires only when
     // the instructor clicks "Done" on the terminal banner below, so they
     // always see WHICH outcome happened (matched vs created) before this
@@ -247,8 +278,10 @@ export function GroupProposalFields({
     });
   }
 
-  const serverError =
-    confirm.error instanceof ApiError
+  // A refusal of a name is shown at that name; the form's own line is for
+  // anything else that went wrong.
+  const serverError = namesPlaced ? null
+    : confirm.error instanceof ApiError
       ? confirm.error.message
       : confirm.error
         ? "Could not save this group. Check your connection and try again."
@@ -346,13 +379,14 @@ export function GroupProposalFields({
             maxLength={200}
             placeholder="e.g. VERIDICAL"
             disabled={confirm.isPending}
-            aria-invalid={invalid ? "true" : undefined}
-            aria-describedby={invalid ? groupNameErrId : undefined}
+            aria-invalid={invalid || groupNameRefusal ? "true" : undefined}
+            aria-describedby={invalid ? groupNameErrId : groupNameRefusal ? `${groupNameErrId}-refusal` : undefined}
             onChange={(event) => {
               setGroupName(event.target.value);
               setGroupNameEdited(true);
+              setEditedSinceRefusal((current) => new Set([...current, "group_name"]));
             }}
-            className={`min-h-11 w-full rounded-md border bg-panel px-3 text-base text-ink ${invalid ? "border-2 border-status-attention-text" : "border-border-input"}`}
+            className={`min-h-11 w-full rounded-md border bg-panel px-3 text-base text-ink ${invalid || groupNameRefusal ? "border-2 border-status-attention-text" : "border-border-input"}`}
           />
           {currentGroup ? null : !groupNameEdited && proposal.short_name ? (
             <AnchorPill anchor={proposal.short_name.anchor} />
@@ -365,6 +399,9 @@ export function GroupProposalFields({
             <p id={groupNameErrId} className="text-sm text-status-attention-text">
               Enter a group name before confirming.
             </p>
+          )}
+          {!invalid && groupNameRefusal && (
+            <p id={`${groupNameErrId}-refusal`} className="signal-field-error">{groupNameRefusal} {REFUSAL_NOTHING_CHANGED}</p>
           )}
         </div>
 
@@ -412,14 +449,18 @@ export function GroupProposalFields({
         {members.map((m, i) => (
           <div key={m.id} className="signal-group-proposal__member">
             <input
+              ref={(el) => { if (el) memberInputRefs.current.set(m.id, el); else memberInputRefs.current.delete(m.id); }}
               type="text"
               value={m.value}
               maxLength={200}
               disabled={confirm.isPending}
               aria-label={`Group member ${i + 1} name`}
-              onChange={(event) => updateMember(m.id, event.target.value)}
-              className="h-11 rounded-md border border-border-input bg-panel px-3 text-base text-ink"
+              aria-invalid={memberRefusals.has(m.id) ? "true" : undefined}
+              aria-describedby={memberRefusals.has(m.id) ? `${groupNameErrId}-member-${m.id}` : undefined}
+              onChange={(event) => { updateMember(m.id, event.target.value); setEditedSinceRefusal((current) => new Set([...current, `member:${m.id}`])); }}
+              className={`h-11 rounded-md border bg-panel px-3 text-base text-ink ${memberRefusals.has(m.id) ? "border-2 border-status-attention-text" : "border-border-input"}`}
             />
+            {memberRefusals.has(m.id) && <p id={`${groupNameErrId}-member-${m.id}`} className="signal-field-error signal-group-proposal__member-error">{memberRefusals.get(m.id)} {REFUSAL_NOTHING_CHANGED}</p>}
             <span className="signal-group-proposal__member-note">
               {!m.edited && m.anchor ? (
                 <AnchorPill anchor={m.anchor} />
