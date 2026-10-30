@@ -250,6 +250,9 @@ class CitationRecencySummaryOut(BaseModel):
     # "source_unavailable", "no_references", "format_setting_invalid",
     # "recency_policy_unavailable"). None when assessed or off.
     unassessed_reason: str | None = None
+    # For "off": whether this format turned it off or simply never turned
+    # it on (the configured default).
+    enabled_source: Literal["format", "default"] | None = None
     window_years: int | None = None
     window_source: Literal["format", "default"] | None = None
     counts_toward_readiness: bool | None = None
