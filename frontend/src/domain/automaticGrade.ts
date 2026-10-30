@@ -22,7 +22,7 @@ const fill = (template: string, values: Record<string, string | number>) =>
 // What each grading pass chose, so a disagreement behind the grade is visible.
 // Kept apart from AUTOMATIC_GRADE_COPY, which the PDF export mirrors word for word.
 export const GRADE_PASSES_COPY = {
-  passes: "The grading passes disagreed: {passes}. A pass is one automatic grading attempt, not an independent reviewer.",
+  passes: "What each grading pass chose: {passes}. A pass is one automatic grading attempt, not an independent reviewer.",
   pass: "Pass {n} {grade}",
   noGrade: "no grade recorded",
 } as const;
@@ -37,8 +37,10 @@ function voteWords(vote: string | null): string | null {
   return VOTE_WORDS[value.toLowerCase()] ?? value;
 }
 
-// What each grading pass chose, shown only when they disagreed: a unanimous
-// grade already says so in how it was chosen.
+// What each grading pass chose, shown only when the passes were not all the
+// same grade (a disagreement, or a pass that gave none): a unanimous grade
+// already says so in how it was chosen. Worded neutrally, because a pass with
+// no grade abstained rather than disagreed.
 export function automaticGradePasses(row: Pick<CriterionResultOut, "votes">): string | null {
   const votes = Array.isArray(row.votes) ? row.votes.filter((vote) => vote === null || typeof vote === "string").map(voteWords) : [];
   if (votes.length < 2 || votes.every((vote) => vote === votes[0])) return null;
