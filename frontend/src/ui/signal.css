@@ -9093,4 +9093,7 @@
   }
   .signal-originality-coverage p { margin: 0; color: var(--color-signal-ink-secondary); font-size: var(--signal-type-label); }
   .signal-originality-coverage > .signal-button { justify-self: start; }
+  /* BUG-551: each refused criterion field, linked from the save summary. */
+  .signal-refused-fields { display: grid; gap: var(--signal-space-1); margin: var(--signal-space-2) 0 0; padding-inline-start: var(--signal-space-5); }
+  .signal-refused-fields button { padding: 0; border: 0; background: none; font: inherit; cursor: pointer; }
 }

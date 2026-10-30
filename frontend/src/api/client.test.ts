@@ -132,6 +132,16 @@ describe("validation refusals", () => {
     await expect(api.post("/x", {})).rejects.toMatchObject({ code: "validation_error", message: VALIDATION_FALLBACK, fields: ["note"] });
   });
 
+  it("keeps each field's own message when one refusal names several", async () => {
+    respond({ detail: [
+      { type: "text_not_storable", loc: ["body", "criteria", 0, "evidence"], msg: "This text contains an invisible character that can't be saved.", input: "x" },
+      { type: "string_too_short", loc: ["body", "criteria", 2, "text"], msg: "String should have at least 1 character", input: "" },
+    ] });
+    const error = await api.post("/x", {}).catch((e: unknown) => e) as ApiError;
+    expect(error.fieldMessages.get("criteria.0.evidence")).toBe("This text contains an invisible character that can't be saved.");
+    expect(error.fieldMessages.get("criteria.2.text")).toBe(VALIDATION_FALLBACK);
+  });
+
   it("keeps the app's own error envelope as it was", async () => {
     respond({ error: { code: "file_malformed", message: "That file could not be read." } });
     await expect(api.post("/x", {})).rejects.toMatchObject({ code: "file_malformed", message: "That file could not be read." });

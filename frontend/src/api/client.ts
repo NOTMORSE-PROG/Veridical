@@ -24,12 +24,15 @@ export class ApiError extends Error {
   readonly code: string;
   // For a validation refusal: the fields the server named, e.g. "reason".
   readonly fields: readonly string[];
+  // Each named field's own message, so one field's reason is never shown on another.
+  readonly fieldMessages: ReadonlyMap<string, string>;
 
-  constructor(status: number, code: string, message: string, fields: readonly string[] = []) {
+  constructor(status: number, code: string, message: string, fields: readonly string[] = [], fieldMessages: ReadonlyMap<string, string> = new Map()) {
     super(message);
     this.status = status;
     this.code = code;
     this.fields = fields;
+    this.fieldMessages = fieldMessages;
   }
 }
 
@@ -40,14 +43,27 @@ export const VALIDATION_FALLBACK = "Some of the information sent was not accepte
 
 type ValidationItem = { type?: unknown; loc?: unknown; msg?: unknown };
 
-function validationError(items: ValidationItem[]): ApiError {
-  const fields = [...new Set(items.flatMap((item) => Array.isArray(item.loc)
-    ? [item.loc.filter((part) => part !== "body" && part !== "query" && part !== "path").map(String).join(".")].filter(Boolean) : []))];
-  const readable = items.find((item) => typeof item.type === "string" && READABLE_VALIDATION_TYPES.has(item.type) && typeof item.msg === "string" && item.msg.trim());
+// The sentence for one refusal: the server's own words when they were written
+// for instructors, otherwise the plain fallback.
+function itemMessage(item: ValidationItem): string {
+  if (typeof item.type !== "string" || !READABLE_VALIDATION_TYPES.has(item.type) || typeof item.msg !== "string" || !item.msg.trim()) return VALIDATION_FALLBACK;
   // Pydantic prefixes a custom check's own sentence with "Value error, ".
-  const text = typeof readable?.msg === "string" ? readable.msg.replace(/^Value error,\s*/i, "").trim() : "";
-  const message = text ? text.charAt(0).toUpperCase() + text.slice(1) + (/[.!?]$/.test(text) ? "" : ".") : VALIDATION_FALLBACK;
-  return new ApiError(422, "validation_error", message, fields);
+  const text = item.msg.replace(/^Value error,\s*/i, "").trim();
+  return text.charAt(0).toUpperCase() + text.slice(1) + (/[.!?]$/.test(text) ? "" : ".");
+}
+
+function fieldPath(item: ValidationItem): string {
+  return Array.isArray(item.loc) ? item.loc.filter((part) => part !== "body" && part !== "query" && part !== "path").map(String).join(".") : "";
+}
+
+function validationError(items: ValidationItem[]): ApiError {
+  const fieldMessages = new Map<string, string>();
+  for (const item of items) {
+    const path = fieldPath(item);
+    if (path && !fieldMessages.has(path)) fieldMessages.set(path, itemMessage(item));
+  }
+  const readable = items.find((item) => itemMessage(item) !== VALIDATION_FALLBACK);
+  return new ApiError(422, "validation_error", readable ? itemMessage(readable) : VALIDATION_FALLBACK, [...fieldMessages.keys()], fieldMessages);
 }
 
 // One reading of an error body: the app's own {error: {code, message}}, or
