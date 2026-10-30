@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { api } from "./client";
+import { ApiError, api, VALIDATION_FALLBACK } from "./client";
 
 describe("api client", () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -110,3 +110,31 @@ describe("api/client BASE_URL default", () => {
     expect(vi.mocked(fetch).mock.calls[0][0]).toBe("http://localhost:8000/auth/me");
   });
 });
+
+describe("validation refusals", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const respond = (body: unknown, status = 422) => vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(body), { status })));
+
+  it("shows the server's own sentence for a check written for instructors, with the field", async () => {
+    respond({ detail: [{ type: "value_error", loc: ["body", "reason"], msg: "Value error, a reason is required to dismiss findings", input: null }] });
+    const error = await api.post("/x", {}).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error).toMatchObject({ status: 422, code: "validation_error", message: "A reason is required to dismiss findings.", fields: ["reason"] });
+  });
+
+  it("names a character that cannot be saved as the server says it", async () => {
+    respond({ detail: [{ type: "text_not_storable", loc: ["body", "criteria", 2, "text"], msg: "This text contains a character that cannot be saved. Remove it and try again.", input: "x" }] });
+    await expect(api.post("/x", {})).rejects.toMatchObject({ code: "validation_error", message: "This text contains a character that cannot be saved. Remove it and try again.", fields: ["criteria.2.text"] });
+  });
+
+  it("replaces technical validator text with a plain sentence", async () => {
+    respond({ detail: [{ type: "string_too_short", loc: ["body", "note"], msg: "String should have at least 1 character", input: "" }] });
+    await expect(api.post("/x", {})).rejects.toMatchObject({ code: "validation_error", message: VALIDATION_FALLBACK, fields: ["note"] });
+  });
+
+  it("keeps the app's own error envelope as it was", async () => {
+    respond({ error: { code: "file_malformed", message: "That file could not be read." } });
+    await expect(api.post("/x", {})).rejects.toMatchObject({ code: "file_malformed", message: "That file could not be read." });
+  });
+});
+
