@@ -325,6 +325,7 @@ export function useJudgmentRevisions(checkRunId: number, ownerCurrent: () => boo
         put(criterion, { ...latest, context: out.context, draft: undefined, receipt: out, history: undefined,
           historyOperation: ++sequence.current, historyLoading: false });
         void client.invalidateQueries({ queryKey: ["report", checkRunId], exact: true });
+        void client.invalidateQueries({ queryKey: ["report", checkRunId, "escalated"] });
         void client.invalidateQueries({ queryKey: ["stats"] });
         return true;
       } catch (error) {
