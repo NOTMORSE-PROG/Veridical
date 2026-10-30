@@ -33,6 +33,7 @@ pytestmark = pytest.mark.skipif(
 SCRATCH_DB = "veridical_recencytest"
 OLD = "Reyes, J. (2015). Barangay health records. Journal of Local Studies, 4(2), 1-9."
 NEW = "Cruz, M. A. (2024). Mobile clinics in Iloilo. Philippine Health Review, 9(1), 3-8."
+ON = {"enabled": True}
 UNDATED = "Santos, P. (n.d.). City health office profile. Iloilo City Government."
 
 
@@ -148,7 +149,7 @@ async def _run(session_factory, check_run_id, extraction, citations):
 async def test_old_source_gets_a_low_note_against_the_manuscript_year(session_factory):
     extraction, citations = _manuscript()
     assert [c.year for c in citations] == [2015, 2024, None]
-    check_run_id, _ = await _seed(session_factory)
+    check_run_id, _ = await _seed(session_factory, ON)
     result, recency = await _run(session_factory, check_run_id, extraction, citations)
 
     summary = result.detail["citation_recency"]
@@ -174,7 +175,7 @@ async def test_old_source_gets_a_low_note_against_the_manuscript_year(session_fa
 
 async def test_a_wider_format_window_removes_the_note(session_factory):
     extraction, citations = _manuscript()
-    check_run_id, _ = await _seed(session_factory, {"window_years": 10})
+    check_run_id, _ = await _seed(session_factory, {**ON, "window_years": 10})
     result, recency = await _run(session_factory, check_run_id, extraction, citations)
     assert recency == []
     assert result.detail["citation_recency"]["window_years"] == 10
@@ -187,6 +188,20 @@ async def test_turning_the_note_off_in_the_format_reads_nothing(session_factory)
     result, recency = await _run(session_factory, check_run_id, extraction, citations)
     assert recency == []
     assert result.detail["citation_recency"]["status"] == "off"
+
+
+async def test_a_format_that_never_chose_stays_off_by_default(session_factory, monkeypatch):
+    monkeypatch.delenv("CITATION_RECENCY_ENABLED", raising=False)
+    get_settings.cache_clear()
+    try:
+        extraction, citations = _manuscript()
+        check_run_id, _ = await _seed(session_factory)
+        result, recency = await _run(session_factory, check_run_id, extraction, citations)
+    finally:
+        get_settings.cache_clear()
+    assert recency == []
+    assert result.detail["citation_recency"]["status"] == "off"
+    assert result.detail["citation_recency"]["setting_sources"]["enabled"] == "default"
 
 
 async def test_invalid_saved_setting_is_reported_unassessed(session_factory):
@@ -203,7 +218,7 @@ async def test_invalid_saved_setting_is_reported_unassessed(session_factory):
 
 async def test_check_date_is_used_when_the_title_page_has_no_year(session_factory):
     extraction, citations = _manuscript(title_page_date="Iloilo City")
-    check_run_id, _ = await _seed(session_factory)
+    check_run_id, _ = await _seed(session_factory, ON)
     result, _ = await _run(session_factory, check_run_id, extraction, citations)
     summary = result.detail["citation_recency"]
     assert summary["reference_year_basis"] == "check_date"
