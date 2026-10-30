@@ -1,5 +1,6 @@
 // BUG-551: a definite validation refusal is shown at the field it names and
 // is never reported as an unconfirmed save.
+import { useEffect, type RefObject } from "react";
 import { ApiError } from "./client";
 
 export function isValidationRefusal(error: unknown): error is ApiError {
@@ -15,4 +16,17 @@ export function fieldRefusal(error: unknown, field: string): string | null {
 export function formRefusal(error: unknown, fields: readonly string[]): string | null {
   if (!isValidationRefusal(error)) return null;
   return fields.some((field) => error.fieldMessages.has(field)) ? null : error.message;
+}
+
+export const REFUSAL_NOTHING_CHANGED = "Nothing was changed.";
+
+// After a refusal the submit button was busy, so focus fell to the page; put
+// it back on the refused field and bring its message into view.
+export function useRefusalFocus(refusal: string | null, field: RefObject<HTMLTextAreaElement | HTMLInputElement | null>) {
+  useEffect(() => {
+    if (!refusal || !field.current) return;
+    field.current.focus();
+    const message = field.current.getAttribute("aria-describedby");
+    if (message) document.getElementById(message.split(" ").pop() ?? "")?.scrollIntoView({ block: "nearest" });
+  }, [refusal, field]);
 }

@@ -429,6 +429,7 @@ describe("FlagDetailPage", () => {
     expect(await screen.findByText(`${sentence} Nothing was changed.`)).toBeInTheDocument();
     expect(reason).toHaveAttribute("aria-invalid", "true");
     expect(reason).toHaveAccessibleDescription(`${sentence} Nothing was changed.`);
+    await waitFor(() => expect(reason).toHaveFocus());
     expect(screen.queryByText("Saving could not be confirmed")).not.toBeInTheDocument();
     // The review stays open: the instructor corrects the reason and can confirm again.
     fireEvent.change(reason, { target: { value: "Retyped reason." } });
