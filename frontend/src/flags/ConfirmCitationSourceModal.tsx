@@ -11,7 +11,8 @@ import { useConfirmCitationSource } from "./useFlag";
 import { useFlagActionReview } from "./useFlagActionReview";
 import { useExplicitActionFocus } from "../routing/useExplicitActionFocus";
 import { useFindingCompletion } from "./useFindingCompletion";
-import { fieldRefusal, formRefusal, isValidationRefusal, REFUSAL_NOTHING_CHANGED, useRefusalFocus } from "../api/fieldRefusal";
+import { fieldRefusal, formRefusal, isValidationRefusal, REFUSAL_NOTHING_CHANGED, REFUSAL_TITLE, useRefusalFocus } from "../api/fieldRefusal";
+import { RefusalAlert } from "../ui/RefusalAlert";
 
 export function ConfirmCitationSourceModal({ flag, onClose, onAccepted, continuationIsCurrent, fallbackFocusRef }: { flag: FlagOut; onClose: () => void; onAccepted: (flag: FlagOut) => boolean; continuationIsCurrent: () => boolean; fallbackFocusRef?: React.RefObject<HTMLHeadingElement | null> }) {
   const [reason, setReason] = useState("");
@@ -22,7 +23,8 @@ export function ConfirmCitationSourceModal({ flag, onClose, onAccepted, continua
   const followAction = useExplicitActionFocus(() => reasonRef.current);
   const errorId = useId();
   const refusalId = useId();
-  const refusal = fieldRefusal(confirm.error, "reason") ?? formRefusal(confirm.error, ["reason"]);
+  const refusal = fieldRefusal(confirm.error, "reason");
+  const requestRefusal = formRefusal(confirm.error, ["reason"]);
   useRefusalFocus(refusal, reasonRef);
   const invalid = attempted && !reason.trim();
   const completion = useFindingCompletion();
@@ -61,7 +63,8 @@ export function ConfirmCitationSourceModal({ flag, onClose, onAccepted, continua
           onChange={event => { if (refusal) confirm.reset(); setReason(event.target.value); review.reasonChanged(); setAttempted(false); }} />
       </label>
       {invalid && <p id={errorId} role="alert" className="signal-field-error">Enter where you verified this before confirming.</p>}
-      {!invalid && refusal && <p id={refusalId} role="alert" className="signal-field-error">{refusal} {REFUSAL_NOTHING_CHANGED}</p>}
+      {!invalid && refusal && <p id={refusalId} className="signal-field-error">{refusal} {REFUSAL_NOTHING_CHANGED}</p>}
+      {requestRefusal && <RefusalAlert title={REFUSAL_TITLE} message={requestRefusal} />}
       {confirm.isError && !isValidationRefusal(confirm.error) && <Alert title="Saving could not be confirmed" tone="error" role="alert">Your entered reason is kept. Review the current assessment before trying again.</Alert>}
     </div>
   </Dialog>;

@@ -139,6 +139,44 @@ describe("bulk confirm and dismiss", () => {
     expect(screen.getByLabelText("Comment (optional)")).not.toHaveAttribute("aria-invalid");
   });
 
+  it("brings a dialog-level refusal into view and focuses it, so focus never escapes the dialog", async () => {
+    respond({ detail: [{ type: "value_error", loc: ["body", "flag_ids"], msg: "Value error, select at most 200 findings at a time", input: [] }] }, 422);
+    dialog("confirm", FLAGS, [1, 2, 3]);
+    fireEvent.click(screen.getByRole("button", { name: "Confirm as real issues" }));
+    const alert = await screen.findByRole("alert");
+    expect(within(alert).getByText("These findings were not changed")).toBeInTheDocument();
+    await waitFor(() => expect(alert).toHaveFocus());
+  });
+
+  it("says both refusals when the comment and the selection are refused together", async () => {
+    respond({ detail: [
+      { type: "text_not_storable", loc: ["body", "note"], msg: "This text can't be saved.", input: "x" },
+      { type: "value_error", loc: ["body", "flag_ids"], msg: "Value error, select at most 200 findings at a time", input: [] },
+    ] }, 422);
+    dialog("confirm", FLAGS, [1, 2, 3]);
+    fireEvent.click(screen.getByRole("button", { name: "Confirm as real issues" }));
+    expect(await screen.findByText("This text can't be saved. Nothing was changed.")).toBeInTheDocument();
+    expect(screen.getByText("Select at most 200 findings at a time.")).toBeInTheDocument();
+  });
+
+  it("never blames the comment with the generic sentence when the request was refused", async () => {
+    respond({ detail: [{ type: "missing", loc: ["body", "expected_revision"], msg: "Field required", input: {} }] }, 422);
+    dialog("confirm", FLAGS, [1, 2, 3]);
+    fireEvent.click(screen.getByRole("button", { name: "Confirm as real issues" }));
+    expect(await screen.findByText(/The selection may have changed/)).toBeInTheDocument();
+    expect(screen.queryByText(/Check what you entered/)).not.toBeInTheDocument();
+  });
+
+  it.each([[500, { error: { code: "internal", message: "Something went wrong on our side." } }], [504, {}]])(
+    "does not say nothing changed when a %s leaves the outcome unknown", async (status, body) => {
+      respond(body, status);
+      dialog("confirm", FLAGS, [1, 2, 3]);
+      fireEvent.click(screen.getByRole("button", { name: "Confirm as real issues" }));
+      const alert = await screen.findByRole("alert");
+      expect(within(alert).getByText("The change could not be confirmed")).toBeInTheDocument();
+      expect(alert).not.toHaveTextContent(/not changed|Nothing was changed/);
+    });
+
   it("shows a refusal as given and changes nothing on screen", async () => {
     respond({ error: { code: "conflict", message: "This assessment changed after you reviewed it. Nothing was changed." } }, 409);
     const onDone = dialog("confirm", FLAGS, [1, 2, 3]);

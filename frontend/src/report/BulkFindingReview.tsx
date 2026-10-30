@@ -9,13 +9,13 @@ import { BULK_REVIEW_COPY, plural } from "../domain/bulkReviewCopy";
 import { findingSubject, findingTitle, severityLabel } from "../domain/findingSummary";
 import { countsForReadiness } from "../domain/readinessExclusion";
 import { instructorAnchor } from "../domain/sourceAnchor";
-import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import { useMediaQuery } from "../ui/useMediaQuery";
 import type { FlagFindingCluster } from "./flagClusters";
 import { useBulkResolveFlags, type BulkAction, type BulkResolveOut } from "./useBulkResolve";
 import { fieldRefusal, formRefusal, isValidationRefusal, REFUSAL_NOTHING_CHANGED, useRefusalFocus } from "../api/fieldRefusal";
+import { RefusalAlert } from "../ui/RefusalAlert";
 
 // While the bar is fixed to the screen, its measured height keeps focused
 // controls clear of it (scroll padding reads this variable).
@@ -115,8 +115,12 @@ export function BulkResolveDialog({ action, clusters, checkRunId, expectedRevisi
   const textField = action === "confirm" ? "note" : "reason";
   const refusal = fieldRefusal(resolve.error, textField);
   useRefusalFocus(refusal, textRef);
-  const error = isValidationRefusal(resolve.error) ? formRefusal(resolve.error, [textField])
-    : resolve.error instanceof ApiError ? resolve.error.message : resolve.error ? "The change could not be confirmed. Review the current findings before trying again." : null;
+  // Only a refusal (4xx) is known to have changed nothing; a failure or an
+  // unreadable answer may have been applied, so it is not said to have not.
+  const refused = resolve.error instanceof ApiError && resolve.error.status >= 400 && resolve.error.status < 500;
+  const error = isValidationRefusal(resolve.error) ? formRefusal(resolve.error, [textField], BULK_REVIEW_COPY.requestRefused)
+    : refused && resolve.error instanceof ApiError ? resolve.error.message
+      : resolve.error ? BULK_REVIEW_COPY.unconfirmedBody : null;
 
   function submit() {
     setAttempted(true);
@@ -157,7 +161,7 @@ export function BulkResolveDialog({ action, clusters, checkRunId, expectedRevisi
           onChange={(event) => { if (refusal) resolve.reset(); onText(event.target.value); setAttempted(false); }} />
         <p id={`${fieldId}-count`} className={tooLong ? "signal-field-error" : "signal-field-hint"}>{BULK_REVIEW_COPY.counter(trimmed.length)}</p>
         {invalid && <p id={`${fieldId}-error`} role="alert" className="signal-field-error">{tooLong ? BULK_REVIEW_COPY.tooLong : BULK_REVIEW_COPY.reasonMissing}</p>}
-        {!invalid && refusal && <p id={`${fieldId}-refusal`} role="alert" className="signal-field-error">{refusal} {REFUSAL_NOTHING_CHANGED}</p>}
+        {!invalid && refusal && <p id={`${fieldId}-refusal`} className="signal-field-error">{refusal} {REFUSAL_NOTHING_CHANGED}</p>}
       </div>
       {needsAcknowledgement && <div className="signal-field">
         <label className="signal-bulk-dialog__acknowledge">
@@ -168,7 +172,7 @@ export function BulkResolveDialog({ action, clusters, checkRunId, expectedRevisi
         </label>
         {unacknowledged && <p id={`${fieldId}-ack-error`} role="alert" className="signal-field-error">{BULK_REVIEW_COPY.acknowledgeMissing}</p>}
       </div>}
-      {error && <Alert title="Nothing was changed" tone="error" role="alert">{error}</Alert>}
+      {error && <RefusalAlert title={refused ? BULK_REVIEW_COPY.refusedTitle : BULK_REVIEW_COPY.unconfirmedTitle} message={error} />}
     </div>
   </Dialog>;
 }
