@@ -87,7 +87,10 @@ function restoreRegisteredFocus(elementId: string, scrollBlock: ScrollLogicalPos
     removePlacementIntent();
     if (!ownsPlacement || !target.isConnected || document.activeElement !== target) return;
     const bounds = target.getBoundingClientRect();
-    if (scrollBlock !== "nearest" || bounds.top < 0 || bounds.bottom > window.innerHeight) {
+    // A fixed bar at the bottom (bulk selection, uploads tray) reserves its
+    // height as scroll padding; a control under it is not in view.
+    const reserved = Number.parseFloat(getComputedStyle(document.documentElement).scrollPaddingBottom) || 0;
+    if (scrollBlock !== "nearest" || bounds.top < 0 || bounds.bottom > window.innerHeight - reserved) {
       target.scrollIntoView({ block: scrollBlock });
     }
   });

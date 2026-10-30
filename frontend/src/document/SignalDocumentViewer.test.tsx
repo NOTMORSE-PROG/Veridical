@@ -555,6 +555,25 @@ describe("SignalDocumentViewerPage", () => {
     expect(screen.getByRole("link", { name: "Open readiness report" })).toHaveAttribute("href", back);
   });
 
+  it("keeps the way back to the report findings when moving to the next finding", async () => {
+    const second = { ...SUMMARY, id: 9, page_anchor: "p. 19", evidence_excerpt: "Another contradiction." };
+    vi.stubGlobal("fetch", stubFetchByPath({
+      "/check-runs/5/document": { ...VIEWER, regions: [...VIEWER.regions,
+        { flag_id: 9, kind: "page_only", page: 19, end_page: null, bbox: null, all_bboxes: [], paragraph: null, index: null }] },
+      "/check-runs/5/report": REPORT,
+      "/check-runs/5/escalated": [],
+      "/check-runs/5/flags": [SUMMARY, second],
+      "/check-runs/5/document/reuse-matches": { passage_archive_size_n: 8, matches: [] },
+      "/flags/7": FLAG,
+      "/flags/9": { ...FLAG, id: 9, page_anchor: "p. 19" },
+    }));
+    const routeReturnFocus = { returnPath: "/report/5?section=findings", elementId: "signal-flag-review-7" };
+    renderWithProviders(<SignalDocumentViewerPage />, { route: "/report/5/document?view=finding&finding=7&location=7", path: "/report/:checkRunId/document", state: { routeReturnFocus } });
+    fireEvent.click(await screen.findByRole("button", { name: "Next finding" }));
+    await waitFor(() => expect(screen.getByRole("link", { name: "Back to findings list" })).toHaveAttribute("href", "/report/5?section=findings#signal-flag-review-9"));
+    expect(screen.getByRole("link", { name: "Open readiness report" })).toHaveAttribute("href", "/report/5?section=findings#signal-flag-review-9");
+  });
+
   it("keeps unavailable source content honest while preserving a return to the report", async () => {
     stubViewer({ ...VIEWER, available: false, unavailable_reason: "Stored content was removed by the instructor.", purged_at: null });
     renderWithProviders(<SignalDocumentViewerPage />, { route: "/report/5/document", path: "/report/:checkRunId/document" });
