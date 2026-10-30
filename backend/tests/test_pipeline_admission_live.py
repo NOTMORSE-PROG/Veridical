@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import time
 from datetime import UTC, datetime
 
 import pytest
@@ -120,12 +121,16 @@ async def test_distinct_route_kicks_cannot_enter_concurrently(session_factory, m
 
 
 def fast_settings():
+    # Short enough to keep the module quick, long enough that an ordinary
+    # slow runner (event-loop stalls of a few hundred ms were measured with
+    # the test process held to a quarter of a CPU) does not time out the
+    # setup admissions. Stall tolerance has its own tests below.
     return Settings(
         _env_file=None,
         veridical_fake_llm=True,
-        pipeline_claim_stale_seconds=0.5,
-        pipeline_claim_renew_seconds=0.04,
-        pipeline_coordination_timeout_seconds=0.08,
+        pipeline_claim_stale_seconds=1.0,
+        pipeline_claim_renew_seconds=0.05,
+        pipeline_coordination_timeout_seconds=0.4,
         pipeline_worker_poll_seconds=0.025,
         pipeline_run_deadline_seconds=5,
     )
@@ -183,6 +188,299 @@ async def test_uninterrupted_module_renews_without_committing_its_pending_work(
         assert (
             await observer.scalar(select(CheckRun.claimed_at).where(CheckRun.id == first_id))
             is None
+        )
+
+
+class StallOnCommit:
+    """Session factory whose next commit blocks the event loop once.
+
+    The block is scheduled with call_soon just before the commit is sent, so
+    it runs while the commit's reply is in flight: the server commits, and the
+    reply and the coordination timeout are both due when the loop resumes.
+    That is what a slow host does to a renewal (a stop-the-world pause, a
+    GIL-bound import in a worker thread)."""
+
+    def __init__(self, factory, seconds):
+        self.factory, self.seconds = factory, seconds
+        self.armed = False
+        self.resumed = asyncio.Event()
+        self.resumed_at = None
+
+    def __call__(self):
+        return _StallSession(self)
+
+    def _block(self):
+        time.sleep(self.seconds)
+        self.resumed_at = time.monotonic()
+        self.resumed.set()
+
+
+class _StallSession:
+    def __init__(self, owner):
+        self.owner = owner
+
+    async def __aenter__(self):
+        self.real = self.owner.factory()
+        await self.real.__aenter__()
+        return self
+
+    async def __aexit__(self, *args):
+        return await self.real.__aexit__(*args)
+
+    def __getattr__(self, name):
+        return getattr(self.real, name)
+
+    async def commit(self):
+        if self.owner.armed:
+            self.owner.armed = False
+            # Flush first so the block lands on the COMMIT round trip itself.
+            await self.real.flush()
+            asyncio.get_running_loop().call_soon(self.owner._block)
+        await self.real.commit()
+
+
+def stall_settings(stale):
+    return fast_settings().model_copy(
+        update={
+            "pipeline_claim_stale_seconds": stale,
+            "pipeline_claim_renew_seconds": 0.1,
+            "pipeline_coordination_timeout_seconds": 0.3,
+        }
+    )
+
+
+async def test_a_loop_stall_during_a_renewal_commit_keeps_the_claim(
+    session_factory, monkeypatch, caplog
+):
+    """A 2 s stall while a renewal's commit is in flight: the commit lands but
+    its reply arrives after the coordination timeout. The lease must recognise
+    its own new token instead of declaring the claim lost (which stopped
+    renewal, let the claim go stale and let a second admission start the same
+    run while the first was still in it)."""
+    first_id, _ = await seed_queue(session_factory)
+    settings = stall_settings(stale=3.0)
+    stall = StallOnCommit(session_factory, 2.0)
+    leases, entries = [], []
+    real_lease = worker.ClaimLease
+
+    def capture(*args, **kwargs):
+        leases.append(real_lease(*args, **kwargs))
+        return leases[-1]
+
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def held(session, run, settings, heartbeat=None, **_kwargs):
+        entries.append(run.id)
+        entered.set()
+        await release.wait()
+        await heartbeat()
+        run.status = CheckRunStatus.done
+        await session.commit()
+
+    monkeypatch.setattr(worker, "ClaimLease", capture)
+    monkeypatch.setattr(worker, "run_check_run", held)
+    task = asyncio.create_task(worker.advance_once(first_id, stall, settings))
+    try:
+        await asyncio.wait_for(entered.wait(), 5)
+        (lease,) = leases
+        stall.armed = True
+        await asyncio.wait_for(stall.resumed.wait(), 5)
+
+        state = await asyncio.wait_for(worker.worker_step(session_factory, settings), 2)
+        assert state == AdmissionState.busy
+        assert time.monotonic() - stall.resumed_at < 0.5
+        assert entries == [first_id]
+        assert "Claim renewal deferred" in caplog.text, "the stall must cut off a renewal reply"
+
+        async with session_factory() as observer:
+            after_stall = await observer.scalar(
+                select(CheckRun.claimed_at).where(CheckRun.id == first_id)
+            )
+        deadline = time.monotonic() + 2
+        renewed = after_stall
+        while renewed == after_stall and time.monotonic() < deadline:
+            await asyncio.sleep(0.05)
+            async with session_factory() as observer:
+                renewed = await observer.scalar(
+                    select(CheckRun.claimed_at).where(CheckRun.id == first_id)
+                )
+        assert renewed > after_stall, "renewal must continue after the stall"
+        assert not lease.lost
+    finally:
+        release.set()
+        await asyncio.wait_for(task, 5)
+    assert entries == [first_id]
+    async with session_factory() as observer:
+        run = await observer.get(CheckRun, first_id)
+        assert run.status == CheckRunStatus.done and run.claimed_at is None
+
+
+async def test_a_stall_longer_than_the_claim_fails_the_holder_without_hanging(
+    session_factory, monkeypatch
+):
+    """With a 1 s claim, a 2 s stall really does end ownership: the holder
+    must find out at its next checkpoint, renewal must not revive the stale
+    claim, and its release must still clear the row."""
+    first_id, _ = await seed_queue(session_factory)
+    settings = stall_settings(stale=1.0)
+    stall = StallOnCommit(session_factory, 2.0)
+    leases = []
+    real_lease = worker.ClaimLease
+
+    def capture(*args, **kwargs):
+        leases.append(real_lease(*args, **kwargs))
+        return leases[-1]
+
+    entered, release = asyncio.Event(), asyncio.Event()
+    outcome = {}
+
+    async def held(session, run, settings, heartbeat=None, **_kwargs):
+        entered.set()
+        await release.wait()
+        try:
+            await heartbeat()
+        except ClaimLost:
+            outcome["lost"] = True
+            await session.rollback()
+            return False
+        outcome["lost"] = False
+
+    monkeypatch.setattr(worker, "ClaimLease", capture)
+    monkeypatch.setattr(worker, "run_check_run", held)
+    task = asyncio.create_task(worker.advance_once(first_id, stall, settings))
+    try:
+        await asyncio.wait_for(entered.wait(), 5)
+        (lease,) = leases
+        stall.armed = True
+        await asyncio.wait_for(stall.resumed.wait(), 5)
+        async with session_factory() as observer:
+            stored = await observer.scalar(
+                select(CheckRun.claimed_at).where(CheckRun.id == first_id)
+            )
+        await asyncio.sleep(0.3)
+        assert lease.lost
+        async with session_factory() as observer:
+            assert (
+                await observer.scalar(select(CheckRun.claimed_at).where(CheckRun.id == first_id))
+                == stored
+            ), "renewal must not revive a claim that went stale"
+    finally:
+        release.set()
+        await asyncio.wait_for(task, 5)
+    assert outcome == {"lost": True}
+    async with session_factory() as observer:
+        run = await observer.get(CheckRun, first_id)
+        assert run.claimed_at is None and run.status == CheckRunStatus.queued
+
+
+def slow_renewal_settings():
+    """Renewals a full second apart, so a test can act between the renewal
+    whose reply was cut off and the next one (which would settle it)."""
+    return fast_settings().model_copy(
+        update={
+            "pipeline_claim_stale_seconds": 3.0,
+            "pipeline_claim_renew_seconds": 1.0,
+            "pipeline_coordination_timeout_seconds": 0.3,
+        }
+    )
+
+
+async def lease_with_cut_off_renewal(session_factory, stall_seconds):
+    """A started lease whose latest renewal committed but never got its reply."""
+    (run_id,) = await seed_queue(session_factory, ("A",))
+    settings = slow_renewal_settings()
+    async with session_factory() as session:
+        admission = await admit_next(session, settings)
+    stall = StallOnCommit(session_factory, stall_seconds)
+    lease = ClaimLease(stall, admission, settings)
+    stall.armed = True
+    lease.start()
+    await asyncio.wait_for(stall.resumed.wait(), 5)
+    async with session_factory() as observer:
+        stored = await observer.scalar(select(CheckRun.claimed_at).where(CheckRun.id == run_id))
+    return run_id, settings, lease, stored
+
+
+async def test_a_lifecycle_boundary_after_a_cut_off_renewal_sees_its_own_claim(
+    session_factory,
+):
+    run_id, settings, lease, stored = await lease_with_cut_off_renewal(session_factory, 1.0)
+    try:
+        assert stored != lease.token, "the renewal's commit must have landed unacknowledged"
+        async with session_factory() as pipeline:
+            await machine._assert_claim_owner(pipeline, run_id, settings, lease.current_token)
+            await pipeline.rollback()
+        assert lease.token == stored
+    finally:
+        await lease.stop()
+        async with session_factory() as cleanup:
+            await worker._release_claim(cleanup, run_id, *lease.tokens())
+
+
+async def test_a_holder_stopping_after_a_cut_off_renewal_still_releases_its_claim(
+    session_factory, monkeypatch
+):
+    first_id, _ = await seed_queue(session_factory)
+    settings = slow_renewal_settings()
+    stall = StallOnCommit(session_factory, 1.0)
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def held(session, run, settings, **_kwargs):
+        entered.set()
+        await release.wait()  # returns without a checkpoint that would settle it
+
+    monkeypatch.setattr(worker, "run_check_run", held)
+    task = asyncio.create_task(worker.advance_once(first_id, stall, settings))
+    try:
+        await asyncio.wait_for(entered.wait(), 5)
+        stall.armed = True
+        await asyncio.wait_for(stall.resumed.wait(), 5)
+    finally:
+        release.set()
+        await asyncio.wait_for(task, 5)
+    async with session_factory() as observer:
+        assert (
+            await observer.scalar(select(CheckRun.claimed_at).where(CheckRun.id == first_id))
+            is None
+        ), "a claim left behind would hold the slot for the whole stale window"
+
+
+async def test_a_stall_past_the_last_confirmed_expiry_keeps_a_claim_the_database_extended(
+    session_factory,
+):
+    """The stall outlasts the expiry known from the last acknowledged renewal
+    but not the one written by the cut-off renewal; the database still shows
+    the claim as fresh, so the holder must keep it."""
+    run_id, settings, lease, stored = await lease_with_cut_off_renewal(session_factory, 2.5)
+    try:
+        await lease.checkpoint()
+        assert not lease.lost and lease.token == stored
+    finally:
+        await lease.stop()
+        async with session_factory() as cleanup:
+            await worker._release_claim(cleanup, run_id, *lease.tokens())
+
+
+async def test_admission_that_times_out_answers_busy_and_withdraws_its_claim(
+    session_factory, monkeypatch
+):
+    """A stall while admission's claim commit is in flight: the claim lands
+    but admission cannot know. It answers busy (no crash out of the poller)
+    and takes the claim back, so the run is not held for the stale window."""
+    (run_id,) = await seed_queue(session_factory, ("A",))
+    settings = stall_settings(stale=3.0)
+    stall = StallOnCommit(session_factory, 1.0)
+    stall.armed = True
+
+    async def forbidden(*_args, **_kwargs):
+        pytest.fail("An unconfirmed admission must not run the check")
+
+    monkeypatch.setattr(worker, "run_check_run", forbidden)
+    state = await asyncio.wait_for(worker.worker_step(stall, settings), 5)
+    assert state == AdmissionState.busy
+    async with session_factory() as observer:
+        assert (
+            await observer.scalar(select(CheckRun.claimed_at).where(CheckRun.id == run_id)) is None
         )
 
 

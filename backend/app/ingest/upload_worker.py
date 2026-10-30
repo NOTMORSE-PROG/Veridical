@@ -6,7 +6,7 @@ from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 
 from app.config import get_settings
 from app.db import get_session_factory
@@ -15,7 +15,8 @@ from app.groups.service import DEFAULT_GROUP_LABEL
 from app.ingest.admission import preparation_scope
 from app.ingest.direct_upload import relay_local_path
 from app.ingest.receipts import ingestion_receipt
-from app.ingest.service import StagedSource, _ingest_upload
+from app.ingest.service import PreparationHandedOff, StagedSource, _ingest_upload
+from app.loop_probe import LoopLagProbe
 from app.memory import return_freed_memory
 from app.models.enums import IngestFailureReason, IngestStatus
 from app.models.manuscript import Manuscript
@@ -66,23 +67,59 @@ async def _cleanup_staging(session, settings):
         storage.close()
 
 
-async def _heartbeat(attempt_id, lease_id, settings):
+def _lease_end(settings):
+    # The database clock, so instances whose clocks differ by a few seconds
+    # still agree on when a lease has run out.
+    return func.clock_timestamp() + timedelta(seconds=settings.direct_upload_lease_seconds)
+
+
+async def _hold_lease(session, attempt_id, lease_id, settings) -> bool:
+    """Extend the lease if this worker still owns the attempt.
+
+    The row stays locked until the caller's transaction ends, so another
+    worker cannot retire the attempt in between; the caller commits."""
+    held = await session.scalar(
+        update(UploadAttempt)
+        .where(
+            UploadAttempt.id == attempt_id,
+            UploadAttempt.lease_id == lease_id,
+            UploadAttempt.status == "processing",
+        )
+        .values(lease_until=_lease_end(settings))
+        .returning(UploadAttempt.id)
+    )
+    return held is not None
+
+
+async def _heartbeat(attempt_id, lease_id, settings, on_lost):
+    """Keep the lease alive while this process prepares the upload.
+
+    Beats keep a fixed cadence and each renewal is bounded by one beat, so a
+    slow renewal does not push the next one back. A failed renewal is retried
+    at the next beat instead of ending the heartbeat: the lease is short, and
+    one database hiccup must not let a live preparation be retired."""
+    loop = asyncio.get_running_loop()
+    beat = settings.direct_upload_heartbeat_seconds
+    due = loop.time()
     while True:
-        await asyncio.sleep(settings.direct_upload_lease_seconds / 4)
-        async with get_session_factory()() as session:
-            await session.execute(
-                update(UploadAttempt)
-                .where(
-                    UploadAttempt.id == attempt_id,
-                    UploadAttempt.lease_id == lease_id,
-                    UploadAttempt.status == "processing",
-                )
-                .values(
-                    lease_until=datetime.now(UTC)
-                    + timedelta(seconds=settings.direct_upload_lease_seconds)
-                )
-            )
-            await session.commit()
+        # After a stall, beat at once rather than bursting the missed beats.
+        due = max(due + beat, loop.time())
+        await asyncio.sleep(due - loop.time())
+        try:
+            async with asyncio.timeout(beat):
+                async with get_session_factory()() as session:
+                    held = await _hold_lease(session, attempt_id, lease_id, settings)
+                    await session.commit()
+        except Exception as exc:  # noqa: BLE001 -- retried at the next beat
+            _logger.warning("Upload lease renewal deferred (%s)", failure_summary(exc))
+            continue
+        if not held:
+            # Retired by another worker after missed beats: whatever this
+            # process still does for the attempt would contradict the
+            # interrupted answer the instructor was already given.
+            _logger.warning("Upload lease for attempt %s is no longer held", attempt_id)
+            on_lost()
+            return
 
 
 async def _retire_interrupted(session):
@@ -92,8 +129,11 @@ async def _retire_interrupted(session):
     )
     rows = await session.execute(
         update(UploadAttempt)
-        .where(UploadAttempt.status == "processing", UploadAttempt.lease_until < datetime.now(UTC))
-        .values(status="failed", error=message)
+        .where(
+            UploadAttempt.status == "processing",
+            UploadAttempt.lease_until < func.clock_timestamp(),
+        )
+        .values(status="failed", error=message, lease_until=None)
         .returning(UploadAttempt.manuscript_id)
     )
     ids = [value for value in rows.scalars() if value is not None]
@@ -205,13 +245,30 @@ async def _process_next_upload(settings, lease, wake_pipeline=None):
         if attempt is None:
             return False
         attempt.status, attempt.lease_id = "processing", str(uuid4())
-        attempt.lease_until = datetime.now(UTC) + timedelta(
-            seconds=settings.direct_upload_lease_seconds
-        )
+        attempt.lease_until = _lease_end(settings)
         await session.commit()
         attempt_id, lease_id = attempt.id, attempt.lease_id
         instructor_id, start_rubric_id = attempt.instructor_id, attempt.start_rubric_id
-        heartbeat = asyncio.create_task(_heartbeat(attempt_id, lease_id, settings))
+        preparing = asyncio.current_task()
+        handed_off = asyncio.Event()
+        publishing = False
+
+        def stop_preparing():
+            # The attempt was retired while this process still worked on it.
+            # Stop, unless only the fenced final write is left.
+            handed_off.set()
+            if not publishing:
+                preparing.cancel()
+
+        async def still_owned(owner_session):
+            # Runs inside the transaction that marks the manuscript ready, so
+            # a retired attempt can never end with a ready manuscript.
+            if not await _hold_lease(owner_session, attempt_id, lease_id, settings):
+                raise PreparationHandedOff
+
+        heartbeat = asyncio.create_task(_heartbeat(attempt_id, lease_id, settings, stop_preparing))
+        probe = LoopLagProbe(settings.event_loop_probe_seconds).start()
+        started = asyncio.get_running_loop().time()
         receipt = manuscript_id = outcome = None
         try:
             # The staged object is copied inside storage for the durable
@@ -236,11 +293,15 @@ async def _process_next_upload(settings, lease, wake_pipeline=None):
                 preparation_lease=lease,
                 upload_attempt=attempt,
                 staged=staged,
+                before_finalize=still_owned,
             )
             receipt = ingestion_receipt(*values).model_dump(mode="json")
             manuscript_id = values[0].id
             check_run_id = check_start_error = None
             if start_rubric_id is not None:
+                # The attempt row stays locked until the check start commits,
+                # so the check never starts for an attempt already retired.
+                await still_owned(session)
                 check_run_id, check_start_error = await _start_requested_check(
                     session, instructor_id, manuscript_id, start_rubric_id
                 )
@@ -249,12 +310,24 @@ async def _process_next_upload(settings, lease, wake_pipeline=None):
                     # Same effect as a manual start: the scheduler looks now
                     # instead of at its next poll (or never, without polling).
                     wake_pipeline()
+            publishing = True
             await _finish_done(
                 session, attempt_id, lease_id, receipt, check_run_id, check_start_error
             )
+        except PreparationHandedOff:
+            await session.rollback()
+            _logger.warning("Upload attempt %s was retired before it finished", attempt_id)
+        except asyncio.CancelledError:
+            # Only the heartbeat's own stop is absorbed; a shutdown is not.
+            if not handed_off.is_set() or preparing.uncancel() > 0:
+                raise
+            with suppress(Exception):
+                await session.rollback()
+            _logger.warning("Upload attempt %s was retired before it finished", attempt_id)
         except Exception as exc:
             await session.rollback()
             if receipt is not None:
+                publishing = True
                 # The manuscript is ready; a later failure (recording the
                 # outcome) must not report a finished upload as failed.
                 _logger.warning("Upload finish was retried (%s)", failure_summary(exc))
@@ -319,8 +392,15 @@ async def _process_next_upload(settings, lease, wake_pipeline=None):
             _logger.warning("Direct upload processing did not complete (%s)", failure_summary(exc))
         finally:
             heartbeat.cancel()
-            with suppress(asyncio.CancelledError, Exception):
-                await heartbeat
+            # Wait without absorbing a cancellation aimed at this task.
+            await asyncio.wait([heartbeat])
+            worst = await probe.stop()
+            _logger.info(
+                "Upload preparation %s ended after %.1f s; worst event-loop delay %.2f s",
+                attempt_id,
+                asyncio.get_running_loop().time() - started,
+                worst,
+            )
             # A relay copy that was not consumed would only fill the disk.
             relay_local_path(settings, attempt_id).unlink(missing_ok=True)
         return True

@@ -13,7 +13,7 @@ from app.config import Settings
 from app.models.run import CheckRun
 from app.pipeline.coordination import Admission
 from app.pipeline.guards import try_guard
-from app.pipeline.machine import ClaimLost, TerminalFailure
+from app.pipeline.machine import ClaimLost, ClaimYield, TerminalFailure
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +38,11 @@ class ClaimLease:
             settings.pipeline_run_deadline_seconds - elapsed, 0
         )
         self.lost = False
+        # A renewal whose commit was sent but whose reply never arrived in
+        # time: (token it wrote, monotonic start of that attempt). The commit
+        # may or may not have landed, so the stored claim can hold either
+        # value until a later read settles it.
+        self.pending: tuple[datetime, float] | None = None
         self.lock = asyncio.Lock()
         self.task: asyncio.Task | None = None
         self.stopping = asyncio.Event()
@@ -52,9 +57,47 @@ class ClaimLease:
             await self.task
             self.task = None
 
+    def tokens(self) -> tuple[datetime, ...]:
+        """Every value the stored claim may hold for this lease (for release)."""
+        return (self.token,) if self.pending is None else (self.token, self.pending[0])
+
+    def _owns(self, stored: datetime | None) -> bool:
+        """True when the stored claim is this lease's. A renewal that timed out
+        after sending its commit may still have landed; finding its token in
+        the row proves it did, so it becomes the current token."""
+        if stored is not None and stored == self.token:
+            return True
+        if self.pending is not None and stored == self.pending[0]:
+            token, attempt = self.pending
+            self.token, self.pending = token, None
+            self.expires = max(self.expires, attempt + self.settings.pipeline_claim_stale_seconds)
+            return True
+        return False
+
+    async def _settle_pending(self) -> None:
+        """Bounded read that adopts a renewal whose commit outcome was unknown."""
+        try:
+            async with asyncio.timeout(self.settings.pipeline_coordination_timeout_seconds):
+                async with self.factory() as session:
+                    stored = await session.scalar(
+                        select(CheckRun.claimed_at).where(CheckRun.id == self.run_id)
+                    )
+            self._owns(stored)
+        except (DBAPIError, TimeoutError):
+            # Still unknown; the next renewal or checkpoint settles it.
+            pass
+
     async def current_token(self) -> datetime:
         """Synchronized snapshot; lifecycle callers already hold their run row."""
         async with self.lock:
+            if self.pending is not None and not self.lost:
+                # The caller compares this token with the row it has locked;
+                # an unsettled renewal would make our own claim look replaced.
+                await self._settle_pending()
+                if self.pending is not None:
+                    # Still unknown which token the row holds: step back for
+                    # a later turn rather than report the claim as taken.
+                    raise ClaimYield
             if self.lost or asyncio.get_running_loop().time() >= self.expires:
                 raise ClaimLost
             return self.token
@@ -78,15 +121,18 @@ class ClaimLease:
                         )
                         if (
                             row is None
-                            or row.claimed_at != self.token
+                            or not self._owns(row.claimed_at)
                             or self.token
                             < now - timedelta(seconds=self.settings.pipeline_claim_stale_seconds)
                         ):
                             self.lost = True
                             return
+                        # Holding the row lock means no earlier renewal is still
+                        # in flight, so the new attempt replaces any older one.
                         row.claimed_at = now
+                        self.pending = (now, attempt)
                         await session.commit()
-                        self.token = now
+                        self.token, self.pending = now, None
                         self.expires = attempt + self.settings.pipeline_claim_stale_seconds
             except (DBAPIError, TimeoutError):
                 # A busy pipeline row must release the global guard promptly.
@@ -97,7 +143,8 @@ class ClaimLease:
         """Read ownership without committing or sharing the analytical session."""
         async with self.lock:
             now_mono = asyncio.get_running_loop().time()
-            if self.lost or now_mono >= self.expires:
+            # An unsettled renewal may have extended ownership; read first.
+            if self.lost or (now_mono >= self.expires and self.pending is None):
                 raise ClaimLost
             try:
                 async with asyncio.timeout(self.settings.pipeline_coordination_timeout_seconds):
@@ -110,7 +157,7 @@ class ClaimLease:
                             )
                         ).one_or_none() or (None, None)
                         if (
-                            actual != self.token
+                            not self._owns(actual)
                             or now is None
                             or actual
                             < now - timedelta(seconds=self.settings.pipeline_claim_stale_seconds)
@@ -118,9 +165,10 @@ class ClaimLease:
                             self.lost = True
                             raise ClaimLost
             except (DBAPIError, TimeoutError):
-                if asyncio.get_running_loop().time() >= self.expires:
-                    self.lost = True
-                    raise ClaimLost from None
+                pass
+            if asyncio.get_running_loop().time() >= self.expires:
+                self.lost = True
+                raise ClaimLost
             if asyncio.get_running_loop().time() >= self.deadline:
                 raise TerminalFailure(
                     "run_deadline_exceeded",
@@ -144,5 +192,7 @@ class ClaimLease:
             except Exception:
                 self.lost = True
                 logger.warning("Claim renewal stopped for check run %s", self.run_id)
-            if asyncio.get_running_loop().time() >= self.expires:
+            # With an unsettled renewal the next locked read decides; giving up
+            # here would abandon a claim that may already have been extended.
+            if asyncio.get_running_loop().time() >= self.expires and self.pending is None:
                 self.lost = True

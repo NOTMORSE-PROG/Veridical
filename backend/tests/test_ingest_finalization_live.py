@@ -230,6 +230,37 @@ async def test_fresh_docx_identity_is_not_published_by_an_intermediate_consumer_
     assert saved["status"] == IngestStatus.failed
 
 
+async def test_a_preparation_handed_off_before_finalizing_publishes_nothing(
+    session_factory, tmp_path
+):
+    """An upload retired by another worker while this one still prepared it:
+    the refusal raised inside the final transaction must leave the record
+    neither ready nor rewritten as a preparation failure."""
+    identity, _, _, source, _, _, _ = await seed(session_factory, tmp_path, "docx")
+    calls = []
+
+    async def handed_off(active_session):
+        calls.append(active_session)
+        raise service.PreparationHandedOff
+
+    async with session_factory() as session:
+        manuscript = await session.get(Manuscript, identity)
+        with pytest.raises(service.PreparationHandedOff):
+            await service.ingest_manuscript(
+                session,
+                manuscript,
+                source,
+                Settings(_env_file=None, data_dir=tmp_path / "data"),
+                read_images=False,
+                before_finalize=handed_off,
+            )
+        assert calls == [session]
+    saved = await snapshot(session_factory, identity)
+    assert saved["status"] == IngestStatus.processing
+    assert saved["detail"] == "Prior safe size-limit message"
+    assert saved["citations"][0][2] == "Original, A. (2020). Old Reference. Example Journal."
+
+
 async def install_fault(session_factory, manuscript_id, fault):
     event = "UPDATE" if fault == "deferred_commit" else "INSERT"
     table = "manuscript" if fault == "deferred_commit" else "citation"

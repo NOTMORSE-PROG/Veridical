@@ -10,7 +10,7 @@ import hashlib
 import logging
 import os
 import zipfile
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
 from dataclasses import asdict, dataclass
@@ -91,6 +91,12 @@ EXTRACTORS: dict[str, Callable[[str, Settings], ExtractionResult]] = {
 }
 
 logger = logging.getLogger(__name__)
+
+
+class PreparationHandedOff(Exception):
+    """The upload this preparation served was retired by another worker, so
+    its result must not be published (the instructor was already told the
+    preparation was interrupted)."""
 
 
 def raw_store_path(settings: Settings, manuscript_id: int) -> Path:
@@ -260,8 +266,12 @@ async def ingest_manuscript(
     *,
     read_images: bool = True,
     _preparation_lease: PreparationLease | None = None,
+    before_finalize: Callable[[AsyncSession], Awaitable[None]] | None = None,
 ) -> ExtractionResult:
-    """Admit direct callers too; nested uploads borrow the same preparation owner."""
+    """Admit direct callers too; nested uploads borrow the same preparation owner.
+
+    `before_finalize` runs inside the transaction that marks the manuscript
+    ready and may refuse it by raising `PreparationHandedOff`."""
     settings = settings or get_settings()
     with preparation_scope(settings, _preparation_lease) as lease:
         return await _ingest_manuscript(
@@ -271,6 +281,7 @@ async def ingest_manuscript(
             settings,
             read_images=read_images,
             preparation_lease=lease,
+            before_finalize=before_finalize,
         )
 
 
@@ -282,6 +293,7 @@ async def _ingest_manuscript(
     *,
     read_images: bool = True,
     preparation_lease: PreparationLease,
+    before_finalize: Callable[[AsyncSession], Awaitable[None]] | None = None,
 ) -> ExtractionResult:
     """`read_images=False` (V-077, Library submissions) skips the vision
     pass, the only Gemini call in ingestion: a Library manuscript is stored
@@ -424,7 +436,14 @@ async def _ingest_manuscript(
         session.add_all(Citation(manuscript_id=manuscript_id, **asdict(draft)) for draft in drafts)
         manuscript.section_tree = result.section_tree.model_dump()
         manuscript.ingest_status = IngestStatus.done
+        if before_finalize is not None:
+            await before_finalize(session)
         await session.commit()
+    except PreparationHandedOff:
+        # Not a preparation failure: the record already carries the
+        # interrupted answer, and this result is discarded.
+        await session.rollback()
+        raise
     except FileMalformedError as exc:
         # Stage boundary (CODING.md §2): the failure is recorded on the row,
         # then propagates — run-level stage bookkeeping arrives with V-018.
@@ -555,6 +574,7 @@ async def _ingest_upload(
     preparation_lease: PreparationLease,
     upload_attempt=None,
     staged: StagedSource | None = None,
+    before_finalize: Callable[[AsyncSession], Awaitable[None]] | None = None,
 ) -> tuple[Manuscript, ExtractionResult, int, TitlePageProposal, Manuscript | None]:
     """Full upload flow for the HTTP surface: save (size-capped) → own row
     → ingest. `instructor_id` is the authenticated caller (BUG-002/D-020) —
@@ -614,7 +634,7 @@ async def _ingest_upload(
         manuscript.file_ref = str(dest)
         await session.commit()
         return await _finish_ingest_upload(
-            session, manuscript, dest, settings, instructor_id, preparation_lease
+            session, manuscript, dest, settings, instructor_id, preparation_lease, before_finalize
         )
     try:
         await save_upload(chunks, dest, settings)
@@ -641,7 +661,7 @@ async def _ingest_upload(
     manuscript.file_ref = str(dest)
     await session.commit()
     return await _finish_ingest_upload(
-        session, manuscript, dest, settings, instructor_id, preparation_lease
+        session, manuscript, dest, settings, instructor_id, preparation_lease, before_finalize
     )
 
 
@@ -652,6 +672,7 @@ async def _finish_ingest_upload(
     settings: Settings,
     instructor_id: int,
     preparation_lease: PreparationLease,
+    before_finalize: Callable[[AsyncSession], Awaitable[None]] | None = None,
 ) -> tuple[Manuscript, ExtractionResult, int, TitlePageProposal, Manuscript | None]:
     # BUG-234: the upload is now durably backed and its hash is committed.
     # Query only this authenticated instructor's rows; exposing whether the
@@ -676,7 +697,12 @@ async def _finish_ingest_upload(
         .limit(1)
     )
     result = await ingest_manuscript(
-        session, manuscript, dest, settings, _preparation_lease=preparation_lease
+        session,
+        manuscript,
+        dest,
+        settings,
+        _preparation_lease=preparation_lease,
+        before_finalize=before_finalize,
     )
     n_citations = (
         await session.scalar(

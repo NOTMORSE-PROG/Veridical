@@ -320,7 +320,7 @@ def status_response(attempt):
         "error": attempt.error,
         "transport": attempt.upload_transport,
         "poll_after_ms": settings.direct_upload_poll_seconds * 1000,
-        "poll_timeout_ms": settings.direct_upload_lease_seconds * 1000,
+        "poll_timeout_ms": settings.direct_upload_poll_timeout_seconds * 1000,
         "filename": attempt.filename,
         "size": attempt.source_bytes,
         "created_at": attempt.created_at.isoformat() if attempt.created_at else None,
