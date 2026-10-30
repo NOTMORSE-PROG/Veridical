@@ -4,6 +4,7 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { useLocation, useNavigate, useNavigationType, useSearchParams } from "react-router";
 import { ApiError } from "../api/client";
+import { isWorkspaceSample } from "../demo/workspaceFixture";
 import type { LibraryItemOut } from "../api/types";
 import { LIBRARY_SEARCH_DEBOUNCE_MS, UNSET_PROGRAM_FILTER } from "../config/ui";
 import { usePrograms } from "../dashboard/useDashboard";
@@ -562,7 +563,7 @@ export function SignalLibraryPage() {
               </span>
             )}
           </h2>
-          {compareMode || (corpusTotal !== undefined && corpusTotal >= 2) ? (
+          {isWorkspaceSample() ? <ActionLink to="/module-checks/reuse" variant="secondary">Open passage comparison</ActionLink> : compareMode || (corpusTotal !== undefined && corpusTotal >= 2) ? (
             <Button
               type="button"
               variant={compareMode ? "quiet" : "secondary"}

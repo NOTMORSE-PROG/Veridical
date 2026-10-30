@@ -91,7 +91,7 @@ export function RecordedJudgmentTools({ checkRunId, criterionId, criterionText, 
   const proposal = confirmation && scope.proposal(confirmation);
   return <div className="signal-judgment-tools signal-group-flow">
     {!draft && cardContext && <ActionAssessmentContext id={`${id}-context`} notices={review.assessmentNotices ?? []}
-      about={canonical.resolution ? "About the earlier AI assessment:" : undefined} />}
+      about={canonical.resolution ? review.assessment?.assessment_method === "manual_source_review" ? "Assessment method:" : "About the earlier AI assessment:" : undefined} />}
     <div className="signal-control-cluster">
       {!draft && (review.decision
         ? <p>{recording ? "Reopen this report to record an instructor judgment." : "Reopen this report to revise recorded judgments."}</p>

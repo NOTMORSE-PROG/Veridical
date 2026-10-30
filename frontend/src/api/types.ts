@@ -431,6 +431,8 @@ export interface PublicCriterionResultOut extends ResultRowCommon {
 export type LLMMode = "fake" | "real" | "unknown";
 
 export interface ReportCommon {
+  /** Explicit source-review provenance; absent for ordinary pipeline reports. */
+  assessment_method?: "manual_source_review";
   status: "ready" | "conditionally_ready" | "not_ready" | "needs_review";
   composite_score: number | null;
   thresholds: { ready_min_score: number; not_ready_max_score: number };

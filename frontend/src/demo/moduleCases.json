@@ -1,0 +1,909 @@
+{
+  "schema_version": 1,
+  "coordinates": {
+    "units": "PDF points",
+    "origin": "top-left",
+    "rectangle_order": [
+      "x0",
+      "y0",
+      "x1",
+      "y1"
+    ],
+    "pdf_page_numbering": "one-based original PDF page index",
+    "qualification": "Native complete-quote search rectangles; scale using each original page width and height. Do not enlarge into guessed paragraph boxes."
+  },
+  "documents": [
+    {
+      "id": "rojahn-2023",
+      "title": "American public opinion on artificial intelligence in healthcare",
+      "authors": [
+        "Jessica Rojahn",
+        "Andrea Palu",
+        "Steven Skiena",
+        "Jason J. Jones"
+      ],
+      "year": 2023,
+      "published_date": "2023-11-09",
+      "publisher": "PLOS ONE",
+      "publisher_url": "https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0294028",
+      "file": "rojahn-2023.pdf",
+      "doi": "10.1371/journal.pone.0294028",
+      "source_url": "https://journals.plos.org/plosone/article/file?id=10.1371/journal.pone.0294028&type=printable",
+      "source_sha256": "993d2a3e660b2a0e45926da11e6b305c44a0a60f4a848d0dc3b40c4e0ac88b38",
+      "source_bytes": 1358631,
+      "pdf_pages": 17,
+      "licence": "Creative Commons Attribution 4.0 International",
+      "licence_short": "CC BY 4.0",
+      "licence_url": "https://creativecommons.org/licenses/by/4.0/",
+      "licence_pdf_pages": [
+        1
+      ],
+      "source_state": "Original published PDF bytes unchanged; excerpts and local results are separate.",
+      "pdf_asset": "/sample-assets/module-checks/rojahn-2023.pdf"
+    },
+    {
+      "id": "nuijten-2016",
+      "title": "The prevalence of statistical reporting errors in psychology (1985-2013)",
+      "authors": [
+        "Mich\u00e8le B. Nuijten",
+        "Chris H. J. Hartgerink",
+        "Marcel A. L. M. van Assen",
+        "Sacha Epskamp",
+        "Jelte M. Wicherts"
+      ],
+      "year": 2016,
+      "first_published_online": "2015-10-23",
+      "publisher": "Behavior Research Methods",
+      "publisher_url": "https://link.springer.com/article/10.3758/s13428-015-0664-2",
+      "file": "nuijten-2016.pdf",
+      "doi": "10.3758/s13428-015-0664-2",
+      "source_url": "https://mbnuijten.com/wp-content/uploads/2013/08/nuijtenetal_2016_reportingerrorspsychology.pdf",
+      "source_sha256": "5d1a96e0cdf0ff090167379efad475cb6e104936e237a4d62a7e6f3a7da47a5e",
+      "source_bytes": 1246203,
+      "pdf_pages": 22,
+      "licence": "Creative Commons Attribution 4.0 International",
+      "licence_short": "CC BY 4.0",
+      "licence_url": "https://creativecommons.org/licenses/by/4.0/",
+      "licence_pdf_pages": [
+        21
+      ],
+      "source_state": "Original published PDF bytes unchanged; excerpts and local results are separate.",
+      "pdf_asset": "/sample-assets/module-checks/nuijten-2016.pdf"
+    },
+    {
+      "id": "veldkamp-2014",
+      "title": "Statistical Reporting Errors and Collaboration on Statistical Analyses in Psychological Science",
+      "authors": [
+        "Coosje L. S. Veldkamp",
+        "Mich\u00e8le B. Nuijten",
+        "Linda Dominguez-Alvarez",
+        "Marcel A. L. M. van Assen",
+        "Jelte M. Wicherts"
+      ],
+      "year": 2014,
+      "published_date": "2014-12-10",
+      "publisher": "PLOS ONE",
+      "publisher_url": "https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0114876",
+      "file": "veldkamp-2014.pdf",
+      "doi": "10.1371/journal.pone.0114876",
+      "source_url": "https://journals.plos.org/plosone/article/file?id=10.1371/journal.pone.0114876&type=printable",
+      "source_sha256": "a91ab7e12f650f80b03c3f6548c3a9709831e469daa4921bd0606d8e7939faed",
+      "source_bytes": 723730,
+      "pdf_pages": 19,
+      "licence": "Creative Commons Attribution 4.0 International",
+      "licence_short": "CC BY 4.0",
+      "licence_url": "https://creativecommons.org/licenses/by/4.0/",
+      "licence_pdf_pages": [
+        1
+      ],
+      "source_state": "Original published PDF bytes unchanged; excerpts and local results are separate.",
+      "pdf_asset": "/sample-assets/module-checks/veldkamp-2014.pdf"
+    }
+  ],
+  "statistics": {
+    "route": "/demo/module-checks/statistics",
+    "title": "Statistical checks on a published AI study",
+    "document_id": "rojahn-2023",
+    "basis": "Saved local computation using the application's native PDF extraction and statistical checking functions. Opening this case does not start a new app check or call an AI service.",
+    "local_computation_completed": true,
+    "app_run_database_writeback_performed": false,
+    "provider_calls": 0,
+    "outcome": "passed",
+    "status_label": "3 statistical reports checked",
+    "n_inferential_stats": 3,
+    "n_descriptive_stats": 0,
+    "n_findings": 0,
+    "checked_values": [
+      {
+        "id": "rojahn-stat-1",
+        "source_quote": "X2 (1, N = 203) = 11.691, p < 0.01",
+        "pdf_page": 9,
+        "test": "Chi2",
+        "df": 1.0,
+        "statistic": 11.691,
+        "reported_p": 0.01,
+        "reported_comparison": "<",
+        "computed_p": 0.0006280313652486828,
+        "error": false,
+        "decision_error": false,
+        "exact_complete_quote_found": true,
+        "line_rects_pdf_points": [
+          [
+            311.9230041503906,
+            701.7310180664062,
+            318.343017578125,
+            711.7310180664062
+          ],
+          [
+            318.33099365234375,
+            699.7334594726562,
+            321.908447265625,
+            706.3993530273438
+          ],
+          [
+            321.908447265625,
+            696.57958984375,
+            324.0570068359375,
+            706.57958984375
+          ],
+          [
+            324.0570068359375,
+            701.0015869140625,
+            445.7040100097656,
+            711.0015869140625
+          ]
+        ],
+        "page_width": 612.0,
+        "page_height": 792.0,
+        "source_document_id": "rojahn-2023",
+        "sample_size": 203,
+        "test_label": "Chi-square",
+        "result_label": "Agrees with reported bound",
+        "explanation": "The recalculated p-value is below the reported bound. No mismatch was recorded for this supported report.",
+        "source": {
+          "boxes_origin": "bottom-left",
+          "page": 9,
+          "source_sha256": "993d2a3e660b2a0e45926da11e6b305c44a0a60f4a848d0dc3b40c4e0ac88b38",
+          "quote": "X2 (1, N = 203) = 11.691, p < 0.01",
+          "highlighted_quote": "X2 (1, N = 203) = 11.691, p < 0.01",
+          "precision": "page_bbox",
+          "boxes": [
+            [
+              311.9230041503906,
+              80.2684326171875,
+              417.072998046875,
+              90.26898193359375
+            ],
+            [
+              318.33099365234375,
+              85.60064697265625,
+              321.908447265625,
+              92.26654052734375
+            ],
+            [
+              324.0570068359375,
+              80.9984130859375,
+              445.7040100097656,
+              90.9984130859375
+            ]
+          ],
+          "precision_note": "Complete quotation uniquely bound to original native glyphs.",
+          "image_asset": "/sample-assets/module-checks/e-e4ee620a8e39b43395366fa1.png",
+          "image_sha256": "e4ee620a8e39b43395366fa17db3d46dfaf4c32829ba8bd82169e4c633559421"
+        }
+      },
+      {
+        "id": "rojahn-stat-2",
+        "source_quote": "X2 (1, N = 203) = 7.577, p < 0.01",
+        "pdf_page": 11,
+        "test": "Chi2",
+        "df": 1.0,
+        "statistic": 7.577,
+        "reported_p": 0.01,
+        "reported_comparison": "<",
+        "computed_p": 0.005911774837471133,
+        "error": false,
+        "decision_error": false,
+        "exact_complete_quote_found": true,
+        "line_rects_pdf_points": [
+          [
+            536.653076171875,
+            433.6860046386719,
+            543.0730590820312,
+            443.6860046386719
+          ],
+          [
+            543.0050048828125,
+            431.6329040527344,
+            546.5824584960938,
+            438.2987976074219
+          ],
+          [
+            546.5824584960938,
+            428.47900390625,
+            548.7869873046875,
+            438.47900390625
+          ],
+          [
+            548.7869873046875,
+            432.9570007324219,
+            559.2169799804688,
+            442.9570007324219
+          ],
+          [
+            200.01498413085938,
+            445.9389953613281,
+            304.3149719238281,
+            456.66900634765625
+          ]
+        ],
+        "page_width": 612.0,
+        "page_height": 792.0,
+        "source_document_id": "rojahn-2023",
+        "sample_size": 203,
+        "test_label": "Chi-square",
+        "result_label": "Agrees with reported bound",
+        "explanation": "The recalculated p-value is below the reported bound. No mismatch was recorded for this supported report.",
+        "source": {
+          "boxes_origin": "bottom-left",
+          "page": 11,
+          "source_sha256": "993d2a3e660b2a0e45926da11e6b305c44a0a60f4a848d0dc3b40c4e0ac88b38",
+          "quote": "X2 (1, N = 203) = 7.577, p < 0.01",
+          "highlighted_quote": "X2 (1, N = 203) = 7.577, p < 0.01",
+          "precision": "page_bbox",
+          "boxes": [
+            [
+              536.653076171875,
+              348.3139953613281,
+              543.0730590820312,
+              358.3139953613281
+            ],
+            [
+              543.0050048828125,
+              353.7012023925781,
+              546.5824584960938,
+              360.3670959472656
+            ],
+            [
+              548.7869873046875,
+              349.0429992675781,
+              559.2169799804688,
+              359.0429992675781
+            ],
+            [
+              200.01498413085938,
+              335.33099365234375,
+              275.6839599609375,
+              345.33099365234375
+            ],
+            [
+              209.198974609375,
+              336.0610046386719,
+              304.3149719238281,
+              346.0610046386719
+            ]
+          ],
+          "precision_note": "Complete quotation uniquely bound to original native glyphs.",
+          "image_asset": "/sample-assets/module-checks/e-c87b8704a087ba0aaf9a8095.png",
+          "image_sha256": "c87b8704a087ba0aaf9a80958643a1ae65ed52759c5bfbcbe1132b8c29e921dc"
+        }
+      },
+      {
+        "id": "rojahn-stat-3",
+        "source_quote": "X2 (1, N = 203) = 5.168, p < 0.05",
+        "pdf_page": 11,
+        "test": "Chi2",
+        "df": 1.0,
+        "statistic": 5.168,
+        "reported_p": 0.05,
+        "reported_comparison": "<",
+        "computed_p": 0.02300668889223209,
+        "error": false,
+        "decision_error": false,
+        "exact_complete_quote_found": true,
+        "line_rects_pdf_points": [
+          [
+            357.61993408203125,
+            472.6340026855469,
+            364.0399475097656,
+            482.6340026855469
+          ],
+          [
+            363.968994140625,
+            470.63690185546875,
+            367.54644775390625,
+            477.30279541015625
+          ],
+          [
+            367.54644775390625,
+            467.4830017089844,
+            369.6940002441406,
+            477.4830017089844
+          ],
+          [
+            369.6940002441406,
+            471.906005859375,
+            486.6360168457031,
+            481.906005859375
+          ]
+        ],
+        "page_width": 612.0,
+        "page_height": 792.0,
+        "source_document_id": "rojahn-2023",
+        "sample_size": 203,
+        "test_label": "Chi-square",
+        "result_label": "Agrees with reported bound",
+        "explanation": "The recalculated p-value is below the reported bound. No mismatch was recorded for this supported report.",
+        "source": {
+          "boxes_origin": "bottom-left",
+          "page": 11,
+          "source_sha256": "993d2a3e660b2a0e45926da11e6b305c44a0a60f4a848d0dc3b40c4e0ac88b38",
+          "quote": "X2 (1, N = 203) = 5.168, p < 0.05",
+          "highlighted_quote": "X2 (1, N = 203) = 5.168, p < 0.05",
+          "precision": "page_bbox",
+          "boxes": [
+            [
+              357.61993408203125,
+              309.3659973144531,
+              364.0399475097656,
+              319.3659973144531
+            ],
+            [
+              363.968994140625,
+              314.69720458984375,
+              367.54644775390625,
+              321.36309814453125
+            ],
+            [
+              369.6940002441406,
+              310.093994140625,
+              486.6360168457031,
+              320.093994140625
+            ],
+            [
+              382.33599853515625,
+              309.3639831542969,
+              458.0050048828125,
+              319.3639831542969
+            ]
+          ],
+          "precision_note": "Complete quotation uniquely bound to original native glyphs.",
+          "image_asset": "/sample-assets/module-checks/e-85cd32d6e64c7dea80d6366e.png",
+          "image_sha256": "85cd32d6e64c7dea80d6366e667c6d8846c34a4d8424cd01378fb6ec79c5c397"
+        }
+      }
+    ],
+    "scope_note": "Only3supported chi-square reports were extracted and recomputed; zero reported inconsistencies is not proof every statistic in the article is correct."
+  },
+  "reuse": {
+    "route": "/demo/module-checks/reuse",
+    "title": "Compare related descriptions of a checking method",
+    "checked_document_id": "nuijten-2016",
+    "library_document_id": "veldkamp-2014",
+    "basis": "The application's local comparison check compared these original papers and saved these results. This page shows that saved case; opening it does not start a new check.",
+    "local_computation_completed": true,
+    "app_database_query_performed": true,
+    "app_run_database_writeback_performed": true,
+    "provider_calls": 0,
+    "classification": "high_similarity",
+    "status_label": "Similar method wording needs review",
+    "model": {
+      "repo": "minishlab/potion-base-8M",
+      "commit_hash": "bf8b056651a2c21b8d2565580b8569da283cab23",
+      "files": [
+        {
+          "name": "tokenizer.json",
+          "sha256": "e67e803f624fb4d67dea1c730d06e1067e1b14d830e2c2202569e3ef0f70bb50"
+        },
+        {
+          "name": "model.safetensors",
+          "sha256": "f65d0f325faadc1e121c319e2faa41170d3fa07d8c89abd48ca5358d9a223de2"
+        },
+        {
+          "name": "config.json",
+          "sha256": "2a6ac0e9aaa356a68a5688070db78fc3a464fefe85d2f06a1905ce3718687553"
+        }
+      ]
+    },
+    "configured_high_similarity_threshold": 0.85,
+    "cosine": 0.8552198118193401,
+    "score_unit": "The full saved passage chunks below, not only the shorter excerpt cards.",
+    "checked_passage_count": 83,
+    "library_passage_count": 46,
+    "matching_nonreference_pairs": 2,
+    "excluded_reference_list": true,
+    "excluded_block_quotes": true,
+    "checked_full_chunk": {
+      "passage_index": 8,
+      "chapter_index": 0,
+      "anchor_kind": "page",
+      "page": 3,
+      "paragraph": null,
+      "char_start": 11475,
+      "char_end": 12386,
+      "text": "70) = 4.48, MSE = 6.61, p <.02^) or when two results are\ncombined into one sentence (e.g., BF(1, 15) = 19.9 and\n5.16, p <.001 and p <.05, respectively^). These restric-\ntions usually also imply that statcheck will not read re-\nsults in tables, since these are often incompletely reported\n(see Appendix A for a more detailed overview of what\nstatcheck can and cannot read).\nStep 3: statcheck uses the extracted test statistics and\ndegrees of freedom to recalculate the p-value. By default\nall tests are assumed to be two-tailed. We compared p-\nvalues recalculated by statcheck in R version 3.1.2 and\nMicrosoft Office Excel 2013 and found that the results of\nboth programs were consistent up to the tenth decimal\npoint. This indicates that underlying algorithms used to\napproximate the distributions are not specific to the R\nenvironment.\nStep 4: Finally, statcheck compares the reported and\nrecalculated p-value.",
+      "context_text": "possibility that statcheck yields a\nbiased depiction of the true inconsistency rate. To avoid bias\nin the prevalence of reporting errors, we performed a validity\nstudy of statcheck, in which we compared statcheck\u2019s results\nwith the results of Wicherts, Bakker, and Molenaar (2011),\nwho performed a manual search for and verification of\nreporting errors in a sample of 49 articles.\n70) = 4.48, MSE = 6.61, p <.02^) or when two results are\ncombined into one sentence (e.g., BF(1, 15) = 19.9 and\n5.16, p <.001 and p <.05, respectively^). These restric-\ntions usually also imply that statcheck will not read re-\nsults in tables, since these are often incompletely reported\n(see Appendix A for a more detailed overview of what\nstatcheck can and cannot read).\nStep 3: statcheck uses the extracted test statistics and\ndegrees of freedom to recalculate the p-value. By default\nall tests are assumed to be two-tailed. We compared p-\nvalues recalculated by statcheck in R version 3.1.2 and\nMicrosoft Office Excel 2013 and found that the results of\nboth programs were consistent up to the tenth decimal\npoint. This indicates that underlying algorithms used to\napproximate the distributions are not specific to the R\nenvironment.\nStep 4: Finally, statcheck compares the reported and\nrecalculated p-value. Whenever the reported p-value is\ninconsistent with the recalculated p-value, the result is\nmarked as an inconsistency. If the reported p-value is\ninconsistent with the recalculated p-value and the incon-\nsistency changes the statistical conclusion (assuming \u03b1 =\n.05), the result is marked as a gross inconsistency. To take\ninto account one-sided tests, statcheck scans the whole\ntext of the",
+      "is_reference_list": false,
+      "is_block_quote": false
+    },
+    "library_full_chunk": {
+      "passage_index": 11,
+      "chapter_index": 0,
+      "anchor_kind": "page",
+      "page": 4,
+      "paragraph": null,
+      "char_start": 12964,
+      "char_end": 14539,
+      "text": "Procedure\nTo assess the accuracy of the p-values reported in our sample of articles, we used a\nrecently developed automated procedure called statcheck [16, 28]. Statcheck is a\npackage in R, a free software environment for statistical computing and graphics\n[29], and is available through https://github.com/MicheleNuijten/statcheck. The\nversion of statcheck that we used for this paper (0.1.0) extracts t, F, x2, r, Z and\nWald statistics from articles that are reported as prescribed by the APA\nPublication Manual [27]. Statcheck re-computes p-values in the following way:\nfirst, it converts a PDF or HTML file to plain text, and then scans the text for\nstatistical results. Next, it re-computes p-values using the test statistics and the\ndegrees of freedom. Finally, it compares the reported and recomputed p-value and\nindicates whether these are consistent or not, while taking into account the effects\nof rounding. In addition, it specifies whether an inconsistent p-value comprises a\n\u2018gross error\u2019: when the p-value is inconsistent to the extent that it may have\naffected a decision about statistical significance (in this case: when it is reported as\nsmaller than 0.05 while the recomputed p-value is larger than 0.05, or vice versa).\nIt is important to note that statcheck\u2019s error prevalence estimate may somewhat\nunderestimate or overestimate the true error prevalence because it cannot read\nstatistical results that are inconsistent with the APA\u2019s reporting guidelines [27] or\nstatistical results that contain additional symbols representing for example effect\nsizes.",
+      "context_text": "the\nJournal of Personality and Social Psychology (Social Psychology), and\nPsychophysiology (Biological Psychology). On 24 October 2012 we downloaded\nall 775 articles published in these journals since Jan 1st, 2012 and then read each\nabstract in order to determine whether an article was empirical or not. After this\nselection, our final sample consisted of 697 empirical articles (see Table 1).\nProcedure\nTo assess the accuracy of the p-values reported in our sample of articles, we used a\nrecently developed automated procedure called statcheck [16, 28]. Statcheck is a\npackage in R, a free software environment for statistical computing and graphics\n[29], and is available through https://github.com/MicheleNuijten/statcheck. The\nversion of statcheck that we used for this paper (0.1.0) extracts t, F, x2, r, Z and\nWald statistics from articles that are reported as prescribed by the APA\nPublication Manual [27]. Statcheck re-computes p-values in the following way:\nfirst, it converts a PDF or HTML file to plain text, and then scans the text for\nstatistical results. Next, it re-computes p-values using the test statistics and the\ndegrees of freedom. Finally, it compares the reported and recomputed p-value and\nindicates whether these are consistent or not, while taking into account the effects\nof rounding. In addition, it specifies whether an inconsistent p-value comprises a\n\u2018gross error\u2019: when the p-value is inconsistent to the extent that it may have\naffected a decision about statistical significance (in this case: when it is reported as\nsmaller than 0.05 while the recomputed p-value is larger than 0.05, or vice versa).\nIt is important to note that statcheck\u2019s error prevalence estimate may somewhat\nunderestimate or overestimate the true error prevalence because it cannot read\nstatistical results that are inconsistent with the APA\u2019s reporting guidelines [27] or\nstatistical results that contain additional symbols representing for example effect\nsizes.\nIn total, 8,110 statistical results were retrieved from 430 of the 697 empirical\narticles (see Table 2). Five p-values that were seemingly reported as larger than 1\nwere excluded after determining that these had been incorrectly retrieved due to\nthe program\u2019s inability to read p-values reported as \u2018p times 10 to the power of\u2019. A\nclose inspection of the retrieved",
+      "is_reference_list": false,
+      "is_block_quote": false
+    },
+    "source_excerpt_cards": [
+      {
+        "role": "checked_manuscript",
+        "file": "nuijten-2016.pdf",
+        "pdf_page": 3,
+        "quote": "Step 4: Finally, statcheck compares the reported and recalculated p-value.",
+        "exact_complete_quote_found": true,
+        "line_rects_pdf_points": [
+          [
+            68.92860412597656,
+            257.94500732421875,
+            289.0780944824219,
+            267.9075927734375
+          ],
+          [
+            68.92860412597656,
+            270.418212890625,
+            150.99050903320312,
+            280.38079833984375
+          ]
+        ],
+        "page_width": 595.2760009765625,
+        "page_height": 790.8660278320312,
+        "source_document_id": "nuijten-2016",
+        "source": {
+          "boxes_origin": "bottom-left",
+          "page": 3,
+          "source_sha256": "5d1a96e0cdf0ff090167379efad475cb6e104936e237a4d62a7e6f3a7da47a5e",
+          "quote": "Step 4: Finally, statcheck compares the reported and recalculated p-value.",
+          "highlighted_quote": "Step 4: Finally, statcheck compares the reported and recalculated p-value.",
+          "precision": "page_bbox",
+          "boxes": [
+            [
+              68.92860412597656,
+              522.9584350585938,
+              289.0780944824219,
+              532.9210205078125
+            ],
+            [
+              68.92860412597656,
+              510.4852294921875,
+              150.99050903320312,
+              520.4478149414062
+            ]
+          ],
+          "precision_note": "Complete quotation uniquely bound to original native glyphs.",
+          "image_asset": "/sample-assets/module-checks/e-b3260e5ed9b9d11a10057cc7.png",
+          "image_sha256": "b3260e5ed9b9d11a10057cc72af717b88b801fb60f3df411cfc3395a29da6bcf"
+        }
+      },
+      {
+        "role": "library_source",
+        "file": "veldkamp-2014.pdf",
+        "pdf_page": 4,
+        "quote": "Finally, it compares the reported and recomputed p-value and indicates whether these are consistent or not, while taking into account the effects of rounding.",
+        "exact_complete_quote_found": true,
+        "line_rects_pdf_points": [
+          [
+            289.24786376953125,
+            478.3247375488281,
+            574.8082885742188,
+            489.7818603515625
+          ],
+          [
+            196.27130126953125,
+            492.3276062011719,
+            574.7818603515625,
+            503.78472900390625
+          ],
+          [
+            196.27130126953125,
+            506.3304748535156,
+            254.85601806640625,
+            517.78759765625
+          ]
+        ],
+        "page_width": 612.2830200195312,
+        "page_height": 790.8660278320312,
+        "source_document_id": "veldkamp-2014",
+        "source": {
+          "boxes_origin": "bottom-left",
+          "page": 4,
+          "source_sha256": "a91ab7e12f650f80b03c3f6548c3a9709831e469daa4921bd0606d8e7939faed",
+          "quote": "Finally, it compares the reported and recomputed p-value and indicates whether these are consistent or not, while taking into account the effects of rounding.",
+          "highlighted_quote": "Finally, it compares the reported and recomputed p-value and indicates whether these are consistent or not, while taking into account the effects of rounding.",
+          "precision": "page_bbox",
+          "boxes": [
+            [
+              289.24786376953125,
+              301.08416748046875,
+              574.8082885742188,
+              312.5412902832031
+            ],
+            [
+              196.27130126953125,
+              287.081298828125,
+              574.7818603515625,
+              298.5384216308594
+            ],
+            [
+              196.27130126953125,
+              273.07843017578125,
+              254.85601806640625,
+              284.5355529785156
+            ]
+          ],
+          "precision_note": "Complete quotation uniquely bound to original native glyphs.",
+          "image_asset": "/sample-assets/module-checks/e-79ef163e49512e7e9af65206.png",
+          "image_sha256": "79ef163e49512e7e9af65206f2f92861c00decf599e7acf5e5165a234e591992"
+        }
+      }
+    ],
+    "relationship": {
+      "shared_authors": [
+        "Mich\u00e8le B. Nuijten",
+        "Marcel A. L. M. van Assen",
+        "Jelte M. Wicherts"
+      ],
+      "prior_work_cited": true,
+      "citation_in_checked_pdf_pages": [
+        1,
+        22
+      ],
+      "explanation": "These are distinct, related articles about the same checking tool. Several authors are shared, and the newer paper cites the earlier study. Similar method descriptions are a review lead, not evidence of plagiarism or authorship."
+    },
+    "scope_note": "Actual local service execution produced similarity review prompts for distinct, related papers. Shared authors and prior citation are disclosed. No claim of plagiarism, authorship, independent accuracy, deployed pipeline execution or human UAT is made.",
+    "execution_detail": "Real Library activation/indexing, PostgreSQL vector queries and F7 result, flag and audit writeback were run in an isolated local database using seeded public-source records. This was not an HTTP upload, deployed pipeline, rubric assessment or completed full check run.",
+    "database_scope": "Isolated local verification database; removed after the receipt was captured.",
+    "http_upload_performed": false,
+    "deployed_pipeline_execution": false,
+    "full_check_run_completed": false,
+    "check_run_status_at_capture": "integrity",
+    "saved_result_outcome": "passed",
+    "saved_result_detail": {
+      "archive_size_n": 1,
+      "corpus": "library",
+      "passage_archive_size_n": 46,
+      "n_flags": 4,
+      "first_upload_context": true,
+      "passages_found": 83
+    },
+    "n_saved_findings": 4,
+    "saved_finding_scopes": [
+      {
+        "saved_flag_id": 1,
+        "scope": "whole_document",
+        "kind": "reuse_high_similarity",
+        "severity": "med",
+        "page_anchor": "whole document",
+        "saved_similarity": 0.888,
+        "first_upload_context": true,
+        "explanation": "A saved similarity review prompt. Related authorship, citation and method context still require human judgment; it is not an accusation."
+      },
+      {
+        "saved_flag_id": 2,
+        "scope": "chapter",
+        "kind": "reuse_high_similarity_chapter",
+        "severity": "med",
+        "page_anchor": "The prevalence of statistical reporting errors in psychology (1985\u20132013)",
+        "saved_similarity": 0.888,
+        "first_upload_context": true,
+        "explanation": "A saved similarity review prompt. Related authorship, citation and method context still require human judgment; it is not an accusation."
+      },
+      {
+        "saved_flag_id": 3,
+        "scope": "passage",
+        "kind": "reuse_high_similarity_passage",
+        "severity": "med",
+        "page_anchor": "p. 3",
+        "saved_similarity": 0.855,
+        "first_upload_context": true,
+        "explanation": "A saved similarity review prompt. Related authorship, citation and method context still require human judgment; it is not an accusation."
+      },
+      {
+        "saved_flag_id": 4,
+        "scope": "passage",
+        "kind": "reuse_high_similarity_passage",
+        "severity": "med",
+        "page_anchor": "p. 4",
+        "saved_similarity": 0.872,
+        "first_upload_context": true,
+        "explanation": "A saved similarity review prompt. Related authorship, citation and method context still require human judgment; it is not an accusation."
+      }
+    ],
+    "pairs": [
+      {
+        "id": "method",
+        "title": "How the same checking tool compares results",
+        "explanation": "Both passages describe comparing reported and recalculated p-values. These are related papers with shared authors, and the newer paper cites the earlier study. Similar descriptions of the same tool are a reason to inspect context, not proof of plagiarism.",
+        "saved_flag_id": 3,
+        "saved_flag_scope": "passage",
+        "saved_flag_kind": "reuse_high_similarity_passage",
+        "saved_severity": "med",
+        "saved_similarity": 0.855,
+        "similarity_scope": "The full stored passage chunks, not only the selected excerpt cards.",
+        "checked_full_chunk": {
+          "text": "70) = 4.48, MSE = 6.61, p <.02^) or when two results are\ncombined into one sentence (e.g., BF(1, 15) = 19.9 and\n5.16, p <.001 and p <.05, respectively^). These restric-\ntions usually also imply that statcheck will not read re-\nsults in tables, since these are often incompletely reported\n(see Appendix A for a more detailed overview of what\nstatcheck can and cannot read).\nStep 3: statcheck uses the extracted test statistics and\ndegrees of freedom to recalculate the p-value. By default\nall tests are assumed to be two-tailed. We compared p-\nvalues recalculated by statcheck in R version 3.1.2 and\nMicrosoft Office Excel 2013 and found that the results of\nboth programs were consistent up to the tenth decimal\npoint. This indicates that underlying algorithms used to\napproximate the distributions are not specific to the R\nenvironment.\nStep 4: Finally, statcheck compares the reported and\nrecalculated p-value.",
+          "page": 3,
+          "context_text": "possibility that statcheck yields a\nbiased depiction of the true inconsistency rate. To avoid bias\nin the prevalence of reporting errors, we performed a validity\nstudy of statcheck, in which we compared statcheck\u2019s results\nwith the results of Wicherts, Bakker, and Molenaar (2011),\nwho performed a manual search for and verification of\nreporting errors in a sample of 49 articles.\n70) = 4.48, MSE = 6.61, p <.02^) or when two results are\ncombined into one sentence (e.g., BF(1, 15) = 19.9 and\n5.16, p <.001 and p <.05, respectively^). These restric-\ntions usually also imply that statcheck will not read re-\nsults in tables, since these are often incompletely reported\n(see Appendix A for a more detailed overview of what\nstatcheck can and cannot read).\nStep 3: statcheck uses the extracted test statistics and\ndegrees of freedom to recalculate the p-value. By default\nall tests are assumed to be two-tailed. We compared p-\nvalues recalculated by statcheck in R version 3.1.2 and\nMicrosoft Office Excel 2013 and found that the results of\nboth programs were consistent up to the tenth decimal\npoint. This indicates that underlying algorithms used to\napproximate the distributions are not specific to the R\nenvironment.\nStep 4: Finally, statcheck compares the reported and\nrecalculated p-value. Whenever the reported p-value is\ninconsistent with the recalculated p-value, the result is\nmarked as an inconsistency. If the reported p-value is\ninconsistent with the recalculated p-value and the incon-\nsistency changes the statistical conclusion (assuming \u03b1 =\n.05), the result is marked as a gross inconsistency. To take\ninto account one-sided tests, statcheck scans the whole\ntext of the"
+        },
+        "library_full_chunk": {
+          "text": "Procedure\nTo assess the accuracy of the p-values reported in our sample of articles, we used a\nrecently developed automated procedure called statcheck [16, 28]. Statcheck is a\npackage in R, a free software environment for statistical computing and graphics\n[29], and is available through https://github.com/MicheleNuijten/statcheck. The\nversion of statcheck that we used for this paper (0.1.0) extracts t, F, x2, r, Z and\nWald statistics from articles that are reported as prescribed by the APA\nPublication Manual [27]. Statcheck re-computes p-values in the following way:\nfirst, it converts a PDF or HTML file to plain text, and then scans the text for\nstatistical results. Next, it re-computes p-values using the test statistics and the\ndegrees of freedom. Finally, it compares the reported and recomputed p-value and\nindicates whether these are consistent or not, while taking into account the effects\nof rounding. In addition, it specifies whether an inconsistent p-value comprises a\n\u2018gross error\u2019: when the p-value is inconsistent to the extent that it may have\naffected a decision about statistical significance (in this case: when it is reported as\nsmaller than 0.05 while the recomputed p-value is larger than 0.05, or vice versa).\nIt is important to note that statcheck\u2019s error prevalence estimate may somewhat\nunderestimate or overestimate the true error prevalence because it cannot read\nstatistical results that are inconsistent with the APA\u2019s reporting guidelines [27] or\nstatistical results that contain additional symbols representing for example effect\nsizes.",
+          "page": 4,
+          "context_text": "the\nJournal of Personality and Social Psychology (Social Psychology), and\nPsychophysiology (Biological Psychology). On 24 October 2012 we downloaded\nall 775 articles published in these journals since Jan 1st, 2012 and then read each\nabstract in order to determine whether an article was empirical or not. After this\nselection, our final sample consisted of 697 empirical articles (see Table 1).\nProcedure\nTo assess the accuracy of the p-values reported in our sample of articles, we used a\nrecently developed automated procedure called statcheck [16, 28]. Statcheck is a\npackage in R, a free software environment for statistical computing and graphics\n[29], and is available through https://github.com/MicheleNuijten/statcheck. The\nversion of statcheck that we used for this paper (0.1.0) extracts t, F, x2, r, Z and\nWald statistics from articles that are reported as prescribed by the APA\nPublication Manual [27]. Statcheck re-computes p-values in the following way:\nfirst, it converts a PDF or HTML file to plain text, and then scans the text for\nstatistical results. Next, it re-computes p-values using the test statistics and the\ndegrees of freedom. Finally, it compares the reported and recomputed p-value and\nindicates whether these are consistent or not, while taking into account the effects\nof rounding. In addition, it specifies whether an inconsistent p-value comprises a\n\u2018gross error\u2019: when the p-value is inconsistent to the extent that it may have\naffected a decision about statistical significance (in this case: when it is reported as\nsmaller than 0.05 while the recomputed p-value is larger than 0.05, or vice versa).\nIt is important to note that statcheck\u2019s error prevalence estimate may somewhat\nunderestimate or overestimate the true error prevalence because it cannot read\nstatistical results that are inconsistent with the APA\u2019s reporting guidelines [27] or\nstatistical results that contain additional symbols representing for example effect\nsizes.\nIn total, 8,110 statistical results were retrieved from 430 of the 697 empirical\narticles (see Table 2). Five p-values that were seemingly reported as larger than 1\nwere excluded after determining that these had been incorrectly retrieved due to\nthe program\u2019s inability to read p-values reported as \u2018p times 10 to the power of\u2019. A\nclose inspection of the retrieved"
+        },
+        "reference_list_match": false,
+        "block_quote_match": false,
+        "source_excerpt_cards": [
+          {
+            "role": "checked_manuscript",
+            "source_document_id": "nuijten-2016",
+            "file": "nuijten-2016.pdf",
+            "pdf_page": 3,
+            "quote": "Step 4: Finally, statcheck compares the reported and recalculated p-value.",
+            "exact_complete_quote_found": true,
+            "line_rects_pdf_points": [
+              [
+                68.92860412597656,
+                257.94500732421875,
+                289.0780944824219,
+                267.9075927734375
+              ],
+              [
+                68.92860412597656,
+                270.418212890625,
+                150.99050903320312,
+                280.38079833984375
+              ]
+            ],
+            "page_width": 595.2760009765625,
+            "page_height": 790.8660278320312,
+            "saved_chunk_start_page": 3,
+            "qualification": "This excerpt is part of the full saved model-scored passage; its own page is preserved even when the saved passage starts on an earlier page.",
+            "source": {
+              "boxes_origin": "bottom-left",
+              "page": 3,
+              "source_sha256": "5d1a96e0cdf0ff090167379efad475cb6e104936e237a4d62a7e6f3a7da47a5e",
+              "quote": "Step 4: Finally, statcheck compares the reported and recalculated p-value.",
+              "highlighted_quote": "Step 4: Finally, statcheck compares the reported and recalculated p-value.",
+              "precision": "page_bbox",
+              "boxes": [
+                [
+                  68.92860412597656,
+                  522.9584350585938,
+                  289.0780944824219,
+                  532.9210205078125
+                ],
+                [
+                  68.92860412597656,
+                  510.4852294921875,
+                  150.99050903320312,
+                  520.4478149414062
+                ]
+              ],
+              "precision_note": "Complete quotation uniquely bound to original native glyphs.",
+              "image_asset": "/sample-assets/module-checks/e-b3260e5ed9b9d11a10057cc7.png",
+              "image_sha256": "b3260e5ed9b9d11a10057cc72af717b88b801fb60f3df411cfc3395a29da6bcf"
+            }
+          },
+          {
+            "role": "library_source",
+            "source_document_id": "veldkamp-2014",
+            "file": "veldkamp-2014.pdf",
+            "pdf_page": 4,
+            "quote": "Finally, it compares the reported and recomputed p-value and indicates whether these are consistent or not, while taking into account the effects of rounding.",
+            "exact_complete_quote_found": true,
+            "line_rects_pdf_points": [
+              [
+                289.24786376953125,
+                478.3247375488281,
+                574.8082885742188,
+                489.7818603515625
+              ],
+              [
+                196.27130126953125,
+                492.3276062011719,
+                574.7818603515625,
+                503.78472900390625
+              ],
+              [
+                196.27130126953125,
+                506.3304748535156,
+                254.85601806640625,
+                517.78759765625
+              ]
+            ],
+            "page_width": 612.2830200195312,
+            "page_height": 790.8660278320312,
+            "saved_chunk_start_page": 4,
+            "qualification": "This excerpt is part of the full saved model-scored passage; its own page is preserved even when the saved passage starts on an earlier page.",
+            "source": {
+              "boxes_origin": "bottom-left",
+              "page": 4,
+              "source_sha256": "a91ab7e12f650f80b03c3f6548c3a9709831e469daa4921bd0606d8e7939faed",
+              "quote": "Finally, it compares the reported and recomputed p-value and indicates whether these are consistent or not, while taking into account the effects of rounding.",
+              "highlighted_quote": "Finally, it compares the reported and recomputed p-value and indicates whether these are consistent or not, while taking into account the effects of rounding.",
+              "precision": "page_bbox",
+              "boxes": [
+                [
+                  289.24786376953125,
+                  301.08416748046875,
+                  574.8082885742188,
+                  312.5412902832031
+                ],
+                [
+                  196.27130126953125,
+                  287.081298828125,
+                  574.7818603515625,
+                  298.5384216308594
+                ],
+                [
+                  196.27130126953125,
+                  273.07843017578125,
+                  254.85601806640625,
+                  284.5355529785156
+                ]
+              ],
+              "precision_note": "Complete quotation uniquely bound to original native glyphs.",
+              "image_asset": "/sample-assets/module-checks/e-79ef163e49512e7e9af65206.png",
+              "image_sha256": "79ef163e49512e7e9af65206f2f92861c00decf599e7acf5e5165a234e591992"
+            }
+          }
+        ]
+      },
+      {
+        "id": "sample",
+        "title": "Related descriptions of journal samples",
+        "explanation": "Both saved passages describe selecting psychology journal samples. The newer paper reports a larger sample and cites the earlier work. The sample sizes and selection rules differ; related methods and shared wording do not establish copied findings.",
+        "saved_flag_id": 4,
+        "saved_flag_scope": "passage",
+        "saved_flag_kind": "reuse_high_similarity_passage",
+        "saved_severity": "med",
+        "saved_similarity": 0.872,
+        "similarity_scope": "The full stored passage chunks, not only the selected excerpt cards.",
+        "checked_full_chunk": {
+          "text": "psychology journals that\nrepresent six main sub disciplines: Journal of Applied\nPsychology (JAP; Applied Psychology), Journal of\nConsulting and Clinical Psychology (JCCP; Clinical\nPsychology), Developmental Psychology (DP;\nDevelopmental Psychology), Journal of Experimental\nPsychology: General (JEPG; Experimental Psychology), and\nJournal of Personality and Social Psychology (JPSP; Social\nPsychology). These journals are published by the APA and\nfollow the APA reporting guidelines. Furthermore, we manu-\nally downloaded all articles in HTML from two journals in\ngeneral psychology: Psychological Science (PS; 2003\u20132013)\nand Frontiers in Psychology (FP; 2010\u20132013). In this manual\ndownload we did not include retractions, errata, and editorials.\nFinally, we automatically downloaded all HTML articles with\nthe subject Bpsychology^ from the Public Library of Science\n(PLoS; 2000\u20132013), using the rplos R package (Chamberlain,\nBoettiger, & Ram, 2014).1 In this automatic process we did\nnot exclude retractions, errata, or editorials. The final sample\nconsisted of 30,717 articles. The number of downloaded arti-",
+          "page": 4,
+          "context_text": "The\ntime span over which we downloaded articles depended on the\nyear a journal started to publish articles in HTML. We collect-\ned the data in 2014, so we included articles up until 2013 to\nensure complete sets of articles for an entire year. Via\nEBSCOhost we manually downloaded all articles in HTML\nfrom 1985 to 2013 from six flagship psychology journals that\nrepresent six main sub disciplines: Journal of Applied\nPsychology (JAP; Applied Psychology), Journal of\nConsulting and Clinical Psychology (JCCP; Clinical\nPsychology), Developmental Psychology (DP;\nDevelopmental Psychology), Journal of Experimental\nPsychology: General (JEPG; Experimental Psychology), and\nJournal of Personality and Social Psychology (JPSP; Social\nPsychology). These journals are published by the APA and\nfollow the APA reporting guidelines. Furthermore, we manu-\nally downloaded all articles in HTML from two journals in\ngeneral psychology: Psychological Science (PS; 2003\u20132013)\nand Frontiers in Psychology (FP; 2010\u20132013). In this manual\ndownload we did not include retractions, errata, and editorials.\nFinally, we automatically downloaded all HTML articles with\nthe subject Bpsychology^ from the Public Library of Science\n(PLoS; 2000\u20132013), using the rplos R package (Chamberlain,\nBoettiger, & Ram, 2014).1 In this automatic process we did\nnot exclude retractions, errata, or editorials. The final sample\nconsisted of 30,717 articles. The number of downloaded arti-\ncles per journal is given in Table 1. To obtain reporting error\nprevalences for each subfield and for psychology in total,\nstatcheck was used on all downloaded articles.\nStatistical analyses\nOur population of interest is all APA-reported NHST results in\nthe full text of the articles from the eight selected flagship\n1 We note there is a minor difference in"
+        },
+        "library_full_chunk": {
+          "text": "Methods\nThe Prevalence of Statistical Reporting Errors\nSample\nFor each psychology subfield as listed in the search engine of Thompson Reuters\u2019\n2012 Journal Citation Reports (Applied Psychology, Biological Psychology,\nClinical Psychology, Developmental Psychology, Educational Psychology,\nExperimental Psychology, Mathematical Psychology Multidisciplinary\nPsychology, Psychoanalysis, and Social Psychology), we chose the journal with the\nhighest 5-year Impact Factor, which (1) was published in English, (2) required the\npublication style of the American Psychological Association (APA) [27], and (3)\npublished at least 80 empirical articles in 2011. Four subfields were excluded for\ndifferent reasons. Educational Psychology was excluded because high-ranking\njournals in Educational Psychology and Developmental Psychology largely\noverlapped. Mathematical Psychology was excluded because articles in this field\ndo not usually report the results of NHST. We excluded Multidisciplinary\nPsychology because we did not regard this field useful to compare subfields of\npsychology, and we excluded Psychoanalysis because hardly any empirical studies\nare reported in this field. From the remaining six subfields, the following journals\nwere included in our sample: the Journal of Applied Psychology (Applied\nPsychology), the Journal of Consulting and Clinical Psychology (Clinical\nPsychology), the Journal of Child Psychology and Psychiatry (Developmental\nPsychology), the Journal of Cognitive Neuroscience (Experimental Psychology), the\nJournal of Personality and Social Psychology (Social Psychology), and\nPsychophysiology (Biological Psychology). On 24 October 2012 we downloaded\nall 775 articles published in these journals since Jan 1st, 2012 and then read each\nabstract in order to determine whether an article was empirical or not. After this\nselection, our final sample consisted of 697 empirical articles (see Table 1).",
+          "page": 3,
+          "context_text": "with a reduced risk of statistical\nreporting errors, and thus expected the probability of a given p-value being\nincorrect to be lower in papers in which the statistical analyses and the reporting\nof the results had been co-piloted (i.e. where more than one person had been\ninvolved). This time-stamped hypothesis can be found at the Open Science\nFramework via http://osf.io/dkn8a.\nMethods\nThe Prevalence of Statistical Reporting Errors\nSample\nFor each psychology subfield as listed in the search engine of Thompson Reuters\u2019\n2012 Journal Citation Reports (Applied Psychology, Biological Psychology,\nClinical Psychology, Developmental Psychology, Educational Psychology,\nExperimental Psychology, Mathematical Psychology Multidisciplinary\nPsychology, Psychoanalysis, and Social Psychology), we chose the journal with the\nhighest 5-year Impact Factor, which (1) was published in English, (2) required the\npublication style of the American Psychological Association (APA) [27], and (3)\npublished at least 80 empirical articles in 2011. Four subfields were excluded for\ndifferent reasons. Educational Psychology was excluded because high-ranking\njournals in Educational Psychology and Developmental Psychology largely\noverlapped. Mathematical Psychology was excluded because articles in this field\ndo not usually report the results of NHST. We excluded Multidisciplinary\nPsychology because we did not regard this field useful to compare subfields of\npsychology, and we excluded Psychoanalysis because hardly any empirical studies\nare reported in this field. From the remaining six subfields, the following journals\nwere included in our sample: the Journal of Applied Psychology (Applied\nPsychology), the Journal of Consulting and Clinical Psychology (Clinical\nPsychology), the Journal of Child Psychology and Psychiatry (Developmental\nPsychology), the Journal of Cognitive Neuroscience (Experimental Psychology), the\nJournal of Personality and Social Psychology (Social Psychology), and\nPsychophysiology (Biological Psychology). On 24 October 2012 we downloaded\nall 775 articles published in these journals since Jan 1st, 2012 and then read each\nabstract in order to determine whether an article was empirical or not. After this\nselection, our final sample consisted of 697 empirical articles (see Table 1).\nProcedure\nTo assess the accuracy of the p-values reported in our sample of articles, we used a\nrecently developed automated procedure called statcheck [16, 28]. Statcheck is a\npackage in R, a free software environment for statistical computing and graphics\n[29], and is available through https://github.com/MicheleNuijten/statcheck. The\nversion of statcheck that we used for this paper (0.1.0) extracts t, F,"
+        },
+        "reference_list_match": false,
+        "block_quote_match": false,
+        "source_excerpt_cards": [
+          {
+            "role": "checked_manuscript",
+            "source_document_id": "nuijten-2016",
+            "file": "nuijten-2016.pdf",
+            "pdf_page": 4,
+            "quote": "The final sample consisted of 30,717 articles.",
+            "exact_complete_quote_found": true,
+            "line_rects_pdf_points": [
+              [
+                223.34109497070312,
+                548.3902587890625,
+                289.1739807128906,
+                558.3528442382812
+              ],
+              [
+                51.028045654296875,
+                560.8036499023438,
+                159.7498779296875,
+                570.7662353515625
+              ]
+            ],
+            "page_width": 595.2760009765625,
+            "page_height": 790.8660278320312,
+            "saved_chunk_start_page": 4,
+            "qualification": "This excerpt is part of the full saved model-scored passage; its own page is preserved even when the saved passage starts on an earlier page.",
+            "source": {
+              "boxes_origin": "bottom-left",
+              "page": 4,
+              "source_sha256": "5d1a96e0cdf0ff090167379efad475cb6e104936e237a4d62a7e6f3a7da47a5e",
+              "quote": "The final sample consisted of 30,717 articles.",
+              "highlighted_quote": "The final sample consisted of 30,717 articles.",
+              "precision": "page_bbox",
+              "boxes": [
+                [
+                  223.34109497070312,
+                  232.51318359375,
+                  289.1739807128906,
+                  242.47576904296875
+                ],
+                [
+                  51.028045654296875,
+                  220.09979248046875,
+                  159.7498779296875,
+                  230.0623779296875
+                ]
+              ],
+              "precision_note": "Complete quotation uniquely bound to original native glyphs.",
+              "image_asset": "/sample-assets/module-checks/e-8a970af7198a96798127cadd.png",
+              "image_sha256": "8a970af7198a96798127cadd72e4fbeab2252c75dbec83e0ddf33d55cadacf9e"
+            }
+          },
+          {
+            "role": "library_source",
+            "source_document_id": "veldkamp-2014",
+            "file": "veldkamp-2014.pdf",
+            "pdf_page": 4,
+            "quote": "After this selection, our final sample consisted of 697 empirical articles (see Table 1).",
+            "exact_complete_quote_found": true,
+            "line_rects_pdf_points": [
+              [
+                531.2149047851562,
+                299.51531982421875,
+                574.8389892578125,
+                310.9724426269531
+              ],
+              [
+                196.27020263671875,
+                313.5181884765625,
+                550.3794555664062,
+                324.9758605957031
+              ]
+            ],
+            "page_width": 612.2830200195312,
+            "page_height": 790.8660278320312,
+            "saved_chunk_start_page": 3,
+            "qualification": "This excerpt is part of the full saved model-scored passage; its own page is preserved even when the saved passage starts on an earlier page.",
+            "source": {
+              "boxes_origin": "bottom-left",
+              "page": 4,
+              "source_sha256": "a91ab7e12f650f80b03c3f6548c3a9709831e469daa4921bd0606d8e7939faed",
+              "quote": "After this selection, our final sample consisted of 697 empirical articles (see Table 1).",
+              "highlighted_quote": "After this selection, our final sample consisted of 697 empirical articles (see Table 1).",
+              "precision": "page_bbox",
+              "boxes": [
+                [
+                  531.2149047851562,
+                  479.8935852050781,
+                  574.8389892578125,
+                  491.3507080078125
+                ],
+                [
+                  196.27020263671875,
+                  465.8901672363281,
+                  550.3794555664062,
+                  477.34783935546875
+                ]
+              ],
+              "precision_note": "Complete quotation uniquely bound to original native glyphs.",
+              "image_asset": "/sample-assets/module-checks/e-99e4de4a6d3d5aa903ffac30.png",
+              "image_sha256": "99e4de4a6d3d5aa903ffac3022003294edff3d6329f4a409584a19a2e6e15774"
+            }
+          }
+        ]
+      }
+    ],
+    "service_receipt_sha256": "f9a0f2644583b21d5c3b4d2e00fbc5b0beace6f46cdd2591eadc387a215e193c",
+    "record_identity_note": "Numeric record identifiers belong only to the isolated verification receipt. Document links must use the named case sources, not ordinary application Library IDs.",
+    "saved_similarity": 0.855
+  },
+  "rendered_source_coordinates": {
+    "units": "PDF points",
+    "origin": "bottom-left",
+    "fields": "source.boxes",
+    "qualification": "Original top-left native search rectangles remain separately identified as line_rects_pdf_points."
+  },
+  "preparation": {
+    "source_bytes_unchanged": true,
+    "local_engine_results_loaded": true,
+    "human_uat": false
+  }
+}

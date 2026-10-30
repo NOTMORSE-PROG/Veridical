@@ -79,3 +79,12 @@ Desktop.ini
 # Progress-report decks / generated presentation assets (internal, not part of the shipped product)
 presentation/
 *.pptx
+
+# Public demonstration documents; exact reviewed sources only.
+!frontend/public/sample-assets/stock-inventory-capstone.pdf
+!frontend/public/sample-assets/e-aimss.pdf
+!frontend/public/sample-assets/official-research-rubric.pdf
+!frontend/public/sample-assets/module-checks/nuijten-2016.pdf
+!frontend/public/sample-assets/module-checks/rojahn-2023.pdf
+!frontend/public/sample-assets/module-checks/veldkamp-2014.pdf
+/public-workspace/dist/

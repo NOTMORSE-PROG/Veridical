@@ -1,0 +1,703 @@
+{
+  "results": [
+    {
+      "criterion_id": 101,
+      "check_result_id": 1101,
+      "judgment_revision": 0,
+      "text": "Introduction",
+      "type": "semantic",
+      "weight": 1,
+      "weight_importance": "med",
+      "kind": "semantic",
+      "outcome": "escalated",
+      "score": null,
+      "basis": "document_review",
+      "anchor": "page 6",
+      "reasoning": "The introduction gives the inventory problem and objectives. Read whether it also previews the structure of the paper before selecting the official level.",
+      "reason": "The introduction gives the inventory problem and objectives. Read whether it also previews the structure of the paper before selecting the official level.",
+      "evidence": [
+        {
+          "quote": "Background: Businesses often struggle with inventory shortages, overstocking, and manual record-keeping.",
+          "anchor": "page 6"
+        }
+      ],
+      "resolution": null,
+      "level": null
+    },
+    {
+      "criterion_id": 102,
+      "check_result_id": 1102,
+      "judgment_revision": 0,
+      "text": "Purpose",
+      "type": "semantic",
+      "weight": 1,
+      "weight_importance": "med",
+      "kind": "semantic",
+      "outcome": "escalated",
+      "score": null,
+      "basis": "document_review",
+      "anchor": "page 5",
+      "reasoning": "The abstract states what the project develops. Compare that purpose with the web-system plan and database claim later in the paper; no automatic grade is assigned.",
+      "reason": "The abstract states what the project develops. Compare that purpose with the web-system plan and database claim later in the paper; no automatic grade is assigned.",
+      "evidence": [
+        {
+          "quote": "This project develops a robust, console-based application using the C programming language",
+          "anchor": "page 5"
+        }
+      ],
+      "resolution": null,
+      "level": null
+    },
+    {
+      "criterion_id": 103,
+      "check_result_id": 1103,
+      "judgment_revision": 0,
+      "text": "Content",
+      "type": "semantic",
+      "weight": 1,
+      "weight_importance": "med",
+      "kind": "semantic",
+      "outcome": "escalated",
+      "score": null,
+      "basis": "document_review",
+      "anchor": "page 23",
+      "reasoning": "The evaluation describes intended testing. Read the implementation, component summary and results before deciding whether the central purpose has sufficient analytical support.",
+      "reason": "The evaluation describes intended testing. Read the implementation, component summary and results before deciding whether the central purpose has sufficient analytical support.",
+      "evidence": [
+        {
+          "quote": "User Testing: Real users (admin & staff) will test the full workflow from product entry to stock movement.",
+          "anchor": "page 23"
+        }
+      ],
+      "resolution": null,
+      "level": null
+    },
+    {
+      "criterion_id": 104,
+      "check_result_id": 1104,
+      "judgment_revision": 0,
+      "text": "Organization",
+      "type": "semantic",
+      "weight": 1,
+      "weight_importance": "med",
+      "kind": "semantic",
+      "outcome": "escalated",
+      "score": null,
+      "basis": "document_review",
+      "anchor": "page 2",
+      "reasoning": "The contents lists the implementation, evaluation, limitations and manual. Inspect the order and links between these sections, rather than treating a contents page as proof of organization.",
+      "reason": "The contents lists the implementation, evaluation, limitations and manual. Inspect the order and links between these sections, rather than treating a contents page as proof of organization.",
+      "evidence": [
+        {
+          "quote": "TABLE OF CONTENT",
+          "anchor": "page 2"
+        }
+      ],
+      "resolution": null,
+      "level": null
+    },
+    {
+      "criterion_id": 105,
+      "check_result_id": 1105,
+      "judgment_revision": 0,
+      "text": "Grammar, Spelling, Writing Mechanics (punctuation, italics, capitalization, etc.)",
+      "type": "semantic",
+      "weight": 1,
+      "weight_importance": "med",
+      "kind": "semantic",
+      "outcome": "escalated",
+      "score": null,
+      "basis": "document_review",
+      "anchor": "page 3",
+      "reasoning": "This sentence offers a proofreading example. Read more of the manuscript before judging the frequency or effect of grammar and mechanics errors.",
+      "reason": "This sentence offers a proofreading example. Read more of the manuscript before judging the frequency or effect of grammar and mechanics errors.",
+      "evidence": [
+        {
+          "quote": "The result embodied in this project report have not been submitted top any other",
+          "anchor": "page 3"
+        }
+      ],
+      "resolution": null,
+      "level": null
+    },
+    {
+      "criterion_id": 106,
+      "check_result_id": 1106,
+      "judgment_revision": 0,
+      "text": "Tone",
+      "type": "semantic",
+      "weight": 1,
+      "weight_importance": "med",
+      "kind": "semantic",
+      "outcome": "escalated",
+      "score": null,
+      "basis": "document_review",
+      "anchor": "page 5",
+      "reasoning": "The abstract offers a sample of the writing tone. A few sentences cannot establish consistent tone throughout the manuscript.",
+      "reason": "The abstract offers a sample of the writing tone. A few sentences cannot establish consistent tone throughout the manuscript.",
+      "evidence": [
+        {
+          "quote": "The Stock and Inventory Management System represents a comprehensive solution",
+          "anchor": "page 5"
+        }
+      ],
+      "resolution": null,
+      "level": null
+    },
+    {
+      "criterion_id": 107,
+      "check_result_id": 1107,
+      "judgment_revision": 0,
+      "text": "Use of References",
+      "type": "semantic",
+      "weight": 1,
+      "weight_importance": "med",
+      "kind": "semantic",
+      "outcome": "escalated",
+      "score": null,
+      "basis": "document_review",
+      "anchor": "page 7",
+      "reasoning": "The literature claim does not identify a supporting study in this sentence. Compare its attribution with the reference section before choosing a level.",
+      "reason": "The literature claim does not identify a supporting study in this sentence. Compare its attribution with the reference section before choosing a level.",
+      "evidence": [
+        {
+          "quote": "Research and case studies show that integrating inventory systems with cloud platforms and mobile applications enhances accessibility and operational efficiency.",
+          "anchor": "page 7"
+        }
+      ],
+      "resolution": null,
+      "level": null
+    },
+    {
+      "criterion_id": 108,
+      "check_result_id": 1108,
+      "judgment_revision": 0,
+      "text": "Quality of References",
+      "type": "semantic",
+      "weight": 1,
+      "weight_importance": "med",
+      "kind": "semantic",
+      "outcome": "escalated",
+      "score": null,
+      "basis": "document_review",
+      "anchor": "page 109",
+      "reasoning": "The reference section contains an acknowledgement rather than identifiable bibliographic records. The professional quality of missing sources cannot be assessed from this excerpt.",
+      "reason": "The reference section contains an acknowledgement rather than identifiable bibliographic records. The professional quality of missing sources cannot be assessed from this excerpt.",
+      "evidence": [
+        {
+          "quote": "The proper guidelines from Our instructor Md. Sakib Ali Mazumder sir.",
+          "anchor": "page 109"
+        }
+      ],
+      "resolution": null,
+      "level": null
+    },
+    {
+      "criterion_id": 109,
+      "check_result_id": 1109,
+      "judgment_revision": 0,
+      "text": "Bibliography",
+      "type": "semantic",
+      "weight": 1,
+      "weight_importance": "med",
+      "kind": "semantic",
+      "outcome": "escalated",
+      "score": null,
+      "basis": "document_review",
+      "anchor": "page 109",
+      "reasoning": "The reference section does not provide the major-reference entries required by the official descriptors. Review the whole document and record a judgment; an acknowledgement is not a bibliography.",
+      "reason": "The reference section does not provide the major-reference entries required by the official descriptors. Review the whole document and record a judgment; an acknowledgement is not a bibliography.",
+      "evidence": [
+        {
+          "quote": "The proper guidelines from Our instructor Md. Sakib Ali Mazumder sir.",
+          "anchor": "page 109"
+        }
+      ],
+      "resolution": null,
+      "level": null
+    }
+  ],
+  "flags": [
+    {
+      "id": 1,
+      "assessment_revision": 1,
+      "check_result_id": 2001,
+      "check_run_id": 1,
+      "manuscript_group_label": "Stock & Inventory Management System",
+      "criterion_text": null,
+      "confidence": null,
+      "annotation": null,
+      "overridden": false,
+      "override_reason": null,
+      "llm_mode": "unknown",
+      "is_passage_level": false,
+      "passage_pair": null,
+      "first_upload_context": false,
+      "evidence_unavailable": false,
+      "citation_source_key": null,
+      "confirmed_citation_source": false,
+      "affects_readiness": false,
+      "readiness_exclusion_reason": "Source observation; instructor review required.",
+      "check_kind": "internal_agreement",
+      "severity": "med",
+      "evidence_excerpt": "efficient database integration",
+      "page_anchor": "page 109",
+      "ai_verdict_summary": "implementation_scope_mismatch",
+      "ai_reasoning": "The conclusion on p.109 describes database integration as delivered. In contrast, the limitations on p.29 explicitly state 'No database integration', the source code on pp.37-50 uses fopen/fprintf to save text files, and p.103 proposes database migration as future work. Ask the authors to align the conclusion with the completed implementation. This is a documentation inconsistency, not a claim about misconduct."
+    },
+    {
+      "id": 2,
+      "assessment_revision": 1,
+      "check_result_id": 2002,
+      "check_run_id": 1,
+      "manuscript_group_label": "Stock & Inventory Management System",
+      "criterion_text": null,
+      "confidence": null,
+      "annotation": null,
+      "overridden": false,
+      "override_reason": null,
+      "llm_mode": "unknown",
+      "is_passage_level": false,
+      "passage_pair": null,
+      "first_upload_context": false,
+      "evidence_unavailable": false,
+      "citation_source_key": null,
+      "confirmed_citation_source": false,
+      "affects_readiness": false,
+      "readiness_exclusion_reason": "Source observation; instructor review required.",
+      "check_kind": "internal_agreement",
+      "severity": "low",
+      "evidence_excerpt": "Develop a web-based inventory system with role-based access control for admin and",
+      "page_anchor": "page 20",
+      "ai_verdict_summary": "implementation_scope_mismatch",
+      "ai_reasoning": "The methodology on p.20 describes a web-based system. The abstract on p.5, the C listing on pp.33-80 and the console screenshots in the user manual support a Windows console implementation. A web interface is explicitly future work on pp.103-104. Clarify whether p.20 describes the original plan, and distinguish that plan from the delivered prototype."
+    },
+    {
+      "id": 3,
+      "assessment_revision": 1,
+      "check_result_id": 2003,
+      "check_run_id": 1,
+      "manuscript_group_label": "Stock & Inventory Management System",
+      "criterion_text": null,
+      "confidence": null,
+      "annotation": null,
+      "overridden": false,
+      "override_reason": null,
+      "llm_mode": "unknown",
+      "is_passage_level": false,
+      "passage_pair": null,
+      "first_upload_context": false,
+      "evidence_unavailable": false,
+      "citation_source_key": null,
+      "confirmed_citation_source": false,
+      "affects_readiness": false,
+      "readiness_exclusion_reason": "Source observation; instructor review required.",
+      "check_kind": "internal_agreement",
+      "severity": "med",
+      "evidence_excerpt": "Total Components: 32",
+      "page_anchor": "page 32",
+      "ai_verdict_summary": "component_count_mismatch",
+      "ai_reasoning": "The summary says 32 components, 29 complete and 3 partial. The displayed table contains 23 rows on p.32 and 11 more on p.33: 34 rows, comprising 31 Complete and 3 Partial. Header text and summary bullets are excluded from that count. The printed 90.6% is consistent with 29/32; the issue is which component set the summary describes. Ask the authors to identify exclusions or reconcile the list and totals."
+    },
+    {
+      "id": 4,
+      "assessment_revision": 1,
+      "check_result_id": 2004,
+      "check_run_id": 1,
+      "manuscript_group_label": "Stock & Inventory Management System",
+      "criterion_text": null,
+      "confidence": null,
+      "annotation": null,
+      "overridden": false,
+      "override_reason": null,
+      "llm_mode": "unknown",
+      "is_passage_level": false,
+      "passage_pair": null,
+      "first_upload_context": false,
+      "evidence_unavailable": false,
+      "citation_source_key": null,
+      "confirmed_citation_source": false,
+      "affects_readiness": false,
+      "readiness_exclusion_reason": "Source observation; instructor review required.",
+      "check_kind": "citation_integrity",
+      "severity": "med",
+      "evidence_excerpt": "Research and case studies show that integrating inventory systems with cloud platforms and",
+      "page_anchor": "page 7",
+      "ai_verdict_summary": "source_support_missing",
+      "ai_reasoning": "The literature review makes this research claim on p.7 without identifying a study in the accompanying sentence. The REFERENCE section on p.109 contains an acknowledgement of instructor guidance rather than bibliographic records. Request the sources supporting the literature claims and their complete entries. No publication has been labelled fake, and no external database lookup is being claimed."
+    }
+  ],
+  "references": [
+    {
+      "reference_id": "21929e1e1023d8b84303aadeb53b959667be51858aac9be5a5624603707456c0",
+      "criterion_id": 101,
+      "flag_id": null,
+      "role": "criterion_evidence",
+      "index": 0,
+      "quote": "Background: Businesses often struggle with inventory shortages, overstocking, and manual record-keeping.",
+      "anchor": "page 6",
+      "source_scope": "own_manuscript",
+      "source_state": "not_checked"
+    },
+    {
+      "reference_id": "8f83369b44ae2f5ec1da2db6ac7c1e07469c49a44de0f89790cb8d94db30ab7b",
+      "criterion_id": 102,
+      "flag_id": null,
+      "role": "criterion_evidence",
+      "index": 0,
+      "quote": "This project develops a robust, console-based application using the C programming language",
+      "anchor": "page 5",
+      "source_scope": "own_manuscript",
+      "source_state": "not_checked"
+    },
+    {
+      "reference_id": "574307c9d663a2a34a87754609137cbeb745fe12bbd8fb35718cdfddd476bd22",
+      "criterion_id": 103,
+      "flag_id": null,
+      "role": "criterion_evidence",
+      "index": 0,
+      "quote": "User Testing: Real users (admin & staff) will test the full workflow from product entry to stock movement.",
+      "anchor": "page 23",
+      "source_scope": "own_manuscript",
+      "source_state": "not_checked"
+    },
+    {
+      "reference_id": "26ec58da0507ec8d014b1e240c9f9501f5c3a360707d9f455daa6241917c2d54",
+      "criterion_id": 104,
+      "flag_id": null,
+      "role": "criterion_evidence",
+      "index": 0,
+      "quote": "TABLE OF CONTENT",
+      "anchor": "page 2",
+      "source_scope": "own_manuscript",
+      "source_state": "not_checked"
+    },
+    {
+      "reference_id": "273d7d00b58a74d9cab15c747277b37c7083187515be91e4d166c3b443a8243c",
+      "criterion_id": 105,
+      "flag_id": null,
+      "role": "criterion_evidence",
+      "index": 0,
+      "quote": "The result embodied in this project report have not been submitted top any other",
+      "anchor": "page 3",
+      "source_scope": "own_manuscript",
+      "source_state": "not_checked"
+    },
+    {
+      "reference_id": "f5bcf2306f847c8cc4b3f654cedc59f0da2eba5c96653b52ecfef25ae2c262ab",
+      "criterion_id": 106,
+      "flag_id": null,
+      "role": "criterion_evidence",
+      "index": 0,
+      "quote": "The Stock and Inventory Management System represents a comprehensive solution",
+      "anchor": "page 5",
+      "source_scope": "own_manuscript",
+      "source_state": "not_checked"
+    },
+    {
+      "reference_id": "44fc0681e8b2dc0710ba720b0b59d932ba5d2d6a16b6905a3387c69c1a65b2aa",
+      "criterion_id": 107,
+      "flag_id": null,
+      "role": "criterion_evidence",
+      "index": 0,
+      "quote": "Research and case studies show that integrating inventory systems with cloud platforms and mobile applications enhances accessibility and operational efficiency.",
+      "anchor": "page 7",
+      "source_scope": "own_manuscript",
+      "source_state": "not_checked"
+    },
+    {
+      "reference_id": "34f7a3bbb12c26affd191b0949bd88cbba3f08e6145ef2c9bbb54f769a46123a",
+      "criterion_id": 108,
+      "flag_id": null,
+      "role": "criterion_evidence",
+      "index": 0,
+      "quote": "The proper guidelines from Our instructor Md. Sakib Ali Mazumder sir.",
+      "anchor": "page 109",
+      "source_scope": "own_manuscript",
+      "source_state": "not_checked"
+    },
+    {
+      "reference_id": "305b3d1a5ee44d6262d4b88427886a702fed8f4241446852ae4de9d0ab3ef7f6",
+      "criterion_id": 109,
+      "flag_id": null,
+      "role": "criterion_evidence",
+      "index": 0,
+      "quote": "The proper guidelines from Our instructor Md. Sakib Ali Mazumder sir.",
+      "anchor": "page 109",
+      "source_scope": "own_manuscript",
+      "source_state": "not_checked"
+    },
+    {
+      "reference_id": "91287d05fcafcd3822f189a3a6829679171600ac847e10d3690aefe7b1523f3e",
+      "criterion_id": null,
+      "flag_id": 1,
+      "role": "agreement_intent",
+      "index": 0,
+      "quote": "File-Based Storage: No database integration limiting data integrity and concurrent access.",
+      "anchor": "page 29",
+      "source_scope": "own_manuscript",
+      "source_state": "not_checked"
+    },
+    {
+      "reference_id": "98d039cd882dd8e8b00e885445438ff167b92f9b4e32581235c199af93690908",
+      "criterion_id": null,
+      "flag_id": 1,
+      "role": "agreement_outcome",
+      "index": 1,
+      "quote": "With secure transaction handling, efficient database integration, and a user-friendly interface, it ensures smooth operations even under high loads.",
+      "anchor": "page 109",
+      "source_scope": "own_manuscript",
+      "source_state": "not_checked"
+    },
+    {
+      "reference_id": "c82eccef3daad2b9d734e54cbd2d196ed520712a967ada54901e289d6acc088c",
+      "criterion_id": null,
+      "flag_id": 2,
+      "role": "agreement_intent",
+      "index": 0,
+      "quote": "Develop a web-based inventory system with role-based access control for admin and",
+      "anchor": "page 20",
+      "source_scope": "own_manuscript",
+      "source_state": "not_checked"
+    },
+    {
+      "reference_id": "c3754b7ca4e7d304c4b761040264f771357ac46551bd9f3779b7777679cc9315",
+      "criterion_id": null,
+      "flag_id": 2,
+      "role": "agreement_outcome",
+      "index": 1,
+      "quote": "This project develops a robust, console-based application using the C programming language that facilitates efficient tracking, monitoring, and management of stock levels, customer orders, supplier relationships, and financial transactions.",
+      "anchor": "page 5",
+      "source_scope": "own_manuscript",
+      "source_state": "not_checked"
+    },
+    {
+      "reference_id": "d1b5a4dd965f8e336570c2201cecd543ead3ba4c27f999e85eaed055ee2993dd",
+      "criterion_id": null,
+      "flag_id": 3,
+      "role": "agreement_intent",
+      "index": 0,
+      "quote": "Total Components: 32",
+      "anchor": "page 32",
+      "source_scope": "own_manuscript",
+      "source_state": "not_checked"
+    },
+    {
+      "reference_id": "e7420d84b4cab2bdbd8834e2274e50e6a1476cd73484dcb993c156f56d6a921e",
+      "criterion_id": null,
+      "flag_id": 3,
+      "role": "agreement_outcome",
+      "index": 1,
+      "quote": "Business Rule Validation Partial Basic Fair",
+      "anchor": "page 33",
+      "source_scope": "own_manuscript",
+      "source_state": "not_checked"
+    },
+    {
+      "reference_id": "f53c96e017223dc0983a7456670122e980efa60e421a6be18a116c1a6f5bbf21",
+      "criterion_id": null,
+      "flag_id": 4,
+      "role": "finding_excerpt",
+      "index": 0,
+      "quote": "Research and case studies show that integrating inventory systems with cloud platforms and",
+      "anchor": "page 7",
+      "source_scope": "own_manuscript",
+      "source_state": "not_checked"
+    },
+    {
+      "reference_id": "8ca3b3cdd17ec9ffec3230de750fe6c7d194af20eeed615c3b97457aac36ac1a",
+      "criterion_id": null,
+      "flag_id": 4,
+      "role": "finding_excerpt",
+      "index": 1,
+      "quote": "The proper guidelines from Our instructor Md. Sakib Ali Mazumder sir.",
+      "anchor": "page 109",
+      "source_scope": "own_manuscript",
+      "source_state": "not_checked"
+    }
+  ],
+  "placements": {
+    "21929e1e1023d8b84303aadeb53b959667be51858aac9be5a5624603707456c0": {
+      "reference_id": "21929e1e1023d8b84303aadeb53b959667be51858aac9be5a5624603707456c0",
+      "state": "page_only",
+      "page": 6,
+      "paragraph": null,
+      "boxes": [],
+      "reason": "The saved passage is verified on this original page; no exact highlight is asserted."
+    },
+    "8f83369b44ae2f5ec1da2db6ac7c1e07469c49a44de0f89790cb8d94db30ab7b": {
+      "reference_id": "8f83369b44ae2f5ec1da2db6ac7c1e07469c49a44de0f89790cb8d94db30ab7b",
+      "state": "page_only",
+      "page": 5,
+      "paragraph": null,
+      "boxes": [],
+      "reason": "The saved passage is verified on this original page; no exact highlight is asserted."
+    },
+    "574307c9d663a2a34a87754609137cbeb745fe12bbd8fb35718cdfddd476bd22": {
+      "reference_id": "574307c9d663a2a34a87754609137cbeb745fe12bbd8fb35718cdfddd476bd22",
+      "state": "page_only",
+      "page": 23,
+      "paragraph": null,
+      "boxes": [],
+      "reason": "The saved passage is verified on this original page; no exact highlight is asserted."
+    },
+    "26ec58da0507ec8d014b1e240c9f9501f5c3a360707d9f455daa6241917c2d54": {
+      "reference_id": "26ec58da0507ec8d014b1e240c9f9501f5c3a360707d9f455daa6241917c2d54",
+      "state": "page_only",
+      "page": 2,
+      "paragraph": null,
+      "boxes": [],
+      "reason": "The saved passage is verified on this original page; no exact highlight is asserted."
+    },
+    "273d7d00b58a74d9cab15c747277b37c7083187515be91e4d166c3b443a8243c": {
+      "reference_id": "273d7d00b58a74d9cab15c747277b37c7083187515be91e4d166c3b443a8243c",
+      "state": "page_only",
+      "page": 3,
+      "paragraph": null,
+      "boxes": [],
+      "reason": "The saved passage is verified on this original page; no exact highlight is asserted."
+    },
+    "f5bcf2306f847c8cc4b3f654cedc59f0da2eba5c96653b52ecfef25ae2c262ab": {
+      "reference_id": "f5bcf2306f847c8cc4b3f654cedc59f0da2eba5c96653b52ecfef25ae2c262ab",
+      "state": "page_only",
+      "page": 5,
+      "paragraph": null,
+      "boxes": [],
+      "reason": "The saved passage is verified on this original page; no exact highlight is asserted."
+    },
+    "44fc0681e8b2dc0710ba720b0b59d932ba5d2d6a16b6905a3387c69c1a65b2aa": {
+      "reference_id": "44fc0681e8b2dc0710ba720b0b59d932ba5d2d6a16b6905a3387c69c1a65b2aa",
+      "state": "page_only",
+      "page": 7,
+      "paragraph": null,
+      "boxes": [],
+      "reason": "The saved passage is verified on this original page; no exact highlight is asserted."
+    },
+    "34f7a3bbb12c26affd191b0949bd88cbba3f08e6145ef2c9bbb54f769a46123a": {
+      "reference_id": "34f7a3bbb12c26affd191b0949bd88cbba3f08e6145ef2c9bbb54f769a46123a",
+      "state": "page_only",
+      "page": 109,
+      "paragraph": null,
+      "boxes": [],
+      "reason": "The saved passage is verified on this original page; no exact highlight is asserted."
+    },
+    "305b3d1a5ee44d6262d4b88427886a702fed8f4241446852ae4de9d0ab3ef7f6": {
+      "reference_id": "305b3d1a5ee44d6262d4b88427886a702fed8f4241446852ae4de9d0ab3ef7f6",
+      "state": "page_only",
+      "page": 109,
+      "paragraph": null,
+      "boxes": [],
+      "reason": "The saved passage is verified on this original page; no exact highlight is asserted."
+    },
+    "91287d05fcafcd3822f189a3a6829679171600ac847e10d3690aefe7b1523f3e": {
+      "reference_id": "91287d05fcafcd3822f189a3a6829679171600ac847e10d3690aefe7b1523f3e",
+      "state": "page_only",
+      "page": 29,
+      "paragraph": null,
+      "boxes": [],
+      "reason": "Read both saved passages in their original page context."
+    },
+    "98d039cd882dd8e8b00e885445438ff167b92f9b4e32581235c199af93690908": {
+      "reference_id": "98d039cd882dd8e8b00e885445438ff167b92f9b4e32581235c199af93690908",
+      "state": "page_only",
+      "page": 109,
+      "paragraph": null,
+      "boxes": [],
+      "reason": "Read both saved passages in their original page context."
+    },
+    "c82eccef3daad2b9d734e54cbd2d196ed520712a967ada54901e289d6acc088c": {
+      "reference_id": "c82eccef3daad2b9d734e54cbd2d196ed520712a967ada54901e289d6acc088c",
+      "state": "page_only",
+      "page": 20,
+      "paragraph": null,
+      "boxes": [],
+      "reason": "Read both saved passages in their original page context."
+    },
+    "c3754b7ca4e7d304c4b761040264f771357ac46551bd9f3779b7777679cc9315": {
+      "reference_id": "c3754b7ca4e7d304c4b761040264f771357ac46551bd9f3779b7777679cc9315",
+      "state": "page_only",
+      "page": 5,
+      "paragraph": null,
+      "boxes": [],
+      "reason": "Read both saved passages in their original page context."
+    },
+    "d1b5a4dd965f8e336570c2201cecd543ead3ba4c27f999e85eaed055ee2993dd": {
+      "reference_id": "d1b5a4dd965f8e336570c2201cecd543ead3ba4c27f999e85eaed055ee2993dd",
+      "state": "page_only",
+      "page": 32,
+      "paragraph": null,
+      "boxes": [],
+      "reason": "Read both saved passages in their original page context."
+    },
+    "e7420d84b4cab2bdbd8834e2274e50e6a1476cd73484dcb993c156f56d6a921e": {
+      "reference_id": "e7420d84b4cab2bdbd8834e2274e50e6a1476cd73484dcb993c156f56d6a921e",
+      "state": "page_only",
+      "page": 33,
+      "paragraph": null,
+      "boxes": [],
+      "reason": "Read both saved passages in their original page context."
+    },
+    "f53c96e017223dc0983a7456670122e980efa60e421a6be18a116c1a6f5bbf21": {
+      "reference_id": "f53c96e017223dc0983a7456670122e980efa60e421a6be18a116c1a6f5bbf21",
+      "state": "page_only",
+      "page": 7,
+      "paragraph": null,
+      "boxes": [],
+      "reason": "Read both saved passages in their original page context."
+    },
+    "8ca3b3cdd17ec9ffec3230de750fe6c7d194af20eeed615c3b97457aac36ac1a": {
+      "reference_id": "8ca3b3cdd17ec9ffec3230de750fe6c7d194af20eeed615c3b97457aac36ac1a",
+      "state": "page_only",
+      "page": 109,
+      "paragraph": null,
+      "boxes": [],
+      "reason": "Read both saved passages in their original page context."
+    }
+  },
+  "page_images": {
+    "6": {
+      "path": "/sample-assets/pages/6.png",
+      "sha256": "bcf1fb9d3d3edfe86e6b724bc45df53fef42934bc151e9e3ce53e6da53327528"
+    },
+    "5": {
+      "path": "/sample-assets/pages/5.png",
+      "sha256": "a589023e4e55f2d5d07a2d37b1be5be0f49313507989e9fb613474c755059dce"
+    },
+    "23": {
+      "path": "/sample-assets/pages/23.png",
+      "sha256": "c4a63fcdf772501ea05b3b35c5aa6e1781392f080bfe9b2865831f18c046eb00"
+    },
+    "2": {
+      "path": "/sample-assets/pages/2.png",
+      "sha256": "a54f83dc35b3b6f42765cff457899eeb1f1e727c5a141389ad3e542ca7439ad1"
+    },
+    "3": {
+      "path": "/sample-assets/pages/3.png",
+      "sha256": "f61db30e1ffc9824bd8f36ad0ccdabe9e673ee1e05f4684903d05f7bc278b759"
+    },
+    "7": {
+      "path": "/sample-assets/pages/7.png",
+      "sha256": "c9c00ee81ddfada2c7dfd7f7d302a2bbd0e2f283a7301c7e4fbf4ba706c41c49"
+    },
+    "109": {
+      "path": "/sample-assets/pages/109.png",
+      "sha256": "4c9e641af25884b0f73edbc3063f0b67601a96bdc5c061ed05692e0c0172e2d6"
+    },
+    "29": {
+      "path": "/sample-assets/pages/29.png",
+      "sha256": "32d36ccd72c5ea0acaf03ba13a76154861b24175479a65098bf76df8c22dc7d5"
+    },
+    "20": {
+      "path": "/sample-assets/pages/20.png",
+      "sha256": "ad49a5887690c3829500126494dc299953b7e9c64bfb57397dd7ddeb7357be28"
+    },
+    "32": {
+      "path": "/sample-assets/pages/32.png",
+      "sha256": "22e429a06844afadaedb1830fb9b870f73510d7d90eef59790dc32b95fc5f87d"
+    },
+    "33": {
+      "path": "/sample-assets/pages/33.png",
+      "sha256": "3b7e861c1624f3670f04c123c1380a26fa5888efb5a1eb2d50dadeabb943cafe"
+    }
+  }
+}

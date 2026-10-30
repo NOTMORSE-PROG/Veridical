@@ -39,6 +39,14 @@ INTERNAL_SUFFIXES = (".pdf",)
 # are the CI regression gate (V-008). Real manuscripts/proposals never
 # live under this path; .gitignore carries the matching whitelist.
 COMMITTABLE_PDF_PREFIX = "backend/tests/fixtures/ingest/"
+PUBLIC_SOURCE_PDFS = frozenset({
+    "frontend/public/sample-assets/stock-inventory-capstone.pdf",
+    "frontend/public/sample-assets/e-aimss.pdf",
+    "frontend/public/sample-assets/official-research-rubric.pdf",
+    "frontend/public/sample-assets/module-checks/nuijten-2016.pdf",
+    "frontend/public/sample-assets/module-checks/rojahn-2023.pdf",
+    "frontend/public/sample-assets/module-checks/veldkamp-2014.pdf",
+})
 
 
 def staged_files() -> list[str]:
@@ -73,7 +81,8 @@ def staged_internal(paths: list[str]) -> list[str]:
         root_internal_md = ("/" not in norm and norm.endswith(".md")
                             and norm not in PUBLIC_ROOT_MD)
         blocked_suffix = (norm.lower().endswith(INTERNAL_SUFFIXES)
-                          and not norm.startswith(COMMITTABLE_PDF_PREFIX))
+                          and not norm.startswith(COMMITTABLE_PDF_PREFIX)
+                          and norm not in PUBLIC_SOURCE_PDFS)
         if (norm.startswith(INTERNAL_PREFIXES)
                 or root_internal_md
                 or blocked_suffix):

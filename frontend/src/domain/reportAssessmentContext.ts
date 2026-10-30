@@ -3,11 +3,12 @@ import type { ReportOut } from "../api/types";
 import { UNKNOWN_AI_DISCLOSURE } from "./aiModeDisclosure";
 
 export interface AssessmentNotice { id: string; title: string; text: string; actionText: string }
-export function reportAssessmentNotices(report: Pick<ReportOut, "check_run_id" | "llm_mode" | "historical_semantic_support_unverified"> | undefined, surface: "report" | "manuscript"): AssessmentNotice[] {
+export function reportAssessmentNotices(report: Pick<ReportOut, "check_run_id" | "llm_mode" | "historical_semantic_support_unverified" | "assessment_method"> | undefined, surface: "report" | "manuscript"): AssessmentNotice[] {
   if (!report) return [];
   const prefix = `assessment-context-${surface}-${report.check_run_id}`;
   const notices: AssessmentNotice[] = [];
-  if (report.llm_mode !== "real") notices.push(report.llm_mode === "fake"
+  if (report.assessment_method === "manual_source_review") notices.push({ id: `${prefix}-method`, title: "Source-review assessment", actionText: "Review the source passages alongside the recorded judgments.", text: "These judgments use the original manuscript and rubric descriptors. Automated grading was not run for this record." });
+  else if (report.llm_mode !== "real") notices.push(report.llm_mode === "fake"
     ? { id: `${prefix}-mode`, title: "Test-mode AI responses", actionText: "Test AI responses. Not a real AI assessment.", text: "These fixture responses are not a real manuscript assessment." }
     : { id: `${prefix}-mode`, title: UNKNOWN_AI_DISCLOSURE.title, actionText: "AI response mode is unverified.", text: UNKNOWN_AI_DISCLOSURE.body });
   if (report.historical_semantic_support_unverified) notices.push({ id: `${prefix}-support`, title: "AI evidence support needs review", actionText: "AI evidence checks are not all confirmed.", text: "Evidence checks are not confirmed for every criterion. Review each result before relying on it. Saved outcomes are unchanged." });

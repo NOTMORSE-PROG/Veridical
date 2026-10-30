@@ -4,6 +4,7 @@ import { IntegrityModuleNavigation, selectedIntegrityModule, type IntegrityKind 
 import { ActionAssessmentContext, ReportAssessmentContext } from "./ReportAssessmentContext";
 import { criterionAssessmentDetails } from "../domain/criterionAssessment";
 import { CriterionSourceCoverage } from "./CriterionSourceCoverage";
+import { RelatedCheckLink } from "../demo/RelatedCheckLink";
 import { RuleFactsDetails } from "./RuleFactsDetails";
 import { RuleScopeNotice } from "./RuleScopeNotice";
 import { coverageItems } from "./reportCoverage";
@@ -1156,6 +1157,7 @@ export function SignalFlagsPanel({
       {selectedModule === "statistical_forensics" && <StatisticalCheckScope scope={statisticalScope} />}
       {selectedModule === "originality_reuse" && <OriginalityScope scope={originalityScope} showAddAction />}
       {selectedModule === "originality_reuse" && <OriginalityCoverageNotice report={review?.assessment} />}
+      <RelatedCheckLink kind={selectedModule} />
       {review && active && <BulkSelectionBar slot="before" findings={selectedClusters.length} locations={selectedLocations} elsewhere={selectedElsewhere} decided={Boolean(review.decision)}
         onAction={(action) => { setBulkMessage(""); setBulkAction(action); }}
         onClear={() => { setSelectedIds(new Set()); document.getElementById("flags-heading")?.focus(); }} />}

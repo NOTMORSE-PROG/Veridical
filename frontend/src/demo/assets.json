@@ -1,0 +1,38 @@
+[
+  {
+    "path": "/sample-assets/stock-inventory-capstone.pdf",
+    "sha256": "ef662fb9cb5619945c69183a8576f3f945109adc51bff408a6cd6fc21626c5fd",
+    "bytes": 6076315,
+    "pages": 109
+  },
+  {
+    "path": "/sample-assets/e-aimss.pdf",
+    "sha256": "496b6c3be6685e6fe5fa0ed446b11a37f088e9a54a1dde9ed3c40d7cddad4f28",
+    "bytes": 1180034,
+    "pages": 19
+  },
+  {
+    "path": "/sample-assets/official-research-rubric.pdf",
+    "sha256": "4e81dcf1b94337873662348af2cd5769094b5abd68d4be34b2354f4794aab54c",
+    "bytes": 138481,
+    "pages": 1
+  },
+  {
+    "path": "/sample-assets/module-checks/nuijten-2016.pdf",
+    "sha256": "5d1a96e0cdf0ff090167379efad475cb6e104936e237a4d62a7e6f3a7da47a5e",
+    "bytes": 1246203,
+    "pages": 22
+  },
+  {
+    "path": "/sample-assets/module-checks/rojahn-2023.pdf",
+    "sha256": "993d2a3e660b2a0e45926da11e6b305c44a0a60f4a848d0dc3b40c4e0ac88b38",
+    "bytes": 1358631,
+    "pages": 17
+  },
+  {
+    "path": "/sample-assets/module-checks/veldkamp-2014.pdf",
+    "sha256": "a91ab7e12f650f80b03c3f6548c3a9709831e469daa4921bd0606d8e7939faed",
+    "bytes": 723730,
+    "pages": 19
+  }
+]

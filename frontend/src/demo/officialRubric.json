@@ -1,0 +1,321 @@
+{
+  "id": 1,
+  "rubric_family_id": "tip-vpaa-054b-demo",
+  "version": 1,
+  "title": "Rubric for Research Presentation (T.I.P. VPAA-054B)",
+  "parse_status": "parsed",
+  "parse_issues": null,
+  "is_active": true,
+  "is_latest_version": true,
+  "criteria": [
+    {
+      "id": 101,
+      "type": "semantic",
+      "text": "Introduction",
+      "weight": 1,
+      "position": 0,
+      "evidence": "T.I.P. VPAA-054B, original rubric page 1",
+      "levels": [
+        {
+          "level": 1,
+          "name": "Beginner",
+          "descriptor": "There is no clear introduction of main topic and the structure of the paper is missing.",
+          "points": 1
+        },
+        {
+          "level": 2,
+          "name": "Acceptable",
+          "descriptor": "The introduction states the main topic but does not adequately preview the structure of the paper.",
+          "points": 2
+        },
+        {
+          "level": 3,
+          "name": "Proficient",
+          "descriptor": "The introduction states the main topic and previews the structure of the paper.",
+          "points": 3
+        },
+        {
+          "level": 4,
+          "name": "Exemplary",
+          "descriptor": "The introduction is engaging, states the main topic and previews the structure of the paper.",
+          "points": 4
+        }
+      ]
+    },
+    {
+      "id": 102,
+      "type": "semantic",
+      "text": "Purpose",
+      "weight": 1,
+      "position": 1,
+      "evidence": "T.I.P. VPAA-054B, original rubric page 1",
+      "levels": [
+        {
+          "level": 1,
+          "name": "Beginner",
+          "descriptor": "The purpose or argument is generally unclear.",
+          "points": 1
+        },
+        {
+          "level": 2,
+          "name": "Acceptable",
+          "descriptor": "The central purpose or argument is not consistently clear throughout the paper.",
+          "points": 2
+        },
+        {
+          "level": 3,
+          "name": "Proficient",
+          "descriptor": "The paper’s purpose is clearly stated in a single sentence.",
+          "points": 3
+        },
+        {
+          "level": 4,
+          "name": "Exemplary",
+          "descriptor": "The paper’s purpose is clearly and concisely stated in a single sentence, which is engaging, and thought provoking.",
+          "points": 4
+        }
+      ]
+    },
+    {
+      "id": 103,
+      "type": "semantic",
+      "text": "Content",
+      "weight": 1,
+      "position": 2,
+      "evidence": "T.I.P. VPAA-054B, original rubric page 1",
+      "levels": [
+        {
+          "level": 1,
+          "name": "Beginner",
+          "descriptor": "Central purpose or argument is not clearly identified. Analysis is vague or not evident. Reader is confused or may be misinformed.",
+          "points": 1
+        },
+        {
+          "level": 2,
+          "name": "Acceptable",
+          "descriptor": "Information supports a central purpose or argument at times. Analysis is basic or general. Reader gains few insights.",
+          "points": 2
+        },
+        {
+          "level": 3,
+          "name": "Proficient",
+          "descriptor": "Information provides reasonable support for a central purpose or argument and displays evidence of a basic analysis of a significant topic. Reader gains some insights.",
+          "points": 3
+        },
+        {
+          "level": 4,
+          "name": "Exemplary",
+          "descriptor": "Balanced presentation of relevant and legitimate information that clearly supports a central purpose or argument and shows a thoughtful, in-depth analysis of a significant topic. Reader gains important insights.",
+          "points": 4
+        }
+      ]
+    },
+    {
+      "id": 104,
+      "type": "semantic",
+      "text": "Organization",
+      "weight": 1,
+      "position": 3,
+      "evidence": "T.I.P. VPAA-054B, original rubric page 1",
+      "levels": [
+        {
+          "level": 1,
+          "name": "Beginner",
+          "descriptor": "The writing is not logically organized. Frequently, ideas fail to make sense together. The reader cannot identify a line of reasoning and loses interest.",
+          "points": 1
+        },
+        {
+          "level": 2,
+          "name": "Acceptable",
+          "descriptor": "In general, the writing is arranged logically, although occasionally ideas fail to make sense together. The reader is fairly clear about what writer intends.",
+          "points": 2
+        },
+        {
+          "level": 3,
+          "name": "Proficient",
+          "descriptor": "The ideas are arranged logically to support the central purpose or argument. They are usually clearly linked to each other. For the most part, the reader can follow the line of reasoning.",
+          "points": 3
+        },
+        {
+          "level": 4,
+          "name": "Exemplary",
+          "descriptor": "The ideas are arranged logically to support the purpose or argument. They flow smoothly from one to another and are clearly linked to each other. The reader can follow the line of reasoning.",
+          "points": 4
+        }
+      ]
+    },
+    {
+      "id": 105,
+      "type": "semantic",
+      "text": "Grammar, Spelling, Writing Mechanics (punctuation, italics, capitalization, etc.)",
+      "weight": 1,
+      "position": 4,
+      "evidence": "T.I.P. VPAA-054B, original rubric page 1",
+      "levels": [
+        {
+          "level": 1,
+          "name": "Beginner",
+          "descriptor": "There are so many errors that meaning is obscured. The reader is confused and stops reading.",
+          "points": 1
+        },
+        {
+          "level": 2,
+          "name": "Acceptable",
+          "descriptor": "The writing has many errors, and the reader is distracted by them.",
+          "points": 2
+        },
+        {
+          "level": 3,
+          "name": "Proficient",
+          "descriptor": "There are occasional errors, but they don’t represent a major distraction or obscure meaning.",
+          "points": 3
+        },
+        {
+          "level": 4,
+          "name": "Exemplary",
+          "descriptor": "The writing is free or almost free of errors.",
+          "points": 4
+        }
+      ]
+    },
+    {
+      "id": 106,
+      "type": "semantic",
+      "text": "Tone",
+      "weight": 1,
+      "position": 5,
+      "evidence": "T.I.P. VPAA-054B, original rubric page 1",
+      "levels": [
+        {
+          "level": 1,
+          "name": "Beginner",
+          "descriptor": "The tone is unprofessional. It is not appropriate for a n academic research paper.",
+          "points": 1
+        },
+        {
+          "level": 2,
+          "name": "Acceptable",
+          "descriptor": "The tone is not consistently professional or appropriate for an academic research paper.",
+          "points": 2
+        },
+        {
+          "level": 3,
+          "name": "Proficient",
+          "descriptor": "The tone is generally professional. For the most part, it is appropriate for an academic research paper.",
+          "points": 3
+        },
+        {
+          "level": 4,
+          "name": "Exemplary",
+          "descriptor": "The tone is consistently professional and appropriate for an academic research paper.",
+          "points": 4
+        }
+      ]
+    },
+    {
+      "id": 107,
+      "type": "semantic",
+      "text": "Use of References",
+      "weight": 1,
+      "position": 6,
+      "evidence": "T.I.P. VPAA-054B, original rubric page 1",
+      "levels": [
+        {
+          "level": 1,
+          "name": "Beginner",
+          "descriptor": "References are seldom cited to support statements.",
+          "points": 1
+        },
+        {
+          "level": 2,
+          "name": "Acceptable",
+          "descriptor": "Although attributions are occasionally given, many statements seem unsubstantiated. The reader is confused about the source of information and ideas.",
+          "points": 2
+        },
+        {
+          "level": 3,
+          "name": "Proficient",
+          "descriptor": "Professionally legitimate sources that support claims are generally present and attribution is, for the most part, clear and fairly represented.",
+          "points": 3
+        },
+        {
+          "level": 4,
+          "name": "Exemplary",
+          "descriptor": "Compelling evidence from professionally legitimate sources is given to support claims. Attribution is clear and fairly represented.",
+          "points": 4
+        }
+      ]
+    },
+    {
+      "id": 108,
+      "type": "semantic",
+      "text": "Quality of References",
+      "weight": 1,
+      "position": 7,
+      "evidence": "T.I.P. VPAA-054B, original rubric page 1",
+      "levels": [
+        {
+          "level": 1,
+          "name": "Beginner",
+          "descriptor": "There are virtually no sources that are professionally reliable. The reader seriously doubts the value of the material and stops reading.",
+          "points": 1
+        },
+        {
+          "level": 2,
+          "name": "Acceptable",
+          "descriptor": "Most of the references are from sources that are not peer-reviewed and have uncertain reliability. The reader doubts the accuracy of much of the material presented.",
+          "points": 2
+        },
+        {
+          "level": 3,
+          "name": "Proficient",
+          "descriptor": "Although most of the references are professionally legitimate, a few are questionable. The reader is uncertain of the reliability of some of the sources.",
+          "points": 3
+        },
+        {
+          "level": 4,
+          "name": "Exemplary",
+          "descriptor": "References are primarily peer-reviewed professional journals or other approved sources. The reader is confident that the information and ideas can be trusted.",
+          "points": 4
+        }
+      ]
+    },
+    {
+      "id": 109,
+      "type": "semantic",
+      "text": "Bibliography",
+      "weight": 1,
+      "position": 8,
+      "evidence": "T.I.P. VPAA-054B, original rubric page 1",
+      "levels": [
+        {
+          "level": 1,
+          "name": "Beginner",
+          "descriptor": "The bibliography is done in the correct format but with many errors. (Includes three major references e.g. science journal articles, books, but no more than two internet sites.)",
+          "points": 1
+        },
+        {
+          "level": 2,
+          "name": "Acceptable",
+          "descriptor": "The bibliography is done in the correct format with some errors. (Includes four major references e.g. science journal articles, books but no more than two internet sites.)",
+          "points": 2
+        },
+        {
+          "level": 3,
+          "name": "Proficient",
+          "descriptor": "The bibliography is done in the correct format with few errors. (Includes five major references e.g. science journal articles, books, but no more than two internet sites.)",
+          "points": 3
+        },
+        {
+          "level": 4,
+          "name": "Exemplary",
+          "descriptor": "The bibliography is done in the correct format with no errors. (Includes more than five major references e.g. science journal articles, books, but no more than two internet sites.)",
+          "points": 4
+        }
+      ]
+    }
+  ],
+  "source_asset": "/sample-assets/official-research-rubric.pdf",
+  "source_sha256": "4e81dcf1b94337873662348af2cd5769094b5abd68d4be34b2354f4794aab54c",
+  "source_note": "Blank-name first page extracted from the official Rubric-for-Oral-Presentation.pdf; original criteria and descriptors unchanged. Duplicate named copies are omitted."
+}

@@ -128,7 +128,7 @@ function CriteriaHeader({ headingRef, title, count, readOnly = false, familyId, 
     <header className="signal-route-header signal-criteria-header">
       <div>
         <nav aria-label="Breadcrumb"><Link to={familyId ? `/rubric?family=${encodeURIComponent(familyId)}` : "/rubric"}>Required format</Link><span aria-hidden="true">/</span><span>Criteria review</span></nav>
-        <h1 ref={headingRef} tabIndex={-1}>{readOnly ? "View criteria" : "Review prepared criteria"}</h1>
+        <h1 ref={headingRef} tabIndex={-1}>{readOnly ? "View criteria" : "Review criteria"}</h1>
         {title && <p className="signal-route-header__intro">{title}{version !== undefined ? ` · Version ${version}` : ""}{count !== undefined ? ` · ${count} ${count === 1 ? "criterion" : "criteria"}` : ""}</p>}
         {instruction && <p>{instruction}</p>}
       </div>
@@ -292,7 +292,7 @@ function CriteriaEditor({ id }: { id: number }) {
   const focusRefusalAfterDialog = useRef(false);
   // The leave dialog shows a save error only when its own save failed.
   const [leaveSaveFailed, setLeaveSaveFailed] = useState(false);
-  useRouteFocus("Review prepared criteria - VERIDICAL", headingRef);
+  useRouteFocus("Review criteria - VERIDICAL", headingRef);
 
   function announce(text: string) {
     announcementSeq.current += 1;

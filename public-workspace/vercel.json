@@ -1,0 +1,14 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "installCommand": "npm --prefix ../frontend ci --no-audit --no-fund",
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "routes": [
+    { "src": "/api(?:/.*)?", "status": 404 },
+    { "handle": "filesystem" },
+    { "src": "/(?:sample-assets|assets)/.*", "status": 404 },
+    { "src": "/demo(?:/.*)?", "dest": "/index.html" },
+    { "src": "/(.*)", "status": 307, "headers": { "Location": "/demo/$1" } }
+  ]
+}

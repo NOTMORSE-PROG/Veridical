@@ -92,14 +92,14 @@ export function FormatReviewWorkbench({ rubric, onUploadNewVersion, children }: 
       {!split && <Button variant="quiet" onClick={() => { pendingReturn.current = true; activate("criteria"); }}>Back to criteria</Button>}
       <RubricSourcePane rubric={rubric} isVisible={split || view === "source"} onUploadNewVersion={onUploadNewVersion} />
     </section>
-    <section ref={criteriaPanel} onFocusCapture={() => { lastPaneFocus.current = "criteria"; }} id={`${id}-criteria`} role={split ? "region" : "tabpanel"} aria-label={split ? "Prepared criteria" : undefined}
+    <section ref={criteriaPanel} onFocusCapture={() => { lastPaneFocus.current = "criteria"; }} id={`${id}-criteria`} role={split ? "region" : "tabpanel"} aria-label={split ? "Criteria" : undefined}
       aria-labelledby={split ? undefined : `${id}-criteria-tab`} hidden={!split && view !== "criteria"}
       className="signal-format-workbench__criteria">
       <header className="signal-format-workbench__criteria-heading">
-        <h2 ref={criteriaHeading} tabIndex={-1}>Prepared criteria</h2>
+        <h2 ref={criteriaHeading} tabIndex={-1}>Criteria</h2>
         {!split && <Button ref={sourceEntry} variant="secondary" onClick={() => { pendingSourceFocus.current = true; activate("source"); }}>Read original format</Button>}
       </header>
-      <div className="signal-format-editor-scroll" tabIndex={0} role="region" aria-label="Prepared criteria, scrollable">
+      <div className="signal-format-editor-scroll" tabIndex={0} role="region" aria-label="Criteria, scrollable">
         {children}
       </div>
     </section>

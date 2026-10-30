@@ -1,0 +1,6 @@
+{
+  "name": "veridical-public-workspace",
+  "private": true,
+  "type": "module",
+  "scripts": { "build": "node build.mjs" }
+}

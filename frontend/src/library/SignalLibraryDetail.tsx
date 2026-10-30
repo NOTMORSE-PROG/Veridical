@@ -2,6 +2,7 @@
 // manuscript and its details, never a verdict: no report link, readiness,
 // or score. The owner can edit details, resolve a possible duplicate, and
 // remove the record from the Library.
+import { isWorkspaceSample, librarySources } from "../demo/workspaceFixture";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { useBlocker, useLocation, useNavigate, useParams } from "react-router";
 import { ApiError, BASE_URL } from "../api/client";
@@ -419,12 +420,14 @@ export function SignalLibraryDetailPage() {
             {documentQuery.data?.available && (
               <a
                 className="signal-button signal-button--secondary"
-                href={BASE_URL + '/library/' + manuscriptId + '/document/original'}
+                href={isWorkspaceSample() ? librarySources.find(source => source.id === manuscriptId)?.asset.path : BASE_URL + '/library/' + manuscriptId + '/document/original'}
+                download={isWorkspaceSample() || undefined}
               >
                 Download original
               </a>
             )}
-            {canCompare && (
+            {isWorkspaceSample() && [204, 205].includes(manuscriptId ?? 0) && <ActionLink to="/module-checks/reuse" variant="secondary">Open passage comparison</ActionLink>}
+            {canCompare && !isWorkspaceSample() && (
               <ActionLink to={`/library?compareFrom=${item.manuscript_id}`} variant="secondary">
                 Compare with another record
               </ActionLink>

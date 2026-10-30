@@ -1,0 +1,52 @@
+{
+  "reviewed_at": "2026-10-30T07:17:40.313907+00:00",
+  "method": "Source review against the supplied official rubric and original manuscript. These are recorded review judgments, not automatic grading outputs.",
+  "source_sha256": "ef662fb9cb5619945c69183a8576f3f945109adc51bff408a6cd6fc21626c5fd",
+  "judgments": [
+    {
+      "criterion_id": 101,
+      "level": 2,
+      "reason": "The introduction identifies the inventory problem and lists objectives on page 6, but it does not preview how the paper is organized. This fits Acceptable rather than the structure-preview requirements of the higher levels."
+    },
+    {
+      "criterion_id": 102,
+      "level": 3,
+      "reason": "Page 5 states the project purpose in one clear sentence: a console-based C application for tracking inventory, orders, suppliers and transactions. The stated purpose is clear. The web/database implementation discrepancies on pages 20, 29 and 109 are recorded separately as content and agreement issues; they do not erase the explicit purpose sentence."
+    },
+    {
+      "criterion_id": 103,
+      "level": 2,
+      "reason": "The requirements, C implementation and user manual support the central inventory-management purpose, but the evaluation on page 23 describes testing that will occur rather than measured results. The Good/Excellent ratings on pages 32-33 lack a stated measurement basis, and the delivered database claim on page 109 conflicts with the limitation on page 29. The analysis remains basic and requires revision."
+    },
+    {
+      "criterion_id": 104,
+      "level": 3,
+      "reason": "The paper has a followable sequence from requirements and design to methodology, implementation, limitations, report summary, user manual and future scope. The table of contents on page 2 supports navigation, and the project phases on page 20 identify a development sequence. Transitions and the very long code/future-scope portions reduce the smooth flow required for Exemplary, but the main organization is generally clear."
+    },
+    {
+      "criterion_id": 105,
+      "level": 3,
+      "reason": "The main narrative is understandable. The declaration on page 3 contains subject-verb errors and the typo submitted top any other university; page 22 misspells developers, and page 109 has inconsistent capitalization. These are noticeable but generally do not obscure the prose. Proficient is a reviewer judgment about the narrative, not a claim that the source code or every line is error-free."
+    },
+    {
+      "criterion_id": 106,
+      "level": 3,
+      "reason": "The requirements, methodology and limitations use a generally professional technical tone, including the explicit limitations on page 29. Occasional promotional wording such as excellent example in the conclusion on page 109 and informal honorifics in the front matter keep it below consistently professional Exemplary."
+    },
+    {
+      "criterion_id": 107,
+      "level": 1,
+      "reason": "The literature review on pages 6-7 names products and makes research claims without identifying supporting studies. The reference section on page 109 contains an acknowledgment rather than cited bibliographic sources. References are therefore seldom used to support the manuscript statements."
+    },
+    {
+      "criterion_id": 108,
+      "level": 1,
+      "reason": "No professionally reliable bibliographic sources are identifiable in the reference section on page 109. This assessment concerns the absence of documented sources; it does not assert that an unknown source is unreliable or fabricate a peer-review check."
+    },
+    {
+      "criterion_id": 109,
+      "level": 1,
+      "reason": "Below the minimum described level: page 109 contains an acknowledgment and no bibliography entries. Even the Beginner descriptor expects three major references, which are not supplied. Beginner is recorded as the lowest available band for this source review; its three-reference condition is not satisfied. Add an actual bibliography and reassess this criterion."
+    }
+  ]
+}

@@ -1,4 +1,5 @@
 import { pendingCriterionSourceAction } from "./criterionSourceReturn";
+import { isWorkspaceSample } from "../demo/workspaceFixture";
 import { WorkflowLink as Link } from "../routing/WorkflowLink";
 import { reportAssessmentNotices } from "../domain/reportAssessmentContext";
 import { ReportAssessmentContext } from "./ReportAssessmentContext";
@@ -206,8 +207,10 @@ export function SignalReportPage() {
                   const origin = validAuditReviewOrigin(location.pathname + location.search + location.hash, id);
                   if (origin) rememberRouteReturnFocus(origin.focusPath, auditDestination(id, location), origin.elementId, { fallbackElementId: origin.fallbackElementId, scrollBlock: origin.scrollBlock });
                 }}>View Audit</ActionLink>
-                <Button variant="secondary" aria-describedby="report-export-accessibility-note" aria-busy={exportPdf.isPending || undefined} aria-disabled={exportPdf.isPending || undefined} onClick={event => exportPdf.start(event.currentTarget)}>{exportPdf.isPending ? "Preparing PDF" : "Export PDF"}</Button>
-                <Button variant="secondary" onClick={() => setShareOpen(true)}>{shareLink ? "Manage active share link" : "Share report"}</Button>
+                {isWorkspaceSample() ? <Button variant="secondary" onClick={() => window.print()}>Print report</Button> : <>
+                  <Button variant="secondary" aria-describedby="report-export-accessibility-note" aria-busy={exportPdf.isPending || undefined} aria-disabled={exportPdf.isPending || undefined} onClick={event => exportPdf.start(event.currentTarget)}>{exportPdf.isPending ? "Preparing PDF" : "Export PDF"}</Button>
+                  <Button variant="secondary" onClick={() => setShareOpen(true)}>{shareLink ? "Manage active share link" : "Share report"}</Button>
+                </>}
               </div>
               <p id="report-export-accessibility-note" className="signal-field-hint">Downloaded PDFs are not optimized for screen readers. Use this on-screen report for accessible review.</p>
               <p role="status" aria-live="polite" className="sr-only">{exportPdf.isPending ? "Preparing PDF." : exportPdf.isReady ? "PDF is ready." : ""}</p>

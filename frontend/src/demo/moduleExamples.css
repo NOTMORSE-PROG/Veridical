@@ -1,0 +1,15 @@
+  .signal-module-case-summary,
+  .signal-module-case-values,
+  .signal-module-case-links,
+  .signal-module-case-source { display: grid; min-inline-size: 0; gap: var(--signal-space-3); padding: var(--signal-space-5); border: var(--signal-border-hairline) solid var(--color-signal-border); border-radius: var(--signal-radius-panel); background: var(--color-signal-surface); }
+  .signal-module-case-source > header { display: grid; gap: var(--signal-space-2); }
+  .signal-module-case-reader { display: flex; flex-direction: column; block-size: var(--signal-criterion-reader-height); min-block-size: 0; min-inline-size: 0; overflow: hidden; }
+  .signal-module-case-pair,
+  .signal-module-case-passages > div { display: flex; flex-wrap: wrap; gap: var(--signal-space-4); min-inline-size: 0; }
+  .signal-module-case-pair > div,
+  .signal-module-case-passages section { flex: 1 1 var(--signal-inspector-width); min-inline-size: 0; display: grid; align-content: start; gap: var(--signal-space-3); }
+  .signal-module-case-values .signal-table-scroll { overflow: auto; }
+  .signal-module-case-values table { width: 100%; border-collapse: collapse; }
+  .signal-module-case-values th,
+  .signal-module-case-values td { text-align: start; padding: var(--signal-space-3); border-block-end: var(--signal-border-hairline) solid var(--color-signal-border); }
+  .signal-module-case-method { overflow-wrap: anywhere; }

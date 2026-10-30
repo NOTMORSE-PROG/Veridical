@@ -60,7 +60,7 @@ describe("SignalReviewCriteriaPage", () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(RUBRIC), { status: 200 })));
     renderPage();
 
-    expect(await screen.findByRole("heading", { name: "Review prepared criteria" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Review criteria" })).toBeInTheDocument();
     expect(await screen.findByLabelText("Criterion text, criterion 1")).toHaveValue("Includes a complete abstract");
     expect(screen.getByLabelText("Type, criterion 2")).toHaveValue("semantic");
     expect(screen.getByLabelText("Evidence expected, criterion 2")).toHaveValue("Results and discussion");

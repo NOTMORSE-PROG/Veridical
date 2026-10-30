@@ -25,6 +25,7 @@ import { ComparisonLeadList } from "../report/ComparisonLeadList";
 import { comparisonLeadCollection, type ComparisonLeadCollection } from "../report/comparisonLeadCollection";
 import { IntegrityModuleNavigation, IntegrityModuleSummary, selectedIntegrityModule } from "../report/IntegrityModules";
 import { StatisticalCheckScope } from "../report/StatisticalCheckScope";
+import { RelatedCheckLink } from "../demo/RelatedCheckLink";
 import { OriginalityScope } from "../report/OriginalityScope";
 import { useFlag } from "../flags/useFlag";
 import { PValueComparison } from "../flags/PValueComparison";
@@ -1128,6 +1129,7 @@ export function SignalDocumentViewerPage() {
                   {selectedModule === "statistical_forensics" && reportQuery.data && <StatisticalCheckScope scope={reportQuery.data.statistical_check_scope} />}
                   {selectedModule === "originality_reuse" && reportQuery.data && <OriginalityScope scope={reportQuery.data.originality_scope} showAddAction />}
                   {selectedModule === "originality_reuse" && reportQuery.data && <OriginalityCoverageNotice report={reportQuery.data} />}
+                  <RelatedCheckLink kind={selectedModule} />
                 </div>}
                 <div id="workspace-module-records">
                 {isExploring ? <ReuseExplorePanel showBack={false} flags={flags} flagsFetching={flagsQuery.isFetching} flagsError={flagsQuery.isError} flagsSucceeded={flagsQuery.isSuccess} onRetryFlags={() => flagsQuery.refetch()} onSelectFlag={selectFinding} onBack={showQueue} includeReferenceList={includeReferenceList} includeBlockQuote={includeBlockQuote} onToggleReferenceList={(value) => setToggle("ref", value)} onToggleBlockQuote={(value) => setToggle("quote", value)} excludedMatchesQuery={excludedMatchesQuery} expandedMatchId={expandedMatchId} onExpandMatch={setMatch} />

@@ -13,7 +13,7 @@
 // behavior is identical to before.
 import { QueryClientProvider } from "@tanstack/react-query";
 import { createAppQueryClient } from "./api/queryClient";
-import { createBrowserRouter, createRoutesFromElements, Route, RouterProvider } from "react-router";
+import { createBrowserRouter, createRoutesFromElements, Navigate, Route, RouterProvider } from "react-router";
 import { AuditLogPage } from "./audit/AuditLog";
 import { RequireAuth } from "./auth/RequireAuth";
 import { CheckProgressPage } from "./check/Progress";
@@ -38,14 +38,17 @@ import { SettingsPage } from "./settings/Settings";
 import { StoredFilesPage } from "./storedFiles/StoredFiles";
 import { SignalShell } from "./shell/SignalShell";
 
+import { isWorkspaceSample } from './demo/workspaceFixture';
+import { ModuleCheckCasePage } from './demo/ModuleCheckCases';
+
 const queryClient = createAppQueryClient();
 
 const router = createBrowserRouter(
   createRoutesFromElements(
     <Route element={<RouteFrame />}>
-        <Route path="/" element={<LandingRoute />} />
+        <Route path="/" element={isWorkspaceSample() ? <Navigate to="/dashboard" replace /> : <LandingRoute />} />
         <Route path="/signin" element={<SignInPage />} />
-        <Route path="/demo/*" element={<PreparedReviewRoute />} />
+        {!isWorkspaceSample() && <Route path="/demo/*" element={<PreparedReviewRoute />} />}
         {/* V-040 (screen 4l): deliberately outside RequireAuth/SignalShell --
             a public, unauthenticated read reached by a token in the URL,
             not a session. */}
@@ -60,6 +63,7 @@ const router = createBrowserRouter(
           {/* A single persistent shell keeps destination navigation stable
               while instructors move between authenticated routes. */}
           <Route path="/dashboard" element={<DashboardPage />} />
+          {isWorkspaceSample() && <Route path="/module-checks/:kind" element={<ModuleCheckCasePage />} />}
           <Route path="/rubric" element={<ManageRubricPage />} />
           <Route path="/library" element={<SignalLibraryPage />} />
           <Route path="/library/compare" element={<SignalLibraryComparePage />} />
@@ -84,6 +88,7 @@ const router = createBrowserRouter(
       </Route>
     ,
   ),
+  { basename: isWorkspaceSample() ? '/demo' : undefined },
 );
 
 export default function App() {
