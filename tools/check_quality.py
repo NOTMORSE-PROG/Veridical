@@ -112,7 +112,9 @@ def changed_paths() -> set[str]:
         ["git", "ls-files", "--others", "--exclude-standard"],
     ]
     for cmd in commands:
-        result = subprocess.run(cmd, capture_output=True, text=True, cwd=REPO_ROOT)
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", cwd=REPO_ROOT
+        )
         if result.returncode == 0:
             paths.update(line.strip() for line in result.stdout.splitlines() if line.strip())
     return paths

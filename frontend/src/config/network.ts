@@ -8,7 +8,7 @@ function retryLimit(value: string | undefined, fallback: number): number {
 export const API_READ_RETRIES = retryLimit(import.meta.env.VITE_API_READ_RETRIES, 3);
 export const SHARED_REPORT_READ_RETRIES = retryLimit(import.meta.env.VITE_SHARED_REPORT_READ_RETRIES, 2);
 
-/** BUG-563: how long a report-page read counts as fresh. Without it every
+/** BUG-564: how long a report-page read counts as fresh. Without it every
  * panel that mounts after the first answer refetched the report, and each
  * report read parses the stored extraction on the server (BUG-561). Writes
  * still invalidate these reads at once. */

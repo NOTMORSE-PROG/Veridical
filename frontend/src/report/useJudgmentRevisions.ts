@@ -337,6 +337,7 @@ export function useJudgmentRevisions(checkRunId: number, ownerCurrent: () => boo
           error: refused ? "This revision was not accepted. Review the current judgment before using this draft."
             : "Saving could not be confirmed. Your entered revision is kept. Review the current judgment before trying again." } });
         void client.invalidateQueries({ queryKey: ["report", checkRunId], exact: true });
+        void client.invalidateQueries({ queryKey: ["report", checkRunId, "escalated"] });
         return false;
       }
     },
