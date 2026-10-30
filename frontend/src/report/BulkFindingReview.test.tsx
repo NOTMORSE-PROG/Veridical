@@ -112,6 +112,33 @@ describe("bulk confirm and dismiss", () => {
     expect(calls).toHaveLength(0);
   });
 
+  it("shows a refused reason under the reason, and nowhere else", async () => {
+    const sentence = "This text contains an invisible character that can't be saved. Retype it or paste it as plain text.";
+    respond({ detail: [{ type: "text_not_storable", loc: ["body", "reason"], msg: sentence, input: "x" }] }, 422);
+    const onDone = dialog("dismiss", FLAGS, [1, 2, 3]);
+    const field = screen.getByLabelText("Reason for dismissing (required)");
+    fireEvent.change(field, { target: { value: REASON } });
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(await screen.findByText(`${sentence} Nothing was changed.`)).toBeInTheDocument();
+    expect(field).toHaveAttribute("aria-invalid", "true");
+    await waitFor(() => expect(field).toHaveFocus());
+    expect(screen.queryByRole("heading", { name: "Nothing was changed" })).not.toBeInTheDocument();
+    expect(onDone).not.toHaveBeenCalled();
+    fireEvent.change(field, { target: { value: `${REASON} Again.` } });
+    expect(field).not.toHaveAttribute("aria-invalid");
+  });
+
+  it.each([
+    ["the selection", { type: "value_error", loc: ["body", "flag_ids"], msg: "Value error, select at most 200 findings at a time", input: [] }, "Select at most 200 findings at a time."],
+    ["the request as a whole", { type: "value_error", loc: ["body"], msg: "Value error, a confirmation takes an optional note, not a reason", input: {} }, "A confirmation takes an optional note, not a reason."],
+  ])("says a refusal of %s once for the dialog, never at the comment", async (_name, item, said) => {
+    respond({ detail: [item] }, 422);
+    dialog("confirm", FLAGS, [1, 2, 3]);
+    fireEvent.click(screen.getByRole("button", { name: "Confirm as real issues" }));
+    expect(await screen.findByText(said)).toBeInTheDocument();
+    expect(screen.getByLabelText("Comment (optional)")).not.toHaveAttribute("aria-invalid");
+  });
+
   it("shows a refusal as given and changes nothing on screen", async () => {
     respond({ error: { code: "conflict", message: "This assessment changed after you reviewed it. Nothing was changed." } }, 409);
     const onDone = dialog("confirm", FLAGS, [1, 2, 3]);
