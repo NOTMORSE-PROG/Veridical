@@ -343,7 +343,9 @@ class R2Storage:
         self._client.close()
 
 
-def get_storage(settings: Settings, *, metadata_probe: bool = False) -> Storage:
+def get_storage(
+    settings: Settings, *, metadata_probe: bool = False, figure_store: bool = False
+) -> Storage:
     if settings.storage_backend == "r2":
         if not (
             settings.r2_bucket
@@ -377,6 +379,14 @@ def get_storage(settings: Settings, *, metadata_probe: bool = False) -> Storage:
                 connect_timeout=settings.storage_probe_connect_timeout_seconds,
                 read_timeout=settings.storage_probe_read_timeout_seconds,
                 retries={"total_max_attempts": settings.storage_probe_total_attempts},
+            )
+        elif figure_store:
+            from botocore.config import Config
+
+            client_config = Config(
+                connect_timeout=settings.figure_store_connect_timeout_seconds,
+                read_timeout=settings.figure_store_read_timeout_seconds,
+                retries={"total_max_attempts": settings.figure_store_total_attempts},
             )
         return R2Storage(
             bucket=settings.r2_bucket,

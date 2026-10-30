@@ -22,7 +22,7 @@ from app.audit.service import write_audit_event
 from app.config import Settings
 from app.db import advisory_lock
 from app.errors import ConflictError, NotFoundError
-from app.ingest.service import raw_store_path
+from app.ingest.service import figure_store_path, raw_store_path
 from app.messages import STORED_FILE_CHECK_RUNNING, STORED_FILE_PREPARATION_RUNNING
 from app.models.enums import (
     CheckRunStatus,
@@ -317,7 +317,11 @@ def delete_stored_files(manuscript: Manuscript, settings: Settings) -> None:
                 )
         if source is not None:
             delete_native_artifacts(source, settings, storage=storage)
-        for path in (source, raw_store_path(settings, manuscript.id)):
+        for path in (
+            source,
+            raw_store_path(settings, manuscript.id),
+            figure_store_path(settings, manuscript.id),
+        ):
             if path is None:
                 continue
             storage.delete(storage_key_for(settings, str(path)))

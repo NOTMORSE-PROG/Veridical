@@ -234,6 +234,90 @@ def test_authenticated_source_routes_follow_bytes(
         assert client.get(f"/check-runs/{run_id}/{route}").status_code == 401
 
 
+def test_report_json_is_unchanged_and_the_extraction_is_parsed_at_most_once(
+    logged_in_with_a_done_run, api_scratch_url, tmp_path, monkeypatch
+):
+    import asyncio
+
+    import app.ingest.service as ingest_service
+    import app.report.service as report_service
+    from app.ingest.docx import extract_document
+    from app.ingest.figures import read_figures
+    from app.ingest.patterns import load_patterns
+    from tests.test_docx_media_read import _source
+    from tests.test_ingest_figures import Scripted
+
+    client, run_id = logged_in_with_a_done_run
+    settings = get_settings()
+    path = tmp_path / "paper.docx"
+    _source(path)
+    extraction = extract_document(str(path), settings)
+    asyncio.run(
+        read_figures(
+            extraction,
+            path,
+            Scripted(),
+            load_patterns(settings.ingest_patterns_file),
+            settings,
+            source_hash=extraction.docx_source_sha256,
+        )
+    )
+    mid = _set_run_original(api_scratch_url, run_id, path, extraction)
+    ingest_service._write_raw_store(extraction, ingest_service.raw_store_path(settings, mid))
+    # Prepared before figure stores existed: only the whole extraction is kept.
+    ingest_service.figure_store_path(settings, mid).unlink()
+
+    # The report as it was built before: figure readings from the whole extraction.
+    figures_now = report_service.load_figure_source_async
+
+    async def whole_extraction(settings, manuscript_id):
+        return await ingest_service.load_raw_store_async(settings, manuscript_id), False
+
+    monkeypatch.setattr(report_service, "load_figure_source_async", whole_extraction)
+    before = client.get(f"/check-runs/{run_id}/report")
+    assert before.status_code == 200, before.text
+    assert before.json()["figure_readings"][0]["status"] == "available"
+    monkeypatch.setattr(report_service, "load_figure_source_async", figures_now)
+
+    parses = []
+    whole = ingest_service.load_raw_store
+
+    def counting(settings, manuscript_id):
+        parses.append(manuscript_id)
+        return whole(settings, manuscript_id)
+
+    monkeypatch.setattr(ingest_service, "load_raw_store", counting)
+    for _ in range(3):
+        after = client.get(f"/check-runs/{run_id}/report")
+        assert after.status_code == 200, after.text
+        assert after.content == before.content
+    # Once, to keep the figure store for this older record; never again.
+    assert parses == [mid]
+
+
+@pytest.mark.parametrize("failure", ["refused", "unreachable"])
+def test_a_storage_error_shows_readings_unavailable_not_an_error(
+    logged_in_with_a_done_run, monkeypatch, failure
+):
+    """Many routes return the report after saving the instructor's action, so a
+    storage outage while reading figure readings must not turn that into a 500."""
+    from botocore.exceptions import ClientError, EndpointConnectionError
+
+    import app.report.service as report_service
+
+    client, run_id = logged_in_with_a_done_run
+
+    async def outage(settings, manuscript_id):
+        if failure == "refused":
+            raise ClientError({"Error": {"Code": "ServiceUnavailable"}}, "GetObject")
+        raise EndpointConnectionError(endpoint_url="https://r2.example.invalid")
+
+    monkeypatch.setattr(report_service, "load_figure_source_async", outage)
+    response = client.get(f"/check-runs/{run_id}/report")
+    assert response.status_code == 200, response.text
+    assert response.json()["figure_readings"] is None
+
+
 def test_authenticated_source_rejects_corrupt_pdf(
     logged_in_with_a_done_run, api_scratch_url, tmp_path
 ):

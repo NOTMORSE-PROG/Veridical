@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from app.errors import ApiDownError, GoneError, InvalidApiKeyError, QuotaExhaustedError
 from app.ingest.image_source import _raster as _native_raster
 from app.ingest.image_source import prepare_figures
+from app.ingest.schemas import FigureSource
 from app.llm.base import LLMNotConfiguredError
 
 _PROMPTS = Path(__file__).parent / "prompts"
@@ -128,17 +129,33 @@ async def read_figures(
     return calls
 
 
+def figure_source(result, extraction_sha256=None) -> FigureSource:
+    """Keep only what saved figure readings are checked against."""
+    images = {
+        entry.image_index: result.images[entry.image_index]
+        for entry in result.figure_readings or []
+        if entry.status == "available" and entry.image_index < len(result.images)
+    }
+    return FigureSource(
+        extraction_sha256=extraction_sha256,
+        figure_readings=result.figure_readings,
+        images=images,
+    )
+
+
 def saved_figure_readings(result, source_hash):
-    """Fail closed on stale occurrence bindings without hiding readable text."""
-    if result.figure_readings is None:
+    """Fail closed on stale occurrence bindings without hiding readable text.
+
+    Takes a full extraction or its FigureSource; both give the same readings.
+    """
+    source = result if isinstance(result, FigureSource) else figure_source(result)
+    if source.figure_readings is None:
         return None
     saved = []
-    for entry in result.figure_readings:
+    for entry in source.figure_readings:
         copy = entry.model_copy(deep=True)
         if entry.status == "available":
-            image = (
-                result.images[entry.image_index] if entry.image_index < len(result.images) else None
-            )
+            image = source.images.get(entry.image_index)
             binding = entry.source_binding
             locator = binding.get("locator")
             matched = (

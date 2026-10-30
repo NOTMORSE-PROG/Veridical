@@ -9,6 +9,7 @@ import asyncio
 import hashlib
 import logging
 import os
+import threading
 import zipfile
 from collections.abc import AsyncIterator, Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -18,6 +19,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
+from boto3.exceptions import S3UploadFailedError
 from botocore.exceptions import BotoCoreError, ClientError
 from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -58,6 +60,7 @@ from app.ingest.recovery import recover_layout, selected_pages
 from app.ingest.schemas import (
     CurrentGroupOut,
     ExtractionResult,
+    FigureSource,
     ManuscriptGroupOut,
     ManuscriptListItem,
     ManuscriptQueueStatus,
@@ -68,6 +71,7 @@ from app.ingest.source_digest import HashingWriter, file_sha256, record_file_sha
 from app.ingest.titlepage import TitlePageProposal, extract_title_page
 from app.ingest.zip_bounds import check_docx_directory_size
 from app.llm import LLMNotConfiguredError, get_llm_client_for
+from app.memory import return_freed_memory
 from app.models.citation import Citation
 from app.models.enums import (
     CheckRunStatus,
@@ -95,6 +99,14 @@ logger = logging.getLogger(__name__)
 
 def raw_store_path(settings: Settings, manuscript_id: int) -> Path:
     return settings.data_dir / f"{manuscript_id}.extraction.json"
+
+
+def figure_store_path(settings: Settings, manuscript_id: int) -> Path:
+    return _figure_store_beside(raw_store_path(settings, manuscript_id))
+
+
+def _figure_store_beside(raw_path: Path) -> Path:
+    return raw_path.with_name(raw_path.name.removesuffix(".extraction.json") + ".figures.json")
 
 
 def select_extractor(suffix: str) -> Callable[[str, Settings], ExtractionResult]:
@@ -413,6 +425,19 @@ async def _ingest_manuscript(
         await preparation_lease.run(
             storage.put_file, raw_path, storage_key_for(settings, str(raw_path))
         )
+        # The figure store written beside it can always be derived again from
+        # the extraction, so a failed copy costs a later view one parse rather
+        # than failing this preparation.
+        figures_path = figure_store_path(settings, manuscript.id)
+        try:
+            await preparation_lease.run(
+                storage.put_file, figures_path, storage_key_for(settings, str(figures_path))
+            )
+        except (OSError, BotoCoreError, ClientError, S3UploadFailedError):
+            # boto3 reports a refused upload as S3UploadFailedError, not ClientError.
+            logger.warning(
+                "Could not keep the figure store of manuscript %s", manuscript.id, exc_info=True
+            )
         # Citation replacement and the terminal state are one transaction.
         finalizing = True
         # Explicit fresh ingestion may enter below the upload boundary. Never
@@ -694,8 +719,31 @@ async def _finish_ingest_upload(
 
 
 def _write_raw_store(result: ExtractionResult, path: Path) -> None:
+    """Write the extraction and, beside it, its figure store.
+
+    Every report view shows the figure readings. The small store lets it read
+    them without parsing the whole extraction. Writing both here keeps them
+    from ever describing different extractions.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(result.model_dump_json(), encoding="utf-8")
+    data = result.model_dump_json().encode("utf-8")
+    path.write_bytes(data)
+    _write_figure_store(
+        figures.figure_source(result, hashlib.sha256(data).hexdigest()),
+        _figure_store_beside(path),
+    )
+
+
+def _write_figure_store(source: FigureSource, path: Path) -> None:
+    # Replaced whole, never rewritten in place: a report view may be reading
+    # the previous copy at this moment.
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with NamedTemporaryFile(
+        "w", encoding="utf-8", dir=path.parent, suffix=".partial", delete_on_close=False
+    ) as staged:
+        staged.write(source.model_dump_json())
+        staged.close()
+        os.replace(staged.name, path)
 
 
 async def list_manuscripts(
@@ -1140,6 +1188,111 @@ async def load_raw_store_async(settings: Settings, manuscript_id: int) -> Extrac
     idle-wake (many resumed check runs hitting a cold cache at once)."""
     return await asyncio.get_running_loop().run_in_executor(
         None, load_raw_store, settings, manuscript_id
+    )
+
+
+# Held while a figure store is derived from a full extraction, so two report
+# views never parse whole extractions at the same time.
+_figure_store_fill = threading.Lock()
+
+
+def load_figure_source(settings: Settings, manuscript_id: int) -> tuple[FigureSource, bool]:
+    """The saved figure readings, read without parsing the whole extraction.
+
+    Parsing a whole extraction costs 15-18 times its size in memory, and the
+    server keeps much of that after the request ends. The small figure store
+    is used only when it was taken from exactly the extraction stored now
+    (same digest), so it can never show readings from an earlier one.
+    Otherwise, including for manuscripts prepared before figure stores
+    existed, the first view derives the store once and writes it locally.
+
+    Also returns whether this call derived the store. The caller then keeps it
+    durably with `keep_figure_store`, while it still holds the manuscript's
+    source lock.
+    """
+    raw_path = _local_copy(settings, raw_store_path(settings, manuscript_id))
+    # Unchanged files hash once per process; later views only stat the file.
+    extraction_sha256 = file_sha256(raw_path, settings)
+    path = figure_store_path(settings, manuscript_id)
+    kept = _kept_figure_source(settings, path, extraction_sha256)
+    if kept is not None:
+        return kept, False
+    with _figure_store_fill:
+        kept = _kept_figure_source(settings, path, extraction_sha256)
+        if kept is not None:
+            return kept, False
+        try:
+            source = figures.figure_source(
+                load_raw_store(settings, manuscript_id), extraction_sha256
+            )
+        finally:
+            # Parsed or not, the extraction is gone by now. Hand its pages back
+            # rather than keep them as this process's new floor.
+            return_freed_memory(collect=False)
+        try:
+            _write_figure_store(source, path)
+        except OSError:
+            # The readings are already in hand; the next view derives it again.
+            logger.warning(
+                "Could not write the figure store of manuscript %s", manuscript_id, exc_info=True
+            )
+            return source, False
+        return source, True
+
+
+def _kept_figure_source(
+    settings: Settings, path: Path, extraction_sha256: str
+) -> FigureSource | None:
+    """The kept figure store, if it was taken from exactly this extraction."""
+    try:
+        source = FigureSource.model_validate_json(
+            _local_copy(settings, path, figure_store=True).read_bytes()
+        )
+    except (OSError, ValueError, BotoCoreError, ClientError):
+        # Missing, damaged (a ValidationError is a ValueError), out of reach or
+        # published by a concurrent view: derive it again rather than fail.
+        return None
+    return source if source.extraction_sha256 == extraction_sha256 else None
+
+
+def _local_copy(settings: Settings, path: Path, *, figure_store: bool = False) -> Path:
+    if path.exists():
+        return path
+    storage = get_storage(settings, figure_store=figure_store)
+    try:
+        return ensure_local_file(settings, storage, str(path))
+    finally:
+        storage.close()
+
+
+def keep_figure_store(settings: Settings, manuscript_id: int) -> None:
+    """Put a figure store this process derived into durable storage."""
+    path = figure_store_path(settings, manuscript_id)
+    storage = get_storage(settings, figure_store=True)
+    try:
+        storage.put_file(path, storage_key_for(settings, str(path)))
+    finally:
+        storage.close()
+
+
+def discard_figure_store(settings: Settings, manuscript_id: int) -> None:
+    """Remove a figure store, durable copy and local copy."""
+    path = figure_store_path(settings, manuscript_id)
+    storage = get_storage(settings, figure_store=True)
+    try:
+        storage.delete(storage_key_for(settings, str(path)))
+    finally:
+        storage.close()
+    path.unlink(missing_ok=True)
+
+
+async def load_figure_source_async(
+    settings: Settings, manuscript_id: int
+) -> tuple[FigureSource, bool]:
+    """`load_figure_source`, off the event loop: it may fetch from durable
+    storage, and a manuscript's first view may parse its whole extraction."""
+    return await asyncio.get_running_loop().run_in_executor(
+        None, load_figure_source, settings, manuscript_id
     )
 
 

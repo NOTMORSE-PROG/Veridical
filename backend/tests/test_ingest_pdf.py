@@ -432,6 +432,23 @@ def test_service_persists_tree_and_status(tmp_path, monkeypatch, ingest_scratch_
             assert len(stored.section_tree["nodes"]) == len(result.section_tree.nodes)
             raw = raw_store_path(settings, manuscript.id)
             assert raw.exists() and raw.stat().st_size > 0
+            # Reports read figure readings from the small store written beside it.
+            from app.ingest.figures import saved_figure_readings
+            from app.ingest.schemas import ExtractionResult, FigureSource
+            from app.ingest.service import figure_store_path
+
+            store = FigureSource.model_validate_json(
+                figure_store_path(settings, manuscript.id).read_bytes()
+            )
+            whole = ExtractionResult.model_validate_json(raw.read_text(encoding="utf-8"))
+            assert store.figure_readings is not None
+            assert [
+                entry.model_dump_json()
+                for entry in saved_figure_readings(store, stored.content_hash) or []
+            ] == [
+                entry.model_dump_json()
+                for entry in saved_figure_readings(whole, stored.content_hash) or []
+            ]
 
             # Citations persisted (V-006) — and re-ingest replaces, not appends.
             from app.models import Citation
@@ -470,6 +487,68 @@ def test_service_persists_tree_and_status(tmp_path, monkeypatch, ingest_scratch_
         # Drop the engine this test bound to its own scratch DB so later
         # tests in the same process don't inherit it (mirrors
         # test_ingest_api.py/test_rubric_router.py's `client` fixture).
+        db._engine = None
+
+
+@live
+def test_preparation_finishes_when_the_figure_store_cannot_be_kept(
+    tmp_path, monkeypatch, ingest_scratch_url
+):
+    """The figure store can be derived again, so failing to keep it durably
+    must not fail the upload. The extraction itself still must be kept."""
+    from boto3.exceptions import S3UploadFailedError
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    import app.ingest.service as service
+    from app import db
+    from app.db import sqlalchemy_url
+    from app.models import Instructor, Manuscript
+    from app.models.enums import IngestStatus
+    from app.storage import LocalDiskStorage
+
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("DATABASE_URL", ingest_scratch_url)
+    db._engine = None
+    get_settings.cache_clear()
+    settings = get_settings()
+    pdf_path = _thesis_pdf(tmp_path)
+    kept = []
+
+    class FigureStoreRefused(LocalDiskStorage):
+        def put_file(self, local_path, key):
+            if key.endswith(".figures.json"):
+                # What R2's upload_file raises for a refused PUT (not ClientError).
+                raise S3UploadFailedError("Failed to upload: ServiceUnavailable")
+            kept.append(key)
+
+    monkeypatch.setattr(
+        service, "get_storage", lambda settings, **_: FigureStoreRefused(settings.data_dir)
+    )
+
+    async def scenario():
+        engine = create_async_engine(sqlalchemy_url(ingest_scratch_url))
+        try:
+            async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                instructor = Instructor(
+                    email=f"figure-store-{time.time_ns()}@test.local", display_name="Test"
+                )
+                session.add(instructor)
+                await session.commit()
+                manuscript = Manuscript(
+                    instructor_id=instructor.id, group_label="G", file_ref=str(pdf_path)
+                )
+                session.add(manuscript)
+                await session.commit()
+                await service.ingest_manuscript(session, manuscript, pdf_path, settings)
+                await session.refresh(manuscript)
+                assert manuscript.ingest_status == IngestStatus.done
+                assert f"{manuscript.id}.extraction.json" in kept
+        finally:
+            await engine.dispose()
+
+    try:
+        asyncio.run(scenario())
+    finally:
         db._engine = None
 
 

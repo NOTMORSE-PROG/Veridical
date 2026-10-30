@@ -7,13 +7,17 @@ an instructor resolves an escalation).
 
 import asyncio
 import dataclasses
+import logging
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Literal
 
 import pymupdf
+from boto3.exceptions import S3UploadFailedError
+from botocore.exceptions import BotoCoreError, ClientError
 from pydantic import ValidationError
 from sqlalchemy import and_, func, or_, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.service import write_audit_event
@@ -40,7 +44,13 @@ from app.findings.policy import exclusion_reason, reuse_excerpt
 from app.ingest.figures import saved_figure_readings
 from app.ingest.regions import recover_region
 from app.ingest.schemas import SectionTree
-from app.ingest.service import load_raw_store, load_raw_store_async
+from app.ingest.service import (
+    discard_figure_store,
+    keep_figure_store,
+    load_figure_source_async,
+    load_raw_store,
+    load_raw_store_async,
+)
 from app.library.passage_indexing import project_indexing_summary
 from app.models.audit import AuditLog
 from app.models.enums import (
@@ -103,6 +113,8 @@ from app.report.statistical_scope import (
 from app.report.subject_identity import recorded_check_subject
 from app.report.weight_importance import WeightImportance, weight_importance
 from app.storage.access import read_source
+
+logger = logging.getLogger(__name__)
 
 
 async def _load_scorable_results(session: AsyncSession, check_run_id: int) -> list[ScorableResult]:
@@ -497,15 +509,61 @@ async def attach_report_figures(
     if manuscript is None:
         return report
     try:
-        readings = saved_figure_readings(
-            await read_source(
-                session, manuscript, lambda: load_raw_store_async(settings, manuscript.id)
-            ),
-            manuscript.content_hash,
+        source, derived = await read_source(
+            session, manuscript, lambda: load_figure_source_async(settings, manuscript.id)
         )
-    except (FileNotFoundError, ValidationError, OSError, GoneError):
-        readings = None
-    return report.model_copy(update={"figure_readings": readings})
+    except (FileNotFoundError, ValidationError, OSError, GoneError, BotoCoreError, ClientError):
+        # Many callers have already saved the instructor's action. A source that
+        # cannot be read or reached shows the readings as unavailable rather
+        # than turning that saved action into an error.
+        return report.model_copy(update={"figure_readings": None})
+    if derived:
+        await _keep_figure_store(session, settings, manuscript.id)
+    return report.model_copy(
+        update={"figure_readings": saved_figure_readings(source, manuscript.content_hash)}
+    )
+
+
+async def _keep_figure_store(session: AsyncSession, settings: Settings, manuscript_id: int) -> None:
+    """Keep a just-derived figure store durably, but only under the source lock.
+
+    `read_source` holds the manuscript's source lock until this request ends,
+    and purge waits for it. So the store is put only after a query on the same
+    transaction shows the lock still held and the manuscript not purged, and
+    that is confirmed again after the put. If either is in doubt, the copy is
+    removed: it holds the thesis's figure text, and a purged manuscript must
+    not leave that behind. It is a cache; a later view derives it again.
+    """
+    loop = asyncio.get_running_loop()
+    if await _source_lock_holds(session, manuscript_id):
+        try:
+            await loop.run_in_executor(None, keep_figure_store, settings, manuscript_id)
+        except (OSError, BotoCoreError, ClientError, S3UploadFailedError):
+            # The local copy stays; this view still shows its readings.
+            logger.warning(
+                "Could not keep the figure store of manuscript %s", manuscript_id, exc_info=True
+            )
+        if await _source_lock_holds(session, manuscript_id):
+            return
+    try:
+        await loop.run_in_executor(None, discard_figure_store, settings, manuscript_id)
+    except (OSError, BotoCoreError, ClientError):
+        logger.warning(
+            "Could not remove the figure store of manuscript %s", manuscript_id, exc_info=True
+        )
+
+
+async def _source_lock_holds(session: AsyncSession, manuscript_id: int) -> bool:
+    """Whether this request's transaction, and the source lock it holds, is
+    still alive and the manuscript is not purged."""
+    try:
+        purged_at = await session.scalar(
+            select(Manuscript.purged_at).where(Manuscript.id == manuscript_id)
+        )
+    except (SQLAlchemyError, OSError):
+        # A lost connection takes its transaction and lock with it.
+        return False
+    return purged_at is None
 
 
 async def report_out_for_check_run(

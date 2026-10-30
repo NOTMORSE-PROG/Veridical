@@ -79,7 +79,7 @@ def seeded(client, api_scratch_url, tmp_path):
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
     from app.db import sqlalchemy_url
-    from app.ingest.service import raw_store_path
+    from app.ingest.service import figure_store_path, raw_store_path
     from app.models.enums import CheckRunStatus, IngestStatus
     from app.models.instructor import Instructor
     from app.models.manuscript import (
@@ -147,6 +147,8 @@ def seeded(client, api_scratch_url, tmp_path):
                 upload_path.write_bytes((FIXTURE_DIR / "native.pdf").read_bytes())
                 raw_path = raw_store_path(settings, mine.id)
                 raw_path.write_text("{}")
+                figure_path = figure_store_path(settings, mine.id)
+                figure_path.write_text("{}")
                 mine.file_ref = str(upload_path)
                 session.add(
                     CheckRun(manuscript_id=mine.id, rubric_id=rubric.id, status=CheckRunStatus.done)
@@ -199,6 +201,7 @@ def seeded(client, api_scratch_url, tmp_path):
                 ids["owner_id"] = owner.id
                 ids["upload_path"] = str(upload_path)
                 ids["raw_path"] = str(raw_path)
+                ids["figure_path"] = str(figure_path)
         finally:
             await engine.dispose()
 
@@ -274,6 +277,7 @@ def test_purge_deletes_embeddings_and_files_but_keeps_the_manuscript_and_run(see
 
     assert not Path(ids["upload_path"]).exists()
     assert not Path(ids["raw_path"]).exists()
+    assert not Path(ids["figure_path"]).exists()
 
     after = client.get("/archive")
     item = after.json()["items"][0]
@@ -671,6 +675,7 @@ def test_purge_refuses_while_source_preparation_is_running(seeded, api_scratch_u
     assert "preparation" in response.json()["error"]["message"].lower()
     assert Path(ids["upload_path"]).is_file()
     assert Path(ids["raw_path"]).is_file()
+    assert Path(ids["figure_path"]).is_file()
     assert client.get("/archive").json()["items"][0]["purged_at"] is None
 
 

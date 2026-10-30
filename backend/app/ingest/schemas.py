@@ -473,6 +473,22 @@ class FigureReading(BaseModel):
     schema_version: Literal["v1"] = "v1"
 
 
+class FigureSource(BaseModel):
+    """The saved figure readings plus the images they point at.
+
+    A report shows figure readings on every view, but checking them needs
+    only these images, not the whole extraction. Kept in its own small file
+    beside the extraction so a report view never parses the large one.
+    """
+
+    # Digest of the stored extraction these were taken from. A store whose
+    # digest differs from the extraction stored now is rebuilt, never shown.
+    extraction_sha256: str | None = None
+    figure_readings: list[FigureReading] | None = None
+    # Only the images that available readings point at, keyed by image index.
+    images: dict[int, ImageBlock] = Field(default_factory=dict)
+
+
 class ExtractionResult(BaseModel):
     page_count: int  # DOCX: 0 — pages don't exist before rendering
     anchor_kind: Literal["page", "paragraph"]

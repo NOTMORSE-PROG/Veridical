@@ -1155,6 +1155,11 @@ class Settings(BaseSettings):
     storage_probe_total_attempts: int = Field(default=1, ge=1)
     # Separate per-instructor scope, using action_rate_limit_window_seconds.
     storage_probe_rate_limit_max_attempts: int = Field(default=60, ge=1)
+    # BUG-561: the small figure store a report view reads and, the first time,
+    # keeps. Short so a slow store delays one view, never holds it up.
+    figure_store_connect_timeout_seconds: float = Field(default=2.0, gt=0)
+    figure_store_read_timeout_seconds: float = Field(default=2.0, gt=0)
+    figure_store_total_attempts: int = Field(default=1, ge=1)
 
     # --- CORS (V-048) --------------------------------------------------------
     # Comma-separated origins allowed to call the API from a browser. Empty
