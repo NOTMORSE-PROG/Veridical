@@ -46,13 +46,21 @@ export function isPagePastEnd(error: unknown): boolean {
   return isValidationRefusal(error) && error.fieldMessages.has("page");
 }
 
-// BUG-555: a 429 or 503 is the service refusing before it acts, not a
-// changed assessment. Nothing was saved and a later try can work.
+// BUG-555: the server's own busy refusals, which it sends before acting
+// (backend/app/errors.py). A bare 503 from a gateway proves nothing about
+// whether the write happened, so only these codes say nothing changed.
+const SERVICE_BUSY_CODES: ReadonlySet<string> = new Set([
+  "rate_limited", "quota_exhausted", "document_preparation_busy", "ai_not_configured", "source_read_unavailable",
+]);
+
 export function isServiceBusy(error: unknown): error is ApiError {
-  return error instanceof ApiError && (error.status === 429 || error.status === 503);
+  return error instanceof ApiError && (error.status === 429 || error.status === 503) && SERVICE_BUSY_CODES.has(error.code);
 }
+
+// Said when a save failed in a way that leaves its outcome unknown.
+export const OUTCOME_UNKNOWN_COPY = "It is not known whether this was saved. Reload the page to see the current state before trying again.";
 
 export const SERVICE_BUSY_COPY = {
   title: "The service is busy",
-  body: "Nothing was changed and your reason is kept. Try again in a moment.",
+  body: "Nothing was changed and what you typed is kept. Try again in a moment.",
 } as const;

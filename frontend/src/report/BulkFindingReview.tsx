@@ -14,7 +14,7 @@ import { Dialog } from "../ui/Dialog";
 import { useMediaQuery } from "../ui/useMediaQuery";
 import type { FlagFindingCluster } from "./flagClusters";
 import { useBulkResolveFlags, type BulkAction, type BulkResolveOut } from "./useBulkResolve";
-import { fieldRefusal, formRefusal, isServiceBusy, isValidationRefusal, REFUSAL_NOTHING_CHANGED, useRefusalFocus } from "../api/fieldRefusal";
+import { fieldRefusal, formRefusal, isServiceBusy, isValidationRefusal, REFUSAL_NOTHING_CHANGED, SERVICE_BUSY_COPY, useRefusalFocus } from "../api/fieldRefusal";
 import { RefusalAlert } from "../ui/RefusalAlert";
 
 // While the bar is fixed to the screen, its measured height keeps focused
@@ -119,6 +119,7 @@ export function BulkResolveDialog({ action, clusters, checkRunId, expectedRevisi
   // unreadable answer may have been applied, so it is not said to have not.
   const refused = isServiceBusy(resolve.error) || (resolve.error instanceof ApiError && resolve.error.status >= 400 && resolve.error.status < 500);
   const error = isValidationRefusal(resolve.error) ? formRefusal(resolve.error, [textField], BULK_REVIEW_COPY.requestRefused)
+    : isServiceBusy(resolve.error) ? SERVICE_BUSY_COPY.body
     : refused && resolve.error instanceof ApiError ? resolve.error.message
       : resolve.error ? BULK_REVIEW_COPY.unconfirmedBody : null;
 
@@ -143,7 +144,9 @@ export function BulkResolveDialog({ action, clusters, checkRunId, expectedRevisi
   return <Dialog title={action === "confirm" ? BULK_REVIEW_COPY.confirmTitle(included.length) : BULK_REVIEW_COPY.dismissTitle(included.length)}
     initialFocusTitle onClose={resolve.isPending ? undefined : onClose}
     actions={<><Button variant="secondary" disabled={resolve.isPending} onClick={onClose}>{BULK_REVIEW_COPY.cancel}</Button>
-      <Button variant="brand" busy={resolve.isPending} disabled={included.length === 0} onClick={submit}>
+      {/* After an outcome nobody can know, review the findings first rather
+          than sending the same write again. */}
+      <Button variant="brand" busy={resolve.isPending} disabled={included.length === 0 || (Boolean(resolve.error) && !refused && !isValidationRefusal(resolve.error))} onClick={submit}>
         {action === "confirm" ? BULK_REVIEW_COPY.confirm : BULK_REVIEW_COPY.dismiss}</Button></>}>
     <div className="signal-group-flow signal-bulk-dialog" aria-busy={resolve.isPending}>
       <p><strong>{BULK_REVIEW_COPY.unopened(unopened)}</strong></p>
