@@ -30,3 +30,9 @@ export function useRefusalFocus(refusal: string | null, field: RefObject<HTMLTex
     if (message) document.getElementById(message.split(" ").pop() ?? "")?.scrollIntoView({ block: "nearest" });
   }, [refusal, field]);
 }
+
+// BUG-543: a list page past the server's cap is refused; asking again gives
+// the same answer, so the screen says the page does not exist.
+export function isPagePastEnd(error: unknown): boolean {
+  return isValidationRefusal(error) && error.fieldMessages.has("page");
+}

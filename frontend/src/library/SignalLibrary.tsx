@@ -16,6 +16,8 @@ import { LibraryEntryStatus } from "./LibraryEntryStatus";
 import { passageIndexingMarker } from "./passageIndexing";
 import { LibraryRecoveryActions } from "./LibraryRecoveryActions";
 import { formatLibraryDate, libraryRecordName } from "./libraryFormat";
+import { isPagePastEnd } from "../api/fieldRefusal";
+import { PAGE_PAST_END_COPY } from "../domain/pagePastEnd";
 import {
   useLibrary,
   useLibraryDocument,
@@ -385,7 +387,7 @@ export function SignalLibraryPage() {
     return () => window.clearTimeout(handle);
   }, [location.key, location.state, searchInput, urlSearch, setSearchParams]);
 
-  const { data, isSuccess, isError, fetchStatus, refetch } = useLibrary(page, program, urlSearch);
+  const { data, isSuccess, isError, error, fetchStatus, refetch } = useLibrary(page, program, urlSearch);
   // The result count belongs to this filter; comparison availability belongs
   // to the whole Library. The common unfiltered query shares the same cache.
   const collection = useLibrary(1, undefined, "");
@@ -414,7 +416,8 @@ export function SignalLibraryPage() {
   const total = data?.total ?? 0;
   const corpusTotal = collection.data?.total ?? (!hasFilters ? data?.total : undefined);
   const settled = fetchStatus === "idle" && isSuccess && Boolean(data);
-  const loadError = fetchStatus === "idle" && isError;
+  const pastEnd = fetchStatus === "idle" && isError && isPagePastEnd(error);
+  const loadError = fetchStatus === "idle" && isError && !pastEnd;
   const unavailable = fetchStatus === "idle" && !isError && !settled;
   const outOfRange = Boolean(data && total > 0 && data.items.length === 0 && page > totalPages);
   const emptyInRange = Boolean(settled && data && total > 0 && data.items.length === 0 && !outOfRange);
@@ -706,6 +709,13 @@ export function SignalLibraryPage() {
             onRetry={retryLibrary}
           />
 
+          {pastEnd && (
+            <div className="signal-library-state" role="alert">
+              <strong>{PAGE_PAST_END_COPY.title(page)}</strong>
+              <p>{PAGE_PAST_END_COPY.body}</p>
+              <ActionLink to={{ search: (() => { const next = new URLSearchParams(searchParams); next.delete("page"); return next.toString(); })() }} variant="secondary">{PAGE_PAST_END_COPY.firstPage}</ActionLink>
+            </div>
+          )}
           {loadError && (
             <div className="signal-library-state" role="alert">
               <strong>The library could not be loaded.</strong>

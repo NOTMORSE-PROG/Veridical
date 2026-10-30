@@ -83,6 +83,15 @@ function stubCompleteDesk(stats: unknown = { ...STATS, complete_queue_count: 27 
 describe("DashboardPage", () => {
   afterEach(() => { onlineManager.setOnline(true); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
+  it("says a page past the end does not exist and offers page 1, instead of a retry that can never work", async () => {
+    stubCompleteDesk(undefined, () => new Response(JSON.stringify({ detail: [{ type: "less_than_equal", loc: ["query", "page"], msg: "Input should be less than or equal to 10000", input: "10001" }] }), { status: 422 }));
+    renderWithProviders(<DashboardPage />, { route: "/dashboard?queue=complete&page=10001" });
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Page 10001 doesn't exist");
+    expect(within(alert).getByRole("link", { name: "Go to page 1" }).getAttribute("href")).toBe("/dashboard?queue=complete");
+    expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+  });
+
   it.each([1, 7])("opens a decided review without presenting its %i retained criteria as current tasks", async count => {
     stubCompleteDesk({ ...STATS, needs_attention_count: 0, complete_queue_count: 1 }, () => ({
       ...MANUSCRIPTS_PAGE, items: [{ ...MANUSCRIPTS_PAGE.items[0], latest_decision: "returned",
