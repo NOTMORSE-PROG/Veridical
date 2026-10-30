@@ -84,6 +84,7 @@ export function GroupAssignmentFields({ manuscriptId, initialProposal, actionsTa
 
   const confirm: GroupProposalController = {
     isPending: locked || (state.kind === "rejected" && state.recovery === "current_assignment"), isSuccess: false,
+    sending: state.kind === "saving",
     // Only a refusal of the names goes to the fields; anything else is
     // reported once, by the alert below.
     error: state.kind === "rejected" && namesRefused(state.error) ? state.error : undefined,

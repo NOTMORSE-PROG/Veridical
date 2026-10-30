@@ -169,6 +169,14 @@ describe("bulk confirm and dismiss", () => {
     expect(screen.queryByText(/Check what you entered/)).not.toBeInTheDocument();
   });
 
+  it("says nothing changed when the service is unavailable before acting", async () => {
+    respond({ error: { code: "unavailable", message: "The service is busy. Try again in a moment." } }, 503);
+    dialog("confirm", FLAGS, [1, 2, 3]);
+    fireEvent.click(screen.getByRole("button", { name: "Confirm as real issues" }));
+    const alert = await screen.findByRole("alert");
+    expect(within(alert).getByText("These findings were not changed")).toBeInTheDocument();
+  });
+
   it.each([[500, { error: { code: "internal", message: "Something went wrong on our side." } }], [504, {}]])(
     "does not say nothing changed when a %s leaves the outcome unknown", async (status, body) => {
       respond(body, status);

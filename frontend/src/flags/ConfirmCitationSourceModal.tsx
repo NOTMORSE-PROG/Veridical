@@ -11,7 +11,7 @@ import { useConfirmCitationSource } from "./useFlag";
 import { useFlagActionReview } from "./useFlagActionReview";
 import { useExplicitActionFocus } from "../routing/useExplicitActionFocus";
 import { useFindingCompletion } from "./useFindingCompletion";
-import { fieldRefusal, formRefusal, isValidationRefusal, REFUSAL_NOTHING_CHANGED, REFUSAL_TITLE, useRefusalFocus } from "../api/fieldRefusal";
+import { fieldRefusal, formRefusal, isValidationRefusal, isServiceBusy, REFUSAL_NOTHING_CHANGED, REFUSAL_TITLE, SERVICE_BUSY_COPY, useRefusalFocus } from "../api/fieldRefusal";
 import { RefusalAlert } from "../ui/RefusalAlert";
 
 export function ConfirmCitationSourceModal({ flag, onClose, onAccepted, continuationIsCurrent, fallbackFocusRef }: { flag: FlagOut; onClose: () => void; onAccepted: (flag: FlagOut) => boolean; continuationIsCurrent: () => boolean; fallbackFocusRef?: React.RefObject<HTMLHeadingElement | null> }) {
@@ -40,7 +40,7 @@ export function ConfirmCitationSourceModal({ flag, onClose, onAccepted, continua
         if (onAccepted(out)) { completion.accept(); setAccepted(true); }
         else review.freeze();
       // A refusal of the reason is definite and changes nothing; the review stays open.
-      }, onError: (error) => { if (!isValidationRefusal(error)) review.freeze(); },
+      }, onError: (error) => { if (!isValidationRefusal(error) && !isServiceBusy(error)) review.freeze(); },
     });
   }
   return <Dialog title="Confirm this source exists?" initialFocusTitle fallbackFocusRef={fallbackFocusRef}
@@ -65,7 +65,8 @@ export function ConfirmCitationSourceModal({ flag, onClose, onAccepted, continua
       {invalid && <p id={errorId} role="alert" className="signal-field-error">Enter where you verified this before confirming.</p>}
       {!invalid && refusal && <p id={refusalId} className="signal-field-error">{refusal} {REFUSAL_NOTHING_CHANGED}</p>}
       {requestRefusal && <RefusalAlert title={REFUSAL_TITLE} message={requestRefusal} takeFocus={!refusal} />}
-      {confirm.isError && !isValidationRefusal(confirm.error) && <Alert title="Saving could not be confirmed" tone="error" role="alert">Your entered reason is kept. Review the current assessment before trying again.</Alert>}
+      {isServiceBusy(confirm.error) && <Alert title={SERVICE_BUSY_COPY.title} tone="error" role="alert">{SERVICE_BUSY_COPY.body}</Alert>}
+        {confirm.isError && !isValidationRefusal(confirm.error) && !isServiceBusy(confirm.error) && <Alert title="Saving could not be confirmed" tone="error" role="alert">Your entered reason is kept. Review the current assessment before trying again.</Alert>}
     </div>
   </Dialog>;
 }
