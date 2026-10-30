@@ -168,7 +168,7 @@ describe("AuditLogPage", () => {
     const row = { ...PAGE.items[0], id: 972, check_run_id: 32, event_type: "flag_finding_confirmed", prompt_type: null, prompt_version: null };
     vi.stubGlobal("fetch", stubFetchByPath({ "/audit": { ...PAGE, items: [row], total: 1 }, "/audit/972": {
       ...row, input_hash: null,
-      payload: { flag_id: 558, check_result_id: 140, instructor_id: 1, note: null, severity: "low", batch_id: "4cf3cfeb", batch_size: 2 },
+      payload: { flag_id: 558, check_result_id: 140, instructor_id: 1, note: null, severity: "low", batch_id: "4cf3cfeb", batch_selected_count: 2 },
     } }));
     renderWithProviders(<AuditLogPage />, { route: "/audit?detail=972" });
     const dialog = await screen.findByRole("dialog");

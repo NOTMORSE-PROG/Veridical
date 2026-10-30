@@ -92,7 +92,7 @@ const EVENT_EXPLANATIONS: Record<string, string> = {
   manuscript_group_selected: "An instructor explicitly selected a saved group for this manuscript. The saved group record was retained.",
   flag_overridden: "An instructor changed how a system finding should affect the readiness review.",
   flag_annotated: "An instructor added context to a system finding.",
-  flag_finding_confirmed: "An instructor confirmed a system finding. It still counts in the readiness review and no longer waits for review.",
+  flag_finding_confirmed: "An instructor confirmed a possible issue found by VERIDICAL and marked it as reviewed. Later entries may change this.",
   rubric_parse_attempt: "VERIDICAL recorded an attempt to prepare review criteria from the uploaded required format.",
   llm_model_exhausted: "A review attempt reached a recorded model or service limit. Check later entries and the report for what happened next.",
   report_decided: "An instructor recorded the final outcome for this readiness review.",
