@@ -96,7 +96,16 @@ async def create_session(
     return row
 
 
+def _unstorable(token: str) -> bool:
+    # A cookie can carry an escaped NUL ("\000" decodes to U+0000), which no
+    # stored session token contains and PostgreSQL text cannot be compared
+    # with; such a token is simply not a session (BUG-537).
+    return "\x00" in token
+
+
 async def get_instructor_by_token(session: AsyncSession, token: str) -> Instructor | None:
+    if _unstorable(token):
+        return None
     row = await session.get(Session, token)
     if row is None:
         return None
@@ -108,6 +117,8 @@ async def get_instructor_by_token(session: AsyncSession, token: str) -> Instruct
 
 
 async def delete_session(session: AsyncSession, token: str) -> None:
+    if _unstorable(token):
+        return
     row = await session.get(Session, token)
     if row is not None:
         await session.delete(row)

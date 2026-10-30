@@ -89,8 +89,8 @@ async def get_shared_evidence_manifest_route(
 @router.get("/shared/{token}/evidence/{reference_id}/page", response_model=EvidencePageOut)
 async def get_shared_evidence_page_route(
     token: DbText,
-    reference_id: Annotated[DbText, Path(pattern=r"^[a-f0-9]{64}$")],
-    snapshot_id: Annotated[DbText, Query(pattern=r"^[a-f0-9]{64}$")],
+    reference_id: Annotated[str, Path(pattern=r"^[a-f0-9]{64}$")],
+    snapshot_id: Annotated[str, Query(pattern=r"^[a-f0-9]{64}$")],
     response: Response,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> EvidencePageOut:

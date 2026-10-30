@@ -7,12 +7,12 @@ of packages installed, so neither asyncpg nor SQLAlchemy is there to import.
 
 from typing import Annotated
 
-from pydantic import AfterValidator
+from pydantic import AfterValidator, Field
 from pydantic_core import PydanticCustomError
 
 from app.config import BIGINT_MAX, BIGINT_MIN
 
-__all__ = ["BIGINT_MAX", "BIGINT_MIN", "TEXT_NOT_STORABLE", "DbInt", "DbText"]
+__all__ = ["BIGINT_MAX", "BIGINT_MIN", "TEXT_NOT_STORABLE", "DbInt", "DbText", "db_text"]
 
 # Every id, page and revision we look up fits in BIGINT, so a request integer
 # outside it cannot match anything. asyncpg refuses to send such a value at
@@ -72,3 +72,10 @@ def _storable_text(value: str) -> str:
 
 
 DbText = Annotated[str, AfterValidator(_storable_text)]
+
+
+def db_text(max_length: int):
+    """DbText with a length limit, for optional fields. The limit has to come
+    before the check: on `DbText | None = Field(max_length=...)` pydantic can
+    only apply it generically and reports "items" instead of characters."""
+    return Annotated[str, Field(max_length=max_length), AfterValidator(_storable_text)]
