@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useBlocker, useParams } from "react-router";
 import { ApiError } from "../api/client";
-import type { CriterionType, RubricLevel } from "../api/types";
+import type { CriterionType, RubricAcknowledgementReason, RubricIssueDetail, RubricLevel } from "../api/types";
 import { WEIGHT_IMPORTANCE_PREVIEW } from "../config/ui";
 import { useRouteFocus } from "../routing/useRouteFocus";
 import { Alert } from "../ui/Alert";
@@ -10,6 +10,8 @@ import { Dialog } from "../ui/Dialog";
 import { type CriterionEdit, useRubric, useSaveCriteria } from "./useRubric";
 import { UploadRubricModal } from "./UploadRubricModal";
 import { FormatReviewWorkbench } from "./FormatReviewWorkbench";
+import { CriterionLevels, ReviewItemNavigator, RubricReviewStatus, SourceReadingSummary } from "./RubricReviewParts";
+import { issueCopy, levelAnchorId, openIssues, orderedIssues, type PendingAcknowledgement } from "./rubricReview";
 
 interface CriterionRow {
   key: string;
@@ -136,6 +138,14 @@ function CriteriaHeader({ headingRef, title, count, readOnly = false, familyId, 
   );
 }
 
+interface LevelReview {
+  issues: readonly RubricIssueDetail[];
+  pending: ReadonlyMap<number, PendingAcknowledgement>;
+  onKeep: (issues: readonly RubricIssueDetail[], reason: RubricAcknowledgementReason, note: string | null) => void;
+  onUndoKeep: (issues: readonly RubricIssueDetail[]) => void;
+  onPageShown: (page: number) => void;
+}
+
 function CriterionCard({
   row,
   index,
@@ -145,6 +155,7 @@ function CriterionCard({
   onChange,
   onRemove,
   serverErrors,
+  review,
 }: {
   row: CriterionRow;
   index: number;
@@ -154,24 +165,24 @@ function CriterionCard({
   onChange: (patch: Partial<CriterionRow>) => void;
   onRemove: () => void;
   serverErrors?: Partial<Record<ServerField, string>>;
+  review: LevelReview;
 }) {
+  const levels = (row.levels?.length || review.issues.length) ? <CriterionLevels criterionKey={row.key} criterionLabel={`Criterion ${index + 1}`}
+    levels={row.levels ?? []} issues={review.issues} pending={review.pending} readOnly={readOnly}
+    onKeep={review.onKeep} onUndoKeep={review.onUndoKeep} onPageShown={review.onPageShown}
+    summaryDescribedBy={serverErrors?.levels ? `criterion-levels-server-${row.key}` : undefined} forceOpen={Boolean(serverErrors?.levels)} /> : null;
   const textError = showErrors && row.text.trim() === "";
   const weightError = showErrors && invalidWeight(row.weight);
   if (readOnly) return (
     <li className="signal-criterion-card">
       <div className="signal-criterion-card__number" aria-hidden="true">{index + 1}</div>
       <div className="signal-criterion-card__body signal-copy-flow">
-        <div className="signal-criterion-card__heading"><p>Criterion {index + 1}</p></div>
+        <div className="signal-criterion-card__heading"><h3>Criterion {index + 1}</h3></div>
         <p>{row.text}</p>
         <p><strong>Type: </strong>{TYPE_LABELS[row.type]}</p>
         <p><strong>Evidence expected: </strong>{row.evidence || "Not specified in this version."}</p>
         <p><strong>Relative weight: </strong>{row.weight} · {importance(row.weight, average)} importance</p>
-        {row.levels && row.levels.length > 0 && (
-          <details className="signal-levels">
-            <summary>Levelled criterion · {row.levels.length} levels</summary>
-            <ol>{row.levels.map((level) => <li key={level.level}><strong>{level.name}</strong><span>{level.descriptor}</span></li>)}</ol>
-          </details>
-        )}
+        {levels}
       </div>
     </li>
   );
@@ -180,7 +191,7 @@ function CriterionCard({
       <div className="signal-criterion-card__number" aria-hidden="true">{index + 1}</div>
       <div className="signal-criterion-card__body">
         <div className="signal-criterion-card__heading">
-          <p>Criterion {index + 1}</p>
+          <h3>Criterion {index + 1}</h3>
           {!readOnly && <button type="button" onClick={onRemove} aria-label={`Remove criterion ${index + 1}`}>Remove</button>}
         </div>
         <label className="signal-criterion-field signal-criterion-field--wide">
@@ -248,12 +259,7 @@ function CriterionCard({
             {weightError && <small id={`criterion-weight-error-${row.key}`} className="signal-field-error">Weight must be greater than zero.</small>}
           </label>
         </div>
-        {row.levels && row.levels.length > 0 && (
-          <details id={`criterion-levels-${row.key}`} className="signal-levels" open={Boolean(serverErrors?.levels) || undefined}>
-            <summary aria-describedby={serverErrors?.levels ? `criterion-levels-server-${row.key}` : undefined}>Levelled criterion · {row.levels.length} levels</summary>
-            <ol>{row.levels.map((level) => <li key={level.level}><strong>{level.name}</strong><span>{level.descriptor}</span></li>)}</ol>
-          </details>
-        )}
+        {levels}
         {serverErrors?.levels && <small id={`criterion-levels-server-${row.key}`} className="signal-field-error">Levels: {serverErrors.levels}</small>}
       </div>
     </li>
@@ -281,6 +287,15 @@ function CriteriaEditor({ id }: { id: number }) {
   const [attempted, setAttempted] = useState<"save" | "confirm">();
   const [announcement, setAnnouncement] = useState<{ id: number; text: string } | null>(null);
   const [removedStack, setRemovedStack] = useState<Array<{ row: CriterionRow; index: number }>>([]);
+  // BUG-566: parser issues the instructor chose to keep as written, sent
+  // with the next save; the revision the page's edits started from; and
+  // whether activation was refused for items still to check.
+  const [pending, setPending] = useState<ReadonlyMap<number, PendingAcknowledgement>>(() => new Map());
+  const [loadedRevision, setLoadedRevision] = useState<number | null>(null);
+  const [currentIssueId, setCurrentIssueId] = useState<number | null>(null);
+  const [activationBlocked, setActivationBlocked] = useState(false);
+  const [discardOpen, setDiscardOpen] = useState(false);
+  const blockedRef = useRef<HTMLDivElement>(null);
   const announcementSeq = useRef(0);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const summaryRef = useRef<HTMLDivElement>(null);
@@ -323,11 +338,12 @@ function CriteriaEditor({ id }: { id: number }) {
     }));
     setRows(next);
     setSavedRows(next);
+    setLoadedRevision(rubric.revision ?? null);
   }, [rows, rubric]);
 
   const readOnly = rubric ? !rubric.is_latest_version || rubric.can_edit_criteria === false : true;
   const dirty = !readOnly && rows !== undefined && savedRows !== undefined
-    && JSON.stringify(rows) !== JSON.stringify(savedRows);
+    && (JSON.stringify(rows) !== JSON.stringify(savedRows) || pending.size > 0);
   const blocker = useBlocker(({ currentLocation, nextLocation }) =>
     dirty && currentLocation.pathname !== nextLocation.pathname,
   );
@@ -341,6 +357,16 @@ function CriteriaEditor({ id }: { id: number }) {
     window.addEventListener("beforeunload", beforeUnload);
     return () => window.removeEventListener("beforeunload", beforeUnload);
   }, [dirty]);
+
+  // Activation refused for items still to check: take the instructor to the
+  // list of them once it is on the page.
+  const focusBlockedSummary = useRef(false);
+  useEffect(() => {
+    if (!activationBlocked || !focusBlockedSummary.current || !blockedRef.current) return;
+    focusBlockedSummary.current = false;
+    blockedRef.current.scrollIntoView({ block: "nearest" });
+    blockedRef.current.focus({ preventScroll: true });
+  });
 
   useEffect(() => {
     if (blocker.state !== "blocked") setLeaveSaveFailed(false);
@@ -377,6 +403,18 @@ function CriteriaEditor({ id }: { id: number }) {
   }
 
   const currentRows = rows;
+  const details = rubric.parse_issue_details ?? null;
+  // Issues on a criterion removed on this page are settled by the next save.
+  const pageIssues = details
+    ? orderedIssues(details, currentRows.map((row) => row.id))
+      .filter((issue) => issue.criterion_id === null || currentRows.some((row) => row.id === issue.criterion_id))
+    : [];
+  const openItems = openIssues(pageIssues, pending);
+  const formatIssues = pageIssues.filter((issue) => issue.criterion_id === null);
+  const issuesFor = (row: CriterionRow) => row.id === null ? [] : pageIssues.filter((issue) => issue.criterion_id === row.id);
+  const legacy = details === null && currentRows.some((row) => row.levels?.length)
+    && currentRows.every((row) => !row.levels?.some((level) => level.source));
+  const gateBlocks = !rubric.is_active && openItems.length > 0;
   const average = currentRows.length
     ? currentRows.reduce((total, row) => total + row.weight, 0) / currentRows.length
     : 0;
@@ -389,6 +427,77 @@ function CriteriaEditor({ id }: { id: number }) {
       ]),
     ]
     : [];
+
+  function issuePlace(issue: RubricIssueDetail): { label: string; anchor: string } {
+    const index = currentRows.findIndex((row) => row.id !== null && row.id === issue.criterion_id);
+    const row = index >= 0 ? currentRows[index] : undefined;
+    const level = issue.level === null ? undefined : row?.levels?.find((item) => item.level === issue.level);
+    if (!row) return { label: "The whole format", anchor: levelAnchorId("format", null) };
+    return { label: `Criterion ${index + 1}${level ? ` · ${level.name}` : ""}`, anchor: levelAnchorId(row.key, level ? level.level : null) };
+  }
+
+  function goToIssue(issue: RubricIssueDetail) {
+    const target = document.getElementById(issuePlace(issue).anchor);
+    if (!target) return;
+    const details = target.closest("details");
+    if (details) details.open = true;
+    setCurrentIssueId(issue.id);
+    target.scrollIntoView({ block: "center" });
+    target.focus({ preventScroll: true });
+  }
+
+  function keepIssues(issues: readonly RubricIssueDetail[], reason: RubricAcknowledgementReason, note: string | null) {
+    setPending((current) => {
+      const next = new Map(current);
+      for (const issue of issues) next.set(issue.id, { issue_id: issue.id, reason_code: reason, note });
+      return next;
+    });
+    announce("Wording kept, not saved yet.");
+  }
+
+  function undoKeep(issues: readonly RubricIssueDetail[]) {
+    setPending((current) => {
+      const next = new Map(current);
+      for (const issue of issues) next.delete(issue.id);
+      return next;
+    });
+    announce("Kept wording undone.");
+  }
+
+  const levelReview = (row: CriterionRow): LevelReview => ({
+    issues: issuesFor(row), pending, onKeep: keepIssues, onUndoKeep: undoKeep,
+    onPageShown: (page) => announce(`Page ${page} shown in the original format.`),
+  });
+
+  function bodyFor(submitted: CriterionRow[], confirm: boolean) {
+    // Only issues still open on the server are sent; the rest were settled.
+    const acknowledgements = [...pending.values()].filter((item) => pageIssues.some((issue) => issue.id === item.issue_id && issue.status === "open"));
+    return {
+      criteria: toEdits(submitted), confirm,
+      ...(loadedRevision !== null ? { expected_revision: loadedRevision } : {}),
+      ...(acknowledgements.length ? { acknowledgements } : {}),
+    };
+  }
+
+  function savedAnnouncement(out: { parse_issue_details?: RubricIssueDetail[] | null }, confirm: boolean) {
+    if (confirm) return "Format confirmed and activated.";
+    if (!out.parse_issue_details) return "Draft saved.";
+    const left = out.parse_issue_details.filter((issue) => issue.status === "open").length;
+    return left ? `Draft saved. ${left} ${left === 1 ? "item" : "items"} to check remain.` : "Draft saved.";
+  }
+
+  function discardAndReload() {
+    setDiscardOpen(false);
+    save.reset();
+    void refetch().then(() => {
+      setPending(new Map());
+      setRemovedStack([]);
+      setActivationBlocked(false);
+      setAttempted(undefined);
+      setRows(undefined);
+      setSavedRows(undefined);
+    });
+  }
 
   function updateRow(key: string, patch: Partial<CriterionRow>) {
     setRows((current) => current?.map((row) => row.key === key ? { ...row, ...patch } : row));
@@ -439,20 +548,37 @@ function CriteriaEditor({ id }: { id: number }) {
   function attemptSave(confirm: boolean) {
     if (save.isPending) return;
     setAttempted(confirm ? "confirm" : "save");
+    setActivationBlocked(false);
     if (invalidCriteria(currentRows)) {
       queueMicrotask(() => summaryRef.current?.focus());
+      return;
+    }
+    // Activation waits until each parser item is kept or settled; the
+    // server refuses it too, this only saves a round trip.
+    if (confirm && gateBlocks) {
+      focusBlockedSummary.current = true;
+      setActivationBlocked(true);
       return;
     }
     const submitted = currentRows;
     submittedKeys.current = submitted.map((row) => row.key);
     setEditedSinceRefusal(new Set());
     save.mutate(
-      { criteria: toEdits(submitted), confirm },
+      bodyFor(submitted, confirm),
       {
-        onSuccess: () => {
+        onSuccess: (out) => {
           setSavedRows(submitted);
           setRemovedStack([]);
-          announce(confirm ? "Format confirmed and activated." : "Draft saved.");
+          setPending(new Map());
+          setLoadedRevision(out.revision ?? null);
+          announce(savedAnnouncement(out, confirm));
+        },
+        onError: (error) => {
+          if (error instanceof ApiError && error.code === "unresolved_rubric_issues") {
+            focusBlockedSummary.current = true;
+            setActivationBlocked(true);
+            void refetch();
+          }
         },
       },
     );
@@ -479,9 +605,9 @@ function CriteriaEditor({ id }: { id: number }) {
     submittedKeys.current = submitted.map((row) => row.key);
     setEditedSinceRefusal(new Set());
     save.mutate(
-      { criteria: toEdits(submitted), confirm: false },
+      bodyFor(submitted, false),
       {
-        onSuccess: () => { setSavedRows(submitted); blocker.proceed(); },
+        onSuccess: () => { setSavedRows(submitted); setPending(new Map()); blocker.proceed(); },
         onError: (error) => {
           resolvingBlocker.current = false;
           setLeaveSaveFailed(true);
@@ -503,7 +629,9 @@ function CriteriaEditor({ id }: { id: number }) {
     .filter((field) => fieldErrors.get(row.key)?.[field] && editedSinceRefusal.has(`${row.key}.${field}`)).length, 0);
   const needing = Math.max(0, refusalCount - changedRefusals);
   // A refused save keeps nothing: the whole set was not saved.
-  const saveError = save.error instanceof ApiError && save.error.status === 422
+  const conflict = save.error instanceof ApiError && save.error.status === 409
+    && ["unresolved_rubric_issues", "rubric_changed", "rubric_locked"].includes(save.error.code) ? save.error.code : null;
+  const saveError = conflict ? undefined : save.error instanceof ApiError && save.error.status === 422
     ? fieldErrors.size > 0 || otherRefusals.length > 0
       ? needing > 0 ? `Nothing was saved. ${needing === 1 ? "One value needs" : `${needing} values need`} changing. Your edits are still on this page.`
         : "Nothing was saved. You have changed the values that were refused; save again to check them."
@@ -523,6 +651,9 @@ function CriteriaEditor({ id }: { id: number }) {
         instruction={readOnly ? "Inspect this version’s criteria beside its uploaded format." : "Compare the prepared criteria with your uploaded format. Correct missing or extra requirements before confirming."} />
       <FormatReviewWorkbench rubric={rubric} onUploadNewVersion={() => setUploadOpen(true)}>
       <div className="signal-section-flow signal-criteria-guidance">
+        {(details !== null || legacy) && <RubricReviewStatus total={pageIssues.length} open={openItems.length} readOnly={readOnly}
+          isActive={rubric.is_active} legacy={legacy} onFirst={() => openItems[0] && goToIssue(openItems[0])} />}
+        <SourceReadingSummary summary={rubric.source_summary} />
         {readOnly
           ? <Alert title="Read-only version" tone="info">
               <p>{rubric.is_latest_version
@@ -536,7 +667,7 @@ function CriteriaEditor({ id }: { id: number }) {
           <summary>How criterion types work</summary>
           <p id="criterion-type-guidance">Choose Structural for checks based on document structure or presence, Semantic for checks that require interpreting the content, and Not from the document for requirements that need other evidence, such as a presentation or printed copy.</p>
         </details>
-        {rubric.parse_status === "needs_review" && (
+        {details === null && rubric.parse_status === "needs_review" && (
           <Alert title="Needs manual completion" tone="warning" role="status">
             <p>{readOnly
               ? "This version retains parser uncertainty. Check the original format and upload a new version if corrections are needed."
@@ -544,6 +675,18 @@ function CriteriaEditor({ id }: { id: number }) {
             {rubric.parse_issues?.length ? <ul>{rubric.parse_issues.map((issue) => <li key={issue}>{issue}</li>)}</ul> : null}
           </Alert>
         )}
+        {activationBlocked && gateBlocks && (
+          <div ref={blockedRef} tabIndex={-1} role="alert" className="signal-error-summary signal-criteria-errors">
+            <h2>Check these items before activating</h2>
+            <ul>{openItems.map((issue) => <li key={issue.id}><button type="button" onClick={() => goToIssue(issue)}>
+              {issuePlace(issue).label}: {issueCopy(issue)}</button></li>)}</ul>
+          </div>
+        )}
+        {formatIssues.length > 0 && <section className="signal-format-issues" aria-labelledby="format-issues-heading">
+          <h3 id="format-issues-heading">Items about the whole format</h3>
+          <CriterionLevels criterionKey="format" criterionLabel="The whole format" levels={[]} issues={formatIssues} pending={pending}
+            readOnly={readOnly} onKeep={keepIssues} onUndoKeep={undoKeep} onPageShown={() => {}} />
+        </section>}
         {problems.length > 0 && (
           <div ref={summaryRef} tabIndex={-1} role="alert" className="signal-error-summary signal-criteria-errors">
             <h2>Fix these items before {attempted === "confirm" ? "confirming" : "saving"}</h2>
@@ -551,6 +694,7 @@ function CriteriaEditor({ id }: { id: number }) {
           </div>
         )}
       </div>
+      {pageIssues.length > 0 && <ReviewItemNavigator items={openItems} currentId={currentIssueId} onGo={goToIssue} />}
       {currentRows.length > 0 ? (
         <ol className="signal-criteria-list" aria-label="Rubric criteria">
           {currentRows.map((row, index) => (
@@ -564,6 +708,7 @@ function CriteriaEditor({ id }: { id: number }) {
               onChange={(patch) => updateRow(row.key, patch)}
               onRemove={() => removeCriterion(row.key)}
               serverErrors={unchangedRefusals(fieldErrors.get(row.key), row.key, editedSinceRefusal)}
+              review={levelReview(row)}
             />
           ))}
         </ol>
@@ -584,6 +729,7 @@ function CriteriaEditor({ id }: { id: number }) {
               <Button variant="secondary" onClick={distributeWeights}>Set equal relative weights</Button>
               <p>Weights are relative. VERIDICAL shows importance as Low, Medium, or High.</p>
               <p>Saving or confirming requires text and a relative weight greater than zero for every criterion. Evidence expected is optional.</p>
+              {details !== null && <p>You can save a draft at any time. Activation waits until each item is checked and kept, or no longer applies.</p>}
             </div>
             <div>
               <Button
@@ -608,6 +754,15 @@ function CriteriaEditor({ id }: { id: number }) {
         )}
         {save.isPending && <p role="status">Saving criteria…</p>}
         {saveError && <div ref={saveErrorRef} tabIndex={-1}><Alert title="Could not save these criteria" tone="error" role="alert">{saveError}{refusedList}</Alert></div>}
+        {conflict === "rubric_changed" && <Alert title="This format changed somewhere else" tone="error" role="alert">
+          <p>This format changed in another tab or window. Your edits are still on this page but were not saved.</p>
+          <Button variant="secondary" onClick={() => setDiscardOpen(true)}>Load the latest version</Button>
+        </Alert>}
+        {conflict === "rubric_locked" && <Alert title="This version is locked" tone="error" role="alert">
+          <p>A check started using this version, so it is now locked. Your edits were not saved.</p>
+          <p>Upload a new version to make corrections. Existing reports keep their original criteria.</p>
+          <Button variant="secondary" onClick={() => setUploadOpen(true)}>Upload new version</Button>
+        </Alert>}
         {rubric.is_active && <Alert title="This format is active" tone="success">New checks use this version.</Alert>}
       </div>
       </FormatReviewWorkbench>
@@ -618,6 +773,15 @@ function CriteriaEditor({ id }: { id: number }) {
           actions={<><Button variant="secondary" disabled={save.isPending} onClick={() => resolveBlocker("keep")}>Keep editing</Button><Button variant="danger" disabled={save.isPending} onClick={() => resolveBlocker("leave")}>Leave without saving</Button><Button variant="brand" busy={save.isPending} onClick={saveAndLeave}>Save draft and leave</Button></>}
         >
           <div className="signal-dialog-copy"><p>Your unsaved criteria changes will be discarded if you leave now.</p>{leaveSaveFailed && saveError && <Alert title="Could not save" tone="error" role="alert">{saveError}</Alert>}</div>
+        </Dialog>
+      )}
+      {discardOpen && (
+        <Dialog
+          title="Discard your edits and load the latest version?"
+          onClose={() => setDiscardOpen(false)}
+          actions={<><Button variant="secondary" onClick={() => setDiscardOpen(false)}>Keep editing</Button><Button variant="danger" onClick={discardAndReload}>Discard and load</Button></>}
+        >
+          <div className="signal-dialog-copy"><p>Your unsaved changes on this page, including wording you chose to keep, will be replaced by the version saved elsewhere.</p></div>
         </Dialog>
       )}
       {uploadOpen && <UploadRubricModal familyId={rubric.rubric_family_id} onClose={() => setUploadOpen(false)} />}

@@ -32,10 +32,15 @@ function documentMatches(value: unknown, rubric: FormatVersion): value is Format
         || (row.source_format === "pdf" && row.reconstruction === "original_pdf"));
 }
 
-export function RubricSourcePane({ rubric, isVisible, onUploadNewVersion }: {
+export function RubricSourcePane({ rubric, isVisible, onUploadNewVersion, requestedPage = null, requestedPageAttempt, onPagesAvailable }: {
   rubric: FormatVersion;
   isVisible: boolean;
   onUploadNewVersion: () => void;
+  requestedPage?: number | null;
+  requestedPageAttempt?: number;
+  // True for a stored PDF original, false when there are no pages to show,
+  // null while that is not known yet.
+  onPagesAvailable?: (available: boolean | null) => void;
 }) {
   const { data: instructor } = useMe();
   const owner = instructor?.id ?? null;
@@ -58,6 +63,10 @@ export function RubricSourcePane({ rubric, isVisible, onUploadNewVersion }: {
     staleTime: Infinity,
   });
   const metadata = document.data;
+  const pagesAvailable = document.isError ? false
+    : !metadata ? null
+      : metadata.available && metadata.source_format === "pdf";
+  useEffect(() => { onPagesAvailable?.(pagesAvailable); }, [onPagesAvailable, pagesAvailable]);
   const hash = metadata?.available ? metadata.source_sha256 : null;
   const downloadIdentity = `${owner}:${rubric.id}:${rubric.version}:${hash ?? ""}`;
   const identityRef = useRef(downloadIdentity);
@@ -159,7 +168,8 @@ export function RubricSourcePane({ rubric, isVisible, onUploadNewVersion }: {
       ? <Suspense fallback={<p role="status">Loading original format.</p>}><PdfPane key={`${owner}:${rubric.id}:${hash}`} documentKind="required_format"
           fileUrl={`${BASE_URL}/rubrics/${rubric.id}/document/file?${sourceQuery}`}
           loadFile={loadPdfSource}
-          regions={[]} flags={[]} selectedFlagId={null} onSelectFlag={() => {}} requestedPage={null} focusSelection={false} /></Suspense>
+          regions={[]} flags={[]} selectedFlagId={null} onSelectFlag={() => {}} requestedPage={requestedPage}
+          requestedPageAttempt={requestedPageAttempt} focusSelection={false} /></Suspense>
       : <DocxPane key={`${owner}:${rubric.id}:${hash}`} documentKind="required_format"
           paragraphs={paragraphs.data?.paragraphs} tables={paragraphs.data?.tables} images={paragraphs.data?.images}
           nativeMath={paragraphs.data?.native_math} omittedImageOccurrences={paragraphs.data?.omitted_image_occurrences}

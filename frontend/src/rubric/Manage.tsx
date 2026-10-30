@@ -93,6 +93,9 @@ export function ManageRubricPage() {
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget>();
   const [deleteError, setDeleteError] = useState<string>();
   const [actionError, setActionError] = useState<string>();
+  // BUG-566: a version with parser items still open cannot be activated
+  // here; the instructor checks them on that version's review screen.
+  const [blockedVersion, setBlockedVersion] = useState<RubricListItem>();
   const [liveMessage, setLiveMessage] = useState("");
   const [recentActivation, setRecentActivation] = useState<number>();
 
@@ -108,12 +111,14 @@ export function ManageRubricPage() {
 
   async function activateVersion(version: RubricListItem) {
     setActionError(undefined);
+    setBlockedVersion(undefined);
     try {
       await activate.mutateAsync(version.id);
       setLiveMessage(`Version ${version.version} is now active.`);
       setRecentActivation(version.version);
       historyHeadingRef.current?.focus();
     } catch (cause) {
+      if (cause instanceof ApiError && cause.code === "unresolved_rubric_issues") { setBlockedVersion(version); return; }
       setActionError(cause instanceof ApiError ? cause.message : "Could not activate this version. Try again.");
     }
   }
@@ -185,6 +190,10 @@ export function ManageRubricPage() {
 
       <p className="signal-live-region" role="status" aria-live="polite">{liveMessage}</p>
       {actionError && <Alert title="Could not update this format" tone="error" role="alert">{actionError}</Alert>}
+      {blockedVersion && <Alert title={`Version ${blockedVersion.version} has items to check`} tone="warning" role="alert">
+        <p>Some level descriptions in this version could not be matched with the document. Check each one before activating it.</p>
+        <ActionLink to={`/rubric/${blockedVersion.id}/review`}>Review Version {blockedVersion.version}</ActionLink>
+      </Alert>}
 
       {(families?.length ?? 0) > 1 && (
         <div className="signal-family-switcher">

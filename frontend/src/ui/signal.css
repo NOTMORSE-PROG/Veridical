@@ -6852,7 +6852,8 @@
     margin-block-end: var(--signal-space-4);
   }
 
-  .signal-criterion-card__heading p {
+  .signal-criterion-card__heading p,
+  .signal-criterion-card__heading h3 {
     margin: 0;
     color: var(--color-signal-ink-muted);
     font-size: var(--signal-type-meta);
@@ -6988,6 +6989,156 @@
     color: var(--color-signal-ink-secondary);
     font-size: var(--signal-type-label);
   }
+
+  /* BUG-566 rubric review (screen 4d). Matched levels stay plain; only a
+     level that needs the instructor carries the Needs Review pair. */
+  .signal-levels ol:has(> .signal-level-row) {
+    list-style: none;
+    padding-inline-start: 0;
+    gap: var(--signal-space-3);
+  }
+
+  .signal-level-row {
+    display: grid;
+    gap: var(--signal-space-2);
+    border-inline-start: var(--signal-border-emphasis) solid var(--color-signal-border);
+    padding: var(--signal-space-2) 0 var(--signal-space-2) var(--signal-space-4);
+  }
+
+  .signal-level-row[data-status="check"] {
+    border-inline-start-color: var(--color-signal-review-text);
+    background: var(--color-signal-review-bg);
+    padding-inline-end: var(--signal-space-3);
+  }
+
+  .signal-level-row--whole { margin-block: var(--signal-space-3); }
+
+  .signal-level-row__head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--signal-space-2) var(--signal-space-3);
+  }
+
+  .signal-level-row__head h4 {
+    margin: 0;
+    font-size: var(--signal-type-label);
+    font-weight: var(--signal-weight-semibold);
+  }
+
+  .signal-level-row p,
+  .signal-level-row ul {
+    margin: 0;
+    max-inline-size: var(--signal-prose-width);
+  }
+
+  .signal-level-row__descriptor { color: var(--color-signal-ink); }
+
+  .signal-level-row__column,
+  .signal-level-row__location,
+  .signal-level-row__note {
+    color: var(--color-signal-ink-secondary);
+    font-size: var(--signal-type-meta);
+  }
+
+  .signal-level-row__location {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--signal-space-2);
+  }
+
+  .signal-level-row__issues {
+    color: var(--color-signal-review-text);
+    font-size: var(--signal-type-label);
+    padding-inline-start: var(--signal-space-4);
+  }
+
+  .signal-level-row > .signal-button { justify-self: start; }
+
+  .signal-level-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--signal-space-1);
+    color: var(--color-signal-ink-secondary);
+    font-size: var(--signal-type-meta);
+    font-weight: var(--signal-weight-semibold);
+  }
+
+  .signal-level-tag--check { color: var(--color-signal-review-text); }
+  .signal-level-tag--not-checked { color: var(--color-signal-ink-muted); }
+
+  .signal-keep-form {
+    display: grid;
+    gap: var(--signal-space-3);
+    max-inline-size: var(--signal-prose-width);
+  }
+
+  .signal-keep-form fieldset {
+    display: grid;
+    gap: var(--signal-space-2);
+    margin: 0;
+    border: 0;
+    padding: 0;
+  }
+
+  .signal-keep-form legend {
+    margin-block-end: var(--signal-space-2);
+    font-size: var(--signal-type-label);
+    font-weight: var(--signal-weight-semibold);
+  }
+
+  .signal-keep-form fieldset label {
+    display: flex;
+    align-items: center;
+    gap: var(--signal-space-2);
+    min-height: var(--signal-control-height);
+  }
+
+  .signal-keep-form__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--signal-space-2);
+  }
+
+  .signal-review-status {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--signal-space-3);
+    border: var(--signal-border-hairline) solid var(--color-signal-border);
+    border-radius: var(--signal-radius-control);
+    padding: var(--signal-space-3) var(--signal-space-4);
+  }
+
+  .signal-review-status.is-open {
+    border-color: var(--color-signal-review-text);
+    background: var(--color-signal-review-bg);
+    color: var(--color-signal-review-text);
+  }
+
+  .signal-review-status p { margin: 0; font-weight: var(--signal-weight-semibold); }
+
+  .signal-review-nav {
+    position: sticky;
+    inset-block-start: 0;
+    z-index: var(--signal-z-raised);
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--signal-space-2);
+    min-block-size: var(--signal-review-nav-height);
+    margin-block-start: var(--signal-space-4);
+    border-block-end: var(--signal-border-hairline) solid var(--color-signal-border);
+    background: var(--color-signal-surface);
+  }
+
+  .signal-review-nav p { margin: 0 auto 0 0; font-size: var(--signal-type-label); font-weight: var(--signal-weight-semibold); }
+
+  .signal-format-editor-scroll:has(.signal-review-nav) { scroll-padding-block-start: var(--signal-review-nav-height); }
+
+  .signal-format-issues h3 { margin: 0; font-size: var(--signal-type-label); }
 
   .signal-save-dock {
     position: static;

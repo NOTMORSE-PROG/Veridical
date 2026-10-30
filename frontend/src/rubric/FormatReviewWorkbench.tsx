@@ -1,4 +1,5 @@
-import { useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { ShowSourcePageContext, type ShowSourcePage } from "./sourcePage";
 import { useSearchParams } from "react-router";
 import type { Rubric } from "../api/types";
 import { RubricSourcePane } from "./RubricSourcePane";
@@ -28,6 +29,9 @@ export function FormatReviewWorkbench({ rubric, onUploadNewVersion, children }: 
   const measuredSplit = useRef(false);
   const pendingReturn = useRef(false);
   const pendingSourceFocus = useRef(false);
+  const returnTarget = useRef<HTMLElement | null>(null);
+  const [pageRequest, setPageRequest] = useState<{ page: number; attempt: number } | null>(null);
+  const [pagesAvailable, setPagesAvailable] = useState<boolean | null>(null);
   const id = useId();
 
   useLayoutEffect(() => {
@@ -55,8 +59,12 @@ export function FormatReviewWorkbench({ rubric, onUploadNewVersion, children }: 
   useLayoutEffect(() => {
     if (pendingReturn.current && (split || view === "criteria")) {
       pendingReturn.current = false;
-      const target = sourceEntry.current?.getClientRects().length ? sourceEntry.current : criteriaHeading.current;
-      target?.focus({ preventScroll: true });
+      // Back to the control that opened the original, when there was one.
+      const opener = returnTarget.current?.isConnected ? returnTarget.current : null;
+      returnTarget.current = null;
+      const target = opener ?? (sourceEntry.current?.getClientRects().length ? sourceEntry.current : criteriaHeading.current);
+      target?.focus({ preventScroll: opener === null });
+      if (opener) opener.scrollIntoView({ block: "nearest" });
     } else if (pendingSourceFocus.current && (split || view === "source")) {
       pendingSourceFocus.current = false;
       sourcePanel.current?.focus({ preventScroll: true });
@@ -66,6 +74,17 @@ export function FormatReviewWorkbench({ rubric, onUploadNewVersion, children }: 
   }, [split, view]);
 
   function activate(next: View) { setView(next); setFocusTab(next); }
+  const showPage = useCallback<ShowSourcePage>((page, returnTo) => {
+    setPageRequest((current) => ({ page, attempt: (current?.attempt ?? 0) + 1 }));
+    // Side by side, focus stays on the button; in tabs the original replaces
+    // the criteria, and Back to criteria returns to that button.
+    if (split) return;
+    returnTarget.current = returnTo;
+    pendingSourceFocus.current = true;
+    setView("source");
+    setFocusTab("source");
+  }, [split]);
+  const contextValue = useMemo(() => pagesAvailable === false ? null : showPage, [pagesAvailable, showPage]);
   function focusOtherTab(event: React.KeyboardEvent, current: View) {
     const next = event.key === "Home" ? "criteria" : event.key === "End" ? "source"
       : event.key === "ArrowLeft" || event.key === "ArrowRight" ? current === "criteria" ? "source" : "criteria" : null;
@@ -90,7 +109,8 @@ export function FormatReviewWorkbench({ rubric, onUploadNewVersion, children }: 
       aria-labelledby={split ? undefined : `${id}-source-tab`} hidden={!split && view !== "source"}
       className="signal-format-workbench__source">
       {!split && <Button variant="quiet" onClick={() => { pendingReturn.current = true; activate("criteria"); }}>Back to criteria</Button>}
-      <RubricSourcePane rubric={rubric} isVisible={split || view === "source"} onUploadNewVersion={onUploadNewVersion} />
+      <RubricSourcePane rubric={rubric} isVisible={split || view === "source"} onUploadNewVersion={onUploadNewVersion}
+        requestedPage={pageRequest?.page ?? null} requestedPageAttempt={pageRequest?.attempt} onPagesAvailable={setPagesAvailable} />
     </section>
     <section ref={criteriaPanel} onFocusCapture={() => { lastPaneFocus.current = "criteria"; }} id={`${id}-criteria`} role={split ? "region" : "tabpanel"} aria-label={split ? "Prepared criteria" : undefined}
       aria-labelledby={split ? undefined : `${id}-criteria-tab`} hidden={!split && view !== "criteria"}
@@ -100,7 +120,7 @@ export function FormatReviewWorkbench({ rubric, onUploadNewVersion, children }: 
         {!split && <Button ref={sourceEntry} variant="secondary" onClick={() => { pendingSourceFocus.current = true; activate("source"); }}>Read original format</Button>}
       </header>
       <div className="signal-format-editor-scroll" tabIndex={0} role="region" aria-label="Prepared criteria, scrollable">
-        {children}
+        <ShowSourcePageContext.Provider value={contextValue}>{children}</ShowSourcePageContext.Provider>
       </div>
     </section>
   </div>;

@@ -13,6 +13,27 @@ export const WEIGHT_IMPORTANCE_PREVIEW = {
 // every reasoned instructor action uses one disclosed validation rule.
 export const RESOLUTION_REASON_MIN_LENGTH = 10;
 export const INSTRUCTOR_NOTE_MAX_LENGTH = 1000;
+
+// BUG-566 rubric review. What each parser check means, in the instructor's
+// words; {row_label} and {other} are filled from the issue when the server
+// sends them. An unknown code shows the server's own message.
+export const RUBRIC_ISSUE_COPY: Record<string, string> = {
+  not_in_source: "VERIDICAL could not find this wording in the document. Compare it with the original.",
+  joins_cells: "This wording seems to combine text from more than one cell of the document's table.",
+  partial_cell: "This wording seems to be only part of one cell in the document's table.",
+  not_one_row: "These levels do not all come from one row of the table, in order.",
+  wrong_row: "These levels may come from a table row that belongs to another criterion.",
+  shared_cell: "This uses the same table cell as another level or criterion.",
+  level_left_out: "The document's row has text under a level this criterion does not include.",
+};
+// Why an instructor keeps wording the parser could not match. Values are the
+// server's reason codes.
+export const RUBRIC_KEEP_REASONS = [
+  { value: "document_wording", label: "The document says it this way" },
+  { value: "outside_table", label: "The wording comes from outside the table" },
+  { value: "other", label: "Other reason" },
+] as const;
+export const RUBRIC_KEEP_NOTE_MAX_LENGTH = INSTRUCTOR_NOTE_MAX_LENGTH;
 // API encoding units for criterion results, independent of readiness thresholds.
 export const CRITERION_SCORE_UNITS = { none: 0, full: 100 } as const;
 // Stored check_result.score uses Numeric(5, 2). This bounds acknowledgment

@@ -2,7 +2,7 @@
 // save/confirm mutation, and versioning (screens 4c/4d/4m).
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, api } from "../api/client";
-import type { CitationRecencySettingsIn, CitationRecencySettingsOut, CriterionType, Rubric, RubricListItem, RubricLevel } from "../api/types";
+import type { CitationRecencySettingsIn, CitationRecencySettingsOut, CriterionType, Rubric, RubricAcknowledgementReason, RubricListItem, RubricLevel } from "../api/types";
 import { verifyUploadFailure, type UploadAttemptScope } from "../auth/useUploadScope";
 import { StaleUploadContextError, UnconfirmedUploadError, validateRubricReceipt } from "../api/uploadOutcome";
 
@@ -86,10 +86,26 @@ export interface CriterionEdit {
   levels?: RubricLevel[] | null;
 }
 
+export interface SaveCriteriaBody {
+  criteria: CriterionEdit[];
+  confirm: boolean;
+  // BUG-566: the revision these edits were made on, so a save never
+  // overwrites a change made in another tab, and the parser issues the
+  // instructor chose to keep as written.
+  expected_revision?: number | null;
+  acknowledgements?: RubricAcknowledgement[];
+}
+
+export interface RubricAcknowledgement {
+  issue_id: number;
+  reason_code: RubricAcknowledgementReason;
+  note: string | null;
+}
+
 export function useSaveCriteria(rubricId: number) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (body: { criteria: CriterionEdit[]; confirm: boolean }) =>
+    mutationFn: (body: SaveCriteriaBody) =>
       api.put<Rubric>(`/rubrics/${rubricId}/criteria`, body),
     onSuccess: (rubric) => {
       queryClient.setQueryData(rubricQueryKey(rubricId), rubric);
