@@ -120,7 +120,7 @@ export function useUploadScope(contextKey?: string) {
       },
     };
   }
-  return { status, ownsContext: ownsContext(), isCurrent, verify, capture };
+  return { status, ownsContext: ownsContext(), isCurrent, verify, capture, actorId: owner.actorId };
 }
 
 export function rejectChangedUploadActor(error: unknown, scope: UploadAttemptScope) {

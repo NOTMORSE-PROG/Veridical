@@ -1,4 +1,4 @@
-import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { api, ApiError } from "../api/client";
 import type { TitlePageProposal } from "../api/types";
@@ -40,7 +40,7 @@ async function chooseSaved() {
   fireEvent.click(radio);
   await screen.findByText("Saved title", { selector: "dd" });
 }
-afterEach(() => { vi.restoreAllMocks(); for (const element of outlets.splice(0)) element.remove(); });
+afterEach(() => { vi.restoreAllMocks(); for (const element of outlets.splice(0)) element.remove(); window.sessionStorage.clear(); });
 
 describe("explicit group assignment", () => {
   it("offers both unselected intents even when extraction found no group details", async () => {
@@ -130,6 +130,28 @@ describe("explicit group assignment", () => {
     expect(screen.getByText("The group record may have changed. Close this form, open it again and try again. Nothing was saved.")).toBeInTheDocument();
     expect(screen.queryByText(/Check what you entered/)).not.toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Group name" })).not.toHaveAttribute("aria-invalid");
+  });
+  it("reopens with the details typed before a save that could not be confirmed, and forgets them once saved", async () => {
+    window.sessionStorage.clear();
+    const first = mount();
+    first.patch.mockRejectedValue(new Error("Connection lost after commit"));
+    const intent = await screen.findByRole("radio", { name: "Review or enter group details" });
+    await waitFor(() => expect(intent).toBeEnabled()); fireEvent.click(intent);
+    fireEvent.change(screen.getByRole("textbox", { name: "Group name" }), { target: { value: "Draft team" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add member" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Group member 1 name" }), { target: { value: "Maria Santos" } });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm assignment" }));
+    await screen.findByRole("heading", { name: "Assignment result unconfirmed" });
+    cleanup(); vi.restoreAllMocks(); for (const element of outlets.splice(0)) element.remove();
+
+    const second = mount();
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Group name" })).toHaveValue("Draft team"));
+    expect(screen.getByRole("textbox", { name: "Group member 1 name" })).toHaveValue("Maria Santos");
+    expect(screen.getByText(/They may not have been saved/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm assignment" }));
+    await waitFor(() => expect(second.patch).toHaveBeenCalledTimes(1));
+    expect(second.patch.mock.calls[0][1]).toMatchObject({ group_name: "Draft team", member_names: ["Maria Santos"] });
+    await waitFor(() => expect(window.sessionStorage.length).toBe(0));
   });
   it("freezes an unknown proposal result, reads current facts and returns to review without a retry or success callback", async () => {
     const control = mount();

@@ -13,6 +13,7 @@ import type { ConfirmGroupResponse, CurrentGroup, TitlePageProposal } from "../a
 import type { GroupProposalInput } from "../api/groupAssignmentOutcome";
 import { fieldRefusal, formRefusal, isValidationRefusal, REFUSAL_NOTHING_CHANGED } from "../api/fieldRefusal";
 import { GROUP_REQUEST_REFUSED } from "./groupRefusalCopy";
+import type { GroupDraft } from "./groupDraft";
 
 export interface GroupProposalController {
   isPending: boolean;
@@ -88,6 +89,7 @@ export function GroupProposalFields({
   onUseSaved,
   manualEntry = false,
   cancelLabel,
+  draft,
 }: {
   manuscriptId: number;
   proposal: TitlePageProposal;
@@ -101,12 +103,14 @@ export function GroupProposalFields({
   onUseSaved?: () => void;
   manualEntry?: boolean;
   cancelLabel?: string;
+  /** What the instructor typed before a save that failed or was not confirmed. */
+  draft?: GroupDraft;
 }) {
   const { data: programs } = usePrograms();
   const programFieldId = useId();
 
-  const [groupName, setGroupName] = useState(currentGroup?.name ?? proposal.short_name?.value ?? "");
-  const [groupNameEdited, setGroupNameEdited] = useState(currentGroup !== undefined || proposal.short_name === null);
+  const [groupName, setGroupName] = useState(draft?.group_name ?? currentGroup?.name ?? proposal.short_name?.value ?? "");
+  const [groupNameEdited, setGroupNameEdited] = useState(draft !== undefined || currentGroup !== undefined || proposal.short_name === null);
   // BUG-551: the members that were sent, in order, and which refused fields
   // have been changed since.
   const sentMemberIds = useRef<number[]>([]);
@@ -133,11 +137,12 @@ export function GroupProposalFields({
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [confirm.error]);
   const [members, setMembers] = useState<MemberField[]>(() =>
-    currentGroup ? currentGroup.member_names.map((name) => newMemberField(name, null))
+    draft ? draft.member_names.map((name) => newMemberField(name, null))
+      : currentGroup ? currentGroup.member_names.map((name) => newMemberField(name, null))
       : proposal.members.map((m) => newMemberField(m.value, m.anchor)),
   );
-  const [programId, setProgramId] = useState<number | null>(currentGroup?.program_id ?? null);
-  const [programEdited, setProgramEdited] = useState(false);
+  const [programId, setProgramId] = useState<number | null>(draft ? draft.program_id : currentGroup?.program_id ?? null);
+  const [programEdited, setProgramEdited] = useState(draft !== undefined);
   const [attempted, setAttempted] = useState(false);
 
   const groupNameRef = useRef<HTMLInputElement>(null);
@@ -338,6 +343,11 @@ export function GroupProposalFields({
 
   return (
     <div hidden={!active} inert={!active} className={active ? "signal-group-proposal" : "hidden"}>
+      {draft && (
+        <p className="text-sm font-medium text-ink">
+          These are the details you entered last time. They may not have been saved, so check them before confirming.
+        </p>
+      )}
       {currentGroup ? (
         <p className="text-sm text-ink-secondary">
           These fields start from the current group record. Changing them can assign this manuscript
