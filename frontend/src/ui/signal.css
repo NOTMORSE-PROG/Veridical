@@ -6891,7 +6891,8 @@
     gap: var(--signal-space-2);
   }
 
-  .signal-criterion-field > span:first-child {
+  .signal-criterion-field > span:first-child,
+  .signal-criterion-field > label:first-child {
     color: var(--color-signal-ink-secondary);
     font-size: var(--signal-type-label);
     font-weight: var(--signal-weight-semibold);
@@ -7054,7 +7055,13 @@
     padding-inline-start: var(--signal-space-4);
   }
 
-  .signal-level-row > .signal-button { justify-self: start; }
+  .signal-level-row__issues.is-settled { color: var(--color-signal-ink-secondary); }
+
+  .signal-level-row__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--signal-space-2);
+  }
 
   .signal-level-tag {
     display: inline-flex;
@@ -7065,8 +7072,10 @@
     font-weight: var(--signal-weight-semibold);
   }
 
+  .signal-level-tag svg { display: inline-block; flex: none; }
   .signal-level-tag--check { color: var(--color-signal-review-text); }
-  .signal-level-tag--not-checked { color: var(--color-signal-ink-muted); }
+  .signal-level-tag--not-checked,
+  .signal-level-tag--row-unchecked { color: var(--color-signal-ink-muted); }
 
   .signal-keep-form {
     display: grid;

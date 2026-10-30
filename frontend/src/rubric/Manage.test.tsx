@@ -222,7 +222,8 @@ describe("ManageRubricPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Activate" }));
 
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("Version 2 has items to check");
+    expect(alert).toHaveTextContent("Version 2 has 1 item to check");
+    await waitFor(() => expect(alert).toHaveFocus());
     expect(within(alert).getByRole("link", { name: "Review Version 2" })).toHaveAttribute("href", `/rubric/${V2.id}/review`);
     expect(screen.queryByText("Version 2 is now active.")).not.toBeInTheDocument();
   });

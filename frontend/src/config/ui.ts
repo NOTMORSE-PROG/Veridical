@@ -15,8 +15,7 @@ export const RESOLUTION_REASON_MIN_LENGTH = 10;
 export const INSTRUCTOR_NOTE_MAX_LENGTH = 1000;
 
 // BUG-566 rubric review. What each parser check means, in the instructor's
-// words; {row_label} and {other} are filled from the issue when the server
-// sends them. An unknown code shows the server's own message.
+// words. An unknown code shows the server's own message.
 export const RUBRIC_ISSUE_COPY: Record<string, string> = {
   not_in_source: "VERIDICAL could not find this wording in the document. Compare it with the original.",
   joins_cells: "This wording seems to combine text from more than one cell of the document's table.",
@@ -25,6 +24,7 @@ export const RUBRIC_ISSUE_COPY: Record<string, string> = {
   wrong_row: "These levels may come from a table row that belongs to another criterion.",
   shared_cell: "This uses the same table cell as another level or criterion.",
   level_left_out: "The document's row has text under a level this criterion does not include.",
+  wrong_column: "This wording is in the document, but under a different level of this row.",
 };
 // Why an instructor keeps wording the parser could not match. Values are the
 // server's reason codes.

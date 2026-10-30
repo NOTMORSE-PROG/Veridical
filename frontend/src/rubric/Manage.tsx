@@ -95,7 +95,9 @@ export function ManageRubricPage() {
   const [actionError, setActionError] = useState<string>();
   // BUG-566: a version with parser items still open cannot be activated
   // here; the instructor checks them on that version's review screen.
-  const [blockedVersion, setBlockedVersion] = useState<RubricListItem>();
+  const [blockedVersion, setBlockedVersion] = useState<{ version: RubricListItem; open: number }>();
+  const blockedRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (blockedVersion) blockedRef.current?.focus(); }, [blockedVersion]);
   const [liveMessage, setLiveMessage] = useState("");
   const [recentActivation, setRecentActivation] = useState<number>();
 
@@ -118,7 +120,11 @@ export function ManageRubricPage() {
       setRecentActivation(version.version);
       historyHeadingRef.current?.focus();
     } catch (cause) {
-      if (cause instanceof ApiError && cause.code === "unresolved_rubric_issues") { setBlockedVersion(version); return; }
+      if (cause instanceof ApiError && cause.code === "unresolved_rubric_issues") {
+        const ids = cause.details.open_issue_ids;
+        setBlockedVersion({ version, open: Array.isArray(ids) ? ids.length : 0 });
+        return;
+      }
       setActionError(cause instanceof ApiError ? cause.message : "Could not activate this version. Try again.");
     }
   }
@@ -190,9 +196,10 @@ export function ManageRubricPage() {
 
       <p className="signal-live-region" role="status" aria-live="polite">{liveMessage}</p>
       {actionError && <Alert title="Could not update this format" tone="error" role="alert">{actionError}</Alert>}
-      {blockedVersion && <Alert title={`Version ${blockedVersion.version} has items to check`} tone="warning" role="alert">
+      {blockedVersion && <Alert ref={blockedRef} tabIndex={-1} tone="warning" role="alert"
+        title={`Version ${blockedVersion.version.version} has ${blockedVersion.open ? `${blockedVersion.open} ${blockedVersion.open === 1 ? "item" : "items"}` : "items"} to check`}>
         <p>Some level descriptions in this version could not be matched with the document. Check each one before activating it.</p>
-        <ActionLink to={`/rubric/${blockedVersion.id}/review`}>Review Version {blockedVersion.version}</ActionLink>
+        <ActionLink to={`/rubric/${blockedVersion.version.id}/review`}>Review Version {blockedVersion.version.version}</ActionLink>
       </Alert>}
 
       {(families?.length ?? 0) > 1 && (

@@ -11,7 +11,7 @@ import { type CriterionEdit, useRubric, useSaveCriteria } from "./useRubric";
 import { UploadRubricModal } from "./UploadRubricModal";
 import { FormatReviewWorkbench } from "./FormatReviewWorkbench";
 import { CriterionLevels, ReviewItemNavigator, RubricReviewStatus, SourceReadingSummary } from "./RubricReviewParts";
-import { issueCopy, levelAnchorId, openIssues, orderedIssues, type PendingAcknowledgement } from "./rubricReview";
+import { issueCopy, levelAnchorId, openIssues, orderedIssues, tidy, type PendingAcknowledgement } from "./rubricReview";
 
 interface CriterionRow {
   key: string;
@@ -139,7 +139,12 @@ function CriteriaHeader({ headingRef, title, count, readOnly = false, familyId, 
 }
 
 interface LevelReview {
+  name: string;
+  // Levels with the server's latest placement; every save rechecks them.
+  levels: readonly RubricLevel[];
   issues: readonly RubricIssueDetail[];
+  nextAfter: (issues: readonly RubricIssueDetail[]) => RubricIssueDetail | null;
+  onGo: (issue: RubricIssueDetail) => void;
   pending: ReadonlyMap<number, PendingAcknowledgement>;
   onKeep: (issues: readonly RubricIssueDetail[], reason: RubricAcknowledgementReason, note: string | null) => void;
   onUndoKeep: (issues: readonly RubricIssueDetail[]) => void;
@@ -167,9 +172,9 @@ function CriterionCard({
   serverErrors?: Partial<Record<ServerField, string>>;
   review: LevelReview;
 }) {
-  const levels = (row.levels?.length || review.issues.length) ? <CriterionLevels criterionKey={row.key} criterionLabel={`Criterion ${index + 1}`}
-    levels={row.levels ?? []} issues={review.issues} pending={review.pending} readOnly={readOnly}
-    onKeep={review.onKeep} onUndoKeep={review.onUndoKeep} onPageShown={review.onPageShown}
+  const levels = (review.levels.length || review.issues.length) ? <CriterionLevels criterionKey={row.key} criterionName={review.name}
+    levels={review.levels} issues={review.issues} pending={review.pending} readOnly={readOnly}
+    onKeep={review.onKeep} onUndoKeep={review.onUndoKeep} onPageShown={review.onPageShown} nextAfter={review.nextAfter} onGo={review.onGo}
     summaryDescribedBy={serverErrors?.levels ? `criterion-levels-server-${row.key}` : undefined} forceOpen={Boolean(serverErrors?.levels)} /> : null;
   const textError = showErrors && row.text.trim() === "";
   const weightError = showErrors && invalidWeight(row.weight);
@@ -293,7 +298,12 @@ function CriteriaEditor({ id }: { id: number }) {
   const [pending, setPending] = useState<ReadonlyMap<number, PendingAcknowledgement>>(() => new Map());
   const [loadedRevision, setLoadedRevision] = useState<number | null>(null);
   const [currentIssueId, setCurrentIssueId] = useState<number | null>(null);
-  const [activationBlocked, setActivationBlocked] = useState(false);
+  // Set when activation (or, on an active format, any save) was refused for
+  // items still to check; `unknown` counts items a refused save would have
+  // raised that this page has not seen.
+  const [blocked, setBlocked] = useState<{ kind: "activate" | "save"; unknown: number } | null>(null);
+  const conflictRef = useRef<HTMLDivElement>(null);
+  const focusConflictAfterDialog = useRef(false);
   const [discardOpen, setDiscardOpen] = useState(false);
   const blockedRef = useRef<HTMLDivElement>(null);
   const announcementSeq = useRef(0);
@@ -362,7 +372,8 @@ function CriteriaEditor({ id }: { id: number }) {
   // list of them once it is on the page.
   const focusBlockedSummary = useRef(false);
   useEffect(() => {
-    if (!activationBlocked || !focusBlockedSummary.current || !blockedRef.current) return;
+    if (!blocked) { focusBlockedSummary.current = false; return; }
+    if (!focusBlockedSummary.current || !blockedRef.current) return;
     focusBlockedSummary.current = false;
     blockedRef.current.scrollIntoView({ block: "nearest" });
     blockedRef.current.focus({ preventScroll: true });
@@ -377,6 +388,9 @@ function CriteriaEditor({ id }: { id: number }) {
     } else if (focusRefusalAfterDialog.current) {
       focusRefusalAfterDialog.current = false;
       requestAnimationFrame(() => { saveErrorRef.current?.scrollIntoView({ block: "nearest" }); saveErrorRef.current?.focus(); });
+    } else if (focusConflictAfterDialog.current) {
+      focusConflictAfterDialog.current = false;
+      requestAnimationFrame(() => { conflictRef.current?.scrollIntoView({ block: "nearest" }); conflictRef.current?.focus(); });
     }
   }, [blocker.state]);
 
@@ -414,7 +428,7 @@ function CriteriaEditor({ id }: { id: number }) {
   const issuesFor = (row: CriterionRow) => row.id === null ? [] : pageIssues.filter((issue) => issue.criterion_id === row.id);
   const legacy = details === null && currentRows.some((row) => row.levels?.length)
     && currentRows.every((row) => !row.levels?.some((level) => level.source));
-  const gateBlocks = !rubric.is_active && openItems.length > 0;
+  const checked = details !== null || currentRows.some((row) => row.levels?.some((level) => level.source));
   const average = currentRows.length
     ? currentRows.reduce((total, row) => total + row.weight, 0) / currentRows.length
     : 0;
@@ -428,22 +442,44 @@ function CriteriaEditor({ id }: { id: number }) {
     ]
     : [];
 
+  function criterionName(row: CriterionRow, index: number): string {
+    return tidy(row.text) || `Criterion ${index + 1}`;
+  }
+
   function issuePlace(issue: RubricIssueDetail): { label: string; anchor: string } {
     const index = currentRows.findIndex((row) => row.id !== null && row.id === issue.criterion_id);
     const row = index >= 0 ? currentRows[index] : undefined;
     const level = issue.level === null ? undefined : row?.levels?.find((item) => item.level === issue.level);
     if (!row) return { label: "The whole format", anchor: levelAnchorId("format", null) };
-    return { label: `Criterion ${index + 1}${level ? ` · ${level.name}` : ""}`, anchor: levelAnchorId(row.key, level ? level.level : null) };
+    return { label: `${criterionName(row, index)}${level ? ` · ${level.name}` : ""}`, anchor: levelAnchorId(row.key, level ? level.level : null) };
   }
 
   function goToIssue(issue: RubricIssueDetail) {
-    const target = document.getElementById(issuePlace(issue).anchor);
+    const place = issuePlace(issue);
+    const target = document.getElementById(place.anchor);
     if (!target) return;
     const details = target.closest("details");
     if (details) details.open = true;
     setCurrentIssueId(issue.id);
     target.scrollIntoView({ block: "center" });
     target.focus({ preventScroll: true });
+    const position = openItems.findIndex((item) => item.id === issue.id);
+    announce(position >= 0 ? `Item ${position + 1} of ${openItems.length}: ${place.label}.` : `${place.label}.`);
+  }
+
+  // The next open item after the given issues, in page order.
+  function nextAfter(issues: readonly RubricIssueDetail[]): RubricIssueDetail | null {
+    const ids = new Set(issues.map((issue) => issue.id));
+    const last = pageIssues.reduce((found, issue, index) => ids.has(issue.id) ? index : found, -1);
+    return pageIssues.slice(last + 1).find((issue) => openItems.includes(issue)) ?? null;
+  }
+
+  function freshLevels(row: CriterionRow): RubricLevel[] {
+    const fresh = row.id === null ? undefined : rubric!.criteria.find((criterion) => criterion.id === row.id)?.levels;
+    return (row.levels ?? []).map((level) => {
+      const latest = fresh?.find((item) => item.level === level.level && item.descriptor === level.descriptor);
+      return latest ? { ...level, source: latest.source } : level;
+    });
   }
 
   function keepIssues(issues: readonly RubricIssueDetail[], reason: RubricAcknowledgementReason, note: string | null) {
@@ -464,10 +500,43 @@ function CriteriaEditor({ id }: { id: number }) {
     announce("Kept wording undone.");
   }
 
-  const levelReview = (row: CriterionRow): LevelReview => ({
-    issues: issuesFor(row), pending, onKeep: keepIssues, onUndoKeep: undoKeep,
+  const levelReview = (row: CriterionRow, index: number): LevelReview => ({
+    name: criterionName(row, index), levels: freshLevels(row), issues: issuesFor(row), pending, nextAfter, onGo: goToIssue,
+    onKeep: keepIssues, onUndoKeep: undoKeep,
     onPageShown: (page) => announce(`Page ${page} shown in the original format.`),
   });
+
+  // A 409 for items still to check. On an active format nothing was saved;
+  // on activation the server saved the edits and kept wording first, and
+  // says which revision it stored.
+  function refusedForOpenItems(error: ApiError, submitted: CriterionRow[]) {
+    const revision = typeof error.details.revision === "number" ? error.details.revision : null;
+    const ids = Array.isArray(error.details.open_issue_ids) ? error.details.open_issue_ids : [];
+    focusBlockedSummary.current = true;
+    if (rubric!.is_active) {
+      const unknown = ids.filter((id) => !pageIssues.some((issue) => issue.id === id)).length;
+      setBlocked({ kind: "save", unknown });
+      announce("Nothing was saved. Check these items first.");
+      void refetch();
+      return;
+    }
+    setSavedRows(submitted);
+    setRemovedStack([]);
+    setPending(new Map());
+    setBlocked({ kind: "activate", unknown: 0 });
+    announce("Your changes were saved. The format was not activated.");
+    if (revision !== null) setLoadedRevision(revision);
+    void refetch().then((result) => { if (revision === null && result.data) setLoadedRevision(result.data.revision ?? null); });
+  }
+
+  // Any save of an active format, and any activation, waits until every item
+  // is kept or settled. The server refuses it too; this saves a round trip.
+  function blockedBeforeSaving(confirm: boolean): boolean {
+    if (!openItems.length || !(rubric!.is_active || confirm)) return false;
+    focusBlockedSummary.current = true;
+    setBlocked({ kind: rubric!.is_active ? "save" : "activate", unknown: 0 });
+    return true;
+  }
 
   function bodyFor(submitted: CriterionRow[], confirm: boolean) {
     // Only issues still open on the server are sent; the rest were settled.
@@ -489,10 +558,12 @@ function CriteriaEditor({ id }: { id: number }) {
   function discardAndReload() {
     setDiscardOpen(false);
     save.reset();
-    void refetch().then(() => {
+    void refetch().then((result) => {
+      // Reload only from a fresh read, never from the cached copy.
+      if (!result.isSuccess) return;
       setPending(new Map());
       setRemovedStack([]);
-      setActivationBlocked(false);
+      setBlocked(null);
       setAttempted(undefined);
       setRows(undefined);
       setSavedRows(undefined);
@@ -548,18 +619,12 @@ function CriteriaEditor({ id }: { id: number }) {
   function attemptSave(confirm: boolean) {
     if (save.isPending) return;
     setAttempted(confirm ? "confirm" : "save");
-    setActivationBlocked(false);
+    setBlocked(null);
     if (invalidCriteria(currentRows)) {
       queueMicrotask(() => summaryRef.current?.focus());
       return;
     }
-    // Activation waits until each parser item is kept or settled; the
-    // server refuses it too, this only saves a round trip.
-    if (confirm && gateBlocks) {
-      focusBlockedSummary.current = true;
-      setActivationBlocked(true);
-      return;
-    }
+    if (blockedBeforeSaving(confirm)) return;
     const submitted = currentRows;
     submittedKeys.current = submitted.map((row) => row.key);
     setEditedSinceRefusal(new Set());
@@ -574,11 +639,7 @@ function CriteriaEditor({ id }: { id: number }) {
           announce(savedAnnouncement(out, confirm));
         },
         onError: (error) => {
-          if (error instanceof ApiError && error.code === "unresolved_rubric_issues") {
-            focusBlockedSummary.current = true;
-            setActivationBlocked(true);
-            void refetch();
-          }
+          if (error instanceof ApiError && error.code === "unresolved_rubric_issues") refusedForOpenItems(error, submitted);
         },
       },
     );
@@ -600,6 +661,7 @@ function CriteriaEditor({ id }: { id: number }) {
       resolveBlocker("keep");
       return;
     }
+    if (blockedBeforeSaving(false)) { resolveBlocker("keep"); return; }
     resolvingBlocker.current = true;
     const submitted = currentRows;
     submittedKeys.current = submitted.map((row) => row.key);
@@ -613,6 +675,8 @@ function CriteriaEditor({ id }: { id: number }) {
           setLeaveSaveFailed(true);
           // The refused fields are on the page, not in the dialog: go back to them.
           if (error instanceof ApiError && error.status === 422) { focusRefusalAfterDialog.current = true; resolveBlocker("keep"); }
+          else if (error instanceof ApiError && error.code === "unresolved_rubric_issues") { refusedForOpenItems(error, submitted); resolveBlocker("keep"); }
+          else if (error instanceof ApiError && (error.code === "rubric_changed" || error.code === "rubric_locked")) { focusConflictAfterDialog.current = true; resolveBlocker("keep"); }
         },
       },
     );
@@ -651,7 +715,7 @@ function CriteriaEditor({ id }: { id: number }) {
         instruction={readOnly ? "Inspect this version’s criteria beside its uploaded format." : "Compare the prepared criteria with your uploaded format. Correct missing or extra requirements before confirming."} />
       <FormatReviewWorkbench rubric={rubric} onUploadNewVersion={() => setUploadOpen(true)}>
       <div className="signal-section-flow signal-criteria-guidance">
-        {(details !== null || legacy) && <RubricReviewStatus total={pageIssues.length} open={openItems.length} readOnly={readOnly}
+        {(checked || legacy) && <RubricReviewStatus total={pageIssues.length} open={openItems.length} readOnly={readOnly}
           isActive={rubric.is_active} legacy={legacy} onFirst={() => openItems[0] && goToIssue(openItems[0])} />}
         <SourceReadingSummary summary={rubric.source_summary} />
         {readOnly
@@ -675,17 +739,20 @@ function CriteriaEditor({ id }: { id: number }) {
             {rubric.parse_issues?.length ? <ul>{rubric.parse_issues.map((issue) => <li key={issue}>{issue}</li>)}</ul> : null}
           </Alert>
         )}
-        {activationBlocked && gateBlocks && (
+        {blocked && openItems.length + blocked.unknown > 0 && (
           <div ref={blockedRef} tabIndex={-1} role="alert" className="signal-error-summary signal-criteria-errors">
-            <h2>Check these items before activating</h2>
+            <h2>{blocked.kind === "save" ? "Check these items before saving changes to this active format" : "Check these items before activating"}</h2>
+            {blocked.kind === "save" && <p>Nothing was saved. Your edits are still on this page.</p>}
             <ul>{openItems.map((issue) => <li key={issue.id}><button type="button" onClick={() => goToIssue(issue)}>
               {issuePlace(issue).label}: {issueCopy(issue)}</button></li>)}</ul>
+            {blocked.unknown > 0 && <p>Saving these changes would also leave {blocked.unknown === 1 ? "one level description" : `${blocked.unknown} level descriptions`} that no longer {blocked.unknown === 1 ? "matches" : "match"} the document. Change {blocked.unknown === 1 ? "it" : "them"} back before saving.</p>}
           </div>
         )}
         {formatIssues.length > 0 && <section className="signal-format-issues" aria-labelledby="format-issues-heading">
           <h3 id="format-issues-heading">Items about the whole format</h3>
-          <CriterionLevels criterionKey="format" criterionLabel="The whole format" levels={[]} issues={formatIssues} pending={pending}
-            readOnly={readOnly} onKeep={keepIssues} onUndoKeep={undoKeep} onPageShown={() => {}} />
+          <CriterionLevels criterionKey="format" criterionName="The whole format" levels={[]} issues={formatIssues} pending={pending}
+            readOnly={readOnly} onKeep={keepIssues} onUndoKeep={undoKeep} onPageShown={() => {}} nextAfter={nextAfter} onGo={goToIssue}
+            rowHeading="From reading the format" />
         </section>}
         {problems.length > 0 && (
           <div ref={summaryRef} tabIndex={-1} role="alert" className="signal-error-summary signal-criteria-errors">
@@ -708,7 +775,7 @@ function CriteriaEditor({ id }: { id: number }) {
               onChange={(patch) => updateRow(row.key, patch)}
               onRemove={() => removeCriterion(row.key)}
               serverErrors={unchangedRefusals(fieldErrors.get(row.key), row.key, editedSinceRefusal)}
-              review={levelReview(row)}
+              review={levelReview(row, index)}
             />
           ))}
         </ol>
@@ -754,6 +821,7 @@ function CriteriaEditor({ id }: { id: number }) {
         )}
         {save.isPending && <p role="status">Saving criteria…</p>}
         {saveError && <div ref={saveErrorRef} tabIndex={-1}><Alert title="Could not save these criteria" tone="error" role="alert">{saveError}{refusedList}</Alert></div>}
+        <div ref={conflictRef} tabIndex={-1}>
         {conflict === "rubric_changed" && <Alert title="This format changed somewhere else" tone="error" role="alert">
           <p>This format changed in another tab or window. Your edits are still on this page but were not saved.</p>
           <Button variant="secondary" onClick={() => setDiscardOpen(true)}>Load the latest version</Button>
@@ -763,6 +831,7 @@ function CriteriaEditor({ id }: { id: number }) {
           <p>Upload a new version to make corrections. Existing reports keep their original criteria.</p>
           <Button variant="secondary" onClick={() => setUploadOpen(true)}>Upload new version</Button>
         </Alert>}
+        </div>
         {rubric.is_active && <Alert title="This format is active" tone="success">New checks use this version.</Alert>}
       </div>
       </FormatReviewWorkbench>

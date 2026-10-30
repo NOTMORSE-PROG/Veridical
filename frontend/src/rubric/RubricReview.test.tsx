@@ -13,6 +13,9 @@ function cell(row: number, col: number, rowLabel: string, heading: string, match
   return { match, page: 1, table: 1, row, col, cell_text: "cell", row_label: rowLabel, column_heading: heading };
 }
 
+// What the server sends for a level it could not place in the table.
+const UNPLACED: RubricLevelSource = { match: "unmatched", page: null, table: null, row: null, col: null, cell_text: null, row_label: null, column_heading: null };
+
 const ISSUE: RubricIssueDetail = {
   id: 11, criterion_id: 2, level: 3, code: "not_in_source",
   message: "'Purpose' level 'Proficient': the descriptor is not found in the document", status: "open", resolution: null,
@@ -38,7 +41,7 @@ function rubric(overrides: Partial<Rubric> = {}): Rubric {
         id: 2, type: "semantic", text: "Purpose", evidence: null, weight: 1, position: 1,
         levels: [
           { level: 1, name: "Beginner", descriptor: "The purpose is unclear.", points: 1, source: cell(2, 2, "Purpose", "BEGIN ER 1") },
-          { level: 3, name: "Proficient", descriptor: "The paper's purpose is clearly stated.", points: 3, source: cell(2, 4, "Purpose", "PROFICIEN T 3", "unmatched") },
+          { level: 3, name: "Proficient", descriptor: "The paper's purpose is clearly stated.", points: 3, source: UNPLACED },
         ],
       },
     ],
@@ -66,6 +69,9 @@ function puts(fetchMock: ReturnType<typeof serve>) {
     .map(([, init]) => JSON.parse(String(init?.body)) as Record<string, unknown>);
 }
 
+const beginnerRow = () => screen.getByRole("heading", { level: 4, name: "Beginner" }).closest("li")!;
+const keepButton = () => screen.getByRole("button", { name: /^Keep this wording/ });
+
 function renderPage() {
   return renderWithProviders(<SignalReviewCriteriaPage />, {
     route: "/rubric/5/review", path: "/rubric/:rubricId/review", authInstructorId: 1,
@@ -83,10 +89,11 @@ describe("rubric review before activation (BUG-566)", () => {
     const proficient = screen.getByRole("heading", { level: 4, name: "Proficient" }).closest("li")!;
     expect(within(proficient).getByText("Check this")).toBeInTheDocument();
     expect(within(proficient).getByText("VERIDICAL could not find this wording in the document. Compare it with the original.")).toBeInTheDocument();
-    expect(within(proficient).getByText('Page 1 · row "Purpose" · column "PROFICIEN T 3"')).toBeInTheDocument();
-    const beginner = screen.getByRole("heading", { level: 4, name: "Beginner" }).closest("li")!;
-    expect(within(beginner).getByText("Matches the document")).toBeInTheDocument();
-    expect(within(beginner).queryByRole("button", { name: "Keep this wording" })).not.toBeInTheDocument();
+    // It cannot be placed, so it points at its criterion's row instead.
+    expect(within(proficient).getByText('Page 1 · row "Purpose"')).toBeInTheDocument();
+    expect(within(beginnerRow()).getByText('Page 1 · row "Purpose" · column "BEGIN ER 1"')).toBeInTheDocument();
+    expect(within(beginnerRow()).getByText("Matches the document")).toBeInTheDocument();
+    expect(within(beginnerRow()).queryByRole("button", { name: /Keep this wording/ })).not.toBeInTheDocument();
     // The issue is shown once, on its level, not again as a raw parser list.
     expect(screen.queryByText(ISSUE.message)).not.toBeInTheDocument();
     expect(screen.getByRole("navigation", { name: "Items to check" })).toHaveTextContent("1 item to check");
@@ -102,9 +109,10 @@ describe("rubric review before activation (BUG-566)", () => {
     await waitFor(() => expect(summary).toHaveFocus());
     expect(puts(fetchMock)).toHaveLength(0);
 
-    fireEvent.click(within(summary).getByRole("button", { name: /Criterion 2 · Proficient/ }));
+    fireEvent.click(within(summary).getByRole("button", { name: /Purpose · Proficient/ }));
     expect(screen.getByRole("heading", { level: 4, name: "Proficient" })).toHaveFocus();
     expect(screen.getByRole("navigation", { name: "Items to check" })).toHaveTextContent("Item 1 of 1");
+    expect(screen.getByText("Item 1 of 1: Purpose · Proficient.")).toBeInTheDocument();
   });
 
   it("keeps wording with a reason, sends it with the revision on save, and can undo before saving", async () => {
@@ -119,7 +127,9 @@ describe("rubric review before activation (BUG-566)", () => {
     });
     renderPage();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Keep this wording" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Keep this wording, Purpose, Proficient" }));
+    expect(screen.getByText("VERIDICAL will grade with this wording exactly as shown.")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("radio", { name: "The document says it this way" })).toHaveFocus());
     fireEvent.click(screen.getByRole("button", { name: "Keep wording" }));
     expect(screen.getByText("Choose why you are keeping this wording.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("radio", { name: "The document says it this way" }));
@@ -127,16 +137,22 @@ describe("rubric review before activation (BUG-566)", () => {
 
     const proficient = screen.getByRole("heading", { level: 4, name: "Proficient" }).closest("li")!;
     expect(within(proficient).getByText("Kept as written")).toBeInTheDocument();
-    expect(within(proficient).getByText(/Not saved yet/)).toBeInTheDocument();
-    expect(screen.getByText("All 1 item is checked. You can activate this format.")).toBeInTheDocument();
+    expect(within(proficient).getByText("Kept as written: The document says it this way. Not saved yet.", { exact: false })).toBeInTheDocument();
+    // What VERIDICAL raised stays on the level after it is kept.
+    expect(within(proficient).getByText("VERIDICAL could not find this wording in the document. Compare it with the original.")).toBeInTheDocument();
+    expect(screen.getByText("All 1 item kept or settled. You can activate this format.")).toBeInTheDocument();
 
-    fireEvent.click(within(proficient).getByRole("button", { name: "Undo" }));
+    fireEvent.click(within(proficient).getByRole("button", { name: "Undo keeping, Purpose, Proficient" }));
     expect(within(proficient).getByText("Check this")).toBeInTheDocument();
-    await waitFor(() => expect(within(proficient).getByRole("button", { name: "Keep this wording" })).toHaveFocus());
+    await waitFor(() => expect(keepButton()).toHaveFocus());
 
-    fireEvent.click(within(proficient).getByRole("button", { name: "Keep this wording" }));
+    fireEvent.click(keepButton());
     fireEvent.click(screen.getByRole("radio", { name: "Other reason" }));
-    fireEvent.change(screen.getByLabelText("Note (optional)"), { target: { value: "  Matches the printed copy  " } });
+    fireEvent.click(screen.getByRole("button", { name: "Keep wording" }));
+    // Other needs a note saying what the reason is.
+    expect(screen.getByText("Add a note for this reason.")).toBeInTheDocument();
+    expect(screen.getByLabelText("Note")).toHaveFocus();
+    fireEvent.change(screen.getByLabelText("Note"), { target: { value: "  Matches the printed copy  " } });
     fireEvent.click(screen.getByRole("button", { name: "Keep wording" }));
     fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
 
@@ -145,7 +161,7 @@ describe("rubric review before activation (BUG-566)", () => {
       confirm: false, expected_revision: 4,
       acknowledgements: [{ issue_id: 11, reason_code: "other", note: "Matches the printed copy" }],
     });
-    expect(await screen.findByText("Checked by Ana Reyes, Oct 30, 2026", { exact: false })).toBeInTheDocument();
+    expect(await screen.findByText("Kept by Ana Reyes, Oct 30, 2026: The document says it this way", { exact: false })).toBeInTheDocument();
 
     // The next save starts from the revision the server returned.
     fireEvent.click(screen.getByRole("button", { name: "Confirm and activate format" }));
@@ -154,20 +170,33 @@ describe("rubric review before activation (BUG-566)", () => {
     expect(puts(fetchMock)[1]).not.toHaveProperty("acknowledgements");
   });
 
-  it("shows the server's refusal to activate as the same list, after reading the format again", async () => {
+  it("shows the server's refusal to activate as the same list, and retries from the revision the refusal saved", async () => {
     let current = rubric({ parse_issue_details: [{ ...ISSUE, status: "resolved", resolution: null }] });
-    serve(() => current, (_url, init) => {
+    const fetchMock = serve(() => current, (_url, init) => {
       if (init?.method !== "PUT") return undefined;
-      current = rubric();
-      return new Response(JSON.stringify({ error: { code: "unresolved_rubric_issues", message: "Open items", details: { open_issue_ids: [11] } } }), { status: 409 });
+      if (puts(fetchMock).length > 1) return new Response(JSON.stringify(current), { status: 200 });
+      // The server keeps the edits at revision 5, then refuses to activate.
+      // Another tab saves revision 6 before this page reads the format again.
+      current = rubric({ revision: 6 });
+      return new Response(JSON.stringify({ error: { code: "unresolved_rubric_issues", message: "Open items", details: { open_issue_ids: [11], revision: 5 } } }), { status: 409 });
     });
     renderPage();
     fireEvent.click(await screen.findByRole("button", { name: "Confirm and activate format" }));
 
     const summary = await screen.findByRole("alert");
+    await waitFor(() => expect(summary).toHaveTextContent("Purpose · Proficient"));
     expect(summary).toHaveTextContent("Check these items before activating");
-    expect(summary).toHaveTextContent("Criterion 2 · Proficient");
     expect(screen.queryByText("Could not save these criteria")).not.toBeInTheDocument();
+    expect(screen.getByText("Your changes were saved. The format was not activated.")).toBeInTheDocument();
+
+    fireEvent.click(keepButton());
+    fireEvent.click(screen.getByRole("radio", { name: "The document says it this way" }));
+    fireEvent.click(screen.getByRole("button", { name: "Keep wording" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm and activate format" }));
+    await waitFor(() => expect(puts(fetchMock)).toHaveLength(2));
+    // Revision 5, from the refusal: taking 6 from the later read would
+    // overwrite the other tab's save.
+    expect(puts(fetchMock)[1]).toMatchObject({ confirm: true, expected_revision: 5, acknowledgements: [{ issue_id: 11, reason_code: "document_wording" }] });
   });
 
   it("keeps the instructor's edits when the format changed elsewhere, and reloads only after they agree", async () => {
@@ -208,7 +237,7 @@ describe("rubric review before activation (BUG-566)", () => {
     renderPage();
     expect(await screen.findByText(/1 item in this version could not be matched with the document\. This version is locked/)).toBeInTheDocument();
     expect(screen.getByText("Check this")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Keep this wording" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Keep this wording/ })).not.toBeInTheDocument();
   });
 
   it("does not present unchecked levels from an older version as matches", async () => {
@@ -235,11 +264,96 @@ describe("rubric review before activation (BUG-566)", () => {
         source_format: "pdf", source_sha256: "a".repeat(64), unavailable_reason: null, reconstruction: "original_pdf" }), { status: 200 })
       : undefined);
     renderPage();
-    const show = await screen.findByRole("button", { name: "Show page 1 of the original, Criterion 2, Proficient" });
+    const show = await screen.findByRole("button", { name: "Show page 1 of the original, Purpose, Proficient" });
     fireEvent.click(show);
 
     expect(await screen.findByTestId("pdf-pane")).toHaveTextContent("Requested page 1");
     fireEvent.click(screen.getByRole("button", { name: "Back to criteria" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Show page 1 of the original, Criterion 2, Proficient" })).toHaveFocus());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Show page 1 of the original, Purpose, Proficient" })).toHaveFocus());
+  });
+
+  it("does not claim it looked for a level it only skipped because another level in its row failed", async () => {
+    const value = rubric();
+    value.criteria[1].levels!.push({ level: 4, name: "Exemplary", descriptor: "The purpose is clearly and concisely stated.", points: 4, source: UNPLACED });
+    serve(() => value);
+    renderPage();
+    const exemplary = (await screen.findByRole("heading", { level: 4, name: "Exemplary" })).closest("li")!;
+    expect(within(exemplary).getByText("Not checked separately")).toBeInTheDocument();
+    expect(within(exemplary).getByText("Another level in this row did not match, so this one was not checked on its own.")).toBeInTheDocument();
+    expect(within(exemplary).queryByText(/could not find this wording/)).not.toBeInTheDocument();
+    expect(within(exemplary).queryByText("Check this")).not.toBeInTheDocument();
+    expect(screen.getByText("1 item to check before this format can be activated")).toBeInTheDocument();
+  });
+
+  it("lets the instructor keep a note about the whole format, which otherwise blocks activation", async () => {
+    const note: RubricIssueDetail = { id: 12, criterion_id: null, level: null, code: "other", message: "Text differs between the copies of the table on pages 2 and 3.", status: "open", resolution: null };
+    let current = rubric({ parse_issue_details: [note] });
+    const fetchMock = serve(() => current, (_url, init) => {
+      if (init?.method !== "PUT") return undefined;
+      current = rubric({ revision: 5, is_active: true, parse_issue_details: [{ ...note, status: "acknowledged", resolution: { kind: "acknowledged", reason_code: "outside_table", note: null, by_instructor_id: 1, by_name: "Ana Reyes", at: "2026-10-30T10:00:00Z" } }] });
+      return new Response(JSON.stringify(current), { status: 200 });
+    });
+    renderPage();
+    const section = (await screen.findByRole("heading", { name: "Items about the whole format" })).closest("section")!;
+    expect(within(section).getByText(note.message)).toBeInTheDocument();
+    fireEvent.click(within(section).getByRole("button", { name: "Keep this wording, The whole format" }));
+    fireEvent.click(screen.getByRole("radio", { name: "The wording comes from outside the table" }));
+    fireEvent.click(screen.getByRole("button", { name: "Keep wording" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm and activate format" }));
+    await waitFor(() => expect(puts(fetchMock)).toHaveLength(1));
+    expect(puts(fetchMock)[0]).toMatchObject({ confirm: true, acknowledgements: [{ issue_id: 12, reason_code: "outside_table", note: null }] });
+  });
+
+  it("does not save changes to an active format while an item is open", async () => {
+    const fetchMock = serve(() => rubric({ is_active: true }));
+    renderPage();
+    expect(await screen.findByText("1 item to check in this active format. Changes can be saved once every item is kept.")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Criterion text, criterion 1"), { target: { value: "Introduction, edited" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
+    const summary = await screen.findByRole("alert");
+    expect(summary).toHaveTextContent("Check these items before saving changes to this active format");
+    expect(summary).toHaveTextContent("Nothing was saved. Your edits are still on this page.");
+    expect(puts(fetchMock)).toHaveLength(0);
+  });
+
+  it("keeps the edits and the kept wording when an active format's save is refused, and names items this page has not seen", async () => {
+    const fetchMock = serve(() => rubric({ is_active: true }), (_url, init) => init?.method === "PUT"
+      ? new Response(JSON.stringify({ error: { code: "unresolved_rubric_issues", message: "Open", details: { open_issue_ids: [99], revision: 4 } } }), { status: 409 })
+      : undefined);
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Keep this wording, Purpose, Proficient" }));
+    fireEvent.click(screen.getByRole("radio", { name: "The document says it this way" }));
+    fireEvent.click(screen.getByRole("button", { name: "Keep wording" }));
+    fireEvent.change(screen.getByLabelText("Criterion text, criterion 1"), { target: { value: "Introduction, edited" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
+
+    await waitFor(() => expect(puts(fetchMock)).toHaveLength(1));
+    const summary = await screen.findByRole("alert");
+    expect(summary).toHaveTextContent("Saving these changes would also leave one level description that no longer matches the document.");
+    expect(screen.getByLabelText("Criterion text, criterion 1")).toHaveValue("Introduction, edited");
+    expect(screen.getByText(/Kept as written: The document says it this way\. Not saved yet\./)).toBeInTheDocument();
+  });
+
+  it("brings the instructor back from the leave dialog to say the format changed elsewhere", async () => {
+    serve(() => rubric(), (_url, init) => init?.method === "PUT"
+      ? new Response(JSON.stringify({ error: { code: "rubric_changed", message: "Changed", details: { revision: 7 } } }), { status: 409 }) : undefined);
+    renderPage();
+    fireEvent.change(await screen.findByLabelText("Criterion text, criterion 1"), { target: { value: "Introduction, edited" } });
+    fireEvent.click(screen.getByRole("link", { name: "Required format" }));
+    const dialog = await screen.findByRole("dialog", { name: "Leave without saving your changes?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save draft and leave" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    const alert = screen.getByText("This format changed in another tab or window. Your edits are still on this page but were not saved.");
+    await waitFor(() => expect(alert.closest("[tabindex='-1']")).toHaveFocus());
+    expect(screen.getByLabelText("Criterion text, criterion 1")).toHaveValue("Introduction, edited");
+  });
+
+  it("closes the keep form with Escape and returns to its button", async () => {
+    serve(() => rubric());
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Keep this wording, Purpose, Proficient" }));
+    fireEvent.keyDown(screen.getByRole("radio", { name: "Other reason" }), { key: "Escape" });
+    expect(screen.queryByRole("button", { name: "Keep wording" })).not.toBeInTheDocument();
+    await waitFor(() => expect(keepButton()).toHaveFocus());
   });
 });

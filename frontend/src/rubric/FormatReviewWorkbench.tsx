@@ -100,7 +100,7 @@ export function FormatReviewWorkbench({ rubric, onUploadNewVersion, children }: 
       onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setFocusTab(view); }}>
       <button ref={criteriaTab} id={`${id}-criteria-tab`} type="button" role="tab" aria-selected={view === "criteria"}
         aria-controls={`${id}-criteria`} tabIndex={focusTab === "criteria" ? 0 : -1}
-        onKeyDown={(event) => focusOtherTab(event, "criteria")} onClick={() => activate("criteria")}>Criteria</button>
+        onKeyDown={(event) => focusOtherTab(event, "criteria")} onClick={() => { returnTarget.current = null; activate("criteria"); }}>Criteria</button>
       <button ref={sourceTab} id={`${id}-source-tab`} type="button" role="tab" aria-selected={view === "source"}
         aria-controls={`${id}-source`} tabIndex={focusTab === "source" ? 0 : -1}
         onKeyDown={(event) => focusOtherTab(event, "source")} onClick={() => activate("source")}>Original format</button>

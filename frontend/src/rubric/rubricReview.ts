@@ -1,7 +1,7 @@
 // BUG-566: what the review screen says about each level description, and
 // which parser issues still need the instructor before a format can grade.
 import type { RubricAcknowledgementReason, RubricIssueDetail, RubricLevel, RubricLevelSource } from "../api/types";
-import { RUBRIC_ISSUE_COPY } from "../config/ui";
+import { RUBRIC_ISSUE_COPY, RUBRIC_KEEP_REASONS } from "../config/ui";
 
 export interface PendingAcknowledgement {
   issue_id: number;
@@ -14,6 +14,9 @@ export type LevelStatus =
   | { kind: "kept_pending"; issues: RubricIssueDetail[] }
   | { kind: "kept"; issues: RubricIssueDetail[] }
   | { kind: "matches" }
+  // Unmatched only because another level in its row failed; it has no issue
+  // of its own, so it is neither a match nor something to decide.
+  | { kind: "row_unchecked" }
   | { kind: "not_checked" };
 
 /** Every issue on the page in reading order: criterion by criterion, the
@@ -63,9 +66,9 @@ export function levelStatus(
   const fromIssues = issueStatus(issues, pending);
   if (fromIssues) return fromIssues;
   if (!level.source) return { kind: "not_checked" };
-  // An unmatched level the server raised no issue for is still shown as
-  // something to check, never as a match.
-  if (level.source.match === "unmatched") return { kind: "check", issues: [] };
+  // An unmatched level the server raised no issue for is never shown as a
+  // match, and never as wording VERIDICAL looked for and could not find.
+  if (level.source.match === "unmatched") return { kind: "row_unchecked" };
   return { kind: "matches" };
 }
 
@@ -85,6 +88,22 @@ export function sourceLocation(source: RubricLevelSource): string | null {
     else if (source.col !== null) parts.push(`column ${source.col}`);
   } else if (source.match === "exact") parts.push("outside the table");
   return parts.length ? parts.join(" · ") : null;
+}
+
+/** Where a criterion's row is, from any of its levels that were placed, so a
+ * level that could not be placed can still point at the right part of the
+ * original. */
+export function rowLocation(levels: readonly RubricLevel[]): { page: number | null; text: string | null } {
+  const placed = levels.map((level) => level.source).find((source) => source && (source.page !== null || source.row_label));
+  if (!placed) return { page: null, text: null };
+  const parts: string[] = [];
+  if (placed.page !== null) parts.push(`Page ${placed.page}`);
+  if (placed.row_label) parts.push(`row "${tidy(placed.row_label)}"`);
+  return { page: placed.page, text: parts.join(" · ") || null };
+}
+
+export function keepReasonLabel(code: string | null | undefined): string | null {
+  return RUBRIC_KEEP_REASONS.find((reason) => reason.value === code)?.label ?? null;
 }
 
 // Labels extracted from a PDF can carry line breaks and zero-width spaces.
