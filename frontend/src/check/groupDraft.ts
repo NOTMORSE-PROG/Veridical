@@ -40,3 +40,16 @@ export function clearGroupDraft(actorId: number | undefined, manuscriptId: numbe
 export function normalizeName(value: string) {
   return value.replace(/[ \t\n\r\f\v]+/g, " ").replace(/^ +| +$/g, "").toLowerCase();
 }
+
+export function memberIdentity(names: string[]) {
+  return [...new Set(names.filter((name) => name.trim()).map(normalizeName))].sort();
+}
+
+// The record read back is exactly what was typed, so the save happened and
+// there is nothing left to restore. A matching name alone is not enough: the
+// usual change keeps the name and edits members or program.
+export function draftWasSaved(draft: GroupDraft, group: { name: string; member_names: string[]; program_id: number | null }) {
+  return normalizeName(group.name) === normalizeName(draft.group_name)
+    && JSON.stringify(memberIdentity(group.member_names)) === JSON.stringify(memberIdentity(draft.member_names))
+    && group.program_id === draft.program_id;
+}
