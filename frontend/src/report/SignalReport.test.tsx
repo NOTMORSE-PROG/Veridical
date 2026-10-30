@@ -130,6 +130,7 @@ describe("SignalReportPage", () => {
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
     expect(reads["/check-runs/5/report"]).toBe(1);
     expect(reads["/check-runs/5/flags"]).toBe(1);
+    expect(reads["/check-runs/5/escalated"]).toBe(1);
     expect(reads["/check-runs/5/share"]).toBe(1);
   });
 

@@ -71,6 +71,7 @@ export function useOverrideFlag(flagId: number) {
       // read the same as active" failure this ticket exists to fix, one
       // layer up (design review spec, required not optional).
       queryClient.invalidateQueries({ queryKey: ["report", out.report.check_run_id, "flags"] });
+      queryClient.invalidateQueries({ queryKey: ["report", out.report.check_run_id, "escalated"] });
       queryClient.invalidateQueries({ queryKey: ["stats"] });
     },
   });
@@ -97,6 +98,7 @@ export function useConfirmFinding(flagId: number) {
       queryClient.setQueryData<FlagOut>(["flag", flagId], current => keepNewerAssessment(current, out));
       queryClient.setQueryData<ReportOut>(["report", out.report.check_run_id], current => keepNewerAssessment(current, out.report));
       queryClient.invalidateQueries({ queryKey: ["report", out.report.check_run_id, "flags"] });
+      queryClient.invalidateQueries({ queryKey: ["report", out.report.check_run_id, "escalated"] });
       queryClient.invalidateQueries({ queryKey: ["stats"] });
     },
   });
@@ -124,6 +126,7 @@ export function useConfirmCitationSource(flagId: number) {
       queryClient.setQueryData<FlagOut>(["flag", flagId], current => keepNewerAssessment(current, out));
       queryClient.setQueryData<ReportOut>(["report", out.report.check_run_id], current => keepNewerAssessment(current, out.report));
       queryClient.invalidateQueries({ queryKey: ["report", out.report.check_run_id, "flags"] });
+      queryClient.invalidateQueries({ queryKey: ["report", out.report.check_run_id, "escalated"] });
       queryClient.invalidateQueries({ queryKey: ["stats"] });
     },
   });

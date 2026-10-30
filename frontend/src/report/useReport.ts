@@ -211,6 +211,7 @@ export function useDecideReport(checkRunId: number) {
     onSuccess: (report, _body, owner) => {
       if (!owner?.isCurrent() || report.check_run_id !== checkRunId) return;
       queryClient.setQueryData<ReportOut>(["report", checkRunId], (current) => keepNewerAssessment(current, report));
+      queryClient.invalidateQueries({ queryKey: ["report", checkRunId, "escalated"] });
       queryClient.invalidateQueries({ queryKey: ["stats"] });
     },
     onError: (error, _input, owner) => { if (owner?.isCurrent()) refetchReportOnConflict(queryClient, checkRunId)(error); },
@@ -233,6 +234,7 @@ export function useReopenReport(checkRunId: number) {
     onSuccess: (report, _reason, owner) => {
       if (!owner?.isCurrent() || report.check_run_id !== checkRunId) return;
       queryClient.setQueryData<ReportOut>(["report", checkRunId], (current) => keepNewerAssessment(current, report));
+      queryClient.invalidateQueries({ queryKey: ["report", checkRunId, "escalated"] });
       queryClient.invalidateQueries({ queryKey: ["stats"] });
     },
     onError: (error, _input, owner) => { if (owner?.isCurrent()) refetchReportOnConflict(queryClient, checkRunId)(error); },
