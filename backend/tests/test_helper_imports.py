@@ -19,10 +19,12 @@ REPO = Path(__file__).resolve().parents[2]
 
 LOAD_HELPER = r"""
 import importlib.abc
+import importlib.machinery
 import importlib.metadata
 import importlib.util
 import re
 import sys
+import sysconfig
 from pathlib import Path
 
 repo = Path(sys.argv[1])
@@ -50,13 +52,25 @@ for module, distributions in importlib.metadata.packages_distributions().items()
     if any(project(d) in installed for d in distributions):
         allowed.add(module)
 
+# Python ships a few modules the name list leaves out, such as the platform's
+# generated _sysconfigdata module, so anything found in its own folders counts
+# as standard library. Installed packages never live there.
+paths = sysconfig.get_paths()
+python_home = {paths["stdlib"], paths["platstdlib"]}
+python_home |= {str(Path(p) / "lib-dynload") for p in list(python_home)}
+python_home.add(str(Path(sys.base_prefix) / "DLLs"))
+python_home = [p for p in python_home if Path(p).is_dir()]
+
 
 class OnlyHelperPackages(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
         top = fullname.partition(".")[0]
-        if top not in allowed:
-            raise ModuleNotFoundError(f"the helper does not install {top!r}", name=top)
-        return None
+        if top in allowed:
+            return None
+        if importlib.machinery.PathFinder.find_spec(top, python_home) is not None:
+            allowed.add(top)
+            return None
+        raise ModuleNotFoundError(f"the helper does not install {top!r}", name=top)
 
 
 sys.meta_path.insert(0, OnlyHelperPackages())
