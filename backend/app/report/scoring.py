@@ -129,6 +129,9 @@ def _contribution(result: ScorableResult) -> CriterionContribution:
     )
 
 
+AGGREGATE_PROBLEM_KINDS = frozenset({"outside_recency_window"})
+
+
 def _finding_identity(flag: ScorableFlag) -> tuple[str | int | None, ...]:
     """BUG-150: 82 anchors on one reuse match (or one repeated citation/
     forensics finding) are 82 `Flag` rows but ONE fact — this is the exact
@@ -140,6 +143,11 @@ def _finding_identity(flag: ScorableFlag) -> tuple[str | int | None, ...]:
     being guessed into a cluster from similar-looking prose."""
     if not flag.problem_kind:
         return ("flag", flag.id)
+    if flag.problem_kind in AGGREGATE_PROBLEM_KINDS:
+        # One judgment about the reference list as a whole: when a format
+        # counts recency toward readiness, many old sources still make one
+        # Low deduction, so recency alone can never decide Not Ready.
+        return (flag.check_kind, flag.problem_kind)
     if flag.check_kind == "originality_reuse":
         if flag.matched_ref is None:
             return ("flag", flag.id)

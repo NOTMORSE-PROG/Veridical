@@ -530,3 +530,28 @@ def test_export_names_the_real_cause_of_a_missing_assessment():
 )
 def test_spacing_variants_and_abbreviated_editions_are_not_read(grammar, raw):
     assert _read(grammar, raw).status == "not_readable"
+
+
+def test_counted_recency_notes_make_one_low_deduction_however_many_sources():
+    from app.models.enums import ReadinessStatus, ResultOutcome
+    from app.report.scoring import ScorableFlag, ScorableResult, score_check_run
+
+    settings = _settings()
+    results = [ScorableResult(1, 1.0, ResultOutcome.passed, 95.0)]
+    notes = [
+        ScorableFlag(
+            severity=FlagSeverity.low,
+            overridden=False,
+            id=index,
+            check_kind="citation_integrity",
+            problem_kind=FINDING_KIND,
+            evidence_excerpt=f"Author {index}. (2010). Old source {index}. J.",
+        )
+        for index in range(14)
+    ]
+    scored = score_check_run(results, notes, settings)
+    assert scored.flag_deduction == settings.scoring_flag_deduction_low
+    assert scored.composite_score == 95.0 - settings.scoring_flag_deduction_low
+    assert scored.status == ReadinessStatus.ready
+    # A single note deducts the same as fourteen.
+    assert score_check_run(results, notes[:1], settings).flag_deduction == scored.flag_deduction
