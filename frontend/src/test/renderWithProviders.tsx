@@ -38,7 +38,9 @@ export function renderWithProviders(
   // useParams() resolves inside the test, same as the real router does;
   // "*" (no `path` given) matches unconditionally, same as the old
   // bare-`ui`-with-no-Route-boundary fallback did.
-  const entry = state ? { pathname: route, state } : route;
+  // A route with a query keeps it as the search, not as part of the path.
+  const [pathname, search] = route.split("?");
+  const entry = state ? { pathname, search: search ? `?${search}` : "", state } : route;
   const element = reviewRunId === undefined ? ui : <CriterionReviewProvider checkRunId={reviewRunId} instructorId={reviewInstructorId}>{ui}</CriterionReviewProvider>;
   const router = createMemoryRouter([{ path: path ?? "*", element }], {
     initialEntries: [entry],
