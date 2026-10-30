@@ -11,7 +11,9 @@ export function pageSpan(pages: readonly number[]): string {
   for (let i = 0; i < sorted.length; i += 1) {
     let end = i;
     while (end + 1 < sorted.length && sorted[end + 1] === sorted[end] + 1) end += 1;
-    runs.push(end > i ? `${sorted[i]} to ${sorted[end]}` : `${sorted[i]}`);
+    // Two pages in a row are named, not written as a range.
+    if (end === i + 1) runs.push(`${sorted[i]}`, `${sorted[end]}`);
+    else runs.push(end > i ? `${sorted[i]} to ${sorted[end]}` : `${sorted[i]}`);
     i = end;
   }
   const words = runs.length > 1 ? `${runs.slice(0, -1).join(", ")} and ${runs[runs.length - 1]}` : runs[0] ?? "";
@@ -30,6 +32,9 @@ export const ORIGINALITY_NOT_COMPARED = {
   someEmpty: "No findings were recorded in the text that was compared. Some text was not compared, so this is not evidence of originality.",
   noneEmpty: "No text was compared, so there is nothing to review. This is not evidence of originality.",
   limitsLink: "Open assessment limits",
+  // A second limit beside "no text was compared" only adds what else was excluded.
+  alsoMembership: "Text after the reference list also could not be confirmed as body text.",
+  alsoNativeMath: "Native Word equations were also excluded.",
 } as const;
 
 const GAPLESS = (pages: readonly number[]) => {
@@ -57,7 +62,8 @@ export function originalityCoverageNote(report: CoverageReport | undefined): Ori
   const boundary = report?.originality_scope?.not_compared_reason === "reference_boundary_unclear" || reason === "reference_boundary_unclear";
   if (boundary) {
     return { none: true, tag: ORIGINALITY_NOT_COMPARED.noneTag, sentence: ORIGINALITY_NOT_COMPARED.boundary(pages.length ? pageSpan(pages) : null),
-      also: reason === "reference_membership_partial" ? ORIGINALITY_NOT_COMPARED.membershipPartial : undefined };
+      also: reason === "reference_membership_partial" ? ORIGINALITY_NOT_COMPARED.alsoMembership
+        : reason?.startsWith("native_math_") ? ORIGINALITY_NOT_COMPARED.alsoNativeMath : undefined };
   }
   if (!status) return null;
   const from = status.not_compared_from?.trim();

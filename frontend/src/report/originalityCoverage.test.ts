@@ -47,14 +47,22 @@ describe("originality text left out of the comparison", () => {
     const [item] = coverageItems({ ...report, manuscript_id: 4, check_run_id: 9 } as ReportOut);
     expect(item.label).toBe("Originality/reuse · Not compared");
     expect(item.detail).toContain("so no text was compared");
-    expect(item.subIssues?.[0]).toContain("could not be confirmed as body text");
+    expect(item.subIssues).toEqual(["Text after the reference list also could not be confirmed as body text."]);
+  });
+
+  it("adds only what else was excluded beside nothing compared, never a claim about leads", () => {
+    const report = { originality_scope: { not_compared_reason: "reference_boundary_unclear" },
+      integrity_check_status: [status({ coverage_reason: "native_math_comparison_incomplete", pages_not_compared: [1] })] } as unknown as ReportOut;
+    const [item] = coverageItems({ ...report, manuscript_id: 4, check_run_id: 9 } as ReportOut);
+    expect(item.subIssues).toEqual(["Native Word equations were also excluded."]);
+    expect(JSON.stringify(item)).not.toMatch(/leads remain available/);
   });
 
   it("uses one page in the singular and drops the continuous-run note when pages have gaps", () => {
     expect(originalityNotComparedDetail(status({ coverage_reason: "reference_end_unclear", pages_not_compared: [187] })))
       .toContain("so page 187 (from where the list starts to the end) was not compared.");
     expect(originalityNotComparedDetail(status({ coverage_reason: "reference_end_unclear", pages_not_compared: [157, 158, 170] })))
-      .toContain("so pages 157 to 158 and 170 were not compared.");
+      .toContain("so pages 157, 158 and 170 were not compared.");
   });
 
   it("names the reason in the empty state instead of calling the check partly run", () => {
