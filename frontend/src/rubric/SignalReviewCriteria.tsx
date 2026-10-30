@@ -51,18 +51,32 @@ function importance(weight: number, average: number): "Low" | "Medium" | "High" 
 type ServerField = "text" | "evidence" | "levels";
 type ServerFieldErrors = Map<string, Partial<Record<ServerField, string>>>;
 
-function serverFieldErrors(error: unknown, submittedKeys: readonly string[]): ServerFieldErrors {
-  const out: ServerFieldErrors = new Map();
-  if (!(error instanceof ApiError) || error.code !== "validation_error") return out;
+function unchangedRefusals(errors: Partial<Record<ServerField, string>> | undefined, key: string, edited: ReadonlySet<string>) {
+  if (!errors) return undefined;
+  const kept = Object.fromEntries(Object.entries(errors).filter(([field]) => !edited.has(`${key}.${field}`))) as Partial<Record<ServerField, string>>;
+  return Object.keys(kept).length ? kept : undefined;
+}
+
+const LEVEL_PART: Record<string, string> = { name: "name", descriptor: "description" };
+// Levels come from the uploaded format and are not edited on this screen.
+const LEVELS_HINT = "Levels come from the uploaded format, so correct it there and upload the format again.";
+
+function serverFieldErrors(error: unknown, submittedKeys: readonly string[]): { byRow: ServerFieldErrors; other: string[] } {
+  const byRow: ServerFieldErrors = new Map();
+  const other: string[] = [];
+  if (!(error instanceof ApiError) || error.code !== "validation_error") return { byRow, other };
   for (const [field, message] of error.fieldMessages) {
-    const match = /^criteria\.(\d+)\.(text|evidence|levels)\b/.exec(field);
+    const match = /^criteria\.(\d+)\.(text|evidence|levels)(?:\.(\d+)\.(name|descriptor))?\b/.exec(field);
     const key = match ? submittedKeys[Number(match[1])] : undefined;
-    if (!match || !key) continue;
+    // A refusal this editor cannot place on a field is still listed, never dropped.
+    if (!match || !key) { if (!other.includes(message)) other.push(message); continue; }
     const name = match[2] as ServerField;
-    // The first message for a field is kept; it is the one its input shows.
-    if (!out.get(key)?.[name]) out.set(key, { ...out.get(key), [name]: message });
+    const text = name === "levels"
+      ? `${match[3] !== undefined ? `Level ${Number(match[3]) + 1}${match[4] ? ` ${LEVEL_PART[match[4]]}` : ""}: ` : ""}${message} ${LEVELS_HINT}`
+      : message;
+    if (!byRow.get(key)?.[name]) byRow.set(key, { ...byRow.get(key), [name]: text });
   }
-  return out;
+  return { byRow, other };
 }
 
 const SERVER_FIELD_LABEL: Record<ServerField, string> = { text: "Criterion text", evidence: "Evidence expected", levels: "Levels" };
@@ -224,11 +238,11 @@ function CriterionCard({
         </div>
         {row.levels && row.levels.length > 0 && (
           <details id={`criterion-levels-${row.key}`} className="signal-levels" open={Boolean(serverErrors?.levels) || undefined}>
-            <summary>Levelled criterion · {row.levels.length} levels</summary>
+            <summary aria-describedby={serverErrors?.levels ? `criterion-levels-server-${row.key}` : undefined}>Levelled criterion · {row.levels.length} levels</summary>
             <ol>{row.levels.map((level) => <li key={level.level}><strong>{level.name}</strong><span>{level.descriptor}</span></li>)}</ol>
           </details>
         )}
-        {serverErrors?.levels && <small className="signal-field-error" role="alert">Levels: {serverErrors.levels}</small>}
+        {serverErrors?.levels && <small id={`criterion-levels-server-${row.key}`} className="signal-field-error">Levels: {serverErrors.levels}</small>}
       </div>
     </li>
   );
@@ -263,6 +277,7 @@ function CriteriaEditor({ id }: { id: number }) {
   const pendingFocusRef = useRef<{ type: "undo" } | { type: "criterion"; key: string } | null>(null);
   const resolvingBlocker = useRef(false);
   const focusErrorsAfterDialog = useRef(false);
+  const focusRefusalAfterDialog = useRef(false);
   useRouteFocus("Review prepared criteria - VERIDICAL", headingRef);
 
   function announce(text: string) {
@@ -318,6 +333,9 @@ function CriteriaEditor({ id }: { id: number }) {
     else if (focusErrorsAfterDialog.current) {
       focusErrorsAfterDialog.current = false;
       queueMicrotask(() => summaryRef.current?.focus());
+    } else if (focusRefusalAfterDialog.current) {
+      focusRefusalAfterDialog.current = false;
+      requestAnimationFrame(() => { saveErrorRef.current?.scrollIntoView({ block: "nearest" }); saveErrorRef.current?.focus(); });
     }
   }, [blocker.state]);
 
@@ -359,8 +377,10 @@ function CriteriaEditor({ id }: { id: number }) {
 
   function updateRow(key: string, patch: Partial<CriterionRow>) {
     setRows((current) => current?.map((row) => row.key === key ? { ...row, ...patch } : row));
-    // Editing a criterion the server refused clears that criterion's message.
-    setEditedSinceRefusal((current) => current.has(key) ? current : new Set([...current, key]));
+    // Changing a refused field clears that field's message; levels are not
+    // edited here, so their refusal stays until the next save.
+    const changed = (["text", "evidence"] as const).filter((field) => field in patch).map((field) => `${key}.${field}`);
+    if (changed.length) setEditedSinceRefusal((current) => new Set([...current, ...changed]));
   }
 
   function addCriterion() {
@@ -446,26 +466,35 @@ function CriteriaEditor({ id }: { id: number }) {
       { criteria: toEdits(submitted), confirm: false },
       {
         onSuccess: () => { setSavedRows(submitted); blocker.proceed(); },
-        onError: () => { resolvingBlocker.current = false; },
+        onError: (error) => {
+          resolvingBlocker.current = false;
+          // The refused fields are on the page, not in the dialog: go back to them.
+          if (error instanceof ApiError && error.status === 422) { focusRefusalAfterDialog.current = true; resolveBlocker("keep"); }
+        },
       },
     );
   }
 
-  const fieldErrors = serverFieldErrors(save.error, submittedKeys.current);
+  const { byRow: fieldErrors, other: otherRefusals } = serverFieldErrors(save.error, submittedKeys.current);
   // Every refused field still unchanged since the save, in page order.
-  const refused = currentRows.flatMap((row, index) => editedSinceRefusal.has(row.key) ? []
-    : (Object.entries(fieldErrors.get(row.key) ?? {}) as [ServerField, string][]).map(([field, message]) => ({ key: row.key, index, field, message })));
+  const refused = currentRows.flatMap((row, index) =>
+    (Object.entries(fieldErrors.get(row.key) ?? {}) as [ServerField, string][])
+      .filter(([field]) => !editedSinceRefusal.has(`${row.key}.${field}`))
+      .map(([field, message]) => ({ key: row.key, index, field, message })));
+  const needing = refused.length + otherRefusals.length;
+  // A refused save keeps nothing: the whole set was not saved.
   const saveError = save.error instanceof ApiError && save.error.status === 422
-    ? fieldErrors.size > 0
-      ? refused.length > 0 ? `${refused.length === 1 ? "One value was" : `${refused.length} values were`} not saved. Your edits are still on this page.`
-        : "You have changed the values that were not saved. Save again to check them."
+    ? fieldErrors.size > 0 || otherRefusals.length > 0
+      ? needing > 0 ? `Nothing was saved. ${needing === 1 ? "One value needs" : `${needing} values need`} changing. Your edits are still on this page.`
+        : "Nothing was saved. You have changed the values that were refused; save again to check them."
       : "One or more criterion values were rejected. Your edits are still on this page. Review the criteria and try again."
     : save.error instanceof Error ? save.error.message : save.error ? "Save failed. Try again." : undefined;
-  const refusedList = refused.length > 0 && <ul className="signal-refused-fields">
+  const refusedList = needing > 0 && <ul className="signal-refused-fields">
     {refused.map((item) => <li key={`${item.key}-${item.field}`}>
       <button type="button" className="signal-text-link" onClick={() => focusRefusedField(item.key, item.field)}>
         Criterion {item.index + 1}, {SERVER_FIELD_LABEL[item.field]}</button>: {item.message}
     </li>)}
+    {otherRefusals.map((message) => <li key={message}>Other values: {message}</li>)}
   </ul>;
 
   return (
@@ -514,7 +543,7 @@ function CriteriaEditor({ id }: { id: number }) {
               showErrors={attempted !== undefined}
               onChange={(patch) => updateRow(row.key, patch)}
               onRemove={() => removeCriterion(row.key)}
-              serverErrors={editedSinceRefusal.has(row.key) ? undefined : fieldErrors.get(row.key)}
+              serverErrors={unchangedRefusals(fieldErrors.get(row.key), row.key, editedSinceRefusal)}
             />
           ))}
         </ol>
@@ -558,7 +587,7 @@ function CriteriaEditor({ id }: { id: number }) {
           </div>
         )}
         {save.isPending && <p role="status">Saving criteria…</p>}
-        {saveError && <div ref={saveErrorRef}><Alert title="Could not save these criteria" tone="error" role="alert">{saveError}{refusedList}</Alert></div>}
+        {saveError && <div ref={saveErrorRef} tabIndex={-1}><Alert title="Could not save these criteria" tone="error" role="alert">{saveError}{refusedList}</Alert></div>}
         {rubric.is_active && <Alert title="This format is active" tone="success">New checks use this version.</Alert>}
       </div>
       </FormatReviewWorkbench>

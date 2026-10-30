@@ -60,7 +60,8 @@ function validationError(items: ValidationItem[]): ApiError {
   const fieldMessages = new Map<string, string>();
   for (const item of items) {
     const path = fieldPath(item);
-    if (path && !fieldMessages.has(path)) fieldMessages.set(path, itemMessage(item));
+    const message = itemMessage(item);
+    if (path && (!fieldMessages.has(path) || (fieldMessages.get(path) === VALIDATION_FALLBACK && message !== VALIDATION_FALLBACK))) fieldMessages.set(path, message);
   }
   const readable = items.find((item) => itemMessage(item) !== VALIDATION_FALLBACK);
   return new ApiError(422, "validation_error", readable ? itemMessage(readable) : VALIDATION_FALLBACK, [...fieldMessages.keys()], fieldMessages);
