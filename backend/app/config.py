@@ -739,7 +739,10 @@ class Settings(BaseSettings):
     # field. A source is outside the window when its year is earlier than
     # the reference year minus the window. The reference year is the year on
     # the manuscript's title page, or the check date when that is not clear.
-    citation_recency_enabled: bool = True
+    # Off unless a format (or this default) turns it on: an existing format
+    # should not start showing new notes on its reports without the
+    # instructor choosing it.
+    citation_recency_enabled: bool = False
     citation_recency_window_years: int = Field(default=5, ge=1, le=100)
     citation_recency_reference_year_basis: Literal["manuscript_year", "check_date"] = (
         "manuscript_year"

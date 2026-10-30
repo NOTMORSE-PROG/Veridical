@@ -33,7 +33,16 @@ def grammar():
 
 
 def _settings(**overrides) -> Settings:
-    return Settings(_env_file=None, **overrides)
+    # The note is off by default; these tests exercise it switched on.
+    return Settings(_env_file=None, **{"citation_recency_enabled": True, **overrides})
+
+
+def test_the_note_is_off_unless_turned_on(monkeypatch):
+    monkeypatch.delenv("CITATION_RECENCY_ENABLED", raising=False)
+    defaults = Settings(_env_file=None)
+    assert defaults.citation_recency_enabled is False
+    assert resolve_policy(None, defaults).enabled is False
+    assert resolve_policy({"enabled": True}, defaults).enabled is True
 
 
 def _read(grammar, raw, year=None, status=FAILED):

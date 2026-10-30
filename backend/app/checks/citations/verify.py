@@ -572,15 +572,13 @@ async def _citation_recency(
     Runs only on a reference list whose entries are bound to the source; a
     list that could not be established is reported as unassessed rather
     than read for dates."""
-    row = (
-        await session.execute(
-            select(CheckRun.created_at, Rubric.citation_recency)
-            .outerjoin(Rubric, Rubric.id == CheckRun.rubric_id)
-            .where(CheckRun.id == check_run_id)
-        )
-    ).one_or_none()
+    stored = await session.scalar(
+        select(Rubric.citation_recency)
+        .join(CheckRun, CheckRun.rubric_id == Rubric.id)
+        .where(CheckRun.id == check_run_id)
+    )
     try:
-        policy = resolve_policy(row.citation_recency if row else None, settings)
+        policy = resolve_policy(stored, settings)
     except ValueError:
         return RecencyAssessment(unassessed_summary("format_setting_invalid"))
     if not policy.enabled:
@@ -589,8 +587,10 @@ async def _citation_recency(
         return RecencyAssessment(unassessed_summary(blocked_reason, policy))
     try:
         grammar = load_grammar(settings.citation_recency_grammar_file)
-        check_date = row.created_at if row and row.created_at else datetime.now(UTC)
-        check_year = check_year_of(check_date, settings)
+        created_at = await session.scalar(
+            select(CheckRun.created_at).where(CheckRun.id == check_run_id)
+        )
+        check_year = check_year_of(created_at or datetime.now(UTC), settings)
     except (OSError, ValueError, UnicodeError, ZoneInfoNotFoundError):
         return RecencyAssessment(unassessed_summary("recency_policy_unavailable", policy))
     return assess_recency(citations, extraction, policy, grammar, check_year)
