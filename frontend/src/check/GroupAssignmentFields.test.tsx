@@ -98,6 +98,27 @@ describe("explicit group assignment", () => {
     expect(input).toHaveValue("  My corrected team  ");
     expect(control.outlet.querySelectorAll(".signal-group-proposal__actions")).toHaveLength(1);
   });
+  it("marks a refused member name at its field and says so once, without calling it unconfirmed", async () => {
+    const control = mount();
+    control.patch.mockRejectedValue(new ApiError(422, "validation_error", "Member name is too long.", ["member_names.0"], new Map([["member_names.0", "Member name is too long."]])));
+    const intent = await screen.findByRole("radio", { name: "Review or enter group details" });
+    await waitFor(() => expect(intent).toBeEnabled()); fireEvent.click(intent);
+    fireEvent.change(screen.getByRole("textbox", { name: "Group name" }), { target: { value: "New team" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add member" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add member" }));
+    // The first row stays blank and is not sent; the refusal is for the second.
+    const member = screen.getByRole("textbox", { name: "Group member 2 name" });
+    fireEvent.change(member, { target: { value: "A very long name" } });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm assignment" }));
+    await screen.findByRole("heading", { name: "Assignment was not saved" });
+    expect(screen.getByText("Some names were not accepted. Each one is marked below. Nothing was saved.")).toBeInTheDocument();
+    expect(member).toHaveAttribute("aria-invalid", "true");
+    expect(member).toHaveAccessibleDescription("Member name is too long. Nothing was changed.");
+    expect(member).toHaveFocus();
+    expect(screen.getByRole("textbox", { name: "Group member 1 name" })).not.toHaveAttribute("aria-invalid");
+    expect(screen.queryByRole("heading", { name: "Assignment result unconfirmed" })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+  });
   it("freezes an unknown proposal result, reads current facts and returns to review without a retry or success callback", async () => {
     const control = mount();
     control.patch.mockRejectedValue(new Error("Connection lost after commit"));

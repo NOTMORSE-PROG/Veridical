@@ -82,7 +82,7 @@ describe("group assignment form lifetime and unknown results", () => {
     control.post.mockRejectedValueOnce(new ApiError(409, "saved_group_changed", "Saved details changed"));
     await waitFor(() => expect(control.result.current.scope.status).toBe("ready"));
     await act(() => control.result.current.submit(submission));
-    expect(control.result.current.state).toEqual({ kind: "rejected", message: "Saved details changed", recovery: "saved_details" });
+    expect(control.result.current.state).toEqual({ kind: "rejected", message: "Saved details changed", recovery: "saved_details", error: expect.any(ApiError) });
     expect(control.result.current.locked).toBe(false);
     await act(() => control.result.current.submit(submission));
     expect(control.post).toHaveBeenCalledTimes(1);

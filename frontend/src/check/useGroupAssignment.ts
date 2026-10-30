@@ -16,7 +16,7 @@ export type AssignmentRecovery = "saved_details" | "current_assignment";
 export type AssignmentState =
   | { kind: "idle" }
   | { kind: "saving" }
-  | { kind: "rejected"; message: string; recovery: AssignmentRecovery | null }
+  | { kind: "rejected"; message: string; recovery: AssignmentRecovery | null; error?: unknown }
   | { kind: "saved"; result: GroupAssignmentOutput }
   | { kind: "unknown"; checking: boolean; current?: ManuscriptGroup; readError?: string };
 
@@ -77,7 +77,7 @@ export function useGroupAssignment(manuscriptId: number) {
       if (!dispatched || isKnownAssignmentRejection(error)) {
         recovery.current = error instanceof ApiError && error.status === 409
           ? error.code === "saved_group_changed" ? "saved_details" : "current_assignment" : null;
-        setState({ kind: "rejected", message: error instanceof Error ? error.message : "Could not save the assignment.", recovery: recovery.current });
+        setState({ kind: "rejected", message: error instanceof Error ? error.message : "Could not save the assignment.", recovery: recovery.current, error });
       } else {
         unknown.current = true;
         setState({ kind: "unknown", checking: false });

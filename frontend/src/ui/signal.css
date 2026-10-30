@@ -1959,6 +1959,16 @@
     grid-row: 2;
   }
 
+  /* A refused name's message sits under its field, above the source note. */
+  .signal-group-proposal__member-error {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .signal-group-proposal__member-error ~ .signal-group-proposal__member-note {
+    grid-row: 3;
+  }
+
   .signal-group-proposal__actions {
     display: flex;
     flex-wrap: wrap;
