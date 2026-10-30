@@ -30,6 +30,7 @@ import { readAuditReviewOrigin } from "../routing/auditReturn";
 import { auditOwnerCurrent, useAuditLogDetail, useAuditLogPage, useAuditOwner, type AuditOwner } from "./useAudit";
 import { Button } from "../ui/Button";
 import { CHECK_KIND_SHORT_LABEL } from "../domain/checkKind";
+import { CriterionContext } from "./CriterionContext";
 
 const FILTERS: ReadonlyArray<{ label: string; value?: string; eventType?: string; eventTypePrefix?: string }> = [
   { label: "All" },
@@ -370,6 +371,7 @@ function AuditDetailModal({ id, owner, onClose, fallbackFocusRef }: {
       </div>}
       {data && <div className="signal-group-flow">
         {query.isError && <p role="status">Last loaded entry. Its current availability could not be confirmed.</p>}
+        <CriterionContext entry={data} />
         <section aria-labelledby={`audit-entry-${id}-meaning`} className="signal-audit-entry-summary signal-group-flow">
           <h3 id={`audit-entry-${id}-meaning`}>{details?.heading ?? "What this records"}</h3>
           {details ? <>

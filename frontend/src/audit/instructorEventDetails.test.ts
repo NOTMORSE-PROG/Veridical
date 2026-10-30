@@ -283,7 +283,7 @@ describe("stored instructor action presentation", () => {
 
   it.each([true, "35", 0, -1, Number.MAX_SAFE_INTEGER + 1])("rejects malformed identity %s without coercion", value => {
     expect(recordedActor({ instructor_id: value }, 1)).toBe("Instructor attribution unavailable");
-    expect(fields("escalation_resolved", { criterion_id: value })["Criterion"]).toBe("Unavailable in this entry.");
+    expect(fields("escalation_resolved", { criterion_id: value })["Recorded criterion identifier"]).toBe("Unavailable in this entry.");
   });
 
   it("attributes You only to the actual valid matching reader", () => {
