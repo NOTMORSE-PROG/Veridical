@@ -18,6 +18,7 @@ import { useFlagActionReview } from "./useFlagActionReview";
 import { FlagActionCurrentReview } from "./FlagActionCurrentReview";
 import { useFindingCompletion, useFindingCompletionOwner } from "./useFindingCompletion";
 import { useAuthOwner } from "../auth/queryOwner";
+import { fieldRefusal, formRefusal, isValidationRefusal } from "../api/fieldRefusal";
 
 const authenticatedLifetimes = new WeakMap<object, number>();
 let nextAuthenticatedLifetime = 0;
@@ -46,7 +47,9 @@ function AnnotationPanel({ flag, drafts }: { flag: FlagOut; drafts: Map<string, 
   const [saved, setSaved] = useState(false);
   const annotate = useAnnotateFlag(flag.id);
   const errorId = useId();
+  const refusalId = useId();
   const invalid = attempted && value.trim().length === 0;
+  const refusal = fieldRefusal(annotate.error, "annotation") ?? formRefusal(annotate.error, ["annotation"]);
 
   useEffect(() => {
     const draft = drafts.get(draftKey);
@@ -74,10 +77,11 @@ function AnnotationPanel({ flag, drafts }: { flag: FlagOut; drafts: Map<string, 
         <textarea
           rows={4}
           value={value}
-          aria-invalid={invalid || undefined}
-          aria-describedby={invalid ? errorId : undefined}
+          aria-invalid={invalid || Boolean(refusal) || undefined}
+          aria-describedby={invalid ? errorId : refusal ? refusalId : undefined}
           disabled={annotate.isPending}
           onChange={(event) => {
+            if (refusal) annotate.reset();
             setValue(event.target.value);
             if (event.target.value === (flag.annotation ?? "")) drafts.delete(draftKey);
             else drafts.set(draftKey, event.target.value);
@@ -89,7 +93,8 @@ function AnnotationPanel({ flag, drafts }: { flag: FlagOut; drafts: Map<string, 
       </label>
       {dirty && <p className="signal-field-hint">Unsaved note kept for this finding while you stay signed in.</p>}
       {invalid && <p id={errorId} role="alert" className="signal-field-error">Enter a note before saving.</p>}
-      {annotate.isError && <Alert title="Could not save this note" tone="error" role="alert">{annotate.error instanceof ApiError ? annotate.error.message : "Try again."}</Alert>}
+      {!invalid && refusal && <p id={refusalId} role="alert" className="signal-field-error">{refusal}</p>}
+      {annotate.isError && !isValidationRefusal(annotate.error) && <Alert title="Could not save this note" tone="error" role="alert">{annotate.error instanceof ApiError ? annotate.error.message : "Try again."}</Alert>}
       <div className="signal-evidence-actions">
         <Button variant="secondary" aria-describedby={noteHelpId} busy={annotate.isPending} onClick={save}>{annotate.isPending ? "Saving note" : "Save note"}</Button>
         {saved && !annotate.isPending && <span role="status" aria-live="polite" className="signal-save-state">Note saved.</span>}
@@ -110,6 +115,8 @@ function ConfirmFinding({ flag }: { flag: FlagOut }) {
   const confirm = useConfirmFinding(flag.id);
   const review = useFlagActionReview(flag, "confirm-finding");
   const noteId = useId();
+  const refusalId = useId();
+  const refusal = fieldRefusal(confirm.error, "note") ?? formRefusal(confirm.error, ["note"]);
   if (flag.finding_confirmed) return <div className="signal-finding-confirmed" role="status">
     <strong>Confirmed by you{flag.finding_confirmed_at ? ` on ${confirmedAtFormatter.format(new Date(flag.finding_confirmed_at))}` : ""}.</strong>
     <p>{flag.finding_confirm_note ? `Your note: ${flag.finding_confirm_note}` : "No note was added."} It still counts for readiness. You can dismiss it instead if you change your mind.</p>
@@ -118,8 +125,11 @@ function ConfirmFinding({ flag }: { flag: FlagOut }) {
     <h3>Is this a real issue?</h3>
     <p>Confirm it to mark it as checked. It keeps counting for readiness.</p>
     <label htmlFor={noteId}>Comment (optional)</label>
-    <textarea id={noteId} rows={2} value={note} disabled={confirm.isPending} onChange={event => setNote(event.target.value)} />
-    {confirm.isError && <p role="alert" className="signal-field-error">{confirm.error instanceof Error ? confirm.error.message : "The finding could not be confirmed. Try again."}</p>}
+    <textarea id={noteId} rows={2} value={note} disabled={confirm.isPending}
+      aria-invalid={Boolean(refusal) || undefined} aria-describedby={refusal ? refusalId : undefined}
+      onChange={event => { if (refusal) confirm.reset(); setNote(event.target.value); }} />
+    {refusal && <p id={refusalId} role="alert" className="signal-field-error">{refusal}</p>}
+    {confirm.isError && !isValidationRefusal(confirm.error) && <p role="alert" className="signal-field-error">{confirm.error instanceof Error ? confirm.error.message : "The finding could not be confirmed. Try again."}</p>}
     <Button variant="primary" disabled={confirm.isPending || !review.canSubmit} onClick={() => {
       if (!review.isCurrent() || !isAssessmentRevision(review.expectedRevision)) return;
       confirm.mutate({ note: note.trim() || null, expected_revision: review.expectedRevision });
@@ -135,7 +145,9 @@ function OverrideDialog({ flag, onClose, onAccepted, continuationIsCurrent, fall
   const reasonRef = useRef<HTMLTextAreaElement>(null);
   const followAction = useExplicitActionFocus(() => reasonRef.current);
   const errorId = useId();
+  const refusalId = useId();
   const invalid = attempted && reason.trim().length === 0;
+  const refusal = fieldRefusal(override.error, "reason") ?? formRefusal(override.error, ["reason"]);
   const completion = useFindingCompletion();
   const [accepted, setAccepted] = useState(false);
 
@@ -148,7 +160,9 @@ function OverrideDialog({ flag, onClose, onAccepted, continuationIsCurrent, fall
         if (review.isCurrent() && onAccepted(out)) { completion.accept(); setAccepted(true); }
         else review.freeze();
       },
-      onError: review.freeze,
+      // A refusal of the reason is definite and changes nothing: keep the
+      // review open so the instructor can correct the reason and try again.
+      onError: (error) => { if (!isValidationRefusal(error)) review.freeze(); },
     });
   }
 
@@ -172,9 +186,10 @@ function OverrideDialog({ flag, onClose, onAccepted, continuationIsCurrent, fall
             rows={4}
             value={reason}
             disabled={override.isPending}
-            aria-invalid={invalid || undefined}
-            aria-describedby={invalid ? errorId : undefined}
+            aria-invalid={invalid || Boolean(refusal) || undefined}
+            aria-describedby={invalid ? errorId : refusal ? refusalId : undefined}
             onChange={(event) => {
+              if (refusal) override.reset();
               setReason(event.target.value);
               review.reasonChanged();
               if (attempted) setAttempted(false);
@@ -182,7 +197,8 @@ function OverrideDialog({ flag, onClose, onAccepted, continuationIsCurrent, fall
           />
         </label>
         {invalid && <p id={errorId} role="alert" className="signal-field-error">Enter a reason before confirming.</p>}
-        {override.isError && <Alert title="Saving could not be confirmed" tone="error" role="alert">Your entered reason is kept. Review the current assessment before trying again.</Alert>}
+        {!invalid && refusal && <p id={refusalId} role="alert" className="signal-field-error">{refusal} Nothing was changed.</p>}
+        {override.isError && !isValidationRefusal(override.error) && <Alert title="Saving could not be confirmed" tone="error" role="alert">Your entered reason is kept. Review the current assessment before trying again.</Alert>}
       </div>
     </Dialog>
   );

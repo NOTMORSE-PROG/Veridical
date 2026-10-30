@@ -11,6 +11,7 @@ import { useConfirmCitationSource } from "./useFlag";
 import { useFlagActionReview } from "./useFlagActionReview";
 import { useExplicitActionFocus } from "../routing/useExplicitActionFocus";
 import { useFindingCompletion } from "./useFindingCompletion";
+import { fieldRefusal, formRefusal, isValidationRefusal } from "../api/fieldRefusal";
 
 export function ConfirmCitationSourceModal({ flag, onClose, onAccepted, continuationIsCurrent, fallbackFocusRef }: { flag: FlagOut; onClose: () => void; onAccepted: (flag: FlagOut) => boolean; continuationIsCurrent: () => boolean; fallbackFocusRef?: React.RefObject<HTMLHeadingElement | null> }) {
   const [reason, setReason] = useState("");
@@ -20,6 +21,8 @@ export function ConfirmCitationSourceModal({ flag, onClose, onAccepted, continua
   const reasonRef = useRef<HTMLTextAreaElement>(null);
   const followAction = useExplicitActionFocus(() => reasonRef.current);
   const errorId = useId();
+  const refusalId = useId();
+  const refusal = fieldRefusal(confirm.error, "reason") ?? formRefusal(confirm.error, ["reason"]);
   const invalid = attempted && !reason.trim();
   const completion = useFindingCompletion();
   const [accepted, setAccepted] = useState(false);
@@ -33,7 +36,8 @@ export function ConfirmCitationSourceModal({ flag, onClose, onAccepted, continua
         if (!review.isCurrent()) return;
         if (onAccepted(out)) { completion.accept(); setAccepted(true); }
         else review.freeze();
-      }, onError: review.freeze,
+      // A refusal of the reason is definite and changes nothing; the review stays open.
+      }, onError: (error) => { if (!isValidationRefusal(error)) review.freeze(); },
     });
   }
   return <Dialog title="Confirm this source exists?" initialFocusTitle fallbackFocusRef={fallbackFocusRef}
@@ -52,11 +56,12 @@ export function ConfirmCitationSourceModal({ flag, onClose, onAccepted, continua
       <FlagActionCurrentReview review={review} busy={confirm.isPending} onRebind={trigger => followAction(trigger, review.rebind)} />
       <label className="signal-evidence-field"><span>Where you verified this (required)</span>
         <textarea ref={reasonRef} rows={4} maxLength={INSTRUCTOR_NOTE_MAX_LENGTH} value={reason}
-          disabled={confirm.isPending} aria-invalid={invalid || undefined} aria-describedby={invalid ? errorId : undefined}
-          onChange={event => { setReason(event.target.value); review.reasonChanged(); setAttempted(false); }} />
+          disabled={confirm.isPending} aria-invalid={invalid || Boolean(refusal) || undefined} aria-describedby={invalid ? errorId : refusal ? refusalId : undefined}
+          onChange={event => { if (refusal) confirm.reset(); setReason(event.target.value); review.reasonChanged(); setAttempted(false); }} />
       </label>
       {invalid && <p id={errorId} role="alert" className="signal-field-error">Enter where you verified this before confirming.</p>}
-      {confirm.isError && <Alert title="Saving could not be confirmed" tone="error" role="alert">Your entered reason is kept. Review the current assessment before trying again.</Alert>}
+      {!invalid && refusal && <p id={refusalId} role="alert" className="signal-field-error">{refusal} Nothing was changed.</p>}
+      {confirm.isError && !isValidationRefusal(confirm.error) && <Alert title="Saving could not be confirmed" tone="error" role="alert">Your entered reason is kept. Review the current assessment before trying again.</Alert>}
     </div>
   </Dialog>;
 }
