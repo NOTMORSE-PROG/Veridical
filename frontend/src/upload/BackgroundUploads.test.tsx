@@ -44,7 +44,7 @@ describe("background uploads", () => {
     expect(await screen.findByText("Ready.")).toBeInTheDocument();
     // Nothing is in progress, so there is nothing to fold: only Close.
     expect(screen.queryByRole("button", { name: /^(Hide|Show)$/ })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Close uploads" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close uploads and clear 1 finished upload" }));
     expect(screen.queryByRole("complementary", { name: "Uploads in progress" })).not.toBeInTheDocument();
     window.localStorage.clear();
   });

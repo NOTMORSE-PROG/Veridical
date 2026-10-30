@@ -326,10 +326,12 @@ function UploadTray({ uploads, canRetry, onDismiss, onDismissAll, onRetry }: {
       <div className="signal-upload-tray__controls">
         {active > 0 && <Button variant="quiet" aria-expanded={!folded} aria-controls={listId} onClick={toggle}>{folded ? "Show" : "Hide"}</Button>}
         {finished.length > 0 && <Button variant="quiet" onClick={close}
-          aria-label={active > 0 ? `Clear ${finished.length} finished ${finished.length === 1 ? "upload" : "uploads"}` : "Close uploads"}>
+          aria-label={active > 0 ? `Clear ${finished.length} finished ${finished.length === 1 ? "upload" : "uploads"}` : `Close uploads and clear ${finished.length} finished ${finished.length === 1 ? "upload" : "uploads"}`}>
           {active > 0 ? "Clear finished" : <><span aria-hidden="true">{"\u2715"}</span> Close</>}</Button>}
       </div>
     </div>
+    {/* Clearing a finished upload only takes it out of this tray. */}
+    {finished.length > 0 && !folded && <p className="signal-field-hint">Finished uploads stay on the Review Desk.</p>}
     {/* Folded, the per-upload messages are not on the page, so the summary
         carries what changed. */}
     {folded && <p role="status" aria-live="polite" className="signal-upload-tray__summary">
