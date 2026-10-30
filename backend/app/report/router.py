@@ -121,8 +121,8 @@ async def get_evidence_manifest_route(
 )
 async def get_evidence_page_route(
     check_run_id: DbInt,
-    reference_id: Annotated[DbText, Path(pattern=r"^[a-f0-9]{64}$")],
-    snapshot_id: Annotated[DbText, Query(pattern=r"^[a-f0-9]{64}$")],
+    reference_id: Annotated[str, Path(pattern=r"^[a-f0-9]{64}$")],
+    snapshot_id: Annotated[str, Query(pattern=r"^[a-f0-9]{64}$")],
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> EvidencePageOut:
@@ -144,8 +144,8 @@ async def get_evidence_page_route(
 )
 async def get_evidence_location_route(
     check_run_id: DbInt,
-    reference_id: Annotated[DbText, Path(pattern=r"^[a-f0-9]{64}$")],
-    snapshot_id: Annotated[DbText, Query(pattern=r"^[a-f0-9]{64}$")],
+    reference_id: Annotated[str, Path(pattern=r"^[a-f0-9]{64}$")],
+    snapshot_id: Annotated[str, Query(pattern=r"^[a-f0-9]{64}$")],
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> EvidenceLocationOut:
@@ -159,7 +159,7 @@ async def get_evidence_location_route(
 @router.get("/check-runs/{check_run_id}/evidence/source-file")
 async def get_evidence_source_file_route(
     check_run_id: DbInt,
-    source_identity: Annotated[DbText, Query(pattern=r"^[a-f0-9]{64}$")],
+    source_identity: Annotated[str, Query(pattern=r"^[a-f0-9]{64}$")],
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> Response:
@@ -195,7 +195,7 @@ async def get_evidence_source_file_route(
 )
 async def get_evidence_source_document_route(
     check_run_id: DbInt,
-    source_identity: Annotated[DbText, Query(pattern=r"^[a-f0-9]{64}$")],
+    source_identity: Annotated[str, Query(pattern=r"^[a-f0-9]{64}$")],
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> EvidenceDocumentOut:
@@ -219,7 +219,7 @@ async def get_evidence_source_document_route(
 async def get_evidence_source_image_route(
     check_run_id: DbInt,
     image_index: Annotated[DbInt, Path(ge=0)],
-    source_identity: Annotated[DbText, Query(pattern=r"^[a-f0-9]{64}$")],
+    source_identity: Annotated[str, Query(pattern=r"^[a-f0-9]{64}$")],
     session: Annotated[AsyncSession, Depends(get_session)],
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> Response:
