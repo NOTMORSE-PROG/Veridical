@@ -274,14 +274,22 @@ def test_the_export_says_how_many_pieces_an_unassessed_image_holds():
         coverage_reason="image_content_unassessed",
         assessment_scope="available_text_and_tables",
         analysis_coverage="partial",
-        n_images_unassessed=2,
+        n_images_unassessed=4,
         image_coverage_items=[
             {"image_index": 0, "page": 120, "reason": "size_filter", "piece_count": 9100},
             {"image_index": 1, "page": 121, "reason": "size_filter"},
+            {"image_index": 2, "page": 122, "reason": "size_filter", "piece_count": 3},
+            {"image_index": 3, "page": 122, "reason": "size_filter"},
         ],
     )
     data = ReportExportData(report=report(coverage), flags=[], archive_size_n=None)
     with pymupdf.open(stream=build_report_pdf(data), filetype="pdf") as document:
         text = " ".join(page.get_text().replace("\n", " ") for page in document)
-    assert "(1 image occurrence, made of 9,100 touching pieces)" in text
+    assert "(1 image occurrence, stored in the PDF as 9,100 small touching pieces)" in text
     assert "Page 121" in text and "(1 image occurrence)." in text
+    # A plain image on the same page is not counted as a piece.
+    assert "(2 image occurrences; 1 stored in the PDF as 3 small touching pieces)" in text
+    assert (
+        "2 listed image occurrences are stored in the PDF as small touching pieces (9,103 in all)"
+        in text
+    )

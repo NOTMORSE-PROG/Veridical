@@ -20,9 +20,25 @@ export const IMAGE_COVERAGE_LABELS: Record<string, string> = {
   table_partly_parsed: "Some statistical cells in the image table could not be assessed",
 };
 
+// BUG-549: touching small PDF image pieces are combined into one image
+// before checking. Same wording as the PDF export (report/export.py).
+const formatCount = (value: number) => value.toLocaleString("en-US");
+
+export function piecesSuffix(count: number, merged: number, pieces: number) {
+  if (!merged) return "";
+  const stored = `stored in the PDF as ${formatCount(pieces)} small touching pieces`;
+  return merged === count ? `, ${stored}` : `; ${merged} ${stored}`;
+}
+
+export function mergedImagesLine(merged: number, pieces: number) {
+  return merged === 1
+    ? `1 listed image occurrence is stored in the PDF as ${formatCount(pieces)} small touching pieces, combined into one image before checking.`
+    : `${merged} listed image occurrences are stored in the PDF as small touching pieces (${formatCount(pieces)} in all), each combined into one image before checking.`;
+}
+
 export function imageCoverageItem(status: IntegrityCheckStatusOut, checkRunId: number): CoverageStatementItem {
   const partial = status.analysis_coverage === "partial";
-  const locations = new Map<string, { label: string; anchor: string | null; count: number; pieces: number }>();
+  const locations = new Map<string, { label: string; anchor: string | null; count: number; merged: number; pieces: number }>();
   let merged = 0;
   let mergedPieces = 0;
   for (const item of status.image_coverage_items ?? []) {
@@ -31,16 +47,17 @@ export function imageCoverageItem(status: IntegrityCheckStatusOut, checkRunId: n
     const anchor = page !== null ? `page ${page}` : paragraph !== null ? `paragraph ${paragraph}` : null;
     const location = page !== null ? `Page ${page}` : paragraph !== null ? `Extracted paragraph ${paragraph + 1}` : "Source location unavailable";
     const label = `${location}: ${IMAGE_COVERAGE_LABELS[item.reason] ?? "Image content unassessed"}`;
-    const pieces = Number.isSafeInteger(item.piece_count) && item.piece_count! > 1 ? item.piece_count! : 1;
-    if (pieces > 1) { merged += 1; mergedPieces += pieces; }
+    // Only merged images count pieces; a plain image is not "a piece".
+    const pieces = Number.isSafeInteger(item.piece_count) && item.piece_count! > 1 ? item.piece_count! : 0;
+    if (pieces) { merged += 1; mergedPieces += pieces; }
     const previous = locations.get(label);
-    locations.set(label, { label, anchor, count: (previous?.count ?? 0) + 1, pieces: (previous?.pieces ?? 0) + pieces });
+    locations.set(label, { label, anchor, count: (previous?.count ?? 0) + 1, merged: (previous?.merged ?? 0) + (pieces ? 1 : 0), pieces: (previous?.pieces ?? 0) + pieces });
   }
   const subIssues: string[] = [];
   if (status.n_images_unassessed) subIssues.push(`${status.n_images_unassessed} image ${status.n_images_unassessed === 1 ? "occurrence remains" : "occurrences remain"} unassessed. Occurrences are not necessarily distinct manuscript figures.`);
   // A page of touching tiles is read as one image; say so, so it never reads
   // as one small picture.
-  if (merged) subIssues.push(`${merged} of the listed image ${merged === 1 ? "occurrences is" : "occurrences are"} made of many touching pieces (${mergedPieces.toLocaleString("en-US")} pieces in all), prepared as one image each.`);
+  if (merged) subIssues.push(mergedImagesLine(merged, mergedPieces));
   if (status.n_image_occurrences_omitted) subIssues.push(`${status.n_image_occurrences_omitted} additional drawing ${status.n_image_occurrences_omitted === 1 ? "occurrence" : "occurrences"} exceeded the inventory limit.`);
   if (status.n_equations_unassessed) subIssues.push(`${status.n_equations_unassessed} ${status.n_equations_unassessed === 1 ? "equation was" : "equations were"} transcribed from images but not evaluated by statistical forensics.`);
   if (status.n_recovery_figures_unassessed || status.n_recovery_tables_unassessed) subIssues.push(`${status.n_recovery_figures_unassessed ?? 0} figure and ${status.n_recovery_tables_unassessed ?? 0} table recovery proposals remain unassessed. These are not verified image locations.`);
@@ -53,8 +70,8 @@ export function imageCoverageItem(status: IntegrityCheckStatusOut, checkRunId: n
     detailsLabel: "image assessment details",
     subIssues,
     // Same wording as the PDF export.
-    sources: [...locations.values()].map(({ label, anchor, count, pieces }) => ({
-      label: `${label} (${count} image ${count === 1 ? "occurrence" : "occurrences"}${pieces > count ? `, made of ${pieces.toLocaleString("en-US")} touching pieces` : ""})`,
+    sources: [...locations.values()].map(({ label, anchor, count, merged: mergedHere, pieces }) => ({
+      label: `${label} (${count} image ${count === 1 ? "occurrence" : "occurrences"}${piecesSuffix(count, mergedHere, pieces)})`,
       to: anchor === null ? null : `/report/${checkRunId}/document?anchor=${encodeURIComponent(anchor)}&coverage=images`,
     })),
   };
