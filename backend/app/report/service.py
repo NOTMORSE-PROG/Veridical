@@ -541,6 +541,10 @@ async def _finish_even_if_cancelled(work) -> None:
                 await asyncio.shield(task)
             except asyncio.CancelledError:
                 continue
+            except Exception:
+                # The cancellation still wins; record why the keep failed.
+                logger.warning("The figure store keep failed while cancelling", exc_info=True)
+                break
         raise
 
 

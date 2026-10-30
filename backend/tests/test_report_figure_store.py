@@ -519,3 +519,38 @@ async def test_a_cancelled_report_view_does_not_release_the_lock_mid_keep(prepar
         await view
     assert durable.objects == {}
     assert not figure_store_path(settings, manuscript.id).exists()
+
+
+async def test_cleanup_uses_the_retrying_storage_client(prepared, monkeypatch):
+    """A purge may already have happened, so the cleanup must not use the
+    short single-attempt figure-store client."""
+    settings, manuscript, _, _ = prepared
+    durable, clients = Durable(), []
+
+    def storage(settings, **kwargs):
+        clients.append(kwargs.get("figure_store", False))
+        return durable
+
+    monkeypatch.setattr(service, "get_storage", storage)
+    service.discard_figure_store(settings, manuscript.id)
+    assert clients == [False]
+
+
+async def test_a_stuck_local_file_does_not_keep_the_durable_copy(prepared, monkeypatch):
+    settings, manuscript, _, _ = prepared
+    store = figure_store_path(settings, manuscript.id)
+    key = storage_key_for(settings, str(store))
+    durable = Durable()
+    durable.objects[key] = store.read_bytes()
+    monkeypatch.setattr(service, "get_storage", lambda settings, **_: durable)
+    real_unlink = Path.unlink
+
+    def locked(self, *args, **kwargs):
+        if self == store:
+            raise PermissionError("in use")
+        return real_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", locked)
+    with pytest.raises(PermissionError):
+        service.discard_figure_store(settings, manuscript.id)
+    assert key not in durable.objects

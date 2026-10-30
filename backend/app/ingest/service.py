@@ -1295,12 +1295,15 @@ def discard_figure_store(settings: Settings, manuscript_id: int) -> None:
     storage client with its retries rather than the short figure-store bound.
     """
     path = figure_store_path(settings, manuscript_id)
-    path.unlink(missing_ok=True)
-    storage = get_storage(settings)
     try:
-        storage.delete(storage_key_for(settings, str(path)))
+        path.unlink(missing_ok=True)
     finally:
-        storage.close()
+        # The durable copy goes even if the local file could not be removed.
+        storage = get_storage(settings)
+        try:
+            storage.delete(storage_key_for(settings, str(path)))
+        finally:
+            storage.close()
 
 
 async def load_figure_source_async(
