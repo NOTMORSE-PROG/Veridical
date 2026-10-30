@@ -78,6 +78,8 @@ import { RecordedFindingSources } from "../report/RecordedEvidencePage";
 import { WORKSPACE_STEP_PARAM, workspaceStep, type ReportStep } from "../report/reviewStep";
 import { WorkspaceStepFooter, WorkspaceStepHeading, WorkspaceStepNavigation } from "./WorkspaceSteps";
 import { InWorkspaceBar, LeadingChevronIcon, WorkspaceBarContext } from "./WorkspaceBar";
+import { OriginalityCoverageNotice } from "../report/OriginalityCoverageNotice";
+import { originalityCoverageNote } from "../report/originalityCoverage";
 
 type ReviewFilter = "open" | "resolved" | "all";
 const FINDINGS_PAGE_PARAM = "findings_page";
@@ -1119,11 +1121,13 @@ export function SignalDocumentViewerPage() {
                 {!isExploring && !isDecision && !selectedFinding && <WorkspaceStepHeading step="findings" />}
                 {!isExploring && !isDecision && !selectedFinding && <div className="signal-document-module-overview">
                   <IntegrityModuleNavigation selected={selectedModule} controls="workspace-module-records" modules={reportQuery.data?.integrity_modules}
+                    stateLabels={originalityCoverageNote(reportQuery.data) ? { originality_reuse: originalityCoverageNote(reportQuery.data)!.tag } : undefined}
                     counts={new Map(["internal_agreement", "citation_integrity", "statistical_forensics", "originality_reuse"].map(kind => [kind, flags?.filter(flag => flag.check_kind === kind).length ?? 0]))}
                     onSelect={kind => updateTask(next => { next.set("module", kind); ["finding", "flag", "location", "reading", "anchor", "view", "pane", "lead_view", "lead_return", "lead_visible", FINDINGS_PAGE_PARAM].forEach(key => next.delete(key)); next.set("view", "queue"); })} />
                   <IntegrityModuleSummary kind={selectedModule} />
                   {selectedModule === "statistical_forensics" && reportQuery.data && <StatisticalCheckScope scope={reportQuery.data.statistical_check_scope} />}
                   {selectedModule === "originality_reuse" && reportQuery.data && <OriginalityScope scope={reportQuery.data.originality_scope} showAddAction />}
+                  {selectedModule === "originality_reuse" && reportQuery.data && <OriginalityCoverageNotice report={reportQuery.data} />}
                 </div>}
                 <div id="workspace-module-records">
                 {isExploring ? <ReuseExplorePanel showBack={false} flags={flags} flagsFetching={flagsQuery.isFetching} flagsError={flagsQuery.isError} flagsSucceeded={flagsQuery.isSuccess} onRetryFlags={() => flagsQuery.refetch()} onSelectFlag={selectFinding} onBack={showQueue} includeReferenceList={includeReferenceList} includeBlockQuote={includeBlockQuote} onToggleReferenceList={(value) => setToggle("ref", value)} onToggleBlockQuote={(value) => setToggle("quote", value)} excludedMatchesQuery={excludedMatchesQuery} expandedMatchId={expandedMatchId} onExpandMatch={setMatch} />

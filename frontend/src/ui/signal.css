@@ -9079,4 +9079,17 @@
   /* A text link styled as a link where a plain link would inherit body text. */
   .signal-text-link { color: var(--color-signal-link); text-decoration: underline; text-underline-offset: var(--signal-link-underline-offset); }
   .signal-text-link:hover { color: var(--color-signal-link-hover); }
+  /* BUG-553: what originality did not compare, beside its scope line. */
+  .signal-originality-coverage {
+    display: grid;
+    gap: var(--signal-space-2);
+    margin-block: var(--signal-space-3);
+    border: var(--signal-border-hairline) solid var(--color-signal-border);
+    border-inline-start: var(--signal-border-emphasis) solid var(--color-signal-warning-text);
+    border-radius: var(--signal-radius-control);
+    background: var(--color-signal-surface);
+    padding: var(--signal-space-3);
+  }
+  .signal-originality-coverage p { margin: 0; }
+  .signal-originality-coverage > .signal-button { justify-self: start; }
 }

@@ -18,14 +18,16 @@ const STATE_LABEL: Record<IntegrityModuleOut["state"], string> = {
   not_applicable: "Not applicable", not_recorded: "Execution not recorded",
 };
 
-export function IntegrityModuleNavigation({ selected, onSelect, modules, counts, controls }: {
+export function IntegrityModuleNavigation({ selected, onSelect, modules, counts, controls, stateLabels }: {
   selected: IntegrityKind; onSelect: (kind: IntegrityKind) => void;
   modules?: IntegrityModuleOut[]; counts: ReadonlyMap<string, number>; controls: string;
+  // A more exact label for a check's state, e.g. originality's "Some text not compared".
+  stateLabels?: Partial<Record<IntegrityKind, string>>;
 }) {
   return <nav className="signal-integrity-modules" aria-label="Manuscript check modules"><p className="signal-field-hint">Choose a check to review its findings and source evidence.</p><div role="group" aria-label="Integrity check modules">
     {INTEGRITY_MODULES.map(module => <Button key={module.kind} variant="secondary"
       aria-pressed={selected === module.kind} aria-controls={controls} onClick={() => onSelect(module.kind)}>
-      <span>{module.label}</span><small>{STATE_LABEL[modules?.find(saved => saved.check_kind === module.kind)?.state ?? "not_recorded"]}</small>
+      <span>{module.label}</span><small>{stateLabels?.[module.kind] ?? STATE_LABEL[modules?.find(saved => saved.check_kind === module.kind)?.state ?? "not_recorded"]}</small>
       <small>{counts.get(module.kind) ?? 0} saved records</small>
     </Button>)}
   </div></nav>;

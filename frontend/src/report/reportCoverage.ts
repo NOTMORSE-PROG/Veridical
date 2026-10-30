@@ -6,7 +6,7 @@ import { nativeMathCoverageItem } from "./nativeMathCoverage";
 import { NATIVE_MATH_HISTORY_TITLE, NATIVE_MATH_HISTORY_LIMIT } from "../domain/nativeMathHistory";
 import { CITATION_HISTORY_REPORT_LIMIT, CITATION_HISTORY_TITLE } from "../domain/citationHistory";
 import { descriptiveAssumptionLimit } from "./statisticalScopeCopy";
-import { originalityNotComparedDetail } from "./originalityCoverage";
+import { originalityCoverageNote } from "./originalityCoverage";
 
 const INTEGRITY_LABEL: Record<IntegrityCheckStatusOut["check_kind"], string> = {
   internal_agreement: "Internal agreement",
@@ -15,11 +15,38 @@ const INTEGRITY_LABEL: Record<IntegrityCheckStatusOut["check_kind"], string> = {
   originality_reuse: "Originality/reuse",
 };
 
+const COVERAGE_COPY: Record<string, string> = {
+  ai_not_configured: "AI-dependent parts of this check were not assessed because no usable AI configuration was available. Any independently completed results remain available. Unassessed comparisons or claims are not treated as passed. This is a system limit, not a finding against the manuscript.",
+  ai_key_rejected: "AI-dependent parts of this check were not assessed because the configured AI key was rejected during an AI request and no applicable alternative completed that request. Any independently completed results remain available. Unassessed comparisons or claims are not treated as passed. This is a system limit, not a finding against the manuscript.",
+  metadata_comparison_policy_unavailable: "Reference metadata comparison could not run because its comparison policy was unavailable. No lookup or claim-support assessment was made for those DOI references.",
+  reference_metadata_policy_unavailable: "Reference metadata could not be parsed because its parsing policy was unavailable. Reference lookups and claim support remain unassessed.",
+  reference_source_projection_unbound: "Reference checks could not establish complete, source-bound coverage of the reference list. Reference lookups and claim support remain unassessed.",
+  citation_metadata_comparison_unassessed: "Some reference titles could not be compared reliably because of ambiguous formatting, case or missing metadata. Those comparisons and their claim support remain unassessed.",
+  source_reading_order_unresolved: "Some pages could not be read reliably. This check was not assessed; this is not a finding against the paper.",
+  source_reading_order_partial: "Some pages could not be read in a reliable order, so this check read the rest of the paper and left those pages out. Its findings come only from the pages it read; the unread pages are not treated as passed.",
+  reference_search_identity_unconfirmed: "External search results could not be confirmed as the cited sources. These references remain unverified. A search result alone does not establish source identity or claim support.",
+  reference_metadata_insufficient: "Some references are visible in the paper, but their author, title, or date could not be read reliably. They have not been verified.",
+  reference_list_unavailable: "The reference list could not be separated reliably. This does not mean references are missing from the paper.",
+  author_year_citation_parse_unassessed: "Some citations could not be linked reliably to their references. No conclusion is made about those links.",
+  numeric_citation_style_unassessed: "Some numbered citations could not be linked reliably. Open the paper to check their source numbers.",
+  numeric_citation_scan_limit: "The numbered-citation scan reached its safety limit. Unread citations have not been assessed.",
+  claim_support_unavailable: "Source details were checked where possible, but some cited claims could not be checked against source content.",
+  statement_extraction_unassessed: "The check could not reliably identify objectives and results to compare. This does not establish that they are absent. Review the manuscript directly.",
+  statement_roles_unverified: "The check found possible objectives and results, but could not reliably establish that they describe this study. Comparison leads do not change readiness.",
+  native_math_source_incomplete: "Native Word source coverage is incomplete. The available text does not establish that objectives or results are absent.",
+  native_math_citation_incomplete: "Supported citations and reference details were checked where possible. Content affected by native Word equations was excluded, so unread content cannot establish that a reference is unused. Other citations or claims may remain unassessed.",
+  native_math_comparison_incomplete: "Some source content or selected Library candidates could not support a verified comparison. Independently supported prose leads remain available; native equations were not compared. This does not establish originality.",
+};
+
+function coverageCopyFor(reason: string): string | undefined {
+  return Object.hasOwn(COVERAGE_COPY, reason) ? COVERAGE_COPY[reason] : undefined;
+}
+
 // BUG-127/BUG-128: one shared coverage projection now serves both the
 // full report and the manuscript-first review workspace. Keeping the
 // wording and recovery destinations here prevents the two surfaces from
 // making different claims about the same incomplete check.
-function integrityCoverageItem(status: IntegrityCheckStatusOut, manuscriptId: number, checkRunId: number): CoverageStatementItem {
+function integrityCoverageItem(status: IntegrityCheckStatusOut, manuscriptId: number, checkRunId: number, scope?: ReportOut["originality_scope"]): CoverageStatementItem {
   const notation = status.check_kind === "statistical_forensics"
     && (status.statistical_notation_unassessed === true || status.coverage_reason === "statistical_notation_unassessed");
   const detail = status.analysis_coverage === "partial" ? notationCopy.partial : notationCopy.unsupported;
@@ -32,11 +59,11 @@ function integrityCoverageItem(status: IntegrityCheckStatusOut, manuscriptId: nu
       subIssues: [notationCopy.limit],
     };
   }
-  const existing = baseIntegrityCoverageItem(status, manuscriptId, checkRunId);
+  const existing = baseIntegrityCoverageItem(status, manuscriptId, checkRunId, scope);
   return notation ? { ...existing, subIssues: [...(existing.subIssues ?? []), detail, notationCopy.limit] } : existing;
 }
 
-function baseIntegrityCoverageItem(status: IntegrityCheckStatusOut, manuscriptId: number, checkRunId: number): CoverageStatementItem {
+function baseIntegrityCoverageItem(status: IntegrityCheckStatusOut, manuscriptId: number, checkRunId: number, scope?: ReportOut["originality_scope"]): CoverageStatementItem {
   const label = INTEGRITY_LABEL[status.check_kind];
   const reason = status.coverage_reason;
   const native = status.check_kind === "statistical_forensics" ? nativeMathCoverageItem(status, checkRunId) : null;
@@ -71,30 +98,13 @@ function baseIntegrityCoverageItem(status: IntegrityCheckStatusOut, manuscriptId
     };
   }
   // Deterministic originality limits: say what was not compared, no rerun.
-  const notCompared = originalityNotComparedDetail(status);
-  if (notCompared) return { key: `${status.check_kind}:${reason}`, label: `${label} · ${reason === "reference_boundary_unclear" ? "Not compared" : "Partly compared"}`, detail: notCompared };
-  const coverageCopy: Record<string, string> = {
-    ai_not_configured: "AI-dependent parts of this check were not assessed because no usable AI configuration was available. Any independently completed results remain available. Unassessed comparisons or claims are not treated as passed. This is a system limit, not a finding against the manuscript.",
-    ai_key_rejected: "AI-dependent parts of this check were not assessed because the configured AI key was rejected during an AI request and no applicable alternative completed that request. Any independently completed results remain available. Unassessed comparisons or claims are not treated as passed. This is a system limit, not a finding against the manuscript.",
-    metadata_comparison_policy_unavailable: "Reference metadata comparison could not run because its comparison policy was unavailable. No lookup or claim-support assessment was made for those DOI references.",
-    reference_metadata_policy_unavailable: "Reference metadata could not be parsed because its parsing policy was unavailable. Reference lookups and claim support remain unassessed.",
-    reference_source_projection_unbound: "Reference checks could not establish complete, source-bound coverage of the reference list. Reference lookups and claim support remain unassessed.",
-    citation_metadata_comparison_unassessed: "Some reference titles could not be compared reliably because of ambiguous formatting, case or missing metadata. Those comparisons and their claim support remain unassessed.",
-    source_reading_order_unresolved: "Some pages could not be read reliably. This check was not assessed; this is not a finding against the paper.",
-    source_reading_order_partial: "Some pages could not be read in a reliable order, so this check read the rest of the paper and left those pages out. Its findings come only from the pages it read; the unread pages are not treated as passed.",
-    reference_search_identity_unconfirmed: "External search results could not be confirmed as the cited sources. These references remain unverified. A search result alone does not establish source identity or claim support.",
-    reference_metadata_insufficient: "Some references are visible in the paper, but their author, title, or date could not be read reliably. They have not been verified.",
-    reference_list_unavailable: "The reference list could not be separated reliably. This does not mean references are missing from the paper.",
-    author_year_citation_parse_unassessed: "Some citations could not be linked reliably to their references. No conclusion is made about those links.",
-    numeric_citation_style_unassessed: "Some numbered citations could not be linked reliably. Open the paper to check their source numbers.",
-    numeric_citation_scan_limit: "The numbered-citation scan reached its safety limit. Unread citations have not been assessed.",
-    claim_support_unavailable: "Source details were checked where possible, but some cited claims could not be checked against source content.",
-    statement_extraction_unassessed: "The check could not reliably identify objectives and results to compare. This does not establish that they are absent. Review the manuscript directly.",
-    statement_roles_unverified: "The check found possible objectives and results, but could not reliably establish that they describe this study. Comparison leads do not change readiness.",
-    native_math_source_incomplete: "Native Word source coverage is incomplete. The available text does not establish that objectives or results are absent.",
-    native_math_citation_incomplete: "Supported citations and reference details were checked where possible. Content affected by native Word equations was excluded, so unread content cannot establish that a reference is unused. Other citations or claims may remain unassessed.",
-    native_math_comparison_incomplete: "Some source content or selected Library candidates could not support a verified comparison. Independently supported prose leads remain available; native equations were not compared. This does not establish originality.",
-  };
+  const note = status.check_kind === "originality_reuse" ? originalityCoverageNote({ integrity_check_status: [status], originality_scope: scope ?? null }) : null;
+  if (note) {
+    const other = note.none && reason && reason !== "reference_boundary_unclear" && reason !== "reference_membership_partial" ? coverageCopyFor(reason) : undefined;
+    return { key: `${status.check_kind}:${reason}`, label: `${label} · ${note.none ? "Not compared" : "Partly compared"}`, detail: note.sentence,
+      subIssues: [note.also, other].filter((text): text is string => Boolean(text)) };
+  }
+  const coverageCopy = COVERAGE_COPY;
   if (reason && coverageCopy[reason]) {
     const imageDetails = status.check_kind === "statistical_forensics" &&
       (status.n_images_unassessed || status.n_image_occurrences_omitted || status.n_equations_unassessed ||
@@ -168,7 +178,7 @@ export function coverageItems(report: ReportOut): CoverageStatementItem[] {
   for (const status of [...(report.integrity_check_status ?? [])].sort((a, b) => order.indexOf(a.check_kind) - order.indexOf(b.check_kind))) {
     if (descriptiveLimit && status.check_kind === "statistical_forensics" && !status.coverage_reason
       && !status.n_skipped_api_down && !status.n_skipped_quota && !status.n_skipped_parse_failure) continue;
-    items.push(integrityCoverageItem(status, report.manuscript_id, report.check_run_id));
+    items.push(integrityCoverageItem(status, report.manuscript_id, report.check_run_id, report.originality_scope));
   }
   return items;
 }
