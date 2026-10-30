@@ -119,6 +119,18 @@ describe("explicit group assignment", () => {
     expect(screen.queryByRole("heading", { name: "Assignment result unconfirmed" })).not.toBeInTheDocument();
     expect(screen.getAllByRole("alert")).toHaveLength(1);
   });
+  it("never tells the instructor to check their entry when the request itself was refused", async () => {
+    const control = mount();
+    control.patch.mockRejectedValue(new ApiError(422, "validation_error", "Some of the information sent was not accepted. Check what you entered and try again.", ["expected_group_id"], new Map([["expected_group_id", "Some of the information sent was not accepted. Check what you entered and try again."]])));
+    const intent = await screen.findByRole("radio", { name: "Review or enter group details" });
+    await waitFor(() => expect(intent).toBeEnabled()); fireEvent.click(intent);
+    fireEvent.change(screen.getByRole("textbox", { name: "Group name" }), { target: { value: "New team" } });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm assignment" }));
+    await screen.findByRole("heading", { name: "Assignment was not saved" });
+    expect(screen.getByText("The group record may have changed. Close this form, open it again and try again. Nothing was saved.")).toBeInTheDocument();
+    expect(screen.queryByText(/Check what you entered/)).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Group name" })).not.toHaveAttribute("aria-invalid");
+  });
   it("freezes an unknown proposal result, reads current facts and returns to review without a retry or success callback", async () => {
     const control = mount();
     control.patch.mockRejectedValue(new Error("Connection lost after commit"));
