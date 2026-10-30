@@ -95,9 +95,9 @@ class UnresolvedRubricIssuesError(ConflictError):
 
     code = "unresolved_rubric_issues"
 
-    def __init__(self, message: str, open_issue_ids: list[int]) -> None:
+    def __init__(self, message: str, open_issue_ids: list[int], *, revision: int) -> None:
         super().__init__(message)
-        self.details = {"open_issue_ids": open_issue_ids}
+        self.details = {"open_issue_ids": open_issue_ids, "revision": revision}
 
 
 class GoneError(VeridicalError):

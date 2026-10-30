@@ -667,12 +667,43 @@ async def test_a_grid_upload_stores_cell_provenance_and_structured_issues(
         active = RubricOut.model_validate(await activate_rubric(session, rubric.id, instructor_id))
     assert active.is_active
 
-    # Rewording it again away from the document reopens the issue.
+    # On the active version, rewording it away from the document again is
+    # refused and nothing is saved: an active format never holds an open issue.
     async with session_factory() as session:
-        await update_criteria(session, rubric.id, body("Strong evidence."), instructor_id)
+        with pytest.raises(UnresolvedRubricIssuesError) as refused:
+            await update_criteria(session, rubric.id, body("Strong evidence."), instructor_id)
+    assert refused.value.details == {"open_issue_ids": [invented.id], "revision": active.revision}
     async with session_factory() as session:
-        reopened = RubricOut.model_validate(await get_rubric(session, rubric.id, instructor_id))
-    assert next(d for d in reopened.parse_issue_details if d.id == invented.id).status == "open"
+        unchanged = RubricOut.model_validate(await get_rubric(session, rubric.id, instructor_id))
+    assert unchanged.revision == active.revision
+    assert unchanged.criteria[1].levels[1].descriptor == "Every claim is supported by data."
+    assert next(d for d in unchanged.parse_issue_details if d.id == invented.id).status == (
+        "resolved"
+    )
+
+    # Kept as written in the same save, the change goes through.
+    from app.rubric.schemas import IssueAcknowledgement
+
+    keep = IssueAcknowledgement(issue_id=invented.id, reason_code="other", note="Panel wording.")
+    async with session_factory() as session:
+        kept = RubricOut.model_validate(
+            await update_criteria(
+                session, rubric.id, body("Strong evidence.", acknowledgements=[keep]), instructor_id
+            )
+        )
+    assert kept.is_active
+    assert next(d for d in kept.parse_issue_details if d.id == invented.id).status == (
+        "acknowledged"
+    )
+
+    # Keeping a wording does not cover a different one written later.
+    async with session_factory() as session:
+        with pytest.raises(UnresolvedRubricIssuesError) as reworded:
+            await update_criteria(
+                session, rubric.id, body("Stronger evidence than before."), instructor_id
+            )
+    assert reworded.value.details["open_issue_ids"] == [invented.id]
+    assert reworded.value.details["revision"] == kept.revision
 
 
 RUBRIC_PDF = Path(__file__).resolve().parents[2] / "Rubric-for-Oral-Presentation.pdf"

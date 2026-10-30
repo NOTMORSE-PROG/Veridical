@@ -136,6 +136,7 @@ IssueCodeOut = Literal[
     "partial_cell",
     "not_one_row",
     "wrong_row",
+    "wrong_column",
     "shared_cell",
     "level_left_out",
     "other",
@@ -159,8 +160,9 @@ class IssueResolution(BaseModel):
 class ParseIssueDetail(BaseModel):
     """One parse issue (BUG-566). A level descriptor "not_in_source", that
     "joins_cells" or is only part of one ("partial_cell"); levels not on one
-    row, in order, under fitting headers ("not_one_row"); levels from a row
-    labelled for another criterion ("wrong_row"); a "shared_cell" between
+    row, in order ("not_one_row"); levels from a row labelled for another
+    criterion, or one level's cell in another row ("wrong_row"); a level under
+    another level's column ("wrong_column"); a "shared_cell" between
     criteria; a "level_left_out" of its row; or "other" (whole-draft notes,
     and text that differs between repeated copies), shown as `message`.
     `criterion_id` and `level` are null for whole-draft notes, `level` is

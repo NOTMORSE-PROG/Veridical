@@ -60,6 +60,15 @@ UNREAD_COPY_TEXT_REASON = (
     "were not read; compare the criteria with the original document"
 )
 
+# BUG-566: without a recovered table, a descriptor can be checked as the
+# document's own words but not for which row and column it came from (a
+# shifted or swapped level still reads as a passage of the flattened text).
+NO_TABLE_LEVELS_REASON = (
+    "No table structure could be read from this format, so VERIDICAL checked "
+    "each level description's wording but not which row and level it belongs "
+    "to; compare the levels with the original document"
+)
+
 # Significant words only (skip 1-3 letter function words: "the", "and",
 # "for", ...) — a coarse but dependency-free overlap signal; no NLP model
 # needed for a coverage HEURISTIC (the real judgment stays with the LLM
@@ -220,6 +229,15 @@ def run_gate(
     return GateResult(ok=not reasons, coverage_ratio=ratio, reasons=reasons)
 
 
+def _unplaced_levels_note(
+    criteria: list[ParsedCriterion], source: DecompositionSource
+) -> list[str]:
+    """A rubric graded on scales but read without any table: the instructor
+    is told what the check could not establish."""
+    levelled = sum(1 for criterion in criteria if criterion.levels)
+    return [NO_TABLE_LEVELS_REASON] if levelled >= 2 and not source.cells else []
+
+
 @dataclass
 class DecompositionOutcome:
     criteria: list[ParsedCriterion]
@@ -344,6 +362,7 @@ async def attempt_decomposition(
                 else []
             )
             issues.extend(standing)
+            issues.extend(_unplaced_levels_note(criteria, source))
             return DecompositionOutcome(
                 criteria=criteria,
                 needs_review=bool(issues),
@@ -371,7 +390,9 @@ async def attempt_decomposition(
         feedback = "; ".join(gate.reasons)
 
     best_criteria, best_issues, best_source = best if best is not None else ([], last_issues, [])
-    best_issues = list(dict.fromkeys([*best_issues, *standing]))
+    best_issues = list(
+        dict.fromkeys([*best_issues, *standing, *_unplaced_levels_note(best_criteria, source)])
+    )
     return DecompositionOutcome(
         criteria=best_criteria,
         needs_review=True,

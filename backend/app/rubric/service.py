@@ -462,8 +462,21 @@ async def update_criteria(
     recheck(rubric, list(rows), get_settings())
     instructor = await session.get(Instructor, instructor_id)
     if instructor is not None:
-        acknowledge(session, rubric, body.acknowledgements, instructor)
+        acknowledge(session, rubric, body.acknowledgements, instructor, list(rows))
+    rubric_revision = rubric.revision
+    if rubric.is_active:
+        # An active version grades every new check, so it never holds an open
+        # issue: an edit that would leave one is refused and nothing is saved.
+        # The instructor resolves or keeps it in the same save, or edits a
+        # new version instead.
+        still_open = open_issue_ids(rubric)
+        if still_open:
+            await session.rollback()
+            raise UnresolvedRubricIssuesError(
+                _ACTIVE_UNRESOLVED_MESSAGE, still_open, revision=rubric_revision
+            )
     rubric.revision += 1
+    saved_revision = rubric.revision
     blocked = open_issue_ids(rubric) if body.confirm and not rubric.is_active else []
 
     if body.confirm and not blocked:
@@ -485,14 +498,21 @@ async def update_criteria(
     await session.commit()
     if blocked:
         # The edits and acknowledgements are saved; only activation waits.
-        raise UnresolvedRubricIssuesError(_UNRESOLVED_MESSAGE, blocked)
+        # The new revision is returned so the client can save again on it
+        # without reloading (and without adopting another tab's save unseen).
+        raise UnresolvedRubricIssuesError(_UNRESOLVED_MESSAGE, blocked, revision=saved_revision)
     await session.refresh(rubric, attribute_names=["criteria"])
     return await get_rubric(session, rubric_id, instructor_id)
 
 
+_ACTIVE_UNRESOLVED_MESSAGE = (
+    "This format is active, and this change would leave items to check open. "
+    "Nothing was saved. Correct or keep each item in the same save, or make the "
+    "change in a new version."
+)
 _UNRESOLVED_MESSAGE = (
-    "Some level descriptions could not be traced to the uploaded format. Correct "
-    "or keep each one before activating this format."
+    "This format has items to check that are still open. Correct or keep each "
+    "one before activating it."
 )
 
 
@@ -505,7 +525,7 @@ async def activate_rubric(session: AsyncSession, rubric_id: int, instructor_id: 
         return rubric
     blocked = open_issue_ids(rubric)
     if blocked:
-        raise UnresolvedRubricIssuesError(_UNRESOLVED_MESSAGE, blocked)
+        raise UnresolvedRubricIssuesError(_UNRESOLVED_MESSAGE, blocked, revision=rubric.revision)
     await _activate_only(session, rubric)
     rubric.revision += 1
     await session.commit()

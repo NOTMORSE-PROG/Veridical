@@ -10,6 +10,7 @@ with the rubric at upload.
 """
 
 import copy
+import hashlib
 from datetime import UTC, datetime
 from typing import Any
 
@@ -60,6 +61,25 @@ def parsed_criterion(row: Criterion) -> ParsedCriterion:
     )
 
 
+def _wording(rows: dict[int, Criterion], criterion_id: int | None, level: int | None) -> str | None:
+    """The text an issue is about: one level's descriptor, or for a row-level
+    issue the criterion and all its descriptors. None for whole-format notes
+    or a criterion since removed."""
+    row = rows.get(criterion_id) if criterion_id is not None else None
+    if row is None:
+        return None
+    levels = row.levels or []
+    if level is not None:
+        return next(
+            (str(lv.get("descriptor", "")) for lv in levels if lv.get("level") == level), ""
+        )
+    return "\n".join([row.text, *(str(lv.get("descriptor", "")) for lv in levels)])
+
+
+def _fingerprint(wording: str | None) -> str | None:
+    return hashlib.sha256(wording.encode("utf-8")).hexdigest() if wording is not None else None
+
+
 def recheck(rubric: Rubric, rows: list[Criterion], settings: Settings) -> None:
     """Recompute every level's source and every criterion issue against the
     stored source, after an edit. The instructor's wording is kept as saved;
@@ -82,6 +102,7 @@ def recheck(rubric: Rubric, rows: list[Criterion], settings: Settings) -> None:
         (issue.code, ordered[issue.criterion].id, issue.level): issue.message for issue in issues
     }
     live = {row.id for row in ordered}
+    by_id = {row.id: row for row in ordered}
     details = copy.deepcopy(rubric.parse_issue_details or [])
     seen: set[tuple[Any, ...]] = set()
     for detail in details:
@@ -94,6 +115,12 @@ def recheck(rubric: Rubric, rows: list[Criterion], settings: Settings) -> None:
             resolution = detail.get("resolution") or {}
             if detail["status"] == "resolved" and resolution.get("kind") == "rechecked":
                 detail["status"], detail["resolution"] = "open", None  # it came back
+            elif detail["status"] == "acknowledged" and resolution.get("subject") != _fingerprint(
+                _wording(by_id, detail["criterion_id"], detail["level"])
+            ):
+                # What was kept has since been reworded: the new wording has
+                # not been reviewed, so the issue is open again.
+                detail["status"], detail["resolution"] = "open", None
             continue
         if detail["status"] != "open":
             continue
@@ -134,11 +161,14 @@ def acknowledge(
     rubric: Rubric,
     acknowledgements: list[IssueAcknowledgement],
     instructor: Instructor,
+    rows: list[Criterion],
 ) -> None:
     """Record the instructor keeping flagged wordings as written, with who,
-    when and why, in the rubric and in the audit log."""
+    when and why, in the rubric and in the audit log. The wording kept is
+    recorded too, so a later rewording reopens the issue."""
     if not acknowledgements:
         return
+    by_row = {row.id: row for row in rows}
     details = copy.deepcopy(rubric.parse_issue_details or [])
     by_id = {detail["id"]: detail for detail in details}
     for ack in acknowledgements:
@@ -147,6 +177,7 @@ def acknowledge(
             raise NotFoundError(f"No parse issue {ack.issue_id} on this format.")
         if detail["status"] != "open":
             continue
+        wording = _wording(by_row, detail["criterion_id"], detail["level"])
         detail["status"] = "acknowledged"
         detail["resolution"] = {
             "kind": "acknowledged",
@@ -155,6 +186,7 @@ def acknowledge(
             "by_instructor_id": instructor.id,
             "by_name": instructor.display_name,
             "at": _now(),
+            "subject": _fingerprint(wording),
         }
         session.add(
             AuditLog(
@@ -167,6 +199,7 @@ def acknowledge(
                     "level": detail["level"],
                     "reason_code": ack.reason_code,
                     "note": ack.note,
+                    "wording": wording,
                     "instructor_id": instructor.id,
                 },
             )

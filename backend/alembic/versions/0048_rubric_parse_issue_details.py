@@ -21,9 +21,7 @@ def upgrade():
     # issues only, and the review screen falls back to those.
     op.add_column("rubric", sa.Column("parse_issue_details", JSONB()))
     op.add_column("rubric", sa.Column("source_snapshot", JSONB()))
-    op.add_column(
-        "rubric", sa.Column("revision", sa.Integer(), server_default="0", nullable=False)
-    )
+    op.add_column("rubric", sa.Column("revision", sa.Integer(), server_default="0", nullable=False))
 
 
 def downgrade():

@@ -350,11 +350,26 @@ def test_confirm_waits_for_open_issues_but_keeps_the_save(client, tmp_path):
     route = f"/rubrics/{uploaded['id']}/criteria"
     resp = client.put(route, json={"criteria": edited, "confirm": True})
     assert resp.status_code == 409, resp.text
-    assert resp.json()["error"]["details"] == {"open_issue_ids": open_ids}
+    details = resp.json()["error"]["details"]
+    assert details["open_issue_ids"] == open_ids
     after = client.get(f"/rubrics/{uploaded['id']}").json()
     assert after["is_active"] is False
     assert {c["weight"] for c in after["criteria"]} == {after["criteria"][0]["weight"]}
     assert after["revision"] == uploaded["revision"] + 1
+    # The refusal carries the saved revision, so the next save can be checked
+    # against it without reloading.
+    assert details["revision"] == after["revision"]
+    again = client.put(
+        route,
+        json={
+            "criteria": after["criteria"],
+            "confirm": True,
+            "acknowledgements": _acks(after),
+            "expected_revision": details["revision"],
+        },
+    )
+    assert again.status_code == 200, again.text
+    assert again.json()["is_active"] is True
 
 
 def test_keeping_a_flagged_wording_records_who_when_and_why(client, tmp_path):

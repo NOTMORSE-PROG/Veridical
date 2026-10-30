@@ -291,10 +291,10 @@ def test_the_production_shift_is_reported_not_stored_as_parsed():
                 lv[1].update(descriptor=GRID[1][3]),
                 lv[2].update(descriptor=GRID[1][2]),
             ),
-            "one row of the table",
+            "sits under the column",
         ),
         # A level taken from the next row.
-        (lambda lv: lv[0].update(descriptor=GRID[2][1]), "one row of the table"),
+        (lambda lv: lv[0].update(descriptor=GRID[2][1]), "cell of the table row"),
     ],
 )
 def test_each_way_a_descriptor_can_leave_its_cell_is_named(mutate, expected):
@@ -451,7 +451,7 @@ def test_one_row_with_its_levels_reversed_is_named():
     for level, cell in zip(levels, reversed([c for c in GRID[2][1:] if c][:4]), strict=True):
         level["descriptor"] = cell
     codes = _codes(_criteria(response), _grid_source())
-    assert ("not_one_row", 1, None) in codes
+    assert [c for c in codes if c[1] == 1] == [("wrong_column", 1, k) for k in range(1, 5)]
 
 
 def test_a_level_under_a_header_with_other_points_is_named():
@@ -464,7 +464,7 @@ def test_a_level_under_a_header_with_other_points_is_named():
         ):
             level["descriptor"] = cell
     codes = _codes(_criteria(response), _grid_source())
-    assert {code for code, _, _ in codes} == {"not_one_row"}
+    assert {code for code, _, _ in codes} == {"wrong_column"}
     assert len(codes) == 12  # 3 rows x 4 levels each under another header
 
 
@@ -484,7 +484,7 @@ def test_a_level_under_a_header_with_another_name_is_named():
     swapped = response["criteria"][0]["levels"]
     swapped[0]["name"], swapped[2]["name"] = swapped[2]["name"], swapped[0]["name"]
     codes = _codes(_criteria(response), _source(rows))
-    assert ("not_one_row", 0, 1) in codes and ("not_one_row", 0, 3) in codes
+    assert ("wrong_column", 0, 1) in codes and ("wrong_column", 0, 3) in codes
 
 
 def test_swapping_two_similarly_named_rows_is_named():
@@ -533,6 +533,62 @@ def test_a_level_column_dropped_from_every_row_is_named():
             level["level"] = i
     codes = _codes(_criteria(response), _grid_source())
     assert [code for code, _, _ in codes].count("level_left_out") == 3
+
+
+def test_the_top_level_column_dropped_from_every_row_is_named():
+    """An edge column is a level column when its header carries a score."""
+    response = _response(GRID)
+    for criterion in response["criteria"]:
+        del criterion["levels"][3]
+    codes = _codes(_criteria(response), _grid_source())
+    assert [code for code, _, _ in codes].count("level_left_out") == 3
+
+
+def _assert_no_orphan_levels(criteria, issues):
+    """Every level that is not traced, or traced to the wrong place, carries
+    an issue of its own; every traced level keeps its cell."""
+    flagged = {(i.criterion, i.level) for i in issues}
+    for index, criterion in enumerate(criteria):
+        for level in criterion.levels or []:
+            if level.source.match == "unmatched":
+                assert (index, level.level) in flagged, (criterion.text, level.level)
+            elif level.source.table is not None:
+                assert level.source.page is not None and level.source.cell_text
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda c: _shifted_levels(c[0], GRID, "The thesis is clearly stated."),
+        lambda c: c[0]["levels"][1].update(descriptor=GRID[1][3]),
+        lambda c: c[0]["levels"][0].update(descriptor=GRID[2][1]),
+        lambda c: [
+            lv.update(descriptor=cell)
+            for lv, cell in zip(
+                c[1]["levels"], [GRID[2][5], GRID[2][3], GRID[2][2], GRID[2][1]], strict=True
+            )
+        ],
+    ],
+)
+def test_no_level_is_left_unmatched_or_misplaced_without_its_own_issue(mutate):
+    response = _response(GRID)
+    mutate(response["criteria"])
+    criteria, issues = verify_against_source(_criteria(response), _grid_source(), SETTINGS)
+    assert issues
+    _assert_no_orphan_levels(criteria, issues)
+    misplaced = {(i.criterion, i.level) for i in issues if i.code in {"wrong_row", "wrong_column"}}
+    for index, criterion in enumerate(criteria):
+        for level, row in zip(criterion.levels, [GRID[index + 1]] * 4, strict=True):
+            cells = [c for c in row[1:] if c][:4]
+            if level.source.match == "exact" and level.descriptor != cells[level.level - 1]:
+                assert (index, level.level) in misplaced, (index, level.level)
+
+
+def _shifted_levels(criterion, rows, invented):
+    first = criterion["levels"]
+    first[0]["descriptor"] = f"{rows[1][1]} {rows[1][2]} {rows[2][1].split('. ')[0]}."
+    first[1]["descriptor"] = rows[1][3]
+    first[2]["descriptor"] = invented
 
 
 def test_a_merged_span_drafted_as_one_level_is_not_a_left_out_level():
@@ -693,6 +749,39 @@ async def test_the_best_failed_draft_keeps_the_rows_rather_than_dropping_them():
     assert len(outcome.criteria) == 3
 
 
+async def test_a_scaled_rubric_read_without_any_table_says_what_was_not_checked():
+    """Flattened text can prove a descriptor's wording, not its row or level."""
+    lines = [
+        "Thesis. Weak: the thesis is vague. Strong: the thesis is sharp.",
+        "Method. Weak: the method is unjustified. Strong: the method is justified.",
+    ]
+    blocks = [_block(x) for x in lines]
+
+    def criterion(text: str, weak: str, strong: str) -> dict:
+        return {
+            "text": text,
+            "type": "semantic",
+            "weight": 1,
+            "levels": [
+                {"level": 1, "name": "Weak", "descriptor": weak, "points": 1},
+                {"level": 2, "name": "Strong", "descriptor": strong, "points": 2},
+            ],
+        }
+
+    response = {
+        "criteria": [
+            criterion("Thesis", "the thesis is vague.", "the thesis is sharp."),
+            criterion("Method", "the method is unjustified.", "the method is justified."),
+        ]
+    }
+    outcome = await attempt_decomposition(
+        _SpySession(), 1, blocks, "\n".join(lines), ScriptedLLM([response]), SETTINGS
+    )
+    assert outcome.attempts == 1 and outcome.needs_review
+    assert [d["code"] for d in outcome.issue_details] == ["other"]
+    assert "No table structure" in outcome.issues[0]
+
+
 async def test_issue_details_name_the_criterion_and_level():
     table, blocks = _pdf_grid(GRID)
     source = build_decomposition_source(_extraction([table], blocks), SETTINGS)
@@ -832,10 +921,33 @@ def test_the_real_rubric_with_one_row_reversed_or_two_rows_swapped_is_not_parsed
     purpose = response["criteria"][1]
     for level, cell in zip(purpose["levels"], reversed(rows[2][1:]), strict=True):
         level["descriptor"] = cell
-    assert ("not_one_row", 1, None) in _codes(_criteria(response), source)
+    assert ("wrong_column", 1, 1) in _codes(_criteria(response), source)
 
     response = _response(rows)
     use, quality = response["criteria"][6], response["criteria"][7]
     use["text"], quality["text"] = quality["text"], use["text"]
     codes = _codes(_criteria(response), source)
     assert ("wrong_row", 6, None) in codes and ("wrong_row", 7, None) in codes
+
+
+@rubric_pdf_only
+def test_the_production_purpose_row_keeps_the_cells_it_did_match():
+    """Production stored Purpose as: Beginner+Content's first sentence,
+    the real Proficient cell as level 2, an invented level 3, the real
+    Exemplary. The traced cells keep their page and place; the misplaced one
+    and the untraced ones each carry their own issue."""
+    source = _real_source()
+    rows = _real_rows(source)
+    response = _response(rows)
+    purpose = response["criteria"][1]["levels"]
+    purpose[0]["descriptor"] = f"{rows[2][1]} {rows[3][1].split('. ')[0]}."
+    purpose[1]["descriptor"] = rows[2][3]
+    purpose[2]["descriptor"] = "The paper's purpose is clearly stated."
+    criteria, issues = verify_against_source(_criteria(response), source, SETTINGS)
+    _assert_no_orphan_levels(criteria, issues)
+    levels = criteria[1].levels
+    assert [lv.source.match for lv in levels] == ["unmatched", "exact", "unmatched", "exact"]
+    assert levels[1].source.page == 1 and levels[1].source.cell_text == rows[2][3]
+    codes = {(i.code, i.level) for i in issues if i.criterion == 1}
+    # The invented level 3 is the start of the Proficient cell, cut short.
+    assert codes == {("joins_cells", 1), ("wrong_column", 2), ("partial_cell", 3)}

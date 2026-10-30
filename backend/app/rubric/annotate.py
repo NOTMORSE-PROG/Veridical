@@ -10,6 +10,7 @@ without touching a criterion or a level and without calling the model.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -58,11 +59,19 @@ async def annotate_rubric(
             )
         ).all()
     )
+    recorded = Path(rubric.source_file) if rubric.source_file else None
+    was_local = recorded is not None and recorded.is_file()
     path = _source_path(
         RubricSource(rubric.id, rubric.rubric_family_id, rubric.version, rubric.source_file),
         settings,
     )
-    extraction = select_extractor(detect_format(path, settings))(str(path), settings)
+    try:
+        extraction = select_extractor(detect_format(path, settings))(str(path), settings)
+    finally:
+        if not was_local:
+            # A copy fetched from storage for this run carries the format's
+            # filled-in values (names); it is not left on the operator's disk.
+            path.unlink(missing_ok=True)
     source = build_decomposition_source(extraction, settings)
     ordered = sorted(rubric.criteria, key=lambda row: row.position)
     _, found = verify_against_source([parsed_criterion(row) for row in ordered], source, settings)

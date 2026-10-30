@@ -40,16 +40,19 @@ from app.config import Settings
 from app.rubric.schemas import LevelSource, ParsedCriterion, ParsedLevel
 from app.rubric.source import DecompositionSource, GridCell
 
-# The review screen's vocabulary. "not_one_row": levels not on one row, not
-# in the row's order, or under headers that do not fit them. "wrong_row": the
-# levels' row is labelled for another criterion. "other": text that differs
-# between repeated copies (and, in validate, every whole-draft note).
+# The review screen's vocabulary. "not_one_row": the levels as a whole are
+# not one row in order (no single level can be blamed). "wrong_row": the
+# levels' row is labelled for another criterion, or (with a level) that
+# level's cell is in another criterion's row. "wrong_column": a level's cell is
+# in the right row but under another level's column. "other": text that
+# differs between repeated copies (and, in validate, every whole-draft note).
 IssueCode = Literal[
     "not_in_source",
     "partial_cell",
     "joins_cells",
     "not_one_row",
     "wrong_row",
+    "wrong_column",
     "shared_cell",
     "level_left_out",
     "other",
@@ -107,10 +110,16 @@ class _Passages:
         self.can_start: list[bool] = []
         self.can_end: list[bool] = []
         lines_of_text = text.split("\n")
+        # The next non-blank line after each line, found in one backward pass.
+        next_lines = [""] * len(lines_of_text)
+        upcoming = ""
+        for index in range(len(lines_of_text) - 1, -1, -1):
+            next_lines[index] = upcoming
+            if lines_of_text[index].strip():
+                upcoming = lines_of_text[index].strip()
         for line_index, line in enumerate(lines_of_text):
             matches = list(_TOKEN.finditer(line))
-            following = lines_of_text[line_index + 1 :]
-            next_line = next((n.strip() for n in following if n.strip()), "")
+            next_line = next_lines[line_index]
             line_ends = not next_line or not next_line[0].islower()
             for i, match in enumerate(matches):
                 before = line[matches[i - 1].end() : match.start()] if i else ""
@@ -335,6 +344,10 @@ def verify_against_source(
     check = _Check(settings)
     verified: list[ParsedCriterion] = list(criteria)
     pending: list[tuple[int, list[tuple[str, str, list[GridCell]]]]] = []
+    # Criteria whose levels could not be placed as one row: each level that is
+    # still exactly one cell keeps that cell as its source, and is checked on
+    # its own once the table's usual level columns are known.
+    strays: list[tuple[int, list[list[GridCell] | None], bool]] = []
 
     for index, criterion in enumerate(criteria):
         if not criterion.levels:
@@ -363,6 +376,7 @@ def verify_against_source(
             )
         verified[index] = _with_sources(criterion, None)
         if failed:
+            strays.append((index, _level_cells(criterion, corpus), True))
             continue
         if candidates and passages:
             check.add(
@@ -385,13 +399,7 @@ def verify_against_source(
         else:
             options = _orderings(candidates)
             if not options:
-                check.add(
-                    "not_one_row",
-                    index,
-                    None,
-                    f"'{label}': its levels do not come from one row of the table, in order; "
-                    "compare them with the original document",
-                )
+                strays.append((index, _level_cells(criterion, corpus), False))
             else:
                 pending.append((index, options))
 
@@ -408,8 +416,95 @@ def verify_against_source(
                 ]
             }
         )
-    _row_checks(placed, grid, check, limit)
+    typical = _row_checks(placed, grid, check, limit)
+    for index, cells, failed in strays:
+        verified[index] = _place_strays(
+            index, verified[index], cells, failed, grid, typical, check, limit
+        )
     return verified, check.issues
+
+
+def _level_cells(criterion: ParsedCriterion, corpus: _Corpus) -> list[list[GridCell] | None]:
+    return [
+        corpus.cells_by_form.get(match_form(level.descriptor)) for level in criterion.levels or []
+    ]
+
+
+def _place_strays(
+    index: int,
+    criterion: ParsedCriterion,
+    cells: list[list[GridCell] | None],
+    failed: bool,
+    grid: _Grid,
+    typical: dict[tuple[int, str], dict[int, tuple[int, ...]]],
+    check: _Check,
+    limit: int,
+) -> ParsedCriterion:
+    """Give every level that is exactly one cell that cell as its source, and
+    raise an issue for each such level that is not where its level belongs:
+    in another row ("wrong_row") or under another level's column
+    ("wrong_column"). Its row is the one most of its cells share, the one its
+    text names on a tie."""
+    found = [options for options in cells if options]
+    if not found:
+        return criterion
+    label = _excerpt(criterion.text, limit)
+    lines: dict[tuple[int, str, int], int] = {}
+    for options in found:
+        for key in {(c.table, axis, getattr(c, axis)) for c in options for axis in ("row", "col")}:
+            lines[key] = lines.get(key, 0) + 1
+
+    def rank(key: tuple[int, str, int]) -> tuple:
+        table, axis, line = key
+        steps = {getattr(c, "col" if axis == "row" else "row") for o in found for c in o}
+        fit = grid.fit(criterion.text, grid.label(table, axis, line, steps))
+        return (lines[key], axis == "row", fit)
+
+    table, axis, line = max(lines, key=rank)
+    step_name = "col" if axis == "row" else "row"
+    expected = typical.get((table, axis), {}).get(len(criterion.levels or []))
+    used = {getattr(c, step_name) for o in found for c in o if getattr(c, axis) == line}
+    level_steps = set(expected) if expected else used
+    header = min(grid.lines(table, axis))
+    levels = list(criterion.levels or [])
+    positional = 0
+    for position, (level, options) in enumerate(zip(levels, cells, strict=True)):
+        if not options:
+            continue
+        on_line = [c for c in options if c.table == table and getattr(c, axis) == line]
+        cell = on_line[0] if on_line else options[0]
+        cell_line = getattr(cell, axis if cell.table == table else "row")
+        row_label = grid.label(cell.table, axis, cell_line, level_steps)
+        heading = grid.at(cell.table, axis, header, getattr(cell, step_name)) or None
+        levels[position] = _exact(level, cell, row_label, heading)
+        if not on_line:
+            positional += 1
+            check.add(
+                "wrong_row",
+                index,
+                level.level,
+                f"'{label}' level '{level.name}': this text is a cell of the table row "
+                f"'{_excerpt(row_label, limit)}'; compare it with the original document",
+            )
+        elif expected and getattr(cell, step_name) != expected[position]:
+            positional += 1
+            check.add(
+                "wrong_column",
+                index,
+                level.level,
+                f"'{label}' level '{level.name}': in the document this text sits under "
+                f"the column '{_excerpt(heading or '', limit)}'; compare it with the "
+                "original document",
+            )
+    if not failed and not positional:
+        check.add(
+            "not_one_row",
+            index,
+            None,
+            f"'{label}': its levels do not come from one row of the table, in order; "
+            "compare them with the original document",
+        )
+    return criterion.model_copy(update={"levels": levels})
 
 
 def _with_sources(criterion: ParsedCriterion, match: Literal["exact"] | None) -> ParsedCriterion:
@@ -456,7 +551,7 @@ def _context(placed: list[_Placed], grid: _Grid) -> dict[_Placed, tuple[str, lis
     context: dict[_Placed, tuple[str, list[str | None]]] = {}
     for (table, axis), items in groups.items():
         used = {s for item in items for s in item.steps}
-        level_steps = set(range(min(used), max(used) + 1))
+        level_steps = _scored_steps(items, grid, set(range(min(used), max(used) + 1)))
         header = min(grid.lines(table, axis))
         has_header = all(item.line != header for item in items)
         for item in items:
@@ -515,15 +610,21 @@ def _assign(
     return placed
 
 
-def _row_checks(placed: list[_Placed], grid: _Grid, check: _Check, limit: int) -> None:
+def _row_checks(
+    placed: list[_Placed], grid: _Grid, check: _Check, limit: int
+) -> dict[tuple[int, str], dict[int, tuple[int, ...]]]:
+    """The checks on placed criteria. Returns, per table and direction, the
+    level columns most rows of each length use, for judging stray levels."""
+    typical: dict[tuple[int, str], dict[int, tuple[int, ...]]] = {}
     by_table: dict[tuple[int, str], list[_Placed]] = {}
     for item in placed:
         by_table.setdefault((item.table, item.axis), []).append(item)
     for (table, axis), items in by_table.items():
         used = {s for item in items for s in item.steps}
-        level_steps = set(range(min(used), max(used) + 1))
+        level_steps = _scored_steps(items, grid, set(range(min(used), max(used) + 1)))
         legends = _legend_lines(items, grid, level_steps)
-        _direction_checks(items, grid, check, limit, level_steps)
+        typical[(table, axis)] = _usual_steps(items)
+        _direction_checks(items, grid, check, limit, level_steps, typical[(table, axis)])
         for item in items:
             label = _excerpt(item.criterion.text, limit)
             own = set(item.steps)
@@ -554,6 +655,60 @@ def _row_checks(placed: list[_Placed], grid: _Grid, check: _Check, limit: int) -
                 continue
             _label_check(item, items, grid, check, limit, level_steps)
         _shared_cells(items, legends, check, limit)
+    return typical
+
+
+def _scored_steps(items: list[_Placed], grid: _Grid, steps: set[int]) -> set[int]:
+    """The table's level columns: those its rows' levels span, extended to a
+    neighbouring column whose header continues the scale's numbering (a top
+    level every row left out is still a level column, "EXEMPLARY 4" after
+    1-3). A neighbour headed "Score" or "Weight 20%" does not continue it."""
+    table, axis = items[0].table, items[0].axis
+    header = min(grid.lines(table, axis))
+    if any(item.line == header for item in items):
+        return steps
+
+    def number(step: int) -> float | None:
+        found = _NUMBER.findall(grid.at(table, axis, header, step))
+        return float(found[0]) if len(found) == 1 else None
+
+    ordered = sorted(steps)
+    numbers = [number(s) for s in ordered if grid.at(table, axis, header, s)]
+    if len(numbers) < 2 or None in numbers:
+        return steps
+    gaps = {b - a for a, b in zip(numbers, numbers[1:], strict=False)}
+    if len(gaps) != 1:
+        return steps
+    gap = gaps.pop()
+    extended = set(steps)
+    all_steps = grid.steps(table, axis)
+    for direction, edge, value in ((1, ordered[-1], numbers[-1]), (-1, ordered[0], numbers[0])):
+        step = edge + direction
+        while step in all_steps:
+            heading = grid.at(table, axis, header, step)
+            if not heading:
+                step += direction  # an empty spacer column
+                continue
+            if number(step) != value + direction * gap:
+                break
+            extended.add(step)
+            value += direction * gap
+            step += direction
+    return extended
+
+
+def _usual_steps(items: list[_Placed]) -> dict[int, tuple[int, ...]]:
+    """For each number of levels, the columns (in level order) most rows with
+    that many levels use, counting only rows that run the majority way."""
+    descending = sum(1 for item in items if item.descending) * 2 > len(items)
+    counts: dict[int, dict[tuple[int, ...], int]] = {}
+    for item in items:
+        if item.descending != descending:
+            continue
+        steps = tuple(item.steps)
+        by_steps = counts.setdefault(len(steps), {})
+        by_steps[steps] = by_steps.get(steps, 0) + 1
+    return {n: max(c, key=c.get) for n, c in counts.items()}
 
 
 def _legend_lines(items: list[_Placed], grid: _Grid, level_steps: set[int]) -> set[int]:
@@ -573,16 +728,46 @@ def _legend_lines(items: list[_Placed], grid: _Grid, level_steps: set[int]) -> s
 
 
 def _direction_checks(
-    items: list[_Placed], grid: _Grid, check: _Check, limit: int, level_steps: set[int]
+    items: list[_Placed],
+    grid: _Grid,
+    check: _Check,
+    limit: int,
+    level_steps: set[int],
+    usual: dict[int, tuple[int, ...]],
 ) -> None:
     """Rows of one table run the same way, and each level sits under a header
-    that fits its points and name."""
+    that fits its points and name. A level in the wrong column is named on its
+    own ("wrong_column"); a row reversed as a whole with no column to blame
+    is named as a row ("not_one_row")."""
+    table, axis = items[0].table, items[0].axis
+    lines = grid.lines(table, axis)
+    header_line = min(lines)
+    has_header = all(item.line != header_line for item in items)
     ascending = sum(1 for item in items if not item.descending)
     descending = len(items) - ascending
     if ascending != descending:
         majority_descending = descending > ascending
         for item in items:
-            if item.descending != majority_descending:
+            if item.descending == majority_descending:
+                continue
+            expected = usual.get(len(item.steps))
+            blamed = 0
+            for level, step, want in zip(
+                item.criterion.levels or [], item.steps, expected or (), strict=False
+            ):
+                if step == want:
+                    continue
+                blamed += 1
+                heading = grid.at(table, axis, header_line, step) if has_header else ""
+                check.add(
+                    "wrong_column",
+                    item.index,
+                    level.level,
+                    f"'{_excerpt(item.criterion.text, limit)}' level '{level.name}': in the "
+                    f"document this text sits under the column '{_excerpt(heading, limit)}'; "
+                    "compare it with the original document",
+                )
+            if not blamed:
                 check.add(
                     "not_one_row",
                     item.index,
@@ -591,10 +776,7 @@ def _direction_checks(
                     "opposite order to the other rows of the table; compare them with the "
                     "original document",
                 )
-    table, axis = items[0].table, items[0].axis
-    lines = grid.lines(table, axis)
-    header_line = min(lines)
-    if any(item.line == header_line for item in items):
+    if not has_header:
         return
     headers = {s: grid.at(table, axis, header_line, s) for s in level_steps}
     similarity = check.settings.rubric_level_header_min_similarity
@@ -620,12 +802,12 @@ def _direction_checks(
                 )
             if misplaced:
                 check.add(
-                    "not_one_row",
+                    "wrong_column",
                     item.index,
                     level.level,
-                    f"'{_excerpt(item.criterion.text, limit)}' level '{level.name}' sits "
-                    f"under the column '{_excerpt(header, limit)}'; compare it with the "
-                    "original document",
+                    f"'{_excerpt(item.criterion.text, limit)}' level '{level.name}': in the "
+                    f"document this text sits under the column '{_excerpt(header, limit)}'; "
+                    "compare it with the original document",
                 )
 
 
