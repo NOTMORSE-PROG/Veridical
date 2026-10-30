@@ -45,6 +45,24 @@ function importance(weight: number, average: number): "Low" | "Medium" | "High" 
   return "Medium";
 }
 
+// A refused save names the field it refused ("criteria.2.text"). Each such
+// message is shown under that criterion's input, keyed by the row that was
+// sent at that position.
+type ServerField = "text" | "evidence" | "levels";
+type ServerFieldErrors = Map<string, Partial<Record<ServerField, string>>>;
+
+function serverFieldErrors(error: unknown, submittedKeys: readonly string[]): ServerFieldErrors {
+  const out: ServerFieldErrors = new Map();
+  if (!(error instanceof ApiError) || error.code !== "validation_error") return out;
+  for (const field of error.fields) {
+    const match = /^criteria\.(\d+)\.(text|evidence|levels)\b/.exec(field);
+    const key = match ? submittedKeys[Number(match[1])] : undefined;
+    if (!match || !key) continue;
+    out.set(key, { ...out.get(key), [match[2] as ServerField]: error.message });
+  }
+  return out;
+}
+
 function toEdits(rows: CriterionRow[]): CriterionEdit[] {
   return rows.map((row) => ({
     id: row.id,
@@ -85,6 +103,7 @@ function CriterionCard({
   showErrors,
   onChange,
   onRemove,
+  serverErrors,
 }: {
   row: CriterionRow;
   index: number;
@@ -93,6 +112,7 @@ function CriterionCard({
   showErrors: boolean;
   onChange: (patch: Partial<CriterionRow>) => void;
   onRemove: () => void;
+  serverErrors?: Partial<Record<ServerField, string>>;
 }) {
   const textError = showErrors && row.text.trim() === "";
   const weightError = showErrors && invalidWeight(row.weight);
@@ -130,11 +150,12 @@ function CriterionCard({
             value={row.text}
             disabled={readOnly}
             aria-label={`Criterion text, criterion ${index + 1}`}
-            aria-invalid={textError || undefined}
-            aria-describedby={textError ? `criterion-text-error-${row.key}` : undefined}
+            aria-invalid={textError || Boolean(serverErrors?.text) || undefined}
+            aria-describedby={textError ? `criterion-text-error-${row.key}` : serverErrors?.text ? `criterion-text-server-${row.key}` : undefined}
             onChange={(event) => onChange({ text: event.target.value })}
           />
           {textError && <small id={`criterion-text-error-${row.key}`} className="signal-field-error">Enter this criterion's text.</small>}
+          {!textError && serverErrors?.text && <small id={`criterion-text-server-${row.key}`} className="signal-field-error">{serverErrors.text}</small>}
         </label>
         <div className="signal-criterion-card__fields">
           <label className="signal-criterion-field">
@@ -158,8 +179,11 @@ function CriterionCard({
               value={row.evidence}
               disabled={readOnly}
               aria-label={`Evidence expected, criterion ${index + 1}`}
+              aria-invalid={Boolean(serverErrors?.evidence) || undefined}
+              aria-describedby={serverErrors?.evidence ? `criterion-evidence-server-${row.key}` : undefined}
               onChange={(event) => onChange({ evidence: event.target.value })}
             />
+            {serverErrors?.evidence && <small id={`criterion-evidence-server-${row.key}`} className="signal-field-error">{serverErrors.evidence}</small>}
           </label>
           <label className="signal-criterion-field signal-criterion-field--weight">
             <span>Relative weight</span>
@@ -184,11 +208,12 @@ function CriterionCard({
           </label>
         </div>
         {row.levels && row.levels.length > 0 && (
-          <details className="signal-levels">
+          <details className="signal-levels" open={Boolean(serverErrors?.levels) || undefined}>
             <summary>Levelled criterion · {row.levels.length} levels</summary>
             <ol>{row.levels.map((level) => <li key={level.level}><strong>{level.name}</strong><span>{level.descriptor}</span></li>)}</ol>
           </details>
         )}
+        {serverErrors?.levels && <small className="signal-field-error" role="alert">Levels: {serverErrors.levels}</small>}
       </div>
     </li>
   );
@@ -203,6 +228,8 @@ function CriteriaEditor({ id }: { id: number }) {
   const { data: rubric, isPending, isError, error, refetch } = useRubric(id);
   const [uploadOpen, setUploadOpen] = useState(false);
   const save = useSaveCriteria(id);
+  const submittedKeys = useRef<string[]>([]);
+  const [editedSinceRefusal, setEditedSinceRefusal] = useState<ReadonlySet<string>>(() => new Set());
   const [rows, setRows] = useState<CriterionRow[]>();
   const [savedRows, setSavedRows] = useState<CriterionRow[]>();
   const [attempted, setAttempted] = useState<"save" | "confirm">();
@@ -312,6 +339,8 @@ function CriteriaEditor({ id }: { id: number }) {
 
   function updateRow(key: string, patch: Partial<CriterionRow>) {
     setRows((current) => current?.map((row) => row.key === key ? { ...row, ...patch } : row));
+    // Editing a criterion the server refused clears that criterion's message.
+    setEditedSinceRefusal((current) => current.has(key) ? current : new Set([...current, key]));
   }
 
   function addCriterion() {
@@ -360,6 +389,8 @@ function CriteriaEditor({ id }: { id: number }) {
       return;
     }
     const submitted = currentRows;
+    submittedKeys.current = submitted.map((row) => row.key);
+    setEditedSinceRefusal(new Set());
     save.mutate(
       { criteria: toEdits(submitted), confirm },
       {
@@ -389,6 +420,8 @@ function CriteriaEditor({ id }: { id: number }) {
     }
     resolvingBlocker.current = true;
     const submitted = currentRows;
+    submittedKeys.current = submitted.map((row) => row.key);
+    setEditedSinceRefusal(new Set());
     save.mutate(
       { criteria: toEdits(submitted), confirm: false },
       {
@@ -398,8 +431,12 @@ function CriteriaEditor({ id }: { id: number }) {
     );
   }
 
+  const fieldErrors = serverFieldErrors(save.error, submittedKeys.current);
+  const firstRefused = currentRows.findIndex((row) => fieldErrors.has(row.key));
   const saveError = save.error instanceof ApiError && save.error.status === 422
-    ? "One or more criterion values were rejected. Your edits are still on this page. Review the criteria and try again."
+    ? firstRefused >= 0
+      ? `Criterion ${firstRefused + 1}: ${save.error.message} Your edits are still on this page.`
+      : "One or more criterion values were rejected. Your edits are still on this page. Review the criteria and try again."
     : save.error instanceof Error ? save.error.message : save.error ? "Save failed. Try again." : undefined;
 
   return (
@@ -448,6 +485,7 @@ function CriteriaEditor({ id }: { id: number }) {
               showErrors={attempted !== undefined}
               onChange={(patch) => updateRow(row.key, patch)}
               onRemove={() => removeCriterion(row.key)}
+              serverErrors={editedSinceRefusal.has(row.key) ? undefined : fieldErrors.get(row.key)}
             />
           ))}
         </ol>
