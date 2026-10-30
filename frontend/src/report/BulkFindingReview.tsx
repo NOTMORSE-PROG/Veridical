@@ -172,7 +172,7 @@ export function BulkResolveDialog({ action, clusters, checkRunId, expectedRevisi
         </label>
         {unacknowledged && <p id={`${fieldId}-ack-error`} role="alert" className="signal-field-error">{BULK_REVIEW_COPY.acknowledgeMissing}</p>}
       </div>}
-      {error && <RefusalAlert title={refused ? BULK_REVIEW_COPY.refusedTitle : BULK_REVIEW_COPY.unconfirmedTitle} message={error} />}
+      {error && <RefusalAlert title={refused ? BULK_REVIEW_COPY.refusedTitle : BULK_REVIEW_COPY.unconfirmedTitle} message={error} takeFocus={!refusal} />}
     </div>
   </Dialog>;
 }

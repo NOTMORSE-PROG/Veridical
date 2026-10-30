@@ -64,7 +64,7 @@ export function ConfirmCitationSourceModal({ flag, onClose, onAccepted, continua
       </label>
       {invalid && <p id={errorId} role="alert" className="signal-field-error">Enter where you verified this before confirming.</p>}
       {!invalid && refusal && <p id={refusalId} className="signal-field-error">{refusal} {REFUSAL_NOTHING_CHANGED}</p>}
-      {requestRefusal && <RefusalAlert title={REFUSAL_TITLE} message={requestRefusal} />}
+      {requestRefusal && <RefusalAlert title={REFUSAL_TITLE} message={requestRefusal} takeFocus={!refusal} />}
       {confirm.isError && !isValidationRefusal(confirm.error) && <Alert title="Saving could not be confirmed" tone="error" role="alert">Your entered reason is kept. Review the current assessment before trying again.</Alert>}
     </div>
   </Dialog>;

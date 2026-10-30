@@ -450,7 +450,7 @@ describe("FlagDetailPage", () => {
     fireEvent.click(confirm);
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("Nothing was changed");
-    expect(alert).toHaveTextContent("This request was not accepted. Reload the page and try again.");
+    expect(alert).toHaveTextContent("This request was not accepted. Copy anything you typed, then reload the page and try again.");
     await waitFor(() => expect(alert).toHaveFocus());
     expect(reason).not.toHaveAttribute("aria-invalid");
     expect(screen.queryByText("Saving could not be confirmed")).not.toBeInTheDocument();

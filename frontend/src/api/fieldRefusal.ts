@@ -14,7 +14,7 @@ export function fieldRefusal(error: unknown, field: string): string | null {
 
 // Said for a request refused as a whole: the instructor's own text was fine,
 // so the generic "check what you entered" would send them to rewrite it.
-export const REQUEST_REFUSED_FALLBACK = "This request was not accepted. Reload the page and try again.";
+export const REQUEST_REFUSED_FALLBACK = "This request was not accepted. Copy anything you typed, then reload the page and try again.";
 
 // The sentences for whatever was refused that no field on this form shows,
 // even when a shown field was refused in the same response.
