@@ -228,7 +228,7 @@ async def _create_rubric_from_upload(
         source=source,
     )
 
-    session.add_all(
+    rows = [
         Criterion(
             rubric_id=rubric.id,
             type=CriterionType(criterion.type),
@@ -237,14 +237,29 @@ async def _create_rubric_from_upload(
             weight=Decimal(str(criterion.weight)),
             position=position,
             # V-069 AC1: structured, never squashed into `evidence` prose.
+            # BUG-566: each level carries where in the format it was found.
             levels=[lvl.model_dump() for lvl in criterion.levels] if criterion.levels else None,
         )
         for position, criterion in enumerate(outcome.criteria)
-    )
+    ]
+    session.add_all(rows)
+    await session.flush()
     rubric.parse_status = (
         RubricParseStatus.needs_review if outcome.needs_review else RubricParseStatus.parsed
     )
     rubric.parse_issues = outcome.issues or None
+    rubric.parse_issue_details = [
+        {
+            "id": detail["id"],
+            "code": detail["code"],
+            "criterion_id": rows[detail["criterion"]].id
+            if detail["criterion"] is not None
+            else None,
+            "level": detail["level"],
+            "message": detail["message"],
+        }
+        for detail in outcome.issue_details
+    ] or None
     await session.commit()
     await session.refresh(rubric, attribute_names=["criteria"])
     return rubric

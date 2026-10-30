@@ -48,6 +48,9 @@ class Rubric(Base, PkCreatedMixin):
         Enum(RubricParseStatus, native_enum=False), server_default=RubricParseStatus.parsed.value
     )
     parse_issues: Mapped[list[Any] | None] = mapped_column(JSONB)
+    # BUG-566: the same issues, one object each and in the same order, naming
+    # the criterion and level an issue is about (see RubricOut).
+    parse_issue_details: Mapped[list[Any] | None] = mapped_column(JSONB)
     # F2.3: nothing runs against a rubric until the instructor confirms
     # (V-012). V-013 generalizes this to "exactly one active version per
     # family" when re-uploads exist; V-012 only ever has one version to

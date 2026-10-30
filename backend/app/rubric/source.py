@@ -36,6 +36,7 @@ class GridCell:
     row: int
     col: int
     text: str
+    page: int | None = None
 
     @property
     def ref(self) -> str:
@@ -70,7 +71,11 @@ class DecompositionSource:
     gate_blocks: list[TextBlock]
     checklist_text: str
     withheld: tuple[str, ...] = ()
+    # Cells left out because they differ between copies, as (table, row, col).
+    withheld_cells: tuple[tuple[int, int, int], ...] = ()
     copies_merged: int = 0
+    # Lines printed only on a repeated copy, not on the copy that was read.
+    unread_copy_lines: int = 0
 
     @classmethod
     def from_text(cls, blocks: list[TextBlock], raw_text: str) -> DecompositionSource:
@@ -199,7 +204,7 @@ class _Line:
 
 def _merge_page_copies(
     lines: list[_Line], every: list[_Grid], settings: Settings
-) -> tuple[list[_Line], list[str]]:
+) -> tuple[list[_Line], list[str], int]:
     """Drop the text of pages that repeat an earlier page, and withhold the
     parts of the kept page that vary between the copies.
 
@@ -214,12 +219,13 @@ def _merge_page_copies(
     pages: dict[int, list[_Line]] = {page: [] for page in grids_on}
     for line in lines:
         if line.block.page is None:
-            return lines, []
+            return lines, [], 0
         pages.setdefault(line.block.page, []).append(line)
     marker = settings.rubric_withheld_value_marker
     kept_pages: list[int] = []
     dropped: set[int] = set()
     withheld: list[str] = []
+    unread = 0
     for page in sorted(pages):
         current = pages[page]
         for earlier_page in kept_pages:
@@ -236,23 +242,44 @@ def _merge_page_copies(
             for tag, i1, i2, j1, j2 in matcher.get_opcodes():
                 if tag == "equal":
                     continue
-                withheld.extend(line.text for line in current[j1:j2])
-                for kept_line in earlier[i1:i2] if tag == "replace" else ():
-                    original = kept_line.original
-                    prefix = max(
-                        (_common_prefix(original, line.text) for line in current[j1:j2]),
-                        key=len,
-                    )
-                    if not prefix.strip() or prefix == original:
-                        continue  # a different line, or a field the kept copy left blank
+                kept_block, copy_block = earlier[i1:i2], current[j1:j2]
+                withheld.extend(line.text for line in copy_block)
+                pairs = _pairs(kept_block, copy_block)
+                paired = {id(copy_line) for _, copy_line, _ in pairs}
+                # A line found only on a copy may be a requirement the kept copy
+                # lacks; it is not read, so the instructor is told it exists.
+                unread += sum(1 for line in copy_block if id(line) not in paired)
+                for kept_line, _, prefix in pairs:
+                    if prefix == kept_line.original:
+                        continue  # a field the kept copy left blank
                     if kept_line.shown is None or len(prefix) < kept_line.shown:
                         kept_line.shown = len(prefix)
-                        withheld.append(original[len(prefix) :])
-                        kept_line.text = f"{prefix}{marker}"
+                        withheld.append(kept_line.original[len(prefix) :])
+                        kept_line.text = f"{prefix}{marker}" if prefix.strip() else marker
             break
         else:
             kept_pages.append(page)
-    return [line for line in lines if id(line) not in dropped], withheld
+    return [line for line in lines if id(line) not in dropped], withheld, unread
+
+
+def _pairs(kept: list[_Line], copy: list[_Line]) -> list[tuple[_Line, _Line, str]]:
+    """Which kept line each differing copy line is a variant of, with their
+    shared leading label. Blocks of equal length pair line for line (a name
+    on a line of its own differs completely); otherwise a copy line pairs with
+    the kept line it shares the longest label with, or with none."""
+    if len(kept) == len(copy):
+        return [(k, c, _common_prefix(k.original, c.text)) for k, c in zip(kept, copy, strict=True)]
+    pairs = []
+    for copy_line in copy:
+        best = max(
+            kept, key=lambda k: len(_common_prefix(k.original, copy_line.text)), default=None
+        )
+        if best is None:
+            continue
+        prefix = _common_prefix(best.original, copy_line.text)
+        if prefix.strip():
+            pairs.append((best, copy_line, prefix))
+    return pairs
 
 
 def _grid_position(grid: _Grid, blocks: list[TextBlock], fragments: dict[int, int]) -> float:
@@ -311,10 +338,15 @@ def build_decomposition_source(result: ExtractionResult, settings: Settings) -> 
 
     fragments: dict[int, int] = {}
     outside: list[_Line] = []
+    # The kept tables' own lines as the extractor flattened them: a checklist
+    # inside one cell keeps one line per item here, unlike the joined cell.
+    table_lines: list[str] = []
     for index, block in enumerate(blocks):
         container = next((g for g in every if _inside(block, g.block)), None)
         if container is not None:
             fragments.setdefault(id(container.owner or container), index)
+            if container.owner is None:
+                table_lines.extend(t for t in block.text.splitlines() if t.strip())
             continue
         texts = [normalize(text) for text in block.text.splitlines()]
         texts = [text for text in texts if text]
@@ -323,7 +355,7 @@ def build_decomposition_source(result: ExtractionResult, settings: Settings) -> 
             for n, text in enumerate(texts)
         )
 
-    outside, withheld = _merge_page_copies(outside, every, settings)
+    outside, withheld, unread = _merge_page_copies(outside, every, settings)
     for grid in kept:
         for r, c in sorted(grid.withheld):
             if grid.rows[r][c]:
@@ -335,7 +367,7 @@ def build_decomposition_source(result: ExtractionResult, settings: Settings) -> 
     prompt_lines = [text for _, chunk in entries for text in chunk]
 
     cells = tuple(
-        GridCell(table=grid.number, row=r + 1, col=c + 1, text=text)
+        GridCell(table=grid.number, row=r + 1, col=c + 1, text=text, page=grid.block.page)
         for grid in kept
         for r, row in enumerate(grid.rows)
         for c, text in enumerate(row)
@@ -345,7 +377,9 @@ def build_decomposition_source(result: ExtractionResult, settings: Settings) -> 
     gate_blocks.extend(
         TextBlock(page=None, text=cell.text, max_font_size=0.0, bold_ratio=0.0) for cell in cells
     )
-    checklist = "\n".join([*(line.text for line in outside), *(cell.text for cell in cells)])
+    # A DOCX table has no flattened lines (its text never reaches `blocks`).
+    in_tables = table_lines or [cell.text for cell in cells]
+    checklist = "\n".join([*(line.text for line in outside), *in_tables])
     return DecompositionSource(
         prompt_text="\n".join(prompt_lines),
         cells=cells,
@@ -353,5 +387,9 @@ def build_decomposition_source(result: ExtractionResult, settings: Settings) -> 
         gate_blocks=gate_blocks,
         checklist_text=checklist,
         withheld=tuple(dict.fromkeys(value for value in withheld if value.strip())),
+        withheld_cells=tuple(
+            (grid.number, r + 1, c + 1) for grid in kept for r, c in sorted(grid.withheld)
+        ),
         copies_merged=len(every) - len(kept),
+        unread_copy_lines=unread,
     )

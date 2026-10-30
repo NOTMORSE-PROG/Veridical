@@ -11,6 +11,22 @@ from pydantic import BaseModel, Field, field_validator
 from app.db import DbInt, DbText
 
 
+class LevelSource(BaseModel):
+    """Where a level descriptor was found in the uploaded format (BUG-566).
+    "exact": it is the whole text of the table cell named here, stored as
+    that cell's text. "passage": one passage of the text outside tables.
+    "unmatched": not traced to the document; the rubric carries a parse
+    issue saying why. `table`/`row`/`col` are 1-based, as the decomposer saw
+    them (empty columns dropped); `page` is the PDF page, None for DOCX."""
+
+    match: Literal["exact", "passage", "unmatched"]
+    page: DbInt | None = Field(default=None, ge=1)
+    table: DbInt | None = Field(default=None, ge=1)
+    row: DbInt | None = Field(default=None, ge=1)
+    col: DbInt | None = Field(default=None, ge=1)
+    cell_text: DbText | None = None
+
+
 class ParsedLevel(BaseModel):
     """One rung of a graded performance scale (V-069 AC1) — structured,
     never squashed into `evidence_needed` prose. `level` is the scale's own
@@ -22,6 +38,10 @@ class ParsedLevel(BaseModel):
     name: DbText = Field(min_length=1)
     descriptor: DbText = Field(min_length=1)
     points: float = Field(ge=0)
+    # Set by the source check, never taken from the model's answer (the
+    # decomposition overwrites whatever a response puts here). None on
+    # levels stored before BUG-566, and then left out of the payload entirely.
+    source: LevelSource | None = Field(default=None, exclude_if=lambda value: value is None)
 
     @field_validator("name", "descriptor")
     @classmethod
@@ -106,6 +126,23 @@ class CitationRecencySettingsOut(BaseModel):
     saved_setting_invalid: bool = False
 
 
+class ParseIssueDetail(BaseModel):
+    """One parse issue. `code` says what kind: a level descriptor that is
+    "not_in_source", keeps only part of its cell ("partial_cell"), "joins_cells",
+    or comes from text that "differs_between_copies"; levels on the "wrong_row"
+    or in the "wrong_order"; a "shared_cell" between criteria; a
+    "level_left_out" of its row; or a whole-draft note ("draft_check",
+    "retry_changed_draft", "unread_copy_text", "injection_suspected").
+    `criterion_id`/`level` are null for whole-draft notes; `criterion_id`
+    can name a criterion the instructor has since removed."""
+
+    id: int
+    code: str
+    criterion_id: int | None = None
+    level: int | None = None
+    message: str
+
+
 class RubricOut(BaseModel):
     id: int
     rubric_family_id: uuid.UUID
@@ -116,6 +153,10 @@ class RubricOut(BaseModel):
     # why, over whatever partial criteria list came back.
     parse_status: Literal["parsed", "needs_review"]
     parse_issues: list[str] | None
+    # BUG-566: `parse_issues` again, one object per message in the same order,
+    # saying which criterion and level each is about. None for rubrics parsed
+    # before this field existed.
+    parse_issue_details: list[ParseIssueDetail] | None = None
     # F2.3 (V-012): nothing runs against a rubric until the instructor
     # confirms — this flips true only via PUT /rubrics/{id}/criteria
     # {confirm: true} or POST /rubrics/{id}/activate.

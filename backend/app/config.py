@@ -470,6 +470,13 @@ class Settings(BaseSettings):
     # closely (difflib ratio over lines). The table condition is the strong
     # signal; this only stops a page that merely shares a letterhead.
     rubric_copy_min_line_ratio: float = Field(default=0.6, gt=0.0, le=1.0)
+    # Words shorter than this are ignored when checking that a criterion names
+    # its own table row ("of", "a"), so the label comparison rests on content.
+    rubric_label_word_min_chars: int = Field(default=3, ge=1)
+    # A level whose name resembles another column's header at least this
+    # closely (difflib ratio), and its own header less, sits in the wrong
+    # column. Tolerates headers the extractor split ("BEGIN ER" for BEGINNER).
+    rubric_level_header_min_similarity: float = Field(default=0.8, gt=0.0, le=1.0)
     # Shown to the model in place of a value withheld for the reason above.
     rubric_withheld_value_marker: str = Field(
         default="[differs between copies, not shown]", min_length=1

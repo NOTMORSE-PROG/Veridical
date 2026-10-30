@@ -102,6 +102,8 @@ def _without_point_values(criterion: ParsedCriterion) -> ParsedCriterion:
         level.model_copy(
             update={
                 "name": _without_typographic_dashes(level.name),
+                # Provenance is the source check's to record, not the model's.
+                "source": None,
                 "descriptor": (
                     _without_typographic_dashes(level.descriptor)
                     if level.descriptor is not None

@@ -141,6 +141,17 @@ def _criteria(response: dict[str, Any]) -> list[ParsedCriterion]:
     return [ParsedCriterion.model_validate(c) for c in response["criteria"]]
 
 
+def _verify(criteria, source, settings=SETTINGS) -> tuple[list[ParsedCriterion], list[str]]:
+    verified, issues = verify_against_source(criteria, source, settings)
+    return verified, [issue.message for issue in issues]
+
+
+def _codes(criteria, source) -> list[tuple[str, int, int | None]]:
+    return [
+        (i.code, i.criterion, i.level) for i in verify_against_source(criteria, source, SETTINGS)[1]
+    ]
+
+
 # --- what the model reads ---------------------------------------------------
 
 
@@ -248,7 +259,7 @@ def _grid_source() -> DecompositionSource:
 def test_a_faithful_draft_is_stored_byte_for_byte_as_the_cells():
     source = _grid_source()
     retyped = _response(GRID, retype=lambda s: s.replace("summarised", "summa-\nrised"))
-    criteria, issues = verify_against_source(_criteria(retyped), source, SETTINGS)
+    criteria, issues = _verify(_criteria(retyped), source, SETTINGS)
     assert issues == []
     for criterion, row in zip(criteria, GRID[1:], strict=True):
         assert [level.descriptor for level in criterion.levels] == [c for c in row[1:] if c][:4]
@@ -256,12 +267,12 @@ def test_a_faithful_draft_is_stored_byte_for_byte_as_the_cells():
 
 def test_the_production_shift_is_reported_not_stored_as_parsed():
     source = _grid_source()
-    _, issues = verify_against_source(
+    _, issues = _verify(
         _criteria(_shifted(GRID, "The thesis is clearly stated.")), source, SETTINGS
     )
     text = " ".join(issues)
     assert "'Thesis: graded" in text
-    assert "joins text from more than one table cell" in text
+    assert "joins text from more than one place" in text
     assert "not in the original document" in text
 
 
@@ -289,7 +300,7 @@ def test_the_production_shift_is_reported_not_stored_as_parsed():
 def test_each_way_a_descriptor_can_leave_its_cell_is_named(mutate, expected):
     response = _response(GRID)
     mutate(response["criteria"][0]["levels"])
-    _, issues = verify_against_source(_criteria(response), _grid_source(), SETTINGS)
+    _, issues = _verify(_criteria(response), _grid_source(), SETTINGS)
     assert any(expected in issue for issue in issues), issues
 
 
@@ -299,14 +310,14 @@ def test_a_level_left_out_of_its_row_is_named():
     del levels[1]
     for i, level in enumerate(levels, start=1):
         level["level"] = i
-    _, issues = verify_against_source(_criteria(response), _grid_source(), SETTINGS)
+    _, issues = _verify(_criteria(response), _grid_source(), SETTINGS)
     assert any("left out" in issue for issue in issues), issues
 
 
 def test_two_criteria_cannot_share_a_cell():
     response = _response(GRID)
     response["criteria"][2]["levels"] = response["criteria"][1]["levels"]
-    _, issues = verify_against_source(_criteria(response), _grid_source(), SETTINGS)
+    _, issues = _verify(_criteria(response), _grid_source(), SETTINGS)
     assert any("same table cell" in issue for issue in issues), issues
 
 
@@ -314,7 +325,7 @@ def test_a_criterion_named_for_another_row_is_named():
     response = _response(GRID)
     response["criteria"][0]["text"] = "Citations: graded on the source's four levels"
     response["criteria"][0]["evidence_needed"] = "The reference list."
-    _, issues = verify_against_source(_criteria(response), _grid_source(), SETTINGS)
+    _, issues = _verify(_criteria(response), _grid_source(), SETTINGS)
     assert any("levels of the table row 'Thesis'" in issue for issue in issues), issues
 
 
@@ -323,7 +334,7 @@ def test_a_grid_with_its_best_level_first_is_accepted():
     table, blocks = _pdf_grid(flipped)
     source = build_decomposition_source(_extraction([table], blocks), SETTINGS)
     response = _response(GRID)  # levels still ascend Beginner -> Exemplary
-    criteria, issues = verify_against_source(_criteria(response), source, SETTINGS)
+    criteria, issues = _verify(_criteria(response), source, SETTINGS)
     assert issues == []
     assert criteria[0].levels[0].descriptor == "The thesis is unclear."
 
@@ -332,7 +343,7 @@ def test_a_grid_laid_out_with_levels_as_rows_is_accepted():
     transposed = [list(column) for column in zip(*GRID, strict=True)]
     table = TableBlock(page=1, bbox=(0.0, 100.0, 600.0, 700.0), rows=transposed)
     source = build_decomposition_source(_extraction([table], []), SETTINGS)
-    criteria, issues = verify_against_source(_criteria(_response(GRID)), source, SETTINGS)
+    criteria, issues = _verify(_criteria(_response(GRID)), source, SETTINGS)
     assert issues == []
     assert criteria[2].levels[3].descriptor == GRID[3][5]
 
@@ -364,13 +375,13 @@ def test_prose_levels_must_be_one_passage_of_the_text():
 
     wrapped = "findings are restated without comparison to prior work."
     assert verify_against_source([criterion(wrapped)], source, SETTINGS)[1] == []
-    _, issues = verify_against_source([criterion("findings are vague.")], source, SETTINGS)
+    _, issues = _verify([criterion("findings are vague.")], source, SETTINGS)
     assert len(issues) == 1 and "not in the original document" in issues[0]
 
 
 def test_criteria_without_levels_are_untouched():
     plain = ParsedCriterion(text="Has an abstract, in my own words", type="structural", weight=1)
-    criteria, issues = verify_against_source([plain], _grid_source(), SETTINGS)
+    criteria, issues = _verify([plain], _grid_source(), SETTINGS)
     assert criteria == [plain] and issues == []
 
 
@@ -380,6 +391,324 @@ def test_matching_ignores_only_spacing_case_punctuation_and_compatibility_forms(
     )
     assert match_form("a n academic paper") == match_form("an academic paper")
     assert match_form("purpose is clear") != match_form("purpose is unclear")
+
+
+# --- layouts a correct draft must pass, and drafts that must not --------------
+
+
+def _source(rows: list[list[str]], *, page: int = 1) -> DecompositionSource:
+    table = TableBlock(page=page, bbox=(0.0, 100.0, 600.0, 700.0), rows=rows)
+    return build_decomposition_source(_extraction([table], []), SETTINGS)
+
+
+def test_each_stored_level_records_the_cell_it_came_from():
+    criteria, _ = _verify(_criteria(_response(GRID)), _grid_source())
+    source = criteria[1].levels[3].source
+    assert source.match == "exact"
+    assert (source.page, source.table, source.row, source.col) == (1, 1, 3, 5)
+    assert source.cell_text == GRID[2][5]
+
+
+def test_a_model_cannot_supply_its_own_provenance():
+    response = _response(GRID)
+    response["criteria"][0]["levels"][0]["descriptor"] = "Invented."
+    response["criteria"][0]["levels"][0]["source"] = {"match": "exact", "row": 2, "col": 2}
+    from app.rubric.decompose import _without_point_values
+
+    parsed = [_without_point_values(c) for c in _criteria(response)]
+    criteria, _ = _verify(parsed, _grid_source())
+    assert criteria[0].levels[0].source.match == "unmatched"
+
+
+def test_rows_that_repeat_the_same_cell_text_each_keep_their_own_row():
+    """A scale whose cells read the same on every row must not pin every
+    criterion to the first such row."""
+    scale = ["Needs improvement (1)", "Fair (2)", "Good (3)", "Excellent (4)"]
+    rows = [["Criterion", "1", "2", "3", "4"]] + [
+        [label, *scale] for label in ["Introduction", "Methodology", "Results", "Discussion"]
+    ]
+    response = _response(rows)
+    assert _codes(_criteria(response), _source(rows)) == []
+
+
+def test_a_header_row_that_repeats_the_descriptors_is_not_mistaken_for_a_row():
+    rows = [
+        ["Area", "Weak", "Strong"],
+        ["Thesis", "Weak", "Strong"],
+        ["Method", "Unjustified.", "Justified."],
+    ]
+    response = _response(rows)
+    for criterion, row in zip(response["criteria"], rows[1:], strict=True):
+        criterion["levels"] = [
+            {"level": i, "name": rows[0][i], "descriptor": row[i], "points": i} for i in (1, 2)
+        ]
+    assert _codes(_criteria(response), _source(rows)) == []
+
+
+def test_one_row_with_its_levels_reversed_is_named():
+    response = _response(GRID)
+    levels = response["criteria"][1]["levels"]
+    for level, cell in zip(levels, reversed([c for c in GRID[2][1:] if c][:4]), strict=True):
+        level["descriptor"] = cell
+    codes = _codes(_criteria(response), _grid_source())
+    assert ("wrong_order", 1, None) in codes
+
+
+def test_a_level_under_a_header_with_other_points_is_named():
+    """Every row reversed the same way passes the direction check, so the
+    column headers' points are what catch it."""
+    response = _response(GRID)
+    for criterion, row in zip(response["criteria"], GRID[1:], strict=True):
+        for level, cell in zip(
+            criterion["levels"], reversed([c for c in row[1:] if c][:4]), strict=True
+        ):
+            level["descriptor"] = cell
+    codes = _codes(_criteria(response), _grid_source())
+    assert {code for code, _, _ in codes} == {"wrong_order"}
+    assert len(codes) == 12  # 3 rows x 4 levels each under another header
+
+
+def test_a_level_under_a_header_with_another_name_is_named():
+    rows = [
+        ["Criterion", "Beginning", "Developing", "Exemplary"],
+        ["Thesis", "Vague.", "Stated.", "Sharp."],
+        ["Method", "Unjustified.", "Partly justified.", "Justified."],
+    ]
+    response = _response(rows)
+    for criterion in response["criteria"]:
+        for level, name in zip(
+            criterion["levels"], ["Beginning", "Developing", "Exemplary"], strict=True
+        ):
+            level["name"] = name
+            level["points"] = 1
+    swapped = response["criteria"][0]["levels"]
+    swapped[0]["name"], swapped[2]["name"] = swapped[2]["name"], swapped[0]["name"]
+    codes = _codes(_criteria(response), _source(rows))
+    assert ("wrong_order", 0, 1) in codes and ("wrong_order", 0, 3) in codes
+
+
+def test_swapping_two_similarly_named_rows_is_named():
+    rows = [
+        ["Criteria", "Low", "High"],
+        ["Use of References", "Rarely cited.", "Always cited."],
+        ["Quality of References", "Unreliable sources.", "Peer-reviewed sources."],
+    ]
+    response = _response(rows)
+    first, second = response["criteria"]
+    first["text"], second["text"] = second["text"], first["text"]
+    codes = _codes(_criteria(response), _source(rows))
+    assert ("wrong_row", 0, None) in codes and ("wrong_row", 1, None) in codes
+
+
+def test_a_shared_scale_legend_is_accepted_for_every_criterion():
+    legend = [
+        ["Rating", "Description"],
+        ["Poor", "Falls well short of the requirement."],
+        ["Good", "Meets the requirement."],
+        ["Excellent", "Exceeds the requirement."],
+    ]
+    descriptors = [row[1] for row in legend[1:]]
+    criteria = [
+        ParsedCriterion(
+            text=name,
+            type="semantic",
+            weight=1,
+            levels=[
+                ParsedLevel(level=i, name=n, descriptor=d, points=i)
+                for i, (n, d) in enumerate(
+                    zip(["Poor", "Good", "Excellent"], descriptors, strict=True), 1
+                )
+            ],
+        )
+        for name in ["Introduction", "Methods", "Results"]
+    ]
+    assert _codes(criteria, _source(legend)) == []
+
+
+def test_a_level_column_dropped_from_every_row_is_named():
+    response = _response(GRID)
+    for criterion in response["criteria"]:
+        del criterion["levels"][1]
+        for i, level in enumerate(criterion["levels"], start=1):
+            level["level"] = i
+    codes = _codes(_criteria(response), _grid_source())
+    assert [code for code, _, _ in codes].count("level_left_out") == 3
+
+
+def test_a_merged_span_drafted_as_one_level_is_not_a_left_out_level():
+    rows = [
+        ["Criterion", "Low", "Middle", "High"],
+        ["Thesis", "Vague.", "Stated.", "Sharp."],
+        ["Depth", "Shallow.", "Adequate.", "Adequate."],  # a DOCX span read twice
+    ]
+    response = _response(rows)
+    response["criteria"][1]["levels"] = response["criteria"][1]["levels"][:2]
+    assert _codes(_criteria(response), _source(rows)) == []
+
+
+def test_a_level_cell_that_differs_between_copies_is_named_not_dropped():
+    first = [row[:] for row in GRID]
+    second = [row[:] for row in GRID]
+    second[1][3] = "The thesis is stated in one sentence. ✓"
+    tables = [
+        TableBlock(page=p, bbox=(0.0, 100.0, 600.0, 700.0), rows=rows)
+        for p, rows in ((1, first), (2, second))
+    ]
+    source = build_decomposition_source(_extraction(tables, []), SETTINGS)
+    response = _response(GRID)
+    response["criteria"][0]["levels"] = [
+        lvl for lvl in response["criteria"][0]["levels"] if lvl["descriptor"] != GRID[1][3]
+    ]
+    for i, level in enumerate(response["criteria"][0]["levels"], start=1):
+        level["level"] = i
+    assert ("differs_between_copies", 0, None) in _codes(_criteria(response), source)
+    marker = SETTINGS.rubric_withheld_value_marker
+    response["criteria"][0]["levels"].insert(
+        2, {"level": 3, "name": "Proficient", "descriptor": marker, "points": 3}
+    )
+    for i, level in enumerate(response["criteria"][0]["levels"], start=1):
+        level["level"] = i
+    assert ("differs_between_copies", 0, 3) in _codes(_criteria(response), source)
+
+
+def test_a_passage_must_be_whole_words_and_end_at_a_boundary():
+    lines = [
+        "Purpose: The paper's purpose is clearly stated in a single sentence.",
+        "Poorly: the purpose is missing.",
+        "Weak (1) = the purpose is",
+        "unclear; Strong (2) = the purpose is clear.",
+    ]
+    source = DecompositionSource.from_text([_block(x) for x in lines], "\n".join(lines))
+
+    def levels(*descriptors: str) -> list[ParsedCriterion]:
+        return [
+            ParsedCriterion(
+                text="Purpose",
+                type="semantic",
+                weight=1,
+                levels=[
+                    ParsedLevel(level=i, name=f"L{i}", descriptor=d, points=i)
+                    for i, d in enumerate(descriptors, start=1)
+                ],
+            )
+        ]
+
+    ok = levels("the purpose is unclear", "the purpose is clear.")
+    assert _codes(ok, source) == []
+    assert _codes(levels("Poor", "the purpose is clear."), source)[0][0] == "not_in_source"
+    prefix = levels("The paper's purpose is clearly stated.", "the purpose is clear.")
+    assert _codes(prefix, source)[0][0] == "not_in_source"
+    # Text may list a scale either way round, but not out of order.
+    assert _codes(levels("the purpose is clear.", "the purpose is unclear"), source) == []
+    shuffled = levels("the purpose is unclear", "the purpose is missing.", "the purpose is clear.")
+    assert ("wrong_order", 0, None) in _codes(shuffled, source)
+
+
+@rubric_pdf_only
+def test_without_a_detected_table_the_invented_production_level_is_still_caught():
+    """A borderless or undetected grid reaches the check as flattened text."""
+    from app.ingest import pdf as pdf_ingest
+
+    extraction = pdf_ingest.extract_document(str(RUBRIC_PDF), SETTINGS)
+    rows = _real_rows(_real_source())
+    flat = extraction.model_copy(update={"tables": []})
+    source = build_decomposition_source(flat, SETTINGS)
+    assert source.cells == ()
+    response = _response(rows)
+    purpose = next(c for c in response["criteria"] if c["text"].startswith("Purpose"))
+    purpose["levels"][2]["descriptor"] = "The paper's purpose is clearly stated."
+    codes = _codes(_criteria(response), source)
+    assert ("not_in_source", response["criteria"].index(purpose), 3) in codes
+
+
+def test_an_unlabelled_name_line_on_a_copy_is_withheld():
+    header_a = ["Panel rating sheet", "Juana Dela Cruz", "Section A1"]
+    header_b = ["Panel rating sheet", "Pedro Santos", "Section A1"]
+    first, first_blocks = _pdf_grid(GRID, page=1, header=header_a)
+    second, second_blocks = _pdf_grid(GRID, page=2, header=header_b)
+    source = build_decomposition_source(
+        _extraction([first, second], first_blocks + second_blocks), SETTINGS
+    )
+    assert "Juana" not in source.prompt_text and "Pedro" not in source.prompt_text
+    assert source.unread_copy_lines == 0
+
+
+async def test_text_found_only_on_a_copy_is_reported_as_unread():
+    first, first_blocks = _pdf_grid(GRID, page=1, header=["Rating sheet", "Section A1"])
+    second, second_blocks = _pdf_grid(
+        GRID,
+        page=2,
+        header=["Rating sheet", "Section A1", "The defense lasts at most 40 minutes."],
+    )
+    source = build_decomposition_source(
+        _extraction([first, second], first_blocks + second_blocks), SETTINGS
+    )
+    assert source.unread_copy_lines == 1
+    assert "40 minutes" not in source.prompt_text
+    outcome = await attempt_decomposition(
+        _SpySession(),
+        1,
+        source.gate_blocks,
+        source.prompt_text,
+        ScriptedLLM([_response(GRID)]),
+        SETTINGS,
+        source=source,
+    )
+    assert outcome.needs_review and outcome.attempts == 1
+    assert [d["code"] for d in outcome.issue_details] == ["unread_copy_text"]
+
+
+def test_a_checklist_inside_one_cell_still_counts_as_separate_items():
+    items = [f"• Requirement {i} applies to every chapter" for i in range(12)]
+    rows = [["Section", "Requirements"], ["Format", " ".join(items)], ["Other", "None."]]
+    table = TableBlock(page=1, bbox=(0.0, 100.0, 600.0, 700.0), rows=rows)
+    inside = (10.0, 200.0, 50.0, 210.0)
+    blocks = [_block("\n".join(items), 1, inside)]
+    source = build_decomposition_source(_extraction([table], blocks), SETTINGS)
+    from app.rubric.validate import folded_requirements
+
+    two = [ParsedCriterion(text=f"Rule {i}", type="structural", weight=1) for i in range(2)]
+    assert folded_requirements(two, source.checklist_text, SETTINGS) is not None
+
+
+async def test_the_best_failed_draft_keeps_the_rows_rather_than_dropping_them():
+    """Each retyped descriptor is its own issue; ranking by raw count would
+    prefer a draft that dropped most rows."""
+    full = _response(GRID)
+    for criterion in full["criteria"]:
+        criterion["levels"][0]["descriptor"] += " Retyped."
+    short = {"criteria": [_response(GRID)["criteria"][0]]}
+    table, blocks = _pdf_grid(GRID)
+    source = build_decomposition_source(_extraction([table], blocks), SETTINGS)
+    outcome = await attempt_decomposition(
+        _SpySession(),
+        1,
+        source.gate_blocks,
+        source.prompt_text,
+        ScriptedLLM([full, short, short]),
+        SETTINGS,
+        source=source,
+    )
+    assert outcome.needs_review
+    assert len(outcome.criteria) == 3
+
+
+async def test_issue_details_name_the_criterion_and_level():
+    table, blocks = _pdf_grid(GRID)
+    source = build_decomposition_source(_extraction([table], blocks), SETTINGS)
+    outcome = await attempt_decomposition(
+        _SpySession(),
+        1,
+        source.gate_blocks,
+        source.prompt_text,
+        ScriptedLLM([_shifted(GRID, "The thesis is clearly stated.")]),
+        SETTINGS,
+        source=source,
+    )
+    assert [d["message"] for d in outcome.issue_details] == outcome.issues
+    assert [d["id"] for d in outcome.issue_details] == list(range(1, len(outcome.issues) + 1))
+    invented = next(d for d in outcome.issue_details if d["code"] == "not_in_source")
+    assert (invented["criterion"], invented["level"]) == (0, 3)
 
 
 # --- through the retry loop ---------------------------------------------------
@@ -474,9 +803,7 @@ def test_all_36_real_descriptors_are_stored_byte_for_byte_as_their_cells():
         # word the extractor split rejoined.
         return re.sub(r"\ba n\b", "an", text.replace("’", "'"))
 
-    criteria, issues = verify_against_source(
-        _criteria(_response(rows, retype=retype)), source, SETTINGS
-    )
+    criteria, issues = _verify(_criteria(_response(rows, retype=retype)), source, SETTINGS)
     assert issues == []
     stored = [level.descriptor for c in criteria for level in c.levels]
     expected = [cell for row in rows[1:] for cell in row[1:]]
@@ -495,3 +822,20 @@ async def test_the_real_rubric_shift_seen_in_production_is_not_parsed():
     )
     assert outcome.needs_review
     assert any("not in the original document" in issue for issue in outcome.issues)
+
+
+@rubric_pdf_only
+def test_the_real_rubric_with_one_row_reversed_or_two_rows_swapped_is_not_parsed():
+    source = _real_source()
+    rows = _real_rows(source)
+    response = _response(rows)
+    purpose = response["criteria"][1]
+    for level, cell in zip(purpose["levels"], reversed(rows[2][1:]), strict=True):
+        level["descriptor"] = cell
+    assert ("wrong_order", 1, None) in _codes(_criteria(response), source)
+
+    response = _response(rows)
+    use, quality = response["criteria"][6], response["criteria"][7]
+    use["text"], quality["text"] = quality["text"], use["text"]
+    codes = _codes(_criteria(response), source)
+    assert ("wrong_row", 6, None) in codes and ("wrong_row", 7, None) in codes

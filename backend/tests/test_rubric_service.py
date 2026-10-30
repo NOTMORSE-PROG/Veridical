@@ -541,3 +541,85 @@ async def test_update_criteria_rejects_a_criterion_id_from_another_rubric(
                 ),
                 instructor_id,
             )
+
+
+def _grid_docx(tmp_path):
+    import docx
+
+    document = docx.Document()
+    document.add_paragraph("Rating sheet for the written paper")
+    rows = [
+        ["Criterion", "Weak 1", "Strong 2"],
+        ["Thesis", "The thesis is unclear.", "The thesis is stated in one sentence."],
+        ["Evidence", "Claims lack support.", "Every claim is supported by data."],
+    ]
+    table = document.add_table(rows=len(rows), cols=len(rows[0]))
+    for r, row in enumerate(rows):
+        for c, text in enumerate(row):
+            table.rows[r].cells[c].text = text
+    path = tmp_path / "grid.docx"
+    document.save(path)
+    return path
+
+
+def _levelled(text: str, weak: str, strong: str) -> dict[str, Any]:
+    return {
+        "text": text,
+        "type": "semantic",
+        "weight": 1,
+        "levels": [
+            {"level": 1, "name": "Weak", "descriptor": weak, "points": 1},
+            {"level": 2, "name": "Strong", "descriptor": strong, "points": 2},
+        ],
+    }
+
+
+async def test_a_grid_upload_stores_cell_provenance_and_structured_issues(
+    session_factory, tmp_path, monkeypatch
+):
+    """BUG-566 end to end: a DOCX table reaches the decomposer as cells, a
+    matched level stores where it came from, and an invented one leaves the
+    rubric for review with an issue naming its criterion and level."""
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+    get_settings.cache_clear()
+    settings = get_settings()
+    response = {
+        "criteria": [
+            _levelled("Thesis", "the thesis is unclear", "The thesis is stated in one sentence."),
+            _levelled("Evidence", "Claims lack support.", "The evidence is convincing."),
+        ]
+    }
+    spy = SpyLLM(response)
+
+    from app.rubric.schemas import RubricOut
+    from app.rubric.service import create_rubric_from_upload, get_rubric
+
+    instructor_id = await _seed_instructor(session_factory)
+    async with session_factory() as session:
+        rubric = await create_rubric_from_upload(
+            session,
+            _chunks(_grid_docx(tmp_path)),
+            "grid.docx",
+            "Grid",
+            spy,
+            settings,
+            instructor_id=instructor_id,
+        )
+        out = RubricOut.model_validate(await get_rubric(session, rubric.id, instructor_id))
+
+    assert spy.calls == settings.rubric_parse_max_retries + 1
+    assert out.parse_status == "needs_review"
+    thesis, evidence = out.criteria
+    first = thesis.levels[0]
+    assert first.descriptor == "The thesis is unclear."  # the cell's text, not the retyping
+    assert first.source.match == "exact"
+    assert (first.source.page, first.source.table, first.source.row, first.source.col) == (
+        None,
+        1,
+        2,
+        2,
+    )
+    assert evidence.levels[1].source.match == "unmatched"
+    assert [d.message for d in out.parse_issue_details] == out.parse_issues
+    invented = next(d for d in out.parse_issue_details if d.code == "not_in_source")
+    assert (invented.criterion_id, invented.level) == (evidence.id, 2)

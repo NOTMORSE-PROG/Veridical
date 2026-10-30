@@ -38,6 +38,9 @@ class Session:
     async def refresh(self, *args, **kwargs):
         pass
 
+    async def flush(self):
+        pass
+
     async def rollback(self):
         pass
 
@@ -94,7 +97,22 @@ def runtime(tmp_path, monkeypatch):
     monkeypatch.setattr(
         service,
         "attempt_decomposition",
-        AsyncMock(return_value=SimpleNamespace(criteria=[], needs_review=True, issues=["control"])),
+        AsyncMock(
+            return_value=SimpleNamespace(
+                criteria=[],
+                needs_review=True,
+                issues=["control"],
+                issue_details=[
+                    {
+                        "id": 1,
+                        "code": "draft_check",
+                        "criterion": None,
+                        "level": None,
+                        "message": "control",
+                    }
+                ],
+            )
+        ),
     )
 
     async def chunks():

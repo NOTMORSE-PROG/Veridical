@@ -161,7 +161,7 @@ async def test_retry_repairing_a_missing_rung_still_requires_source_confirmation
         ]
     )
     # Every level descriptor has to be the document's own words (BUG-566).
-    rungs = "\n".join(f"rung {i}" for i in range(1, 5))
+    rungs = "\n".join(f"rung {i}." for i in range(1, 5))
     outcome = await attempt_decomposition(_SpySession(), 1, [], rungs, llm, SETTINGS)
     assert outcome.attempts == 2
     assert outcome.needs_review
