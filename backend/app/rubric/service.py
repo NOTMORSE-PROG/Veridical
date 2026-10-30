@@ -27,12 +27,12 @@ from app.models.enums import CriterionType, RubricParseStatus
 from app.models.group import Program
 from app.models.rubric import Criterion, Rubric
 from app.models.run import CheckRun
-from app.rubric.decompose import raw_text_for_decomposition
 from app.rubric.schemas import (
     CitationRecencySettingsOut,
     RubricListItem,
     UpdateCriteriaRequest,
 )
+from app.rubric.source import build_decomposition_source
 from app.rubric.validate import attempt_decomposition
 from app.storage import get_storage, storage_key_for
 
@@ -210,13 +210,22 @@ async def _create_rubric_from_upload(
         await session.commit()
         raise
 
-    raw_text = raw_text_for_decomposition(result.blocks)
+    # BUG-566: recovered tables go to the model cell by cell, repeated
+    # copies are read once, and values that differ between copies (names
+    # filled in on each one) never leave the server.
+    source = build_decomposition_source(result, settings)
 
     # Never raises (V-011): a persistent failure comes back as a
     # needs_review outcome, not an exception — the upload always succeeds
     # and lands the instructor on a reviewable rubric (charter rule 1).
     outcome = await attempt_decomposition(
-        session, rubric.id, result.blocks, raw_text, llm, settings
+        session,
+        rubric.id,
+        source.gate_blocks,
+        source.prompt_text,
+        llm,
+        settings,
+        source=source,
     )
 
     session.add_all(

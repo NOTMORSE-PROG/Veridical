@@ -12,6 +12,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
+from app.config import Settings, get_settings
 from app.errors import VeridicalError
 from app.ingest.schemas import TextBlock
 from app.llm.base import LLMClient
@@ -33,9 +34,13 @@ PROMPT_TYPE = "rubric_decomposition"
 # MTSU's 44-item checklist into 7 criteria).
 # v5 preserves independently graded source rows, distinguishes quality from
 # counts using the full scale, and refuses requirements inferred from purpose.
-PROMPT_VERSION = "v5"
+# BUG-566: v6 reads recovered tables cell by cell and asks for every level
+# descriptor to be one cell's whole text, copied word for word (flattened
+# reading order had moved short cells into the neighbouring row).
+PROMPT_VERSION = "v6"
 _PROMPT_FILE = Path(__file__).parent / "prompts" / f"{PROMPT_TYPE}_{PROMPT_VERSION}.txt"
 _PLACEHOLDER = "{rubric_text}"
+_MARKER_PLACEHOLDER = "{withheld_marker}"
 
 
 class RubricParseError(VeridicalError):
@@ -128,7 +133,11 @@ def _normalize_weights(criteria: list[ParsedCriterion]) -> list[ParsedCriterion]
 
 
 async def decompose_rubric(
-    raw_text: str, llm: LLMClient, *, feedback: str | None = None
+    raw_text: str,
+    llm: LLMClient,
+    *,
+    feedback: str | None = None,
+    settings: Settings | None = None,
 ) -> list[ParsedCriterion]:
     """Format-agnostic by construction: the prompt carries no assumption
     about section names, numbering, or scoring style (charter rule 7 at
@@ -142,7 +151,10 @@ async def decompose_rubric(
     # Plain substitution, not str.format(): the prompt's own JSON example
     # is full of literal `{`/`}` that .format() would try to parse as
     # fields.
-    template = _PROMPT_FILE.read_text(encoding="utf-8")
+    settings = settings or get_settings()
+    template = _PROMPT_FILE.read_text(encoding="utf-8").replace(
+        _MARKER_PLACEHOLDER, settings.rubric_withheld_value_marker
+    )
     prompt = template.replace(_PLACEHOLDER, raw_text)
     if feedback:
         prompt = (

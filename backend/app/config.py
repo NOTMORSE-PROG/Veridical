@@ -453,6 +453,28 @@ class Settings(BaseSettings):
         r"\u2713\u2714\ue000-\uf8ff]|\d{1,2}[.)](?!\d))(?:\s|$)"
     )
 
+    # --- What the rubric decomposer reads (BUG-566) ---------------------------
+    # A table the extractor recovered is shown to the model cell by cell when
+    # it has at least this many non-empty rows and columns. Flattened reading
+    # order interleaves short cells from neighbouring rows, which shifted
+    # level descriptors between criteria.
+    rubric_grid_min_rows: int = Field(default=2, ge=2)
+    rubric_grid_min_columns: int = Field(default=2, ge=2)
+    # A later table is a repeated copy of an earlier one (the same grid
+    # printed once per student) when it has the same shape and at least this
+    # share of its non-empty cells is identical. Cells that differ between
+    # copies are filled-in values and are withheld from the model.
+    rubric_copy_min_identical_cell_ratio: float = Field(default=0.9, gt=0.0, le=1.0)
+    # A later page is a repeated copy when every table on it repeats one on an
+    # earlier page and its other text matches that page's at least this
+    # closely (difflib ratio over lines). The table condition is the strong
+    # signal; this only stops a page that merely shares a letterhead.
+    rubric_copy_min_line_ratio: float = Field(default=0.6, gt=0.0, le=1.0)
+    # Shown to the model in place of a value withheld for the reason above.
+    rubric_withheld_value_marker: str = Field(
+        default="[differs between copies, not shown]", min_length=1
+    )
+
     # --- Aggregation & scoring (V-019, F8.1, ENGINEERING §5) -----------------
     # Three-way status thresholds — VISIBLE in the report payload, never a
     # black box (ticket AC). Defaults per ENGINEERING.md §5.

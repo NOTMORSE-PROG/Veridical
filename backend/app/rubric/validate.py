@@ -22,6 +22,8 @@ from app.llm.base import LLMClient
 from app.models.audit import AuditLog
 from app.rubric.decompose import RubricParseError, decompose_rubric
 from app.rubric.schemas import ParsedCriterion
+from app.rubric.source import DecompositionSource
+from app.rubric.verbatim import verify_against_source
 
 # BUG-160: worded as a fact about the document, never an accusation against
 # whoever uploaded it (ground rule 3) -- the same language could describe a
@@ -225,12 +227,22 @@ async def attempt_decomposition(
     raw_text: str,
     llm: LLMClient,
     settings: Settings,
+    *,
+    source: DecompositionSource | None = None,
 ) -> DecompositionOutcome:
     """Up to `rubric_parse_max_retries + 1` total attempts. Only a
     validation failure (`RubricParseError`, or the gate) triggers a
     retry — quota/API-down errors are infra failures, not content
     problems, and propagate immediately rather than burning retries
-    against the daily meter for nothing (ticket edge case)."""
+    against the daily meter for nothing (ticket edge case).
+
+    `source` is what the upload path builds from the extraction (tables
+    cell by cell, repeated copies read once). Without it, `raw_text` is the
+    whole source. Either way every level descriptor is checked against it
+    (BUG-566): one that is not the document's own words is a gate issue,
+    retried with that feedback and, if it persists, left for the
+    instructor to review rather than stored as if it were parsed."""
+    source = source or DecompositionSource.from_text(blocks, raw_text)
     total_attempts = settings.rubric_parse_max_retries + 1
     feedback: str | None = None
     # The schema-valid attempt with the fewest gate issues (then the most
@@ -249,11 +261,13 @@ async def attempt_decomposition(
     # case — it's the same input every time. A suspected match doesn't
     # change what the gate checks; it's an independent concern that must
     # survive even a clean gate pass (see below).
-    injection = detect_injection_signal(raw_text)
+    injection = detect_injection_signal(source.prompt_text)
 
     for attempt in range(1, total_attempts + 1):
         try:
-            criteria = await decompose_rubric(raw_text, llm, feedback=feedback)
+            criteria = await decompose_rubric(
+                source.prompt_text, llm, feedback=feedback, settings=settings
+            )
         except RubricParseError as exc:
             last_issues = [str(exc)]
             await _log_attempt(
@@ -268,7 +282,10 @@ async def attempt_decomposition(
             feedback = last_issues[0]
             continue
 
-        gate = run_gate(blocks, criteria, settings, raw_text)
+        criteria, source_issues = verify_against_source(criteria, source, settings)
+        gate = run_gate(source.gate_blocks, criteria, settings, source.checklist_text)
+        gate.reasons[:0] = source_issues
+        gate.ok = gate.ok and not source_issues
         await _log_attempt(
             session,
             rubric_id,
