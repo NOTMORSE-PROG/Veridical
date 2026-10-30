@@ -164,6 +164,22 @@ describe("AuditLogPage", () => {
     expect(within(dialog).queryByText("You")).not.toBeInTheDocument();
   });
 
+  it("BUG-559: shows a confirmed finding as the instructor's action, not an unknown origin", async () => {
+    const row = { ...PAGE.items[0], id: 972, check_run_id: 32, event_type: "flag_finding_confirmed", prompt_type: null, prompt_version: null };
+    vi.stubGlobal("fetch", stubFetchByPath({ "/audit": { ...PAGE, items: [row], total: 1 }, "/audit/972": {
+      ...row, input_hash: null,
+      payload: { flag_id: 558, check_result_id: 140, instructor_id: 1, note: null, severity: "low", batch_id: "4cf3cfeb", batch_size: 2 },
+    } }));
+    renderWithProviders(<AuditLogPage />, { route: "/audit?detail=972" });
+    const dialog = await screen.findByRole("dialog");
+    expect(await within(dialog).findByText("You")).toBeVisible();
+    expect(within(dialog).queryByText("Not established by this entry.")).not.toBeInTheDocument();
+    expect(screen.getAllByText("Finding confirmed").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Instructor action:", { exact: false }).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/Origin unavailable/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Flag finding confirmed")).not.toBeInTheDocument();
+  });
+
   it("opening and closing Detail preserves the selected Audit page", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/audit": { ...PAGE, page: 2, total: 60 }, "/audit/42": DETAIL }));
     renderWithProviders(<AuditLogPage />, { route: "/audit?page=2" });
