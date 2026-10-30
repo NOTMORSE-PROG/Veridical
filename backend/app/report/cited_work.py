@@ -10,7 +10,7 @@ def cited_work(detail: dict[str, Any], evidence_excerpt: str) -> dict[str, Any]:
     kind = detail.get("kind")
     if kind == "orphan_in_text_citation":
         text = detail.get("raw_text")
-    elif kind == "uncited_reference":
+    elif kind in {"uncited_reference", "outside_recency_window"}:
         text = evidence_excerpt
     else:
         return {"cited_text": None, "cited_authors": None, "cited_year": None}

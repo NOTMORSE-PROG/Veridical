@@ -60,6 +60,7 @@ from app.checks.escalation import NEEDS_REVIEW_OUTCOMES as _NEEDS_REVIEW_OUTCOME
 from app.config import get_settings
 from app.library.passage_indexing import indexing_scope_sentences
 from app.report.automatic_grade import automatic_grade_caution, automatic_grade_lines
+from app.report.citation_recency import recency_sentences
 from app.report.rule_facts import rule_facts_copy, rule_facts_presentation
 from app.report.schemas import (
     CriterionResultOut,
@@ -671,6 +672,17 @@ def _originality_scope_flowables(data: ReportExportData, styles: dict[str, Parag
         if sentences:
             items.append(Spacer(1, 10))
     return items
+
+
+def _citation_recency_flowables(data: ReportExportData, styles: dict[str, ParagraphStyle]) -> list:
+    """V-092: the recency counts, before the per-source notes they summarize."""
+    sentences = recency_sentences(data.report.citation_recency)
+    if not sentences:
+        return []
+    return [
+        *(Paragraph(escape(sentence), styles["caption"]) for sentence in sentences),
+        Spacer(1, 10),
+    ]
 
 
 def _tone_badge(label: str, tone: str, styles: dict[str, ParagraphStyle]) -> Table:
@@ -2011,6 +2023,7 @@ def _build_report_pdf(data: ReportExportData, image_path) -> bytes:
     )
     flag_intro.append(Spacer(1, 6))
     scope_emitted = False
+    recency_emitted = False
     if not data.flags:
         flow.extend(flag_intro)
         flow.append(
@@ -2110,6 +2123,9 @@ def _build_report_pdf(data: ReportExportData, image_path) -> bytes:
                 if kind == "originality_reuse" and group_index == 0 and not scope_emitted:
                     prefix.extend(_originality_scope_flowables(data, styles))
                     scope_emitted = True
+                if kind == "citation_integrity" and group_index == 0 and not recency_emitted:
+                    prefix.extend(_citation_recency_flowables(data, styles))
+                    recency_emitted = True
                 flag_intro = []
                 local_start = [divider, heading, header, evidence_label]
                 start_items = [*prefix, *local_start]
@@ -2300,6 +2316,8 @@ def _build_report_pdf(data: ReportExportData, image_path) -> bytes:
             module_sections.setdefault(kind, []).extend(flow[group_start:])
             del flow[group_start:]
     flow.append(Spacer(1, 4))
+    if not recency_emitted:
+        flow.extend(_citation_recency_flowables(data, styles))
     if not scope_emitted:
         flow.extend(_originality_scope_flowables(data, styles))
 

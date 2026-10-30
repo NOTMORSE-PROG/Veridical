@@ -17,6 +17,7 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.checks.citations.recency import CitationRecencyFormatSettings, effective_settings
 from app.config import Settings, get_settings
 from app.errors import ConflictError, NotFoundError
 from app.ingest.admission import PreparationLease, preparation_scope
@@ -27,7 +28,11 @@ from app.models.group import Program
 from app.models.rubric import Criterion, Rubric
 from app.models.run import CheckRun
 from app.rubric.decompose import raw_text_for_decomposition
-from app.rubric.schemas import RubricListItem, UpdateCriteriaRequest
+from app.rubric.schemas import (
+    CitationRecencySettingsOut,
+    RubricListItem,
+    UpdateCriteriaRequest,
+)
 from app.rubric.validate import attempt_decomposition
 from app.storage import get_storage, storage_key_for
 
@@ -107,6 +112,8 @@ async def _create_rubric_from_upload(
     # family's current value; carried forward here so a routine "upload a
     # corrected format" action can never silently undo program scoping.
     family_program_id: int | None = None
+    # The family's citation recency setting is carried forward the same way.
+    family_citation_recency: dict | None = None
     if family_id is not None:
         await _lock_rubric_family(session, family_id, instructor_id)
         siblings = (
@@ -120,6 +127,7 @@ async def _create_rubric_from_upload(
             raise NotFoundError(f"No rubric family {family_id}.")
         version = max(r.version for r in siblings) + 1
         family_program_id = siblings[0].program_id
+        family_citation_recency = siblings[0].citation_recency
 
     # The row exists (and has its id) before the file does — same pattern
     # as manuscript ingestion: the server-owned id names the stored file,
@@ -129,6 +137,7 @@ async def _create_rubric_from_upload(
         title=title,
         source_file="",
         program_id=family_program_id,
+        citation_recency=family_citation_recency,
         **({"rubric_family_id": family_id, "version": version} if family_id is not None else {}),
     )
     session.add(rubric)
@@ -286,7 +295,40 @@ async def get_rubric(
         rubric.is_latest_version and not await _has_reports(session, rubric_id)
     )
     rubric.program = await _program_name(session, rubric.program_id)  # type: ignore[attr-defined]
+    rubric.citation_recency_settings = _recency_view(rubric.citation_recency)  # type: ignore[attr-defined]
     return rubric
+
+
+def _recency_view(stored: dict | None) -> CitationRecencySettingsOut:
+    try:
+        return CitationRecencySettingsOut(**effective_settings(stored, get_settings()))
+    except ValueError:
+        # A saved setting that no longer validates is shown as such; the
+        # check reports it as unassessed instead of guessing a window.
+        return CitationRecencySettingsOut(
+            **effective_settings(None, get_settings()), saved_setting_invalid=True
+        )
+
+
+async def set_rubric_family_citation_recency(
+    session: AsyncSession,
+    family_id: uuid.UUID,
+    body: CitationRecencyFormatSettings,
+    instructor_id: int,
+) -> CitationRecencySettingsOut:
+    """Sets the whole family's citation recency setting in one write, like
+    `set_rubric_family_program`. A field left null uses the configured
+    default; all fields null clears the setting. Reports already made keep
+    the values recorded with them."""
+    await _lock_rubric_family(session, family_id, instructor_id)
+    stored = body.model_dump(exclude_none=True) or None
+    await session.execute(
+        update(Rubric)
+        .where(Rubric.rubric_family_id == family_id, Rubric.instructor_id == instructor_id)
+        .values(citation_recency=stored)
+    )
+    await session.commit()
+    return _recency_view(stored)
 
 
 async def _program_name(session: AsyncSession, program_id: int | None) -> str | None:

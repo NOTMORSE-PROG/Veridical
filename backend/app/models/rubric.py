@@ -58,6 +58,12 @@ class Rubric(Base, PkCreatedMixin):
     # everything (AC3), never guessed. Kept in sync across a family's
     # versions by `app/rubric/service.py::set_rubric_family_program`.
     program_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("program.id"))
+    # V-092: the format's citation recency setting, e.g. {"window_years": 3}.
+    # Each field is optional and falls back to the configured default, so
+    # NULL means "use the defaults". A family-level attribute like
+    # `program_id`, kept equal across versions. Each check records the
+    # values it used, so changing this later never rewrites an old report.
+    citation_recency: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
 
     instructor: Mapped["Instructor"] = relationship(back_populates="rubrics")
     # cascade="all, delete-orphan" + passive_deletes=True: deleting a
