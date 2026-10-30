@@ -18,6 +18,7 @@ from typing import Any
 from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.audit.criterion_context import get_criterion_context
 from app.audit.schemas import AuditLogDetail, AuditLogSummary, LLMExecutionMode, PaginatedAuditLog
 from app.errors import NotFoundError
 from app.models.audit import AuditLog
@@ -146,6 +147,7 @@ async def get_audit_log_detail(
         input_hash=entry.input_hash,
         payload=entry.payload or {},
         group_selection=group_selection,
+        criterion_context=await get_criterion_context(session, entry, instructor_id),
     )
 
 

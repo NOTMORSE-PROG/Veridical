@@ -37,7 +37,21 @@ class AuditLogSummary(BaseModel):
     created_at: datetime
 
 
+class AuditCriterionContext(BaseModel):
+    """Separately retrieved producing-format text, not a historical payload field."""
+
+    check_run_id: int
+    criterion_id: int
+    check_result_id: int
+    criterion_text: str
+    criterion_position: int
+    rubric_id: int
+    rubric_version: int
+    rubric_title: str
+
+
 class AuditLogDetail(AuditLogSummary):
+    criterion_context: AuditCriterionContext | None = None
     # Historical saved-group facts are projected only after receipt validation;
     # the original payload remains available separately for inspection.
     group_selection: dict[str, Any] | None = None

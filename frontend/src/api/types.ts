@@ -659,7 +659,20 @@ export interface AuditLogSummary {
   created_at: string;
 }
 
+export interface AuditCriterionContext {
+  check_run_id: number;
+  criterion_id: number;
+  check_result_id: number;
+  criterion_text: string;
+  criterion_position: number;
+  rubric_id: number;
+  rubric_version: number;
+  rubric_title: string;
+}
+
 export interface AuditLogDetail extends AuditLogSummary {
+  /** Producing-format context retrieved separately from the saved payload. */
+  criterion_context?: AuditCriterionContext | null;
   /** Server-validated historical selection; raw payload remains separate. */
   group_selection?: Record<string, unknown> | null;
   // Only on the detail view, not AuditLogSummary's list rows -- the list

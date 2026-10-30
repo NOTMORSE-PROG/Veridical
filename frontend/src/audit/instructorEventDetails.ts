@@ -248,7 +248,7 @@ export function instructorEventDetails(event: string, rawPayload: unknown, entry
     return {
       heading: "Criterion judgment recorded",
       fields: [
-        { role: "primary", label: "Criterion", value: saved ? `Criterion #${saved.criterionId}` : "Unavailable in this entry." },
+        { role: "secondary", label: "Recorded criterion identifier", value: saved ? `Criterion #${saved.criterionId}` : "Unavailable in this entry." },
         { role: "primary", label: "Original automated assessment", value: saved ? originalJudgmentLabel(saved.original) : "Unavailable in this entry." },
         { role: "primary", label: "Instructor judgment", value: saved ? judgmentLabel(saved.after) : "Unavailable in this entry." },
         { role: "reason", label: "Instructor reason", value: saved?.after.reason ?? "Unavailable in this entry." },
@@ -263,7 +263,7 @@ export function instructorEventDetails(event: string, rawPayload: unknown, entry
     return {
       heading: "Criterion judgment revised",
       fields: [
-        { role: "primary", label: "Criterion", value: saved ? `Criterion #${saved.criterionId}` : "Unavailable in this entry." },
+        { role: "secondary", label: "Recorded criterion identifier", value: saved ? `Criterion #${saved.criterionId}` : "Unavailable in this entry." },
         { role: "primary", label: "Previous recorded judgment", value: saved ? judgmentLabel(saved.before) : "Unavailable in this entry." },
         { role: "primary", label: "Revised judgment", value: saved ? judgmentLabel(saved.after) : "Unavailable in this entry." },
         { role: "reason", label: "Revision reason", value: saved?.after.reason ?? "Unavailable in this entry." },
@@ -312,7 +312,7 @@ export function instructorEventDetails(event: string, rawPayload: unknown, entry
     default: judgment = "The recorded judgment is unavailable in this entry.";
   }
   const fields: InstructorEventDetails["fields"] = [
-    { role: "primary", label: "Criterion", value: recordedId(payload.criterion_id) ? `Criterion #${payload.criterion_id}` : "Unavailable in this entry." },
+    { role: "secondary", label: "Recorded criterion identifier", value: recordedId(payload.criterion_id) ? `Criterion #${payload.criterion_id}` : "Unavailable in this entry." },
     { role: "primary", label: "Recorded judgment", value: judgment },
     { role: "reason", label: "Instructor reason", value: Object.hasOwn(payload, "reason") ? recordedInstructorComment(payload.resolution, payload.reason) ?? "Unavailable in this entry." : "Unavailable in this entry." },
   ];
