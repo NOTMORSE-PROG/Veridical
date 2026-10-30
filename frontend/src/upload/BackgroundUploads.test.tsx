@@ -36,23 +36,25 @@ describe("background uploads", () => {
     expect(screen.queryByRole("complementary", { name: "Uploads in progress" })).not.toBeInTheDocument();
   });
 
-  it("folds to one line so it stops covering the page, and unfolds for a new upload", async () => {
+  it("closes in one click once every upload has finished, and remembers that", async () => {
     window.localStorage.clear();
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(SUMMARY), { status: 200 })));
     await renderWithUploadProviders(<BackgroundUploadsProvider><Starter /></BackgroundUploadsProvider>);
     choose();
     expect(await screen.findByText("Ready.")).toBeInTheDocument();
-    const hide = screen.getByRole("button", { name: "Hide uploads" });
-    expect(hide).toHaveAttribute("aria-expanded", "true");
-    fireEvent.click(hide);
-    expect(screen.getByRole("button", { name: "Show uploads" })).toHaveAttribute("aria-expanded", "false");
-    expect(screen.getByText("1 ready")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Dismiss large-thesis.pdf" })).not.toBeInTheDocument();
-    expect(window.localStorage.getItem("veridical.uploads-tray-folded.v1")).toBe("true");
-
-    choose("second-thesis.pdf");
-    expect(await screen.findByRole("button", { name: "Hide uploads" })).toHaveAttribute("aria-expanded", "true");
+    // Nothing is in progress, so there is nothing to fold: only Close.
+    expect(screen.queryByRole("button", { name: /^(Hide|Show)$/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close uploads" }));
+    expect(screen.queryByRole("complementary", { name: "Uploads in progress" })).not.toBeInTheDocument();
     window.localStorage.clear();
+  });
+
+  it("takes an upload out of the tray once its check is started from it", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(SUMMARY), { status: 200 })));
+    await renderWithUploadProviders(<BackgroundUploadsProvider><Starter /></BackgroundUploadsProvider>);
+    choose();
+    fireEvent.click(await screen.findByRole("link", { name: "Start a check" }));
+    expect(screen.queryByRole("complementary", { name: "Uploads in progress" })).not.toBeInTheDocument();
   });
 
   it("keeps a sending file's warning and anything needing attention in the folded summary", () => {
