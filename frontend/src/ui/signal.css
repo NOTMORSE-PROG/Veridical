@@ -8974,8 +8974,24 @@
     padding: var(--signal-space-4);
   }
   .signal-upload-tray__title { margin: 0; font-size: var(--signal-type-body); }
-  .signal-upload-tray__header { display: flex; align-items: center; justify-content: space-between; gap: var(--signal-space-3); }
+  /* The header stays put while a long list scrolls, so it can always be folded. */
+  .signal-upload-tray__header {
+    position: sticky;
+    inset-block-start: calc(-1 * var(--signal-space-4));
+    z-index: var(--signal-z-raised);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--signal-space-3);
+    margin-block-start: calc(-1 * var(--signal-space-4));
+    padding-block: var(--signal-space-4) var(--signal-space-2);
+    background: var(--color-signal-surface);
+  }
   .signal-upload-tray__summary { margin: 0; color: var(--color-signal-ink-muted); }
+  .signal-upload-tray__summary [data-attention="true"] { color: var(--color-signal-not-ready-text); font-weight: var(--signal-weight-semibold); }
+  /* Room below the page's last row, so nothing stays under the tray. */
+  body:has(.signal-upload-tray) { padding-block-end: calc(var(--signal-upload-tray-height) + 2 * var(--signal-space-5)); }
+  html:has(.signal-upload-tray) { scroll-padding-block-end: calc(var(--signal-upload-tray-height) + 2 * var(--signal-space-5)); }
   .signal-upload-tray ul[hidden] { display: none; }
   .signal-upload-tray ul { display: grid; gap: var(--signal-space-3); margin: 0; padding: 0; list-style: none; }
   .signal-upload-tray__item { display: grid; gap: var(--signal-space-2); border-block-start: var(--signal-border-hairline) solid var(--color-signal-border); padding-block-start: var(--signal-space-3); }
