@@ -2,6 +2,7 @@ import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderWithUploadProviders } from "../test/renderWithUploadProviders";
 import { BackgroundUploadsProvider, useBackgroundUploads } from "./BackgroundUploads";
+import { traySummary } from "./traySummary";
 
 const SUMMARY = {
   manuscript_id: 42, group_label: "Ungrouped", ingest_status: "done", page_count: 312, anchor_kind: "page",
@@ -41,17 +42,34 @@ describe("background uploads", () => {
     await renderWithUploadProviders(<BackgroundUploadsProvider><Starter /></BackgroundUploadsProvider>);
     choose();
     expect(await screen.findByText("Ready.")).toBeInTheDocument();
-    const hide = screen.getByRole("button", { name: "Hide" });
+    const hide = screen.getByRole("button", { name: "Hide uploads" });
     expect(hide).toHaveAttribute("aria-expanded", "true");
     fireEvent.click(hide);
-    expect(screen.getByRole("button", { name: "Show" })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByRole("button", { name: "Show uploads" })).toHaveAttribute("aria-expanded", "false");
     expect(screen.getByText("1 ready")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Dismiss large-thesis.pdf" })).not.toBeInTheDocument();
     expect(window.localStorage.getItem("veridical.uploads-tray-folded.v1")).toBe("true");
 
     choose("second-thesis.pdf");
-    expect(await screen.findByRole("button", { name: "Hide" })).toHaveAttribute("aria-expanded", "true");
+    expect(await screen.findByRole("button", { name: "Hide uploads" })).toHaveAttribute("aria-expanded", "true");
     window.localStorage.clear();
+  });
+
+  it("keeps a sending file's warning and anything needing attention in the folded summary", () => {
+    const base = { size: 1, percent: null, startsCheck: false };
+    const parts = traySummary([
+      { ...base, id: "a", fileName: "a.pdf", phase: "sending", serverOwned: false },
+      { ...base, id: "b", fileName: "b.pdf", phase: "preparing", serverOwned: true },
+      { ...base, id: "c", fileName: "c.pdf", phase: "failed", error: "Refused." },
+      { ...base, id: "d", fileName: "d.pdf", phase: "done", checkStartError: "No format chosen." },
+      { ...base, id: "e", fileName: "e.pdf", phase: "done" },
+    ] as Parameters<typeof traySummary>[0]);
+    expect(parts).toEqual([
+      { text: "1 sending: keep this tab open", attention: true },
+      { text: "2 need attention", attention: true },
+      { text: "1 preparing", attention: false },
+      { text: "1 ready", attention: false },
+    ]);
   });
 
   it("reports a failed upload honestly and lets the instructor try again", async () => {

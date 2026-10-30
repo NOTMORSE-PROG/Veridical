@@ -9,6 +9,7 @@ import { followUpload, listActiveUploads, startedCheckId } from "../api/uploadTr
 import { StaleUploadContextError, validateIngestReceipt } from "../api/uploadOutcome";
 import { useUploadScope, type UploadAttemptScope } from "../auth/useUploadScope";
 import { BACKGROUND_UPLOAD_BUSY_RETRY, BACKGROUND_UPLOAD_DISMISSED_KEPT } from "../config/ui";
+import { traySummary } from "./traySummary";
 import { ActionLink } from "../ui/ActionLink";
 import { Button } from "../ui/Button";
 
@@ -275,17 +276,24 @@ function rememberFolded(folded: boolean) {
 
 const isActive = (item: BackgroundUpload) => item.phase === "waiting" || item.phase === "sending" || item.phase === "preparing";
 
-export function traySummary(uploads: BackgroundUpload[]) {
-  const active = uploads.filter(isActive).length;
-  const ready = uploads.filter((item) => item.phase === "done").length;
-  const failed = uploads.filter((item) => item.phase === "failed").length;
-  return [active && `${active} in progress`, ready && `${ready} ready`, failed && `${failed} not uploaded`].filter(Boolean).join(" · ");
+// The page keeps room below its last row for the tray, so nothing ends up
+// permanently under it (padding reads this variable).
+function useTrayHeight(node: HTMLElement | null) {
+  useEffect(() => {
+    if (!node || typeof ResizeObserver === "undefined") return;
+    const root = document.documentElement;
+    const observer = new ResizeObserver(() => root.style.setProperty("--signal-upload-tray-height", `${Math.ceil(node.getBoundingClientRect().height)}px`));
+    observer.observe(node);
+    return () => { observer.disconnect(); root.style.removeProperty("--signal-upload-tray-height"); };
+  }, [node]);
 }
 
 function UploadTray({ uploads, canRetry, onDismiss, onRetry }: {
   uploads: BackgroundUpload[]; canRetry: (id: string) => boolean; onDismiss: (id: string) => void; onRetry: (id: string) => void;
 }) {
   const listId = useId();
+  const [tray, setTray] = useState<HTMLElement | null>(null);
+  useTrayHeight(tray);
   const [folded, setFolded] = useState(readFolded);
   const active = uploads.filter(isActive).length;
   const seenActive = useRef(active);
@@ -297,14 +305,17 @@ function UploadTray({ uploads, canRetry, onDismiss, onRetry }: {
     setFolded(!folded);
     rememberFolded(!folded);
   }
-  return <aside className="signal-upload-tray" aria-label="Uploads in progress" data-folded={folded ? "true" : undefined}>
+  return <aside ref={setTray} className="signal-upload-tray" aria-label="Uploads in progress" data-folded={folded ? "true" : undefined}>
     <div className="signal-upload-tray__header">
       <h2 className="signal-upload-tray__title">Uploads</h2>
-      <Button variant="quiet" aria-expanded={!folded} aria-controls={listId} onClick={toggle}>{folded ? "Show" : "Hide"}</Button>
+      <Button variant="quiet" aria-expanded={!folded} aria-controls={listId} onClick={toggle}>{folded ? "Show uploads" : "Hide uploads"}</Button>
     </div>
     {/* Folded, the per-upload messages are not on the page, so the summary
         carries what changed. */}
-    {folded && <p role="status" aria-live="polite" className="signal-upload-tray__summary">{traySummary(uploads)}</p>}
+    {folded && <p role="status" aria-live="polite" className="signal-upload-tray__summary">
+      {traySummary(uploads).map((part, index) => <span key={part.text} data-attention={part.attention ? "true" : undefined}>
+        {index > 0 && " · "}{part.text}</span>)}
+    </p>}
     <ul id={listId} hidden={folded}>
       {uploads.map((item) => <li key={item.id} className="signal-upload-tray__item" data-phase={item.phase}
         data-attention={item.phase === "done" && item.checkStartError ? "true" : undefined}>
