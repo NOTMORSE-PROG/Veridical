@@ -9,7 +9,7 @@ import { ReviewDeskReturnLink } from "../routing/ReviewDeskReturnLink";
 import { type KeyboardEvent, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigationType, useParams, useSearchParams } from "react-router";
 import { ApiError } from "../api/client";
-import type { FlagOut, FlagRegionOut, ReportOut } from "../api/types";
+import type { FlagOut, FlagRegionOut, FlagSummaryOut, ReportOut } from "../api/types";
 import { CRITERION_ANCHOR_REGION_ID, COMPARISON_LEAD_PAGE_SIZE, LIST_PAGE_SIZE } from "../config/ui";
 import { checkKindMeta, findingVerificationPrompt, isPValueFinding } from "../domain/checkKind";
 import { agreementEvidenceType, evidenceDisplayState } from "../domain/evidenceDisplay";
@@ -131,7 +131,8 @@ function regionForFinding(finding: ReviewFinding, regions: FlagRegionOut[]): Fla
     ?? null;
 }
 
-function ReviewQueue({ findings, regions, sourceAvailability, report, collection, viewedIds, filter, invalidSelection, onFilter, onSelect, onExplore, onRetry, showComparisons = true, moduleKind }: {
+function ReviewQueue({ findings, regions, sourceAvailability, report, collection, viewedIds, filter, invalidSelection, onFilter, onSelect, onExplore, onRetry, showComparisons = true, moduleKind, onClose }: {
+  onClose?: () => void;
   moduleKind: string;
   findings: ReviewFinding[];
   regions: FlagRegionOut[];
@@ -169,7 +170,8 @@ function ReviewQueue({ findings, regions, sourceAvailability, report, collection
           ? <ActionLink to={`/report/${report.check_run_id}?section=limits`} variant="secondary">Open assessment limits</ActionLink> : undefined}><p>{empty.description}</p></EmptyState>;
       })()}
       {findings.length > 0 && (
-        <div className="signal-document-inspector__heading"><h2>{collection.lastLoaded ? "Last loaded integrity findings" : "Integrity findings"}</h2></div>
+        <div className="signal-document-inspector__heading"><h2>{collection.lastLoaded ? "Last loaded integrity findings" : "Integrity findings"}</h2>
+          {onClose && <Button variant="quiet" onClick={onClose} aria-label="Close the findings list">Close</Button>}</div>
       )}
       {findings.length > 0 && (
         <div className="signal-document-review-filters" role="group" aria-label="Filter review findings">
@@ -285,6 +287,41 @@ function SelectedFinding({ comparisonHost, comparisonVisible, finding, total, lo
   </article>;
 }
 
+// Several locations of one finding are often on the same page; a label that
+// says only "p. 9" twice cannot be told apart, so a short piece of each one's
+// own text is added when labels would repeat.
+const LOCATION_SUBJECT_CHARS = 48;
+
+// The location just chosen; its button takes focus back once the evidence for
+// it has rendered (the panel re-renders for the new record).
+let pendingLocationFocus: number | null = null;
+
+function useLocationFocus(locationFlagId: number) {
+  useEffect(() => {
+    if (pendingLocationFocus !== locationFlagId) return;
+    let frames = 0;
+    let frame = 0;
+    const attempt = () => {
+      const button = document.getElementById(`finding-location-${locationFlagId}`);
+      if (button) { button.focus({ preventScroll: true }); pendingLocationFocus = null; return; }
+      if (++frames < 30) frame = requestAnimationFrame(attempt);
+    };
+    attempt();
+    return () => cancelAnimationFrame(frame);
+  });
+}
+
+function locationLabels(members: FlagSummaryOut[]) {
+  const base = members.map((member) => member.cited_text ? `${member.cited_text}, ${instructorAnchor(member.page_anchor)}` : instructorAnchor(member.page_anchor));
+  const repeated = (label: string) => base.filter((item) => item === label).length > 1;
+  const subject = (member: FlagSummaryOut) => {
+    const text = member.evidence_excerpt.trim().replace(/\s+/g, " ");
+    return text.length > LOCATION_SUBJECT_CHARS ? `${text.slice(0, LOCATION_SUBJECT_CHARS).trimEnd()}…` : text;
+  };
+  const labels = members.map((member, index) => repeated(base[index]) && subject(member) ? `${base[index]} · “${subject(member)}”` : base[index]);
+  return members.map((member, index) => ({ member, label: labels[index], same: labels.filter((label) => label === labels[index]).length > 1 }));
+}
+
 function SelectedFindingEvidence({ comparisonHost, comparisonVisible, finding, flag, current, locationFlagId, region, sourceAvailability, sourceAnchor, onLocation, onExplore, fullWidth, canExpand, onExpand, onReadManuscript, onStatementSource, activeStatement, showPageSources }: {
   showPageSources: boolean;
   comparisonHost?: HTMLElement | null;
@@ -295,6 +332,7 @@ function SelectedFindingEvidence({ comparisonHost, comparisonVisible, finding, f
   onLocation: (flagId: number) => void; onExplore: () => void;
   fullWidth: boolean; canExpand: boolean; onReadManuscript: () => void; onExpand: () => void; onStatementSource: (anchor: string | null, role: AgreementStatementRole) => void; activeStatement?: AgreementStatementRole;
 }) {
+  useLocationFocus(locationFlagId);
   const { showsManuscriptQuote, reasoningText, showsManuscriptEvidence, isResubmission } = evidenceDisplayState(flag);
   const precision = regionPrecision(region, sourceAvailability);
   const comparative = flag.check_kind === "originality_reuse";
@@ -317,7 +355,8 @@ function SelectedFindingEvidence({ comparisonHost, comparisonVisible, finding, f
         <section className="signal-document-locations" aria-labelledby="finding-locations-heading">
           <h3 id="finding-locations-heading">Recorded locations and scopes</h3>
           <p>Location {locationIndex + 1} of {finding.flags.length}. These records are presented as one finding; none of the stored data was removed.</p>
-          <div role="group" aria-label={`Locations for Finding ${finding.number}`}>{finding.flags.map((member, index) => <button key={member.id} type="button" aria-pressed={member.id === locationFlagId} onClick={() => onLocation(member.id)}>Location {index + 1}: {member.cited_text ? `${member.cited_text}, ${instructorAnchor(member.page_anchor)}` : instructorAnchor(member.page_anchor)}</button>)}</div>
+          <div role="group" aria-label={`Locations for Finding ${finding.number}`}>{locationLabels(finding.flags).map(({ member, label }, index) => <button key={member.id} id={`finding-location-${member.id}`} type="button" aria-pressed={member.id === locationFlagId} onClick={() => onLocation(member.id)}>Location {index + 1}: {label}</button>)}</div>
+          {locationLabels(finding.flags).every(({ same }) => same) && <p className="signal-field-hint">These locations point to the same passage{finding.flags[0]?.page_anchor ? ` on ${instructorAnchor(finding.flags[0].page_anchor)}` : ""}. Each one's explanation below can still differ.</p>}
         </section>
       )}
       {!showsManuscriptQuote && <p><strong>Recorded check result:</strong> {systemFindingCopy(flag.evidence_excerpt, flag.ai_verdict_summary, "evidence")}</p>}
@@ -435,7 +474,7 @@ function ReadinessDecision({ checkRunId, step, report: loadedReport, pending, er
   );
 }
 
-function ReviewHome({ moduleKind, showComparisons = true, checkRunId, report, reportPending, reportRetrying, reportError, onReportRetry, findings, regions, sourceAvailability, collection, viewedIds, onFlagsRetry, filter, invalidSelection, onFilter, onSelect, onExplore }: {
+function ReviewHome({ onClose, moduleKind, showComparisons = true, checkRunId, report, reportPending, reportRetrying, reportError, onReportRetry, findings, regions, sourceAvailability, collection, viewedIds, onFlagsRetry, filter, invalidSelection, onFilter, onSelect, onExplore }: {
   showComparisons?: boolean;
   moduleKind: string;
   checkRunId: number;
@@ -455,11 +494,12 @@ function ReviewHome({ moduleKind, showComparisons = true, checkRunId, report, re
   onFilter: (filter: ReviewFilter) => void;
   onSelect: (id: number) => void;
   onExplore: () => void;
+  onClose?: () => void;
 }) {
   if (reportPending) return <div role="status" aria-live="polite" aria-busy="true" className="signal-desk-loading"><span>Loading review queue.</span><i /><i /></div>;
   const availableReport = usableReport(report, checkRunId, reportError);
   if (!availableReport) return <ReportUnavailable checkRunId={checkRunId} error={reportError} onRetry={onReportRetry} />;
-  return <>{Boolean(reportError) && <ReportReadNotice retrying={reportRetrying} onRetry={onReportRetry} />}<ReviewQueue moduleKind={moduleKind} showComparisons={showComparisons} findings={findings} regions={regions} sourceAvailability={sourceAvailability} report={availableReport} collection={collection} viewedIds={viewedIds} onRetry={onFlagsRetry} filter={filter} invalidSelection={invalidSelection} onFilter={onFilter} onSelect={onSelect} onExplore={onExplore} /></>;
+  return <>{Boolean(reportError) && <ReportReadNotice retrying={reportRetrying} onRetry={onReportRetry} />}<ReviewQueue onClose={onClose} moduleKind={moduleKind} showComparisons={showComparisons} findings={findings} regions={regions} sourceAvailability={sourceAvailability} report={availableReport} collection={collection} viewedIds={viewedIds} onRetry={onFlagsRetry} filter={filter} invalidSelection={invalidSelection} onFilter={onFilter} onSelect={onSelect} onExplore={onExplore} /></>;
 }
 
 export function SignalDocumentViewerPage() {
@@ -597,6 +637,9 @@ export function SignalDocumentViewerPage() {
     requestAnimationFrame(() => document.getElementById(STEP_FOCUS_TARGET[step])?.focus());
   }, [step, navigationType]);
   const selectedFinding = isDecision ? null : findingForFlag(findings, requestedFlagId);
+  // The findings list under the check tiles can be closed; choosing a check
+  // opens it again.
+  const [findingsListClosed, setFindingsListClosed] = useState(false);
   const selectedModule = selectedIntegrityModule(selectedFinding?.representative.check_kind ?? searchParams.get("module") ?? findings[0]?.representative.check_kind ?? null);
   const moduleFindings = otherFindings.filter(finding => finding.representative.check_kind === selectedModule);
   const selectedComparison = Boolean(selectedFinding && isOptionalComparisonLead(selectedFinding.representative));
@@ -856,6 +899,28 @@ export function SignalDocumentViewerPage() {
     const elementId = `signal-flag-review-${findingId}`;
     rememberRouteReturnFocus(findingOrigin.returnPath, `/report/${id}/document?${next}`, elementId, { armed: true });
     return { ...findingOrigin.state, routeReturnFocus: { returnPath: findingOrigin.returnPath, elementId } };
+  }
+
+  // Another recorded location of the finding on screen: the manuscript moves
+  // to it, and focus stays on the location buttons instead of jumping to the
+  // finding heading (which scrolled the page).
+  function closeFindingsList() {
+    setFindingsListClosed(true);
+    // Focus goes to the check tiles, where the list is opened again.
+    requestAnimationFrame(() => (document.querySelector<HTMLElement>("[aria-controls='workspace-module-records'][aria-pressed='true']")
+      ?? document.querySelector<HTMLElement>("[aria-controls='workspace-module-records']"))?.focus());
+  }
+
+  function selectLocation(flagId: number) {
+    const finding = findingForFlag(findings, flagId);
+    if (!finding) return;
+    const next = new URLSearchParams(searchParams);
+    clearPdfReading(next);
+    next.set("location", String(flagId));
+    for (const key of ["flag", "anchor", "panel", "match"]) next.delete(key);
+    sourceReveal.arm(next.toString(), flagId);
+    pendingLocationFocus = flagId;
+    setSearchParams(next, { replace: true, state: carryFindingOrigin(next, finding.representative.id) ?? location.state });
   }
 
   function selectFinding(flagId: number, replace = false) {
@@ -1138,18 +1203,18 @@ export function SignalDocumentViewerPage() {
                   <IntegrityModuleNavigation selected={selectedModule} controls="workspace-module-records" modules={reportQuery.data?.integrity_modules}
                     stateLabels={originalityCoverageNote(reportQuery.data) ? { originality_reuse: originalityCoverageNote(reportQuery.data)!.tag } : undefined}
                     counts={new Map(["internal_agreement", "citation_integrity", "statistical_forensics", "originality_reuse"].map(kind => [kind, flags?.filter(flag => flag.check_kind === kind).length ?? 0]))}
-                    onSelect={kind => updateTask(next => { next.set("module", kind); ["finding", "flag", "location", "reading", "anchor", "view", "pane", "lead_view", "lead_return", "lead_visible", FINDINGS_PAGE_PARAM].forEach(key => next.delete(key)); next.set("view", "queue"); })} />
-                  <IntegrityModuleSummary kind={selectedModule} />
-                  {selectedModule === "statistical_forensics" && reportQuery.data && <StatisticalCheckScope scope={reportQuery.data.statistical_check_scope} />}
-                  {selectedModule === "originality_reuse" && reportQuery.data && <OriginalityScope scope={reportQuery.data.originality_scope} showAddAction />}
-                  {selectedModule === "originality_reuse" && reportQuery.data && <OriginalityCoverageNotice report={reportQuery.data} />}
+                    onSelect={kind => { setFindingsListClosed(false); updateTask(next => { next.set("module", kind); ["finding", "flag", "location", "reading", "anchor", "view", "pane", "lead_view", "lead_return", "lead_visible", FINDINGS_PAGE_PARAM].forEach(key => next.delete(key)); next.set("view", "queue"); }); }} />
+                  {!findingsListClosed && <IntegrityModuleSummary kind={selectedModule} />}
+                  {!findingsListClosed && selectedModule === "statistical_forensics" && reportQuery.data && <StatisticalCheckScope scope={reportQuery.data.statistical_check_scope} />}
+                  {!findingsListClosed && selectedModule === "originality_reuse" && reportQuery.data && <OriginalityScope scope={reportQuery.data.originality_scope} showAddAction />}
+                  {!findingsListClosed && selectedModule === "originality_reuse" && reportQuery.data && <OriginalityCoverageNotice report={reportQuery.data} />}
                 </div>}
                 <div id="workspace-module-records">
                 {isExploring ? <ReuseExplorePanel showBack={false} flags={flags} flagsFetching={flagsQuery.isFetching} flagsError={flagsQuery.isError} flagsSucceeded={flagsQuery.isSuccess} onRetryFlags={() => flagsQuery.refetch()} onSelectFlag={selectFinding} onBack={showQueue} includeReferenceList={includeReferenceList} includeBlockQuote={includeBlockQuote} onToggleReferenceList={(value) => setToggle("ref", value)} onToggleBlockQuote={(value) => setToggle("quote", value)} excludedMatchesQuery={excludedMatchesQuery} expandedMatchId={expandedMatchId} onExpandMatch={setMatch} />
                   : isDecision ? <ReadinessDecision checkRunId={id} step={step} report={reportQuery.data} pending={reportQuery.isPending} error={reportQuery.error} retrying={reportQuery.fetchStatus === "fetching"} onRetry={() => reportQuery.refetch()} sourceTarget={criterionSourceTarget} onOpenSource={openCriterionSource} onOpenEvidenceSource={openRecordedCriterionSource}
                     returnNotice={criterionReturnNotice?.run === id && criterionReturnNotice.search === sourceQuery ? criterionReturnNotice.message : undefined} />
-                    : selectedFinding && selectedLocationId ? <SelectedFinding comparisonHost={comparisonHost} comparisonVisible={workspace.split || activeTab === "manuscript"} onRevealSource={selectedRegion?.kind === "paragraph_only" ? revealRecordedLocation : undefined} activeStatement={statementTarget?.run === id && statementTarget.flag === selectedLocationId ? statementTarget.role : undefined} onRecordReady={setSelectedRecord} onStatementSource={showStatementSource} fullWidth={fullWidthReading} singlePane={singlePaneLayout} onReadingChange={changeReading} finding={selectedFinding} total={otherFindings.length} locationFlagId={selectedLocationId} region={selectedRegion} sourceAvailability={sourceAvailability} sourceAnchor={recordedAnchor} previous={previousFinding} next={nextFinding} collection={optional} outsideFilter={selectedComparison && selectedNavigationIndex < 0 && optional.snapshot !== undefined} filterPosition={selectedNavigationIndex + 1} filterTotal={navigationFindings.length} onAll={() => update((next) => { next.delete("lead_view"); next.delete("lead_visible"); next.delete("lead_return"); next.set("lead_page", String(Math.floor((optional.snapshot?.records.findIndex((record) => record.id === selectedLocationId) ?? 0) / COMPARISON_LEAD_PAGE_SIZE) + 1)); }, true)} onBack={showQueue} onPrevious={() => previousFinding && selectFinding(previousFinding.representative.id, true)} onNext={() => nextFinding && selectFinding(nextFinding.representative.id, true)} onLocation={selectFinding} onExplore={openExplore} />
-                      : <ReviewHome moduleKind={selectedModule} showComparisons={selectedModule === "originality_reuse"} checkRunId={id} report={reportQuery.data} reportPending={reportQuery.isPending} reportRetrying={reportQuery.fetchStatus === "fetching"} reportError={reportQuery.error} onReportRetry={() => reportQuery.refetch()} findings={moduleFindings} regions={viewer?.regions ?? []} sourceAvailability={sourceAvailability} collection={optional} viewedIds={viewedIds} onFlagsRetry={() => { void flagsQuery.refetch(); }} filter={filter} invalidSelection={invalidSelection} onFilter={setFilter} onSelect={selectFinding} onExplore={openExplore} />}
+                    : selectedFinding && selectedLocationId ? <SelectedFinding comparisonHost={comparisonHost} comparisonVisible={workspace.split || activeTab === "manuscript"} onRevealSource={selectedRegion?.kind === "paragraph_only" ? revealRecordedLocation : undefined} activeStatement={statementTarget?.run === id && statementTarget.flag === selectedLocationId ? statementTarget.role : undefined} onRecordReady={setSelectedRecord} onStatementSource={showStatementSource} fullWidth={fullWidthReading} singlePane={singlePaneLayout} onReadingChange={changeReading} finding={selectedFinding} total={otherFindings.length} locationFlagId={selectedLocationId} region={selectedRegion} sourceAvailability={sourceAvailability} sourceAnchor={recordedAnchor} previous={previousFinding} next={nextFinding} collection={optional} outsideFilter={selectedComparison && selectedNavigationIndex < 0 && optional.snapshot !== undefined} filterPosition={selectedNavigationIndex + 1} filterTotal={navigationFindings.length} onAll={() => update((next) => { next.delete("lead_view"); next.delete("lead_visible"); next.delete("lead_return"); next.set("lead_page", String(Math.floor((optional.snapshot?.records.findIndex((record) => record.id === selectedLocationId) ?? 0) / COMPARISON_LEAD_PAGE_SIZE) + 1)); }, true)} onBack={showQueue} onPrevious={() => previousFinding && selectFinding(previousFinding.representative.id, true)} onNext={() => nextFinding && selectFinding(nextFinding.representative.id, true)} onLocation={selectLocation} onExplore={openExplore} />
+                      : findingsListClosed ? null : <ReviewHome onClose={closeFindingsList} moduleKind={selectedModule} showComparisons={selectedModule === "originality_reuse"} checkRunId={id} report={reportQuery.data} reportPending={reportQuery.isPending} reportRetrying={reportQuery.fetchStatus === "fetching"} reportError={reportQuery.error} onReportRetry={() => reportQuery.refetch()} findings={moduleFindings} regions={viewer?.regions ?? []} sourceAvailability={sourceAvailability} collection={optional} viewedIds={viewedIds} onFlagsRetry={() => { void flagsQuery.refetch(); }} filter={filter} invalidSelection={invalidSelection} onFilter={setFilter} onSelect={selectFinding} onExplore={openExplore} />}
                 </div>
                 {step && !isExploring && !selectedFinding && !searchParams.has("criterion") && <WorkspaceStepFooter current={step} onSelect={goToStep} />}
               </aside>

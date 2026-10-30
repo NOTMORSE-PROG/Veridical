@@ -537,6 +537,23 @@ describe("SignalDocumentViewerPage", () => {
     expect(screen.getByTestId("pdf-pane")).toHaveAttribute("data-selection", "7");
   });
 
+  it("closes the findings list back to the check tiles, and a check opens it again", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({
+      "/check-runs/5/document": VIEWER,
+      "/check-runs/5/report": REPORT,
+      "/check-runs/5/escalated": [],
+      "/check-runs/5/flags": [SUMMARY],
+      "/check-runs/5/document/reuse-matches": { passage_archive_size_n: 8, matches: [] },
+    }));
+    renderWithProviders(<SignalDocumentViewerPage />, { route: "/report/5/document?view=queue&module=internal_agreement&pane=review", path: "/report/:checkRunId/document" });
+    fireEvent.click(await screen.findByRole("button", { name: "Close the findings list" }));
+    expect(screen.queryByRole("list", { name: "Findings on this page" })).not.toBeInTheDocument();
+    const tile = screen.getByRole("button", { name: /^Internal agreement/ });
+    await waitFor(() => expect(tile).toHaveFocus());
+    fireEvent.click(tile);
+    expect(await screen.findByRole("list", { name: "Findings on this page" })).toBeInTheDocument();
+  });
+
   it("leads back to the report findings the finding was opened from", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({
       "/check-runs/5/document": VIEWER,

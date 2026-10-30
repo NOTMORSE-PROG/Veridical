@@ -175,12 +175,15 @@ export function BackgroundUploadsProvider({ children }: { children: ReactNode })
     if (entry) void run(id, entry.file, entry.options);
   }, [run]);
 
-  const dismiss = useCallback((id: string) => {
-    files.current.delete(id);
-    const attemptId = uploads.find((upload) => upload.id === id)?.attemptId;
-    if (attemptId && restoredFor.current !== null) rememberDismissed(restoredFor.current, attemptId);
-    setUploads((current) => current.filter((upload) => upload.id !== id));
+  const dismissAll = useCallback((ids: readonly string[]) => {
+    for (const id of ids) {
+      files.current.delete(id);
+      const attemptId = uploads.find((upload) => upload.id === id)?.attemptId;
+      if (attemptId && restoredFor.current !== null) rememberDismissed(restoredFor.current, attemptId);
+    }
+    setUploads((current) => current.filter((upload) => !ids.includes(upload.id)));
   }, [uploads]);
+  const dismiss = useCallback((id: string) => dismissAll([id]), [dismissAll]);
 
   // A new page shows the uploads that are still preparing on the server, or
   // finished since, even when another tab sent them.
@@ -237,7 +240,7 @@ export function BackgroundUploadsProvider({ children }: { children: ReactNode })
   const value = useMemo(() => ({ uploads, canStartCheck: directUpload(), start, dismiss }), [uploads, start, dismiss]);
   return <BackgroundUploadsContext.Provider value={value}>
     {children}
-    {uploads.length > 0 && <UploadTray uploads={uploads} canRetry={(id) => files.current.has(id)} onDismiss={dismiss} onRetry={retry} />}
+    {uploads.length > 0 && <UploadTray uploads={uploads} canRetry={(id) => files.current.has(id)} onDismiss={dismiss} onDismissAll={dismissAll} onRetry={retry} />}
   </BackgroundUploadsContext.Provider>;
 }
 
@@ -288,14 +291,18 @@ function useTrayHeight(node: HTMLElement | null) {
   }, [node]);
 }
 
-function UploadTray({ uploads, canRetry, onDismiss, onRetry }: {
-  uploads: BackgroundUpload[]; canRetry: (id: string) => boolean; onDismiss: (id: string) => void; onRetry: (id: string) => void;
+function UploadTray({ uploads, canRetry, onDismiss, onDismissAll, onRetry }: {
+  uploads: BackgroundUpload[]; canRetry: (id: string) => boolean; onDismiss: (id: string) => void;
+  onDismissAll: (ids: readonly string[]) => void; onRetry: (id: string) => void;
 }) {
   const listId = useId();
   const [tray, setTray] = useState<HTMLElement | null>(null);
   useTrayHeight(tray);
-  const [folded, setFolded] = useState(readFolded);
+  const [foldChoice, setFolded] = useState(readFolded);
   const active = uploads.filter(isActive).length;
+  // Folding is for uploads in progress; once all have finished the list
+  // shows, so a failed one's Try again is never out of reach.
+  const folded = foldChoice && active > 0;
   const seenActive = useRef(active);
   useEffect(() => {
     if (active > seenActive.current) setFolded(false);
@@ -305,10 +312,23 @@ function UploadTray({ uploads, canRetry, onDismiss, onRetry }: {
     setFolded(!folded);
     rememberFolded(!folded);
   }
+  // Closing clears every finished upload at once (each is still on the
+  // Review Desk). One still being sent cannot be put away: it folds to its
+  // status line instead, since closing the tab would lose the file.
+  const finished = uploads.filter((item) => item.phase === "done" || item.phase === "failed").map((item) => item.id);
+  function close() {
+    onDismissAll(finished);
+    if (active > 0 && !folded) toggle();
+  }
   return <aside ref={setTray} className="signal-upload-tray" aria-label="Uploads in progress" data-folded={folded ? "true" : undefined}>
     <div className="signal-upload-tray__header">
       <h2 className="signal-upload-tray__title">Uploads</h2>
-      <Button variant="quiet" aria-expanded={!folded} aria-controls={listId} onClick={toggle}>{folded ? "Show uploads" : "Hide uploads"}</Button>
+      <div className="signal-upload-tray__controls">
+        {active > 0 && <Button variant="quiet" aria-expanded={!folded} aria-controls={listId} onClick={toggle}>{folded ? "Show" : "Hide"}</Button>}
+        {finished.length > 0 && <Button variant="quiet" onClick={close}
+          aria-label={active > 0 ? `Clear ${finished.length} finished ${finished.length === 1 ? "upload" : "uploads"}` : "Close uploads"}>
+          {active > 0 ? "Clear finished" : <><span aria-hidden="true">{"\u2715"}</span> Close</>}</Button>}
+      </div>
     </div>
     {/* Folded, the per-upload messages are not on the page, so the summary
         carries what changed. */}
@@ -327,13 +347,13 @@ function UploadTray({ uploads, canRetry, onDismiss, onRetry }: {
         {item.phase === "failed" && item.keptRecord && <ActionLink variant="secondary" to="/dashboard">{UPLOAD_REFUSAL_COPY.openDesk}</ActionLink>}
         {item.phase === "failed" && !canRetry(item.id) && <p className="signal-field-hint">Choose the file again in Upload manuscript.</p>}
         <div className="signal-upload-tray__actions">
-          {item.phase === "done" && item.checkRunId !== undefined && <ActionLink variant="secondary" to={`/checks/${item.checkRunId}`}>Open the check</ActionLink>}
+          {item.phase === "done" && item.checkRunId !== undefined && <ActionLink variant="secondary" to={`/checks/${item.checkRunId}`} onClick={() => onDismiss(item.id)}>Open the check</ActionLink>}
           {/* A refused start may still have created the check, so the Review Desk is
               offered instead of a second start. */}
           {item.phase === "done" && item.checkRunId === undefined && item.checkStartError
             && <ActionLink variant="secondary" to="/dashboard">Open the Review Desk</ActionLink>}
           {item.phase === "done" && item.checkRunId === undefined && !item.checkStartError && item.manuscriptId !== undefined
-            && <ActionLink variant="secondary" to={`/dashboard?check=${item.manuscriptId}`}>Start a check</ActionLink>}
+            && <ActionLink variant="secondary" to={`/dashboard?check=${item.manuscriptId}`} onClick={() => onDismiss(item.id)}>Start a check</ActionLink>}
           {item.phase === "failed" && canRetry(item.id) && <Button variant="secondary" onClick={() => onRetry(item.id)}>Try again</Button>}
           {(item.phase === "done" || item.phase === "failed") && <Button variant="quiet" onClick={() => onDismiss(item.id)} aria-label={`Dismiss ${item.fileName}`}>Dismiss</Button>}
         </div>

@@ -4973,6 +4973,13 @@
     line-height: var(--signal-line-section);
   }
 
+  /* The findings list heading carries its Close button on the same row. */
+  .signal-document-inspector__heading:has(> h2 + button) {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    justify-items: stretch;
+  }
+
   .signal-document-inspector__heading > p:last-child {
     margin: 0;
     color: var(--color-signal-ink-secondary);
@@ -8926,7 +8933,9 @@
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: var(--signal-rhythm-control);
-    align-items: stretch;
+    /* Each card keeps its own height: opening one card's details must not
+       stretch its neighbour into an empty box. */
+    align-items: start;
     padding: var(--signal-space-5) var(--signal-space-6) var(--signal-space-6);
   }
   @media (max-width: 1023px) {
@@ -8938,10 +8947,7 @@
     padding: var(--signal-space-5);
     min-inline-size: 0;
   }
-  /* Cards in a row share one height; the details bar sits on the bottom
-     edge so the rows line up. */
   #record-panel-grades .signal-result-list > .signal-result-card { display: flex; flex-direction: column; gap: var(--signal-space-2); }
-  #record-panel-grades .signal-result-list > .signal-result-card > details:last-of-type { margin-block-start: auto; }
   /* BUG-518: confirm a finding as a real issue (note optional). */
   .signal-finding-confirm,
   .signal-finding-confirmed {
@@ -8988,9 +8994,9 @@
     background: var(--color-signal-surface);
   }
   .signal-upload-tray__summary { margin: 0; color: var(--color-signal-ink-muted); }
+  .signal-upload-tray__controls { display: flex; gap: var(--signal-space-2); }
   .signal-upload-tray__summary [data-attention="true"] { color: var(--color-signal-not-ready-text); font-weight: var(--signal-weight-semibold); }
-  /* Room below the page's last row, so nothing stays under the tray. */
-  body:has(.signal-upload-tray) { padding-block-end: calc(var(--signal-upload-tray-height) + 2 * var(--signal-space-5)); }
+  /* A focused control is scrolled clear of the tray. */
   html:has(.signal-upload-tray) { scroll-padding-block-end: calc(var(--signal-upload-tray-height) + 2 * var(--signal-space-5)); }
   .signal-upload-tray ul[hidden] { display: none; }
   .signal-upload-tray ul { display: grid; gap: var(--signal-space-3); margin: 0; padding: 0; list-style: none; }
