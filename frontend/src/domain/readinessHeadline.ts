@@ -1,15 +1,20 @@
 // V-087: when the band is Needs Review, the headline says why in one line,
 // from the report's own record (partial checks, unread pages, grades).
 import type { ReportOut } from "../api/types";
+import { originalityCoverageNote } from "../report/originalityCoverage";
 
-type HeadlineReport = Pick<ReportOut, "status" | "results" | "integrity_modules" | "integrity_check_status" | "pending_review_count">;
+type HeadlineReport = Pick<ReportOut, "status" | "results" | "integrity_modules" | "integrity_check_status" | "pending_review_count" | "originality_scope">;
 
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
 
 export function needsReviewReason(report: HeadlineReport): string | null {
   if (report.status !== "needs_review") return null;
   const parts: string[] = [];
-  const partial = (report.integrity_modules ?? []).filter((module) => module.state === "partial" || module.state === "incomplete").length;
+  // A check that compared no text at all did not run "in part"; it is named
+  // on its own (BUG-553).
+  const comparedNothing = originalityCoverageNote(report)?.none ? 1 : 0;
+  const partial = (report.integrity_modules ?? []).filter((module) => (module.state === "partial" || module.state === "incomplete")
+    && !(comparedNothing && module.check_kind === "originality_reuse")).length;
   // Several checks usually skip the same pages, so the unread count is the union.
   const pages = new Set<number>();
   let largestCount = 0;
@@ -21,6 +26,7 @@ export function needsReviewReason(report: HeadlineReport): string | null {
   if (partial > 0) {
     parts.push(unread > 0 ? `${plural(partial, "check", "checks")} could not read ${plural(unread, "page", "pages")}` : `${plural(partial, "check", "checks")} ran only in part`);
   }
+  if (comparedNothing) parts.push(`${plural(comparedNothing, "check", "checks")} could not compare any text`);
   const total = report.results.length;
   if (total > 0) {
     const graded = report.results.filter((row) => row.outcome === "passed" || row.outcome === "failed").length;
