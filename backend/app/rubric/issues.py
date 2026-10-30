@@ -14,6 +14,7 @@ import hashlib
 from datetime import UTC, datetime
 from typing import Any
 
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
@@ -52,13 +53,20 @@ def _now() -> str:
 
 
 def parsed_criterion(row: Criterion) -> ParsedCriterion:
-    return ParsedCriterion(
-        text=row.text,
-        type=row.type.value,
-        evidence_needed=row.evidence,
-        weight=float(row.weight),
-        levels=[ParsedLevel.model_validate(level) for level in row.levels] if row.levels else None,
-    )
+    """A stored criterion in the decomposition's shape. Levels saved by hand
+    that are not a scale the decomposer could produce (a single level, say)
+    are left out of the check rather than failing the save."""
+    base = {
+        "text": row.text,
+        "type": row.type.value,
+        "evidence_needed": row.evidence,
+        "weight": float(row.weight),
+    }
+    try:
+        levels = [ParsedLevel.model_validate(level) for level in row.levels or []]
+        return ParsedCriterion(**base, levels=levels or None)
+    except ValidationError:
+        return ParsedCriterion(**base)
 
 
 def _wording(rows: dict[int, Criterion], criterion_id: int | None, level: int | None) -> str | None:

@@ -393,6 +393,21 @@ def test_keeping_a_flagged_wording_records_who_when_and_why(client, tmp_path):
     assert missing.status_code == 404
 
 
+def test_a_hand_saved_single_level_does_not_break_the_recheck(client, tmp_path):
+    uploaded = _upload(client, tmp_path)
+    one_level = {
+        "type": "semantic",
+        "text": "Overall impression",
+        "weight": 1,
+        "levels": [{"level": 1, "name": "Met", "descriptor": "Meets it.", "points": 1}],
+    }
+    resp = client.put(
+        f"/rubrics/{uploaded['id']}/criteria",
+        json={"criteria": [*uploaded["criteria"], one_level]},
+    )
+    assert resp.status_code == 200, resp.text
+
+
 def test_a_save_on_an_older_revision_is_refused(client, tmp_path):
     uploaded = _upload(client, tmp_path)
     route = f"/rubrics/{uploaded['id']}/criteria"
