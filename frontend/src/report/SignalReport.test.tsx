@@ -115,6 +115,24 @@ function stubReport(report: ReportOut = BASE_REPORT, escalated: EscalatedItemOut
 }
 
 describe("SignalReportPage", () => {
+  it("reads the report and its findings once per page load", async () => {
+    stubReport();
+    const answer = globalThis.fetch as unknown as (...args: unknown[]) => Promise<Response>;
+    const reads: Record<string, number> = {};
+    vi.stubGlobal("fetch", vi.fn(async (...args: unknown[]) => {
+      const path = new URL(String(args[0]), "http://localhost").pathname;
+      reads[path] = (reads[path] ?? 0) + 1;
+      return answer(...args);
+    }));
+    renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+    await screen.findByRole("heading", { name: "Final defense-readiness decision" });
+    // Let every panel that mounts after the first answer settle.
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
+    expect(reads["/check-runs/5/report"]).toBe(1);
+    expect(reads["/check-runs/5/flags"]).toBe(1);
+    expect(reads["/check-runs/5/share"]).toBe(1);
+  });
+
   it("records the decision on the report and offers grade changes beside the records", async () => {
     stubReport({ ...BASE_REPORT, results: [{ ...BASE_REPORT.results[0],
       resolution: { type: "mark_pass", reason: "Checked against the manuscript.", ai_majority_verdict: null } }] });

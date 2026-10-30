@@ -6,6 +6,7 @@ import { ApiError, api } from "../api/client";
 import { confirmedJudgment } from "./savedJudgment";
 import { captureAuthOwner as reportMutationOwner } from "../auth/queryOwner";
 import { isAssessmentRevision, keepNewerAssessment } from "./assessmentRevision";
+import { REPORT_READ_FRESH_MS } from "../config/network";
 import type {
   Decision,
   DocumentParagraphsOut,
@@ -20,6 +21,7 @@ import type {
 
 export function useReport(checkRunId: number) {
   return useQuery({
+    staleTime: REPORT_READ_FRESH_MS,
     queryKey: ["report", checkRunId],
     queryFn: () => api.get<ReportOut>(`/check-runs/${checkRunId}/report`),
     structuralSharing: (current, incoming) => keepNewerAssessment(current as ReportOut | undefined, incoming as ReportOut),
@@ -29,6 +31,7 @@ export function useReport(checkRunId: number) {
 
 export function useEscalatedItems(checkRunId: number) {
   return useQuery({
+    staleTime: REPORT_READ_FRESH_MS,
     queryKey: ["report", checkRunId, "escalated"],
     queryFn: () => api.get<EscalatedItemOut[]>(`/check-runs/${checkRunId}/escalated`),
     enabled: Number.isInteger(checkRunId) && checkRunId > 0,
@@ -40,6 +43,7 @@ export function useEscalatedItems(checkRunId: number) {
 // of zero flags on a run never adds dead weight to every report fetch).
 export function useFlags(checkRunId: number, { enabled = true }: { enabled?: boolean } = {}) {
   return useQuery({
+    staleTime: REPORT_READ_FRESH_MS,
     queryKey: ["report", checkRunId, "flags"],
     queryFn: () => api.get<FlagSummaryOut[]>(`/check-runs/${checkRunId}/flags`),
     enabled: enabled && Number.isInteger(checkRunId) && checkRunId > 0,
@@ -62,6 +66,7 @@ export function useCachedReportFlags(checkRunId: number | undefined) {
 // screen that never opens the viewer should never pay for it.
 export function useManuscriptViewer(checkRunId: number) {
   return useQuery({
+    staleTime: REPORT_READ_FRESH_MS,
     queryKey: ["report", checkRunId, "document"],
     queryFn: () => api.get<ManuscriptViewerOut>(`/check-runs/${checkRunId}/document`),
     enabled: Number.isInteger(checkRunId) && checkRunId > 0,
