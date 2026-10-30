@@ -20,7 +20,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-from app.db import DbInt
+from app.db_types import DbInt
 from app.ingest.native_math_models import NativeMathInventory
 from app.ingest.native_table_models import NativeTableOrderWitness
 from app.ingest.recovery_models import RecoveryEnvelope
