@@ -7,7 +7,10 @@ import { recordedActor } from "./instructorEventDetails";
 const ORIGIN_NOT_PROVABLE = new Map([
   ["library_entry_removed", "an instructor or a maintenance cleanup can remove a Library record"],
   ["library_orphan_corpus_rows_removed", "an operator cleanup, neither an instructor nor the pipeline"],
+  ["public_report_details_recorded", "written when an instructor creates a share link, but records no actor"],
 ]);
+// Helpers and filters that forward an event name they were given.
+const PASS_THROUGH = new Set(["event_type", "row.event_type"]);
 // Event names the backend builds from a check kind. Only the integrity checks
 // produce them.
 const INTEGRITY_KINDS = ["internal_agreement", "citation_integrity", "statistical_forensics", "originality_reuse"];
@@ -29,12 +32,20 @@ async function backendEventTypes(): Promise<string[]> {
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) walk(full);
       else if (entry.name.endsWith(".py")) {
-        for (const match of fs.readFileSync(full, "utf8").matchAll(/event_type=(f?)"([^"]+)"/g)) {
-          if (!match[1]) found.add(match[2]);
+        const source = fs.readFileSync(full, "utf8");
+        for (const match of source.matchAll(/event_type=(?:(f?)["']([^"']+)["']|([A-Za-z_][\w.]*))/g)) {
+          const [, fString, literal, name] = match;
+          if (name !== undefined) {
+            if (PASS_THROUGH.has(name)) continue;
+            // A module constant: resolve it in the same file.
+            const constant = source.match(new RegExp(`^${name} = ["']([^"']+)["']`, "m"));
+            if (!constant) throw new Error(`Unresolved event name ${name} in ${full}`);
+            found.add(constant[1]);
+          } else if (!fString) found.add(literal);
           else {
-            const expanded = TEMPLATES.get(match[2]);
-            if (!expanded) throw new Error(`Unlisted event name template in ${full}: ${match[2]}`);
-            expanded.forEach(name => found.add(name));
+            const expanded = TEMPLATES.get(literal);
+            if (!expanded) throw new Error(`Unlisted event name template in ${full}: ${literal}`);
+            expanded.forEach(event => found.add(event));
           }
         }
       }
