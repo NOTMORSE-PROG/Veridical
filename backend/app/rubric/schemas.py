@@ -13,18 +13,22 @@ from app.db import DbInt, DbText
 
 class LevelSource(BaseModel):
     """Where a level descriptor was found in the uploaded format (BUG-566).
-    "exact": it is the whole text of the table cell named here, stored as
-    that cell's text. "passage": one passage of the text outside tables.
-    "unmatched": not traced to the document; the rubric carries a parse
-    issue saying why. `table`/`row`/`col` are 1-based, as the decomposer saw
+    "exact": the whole text of the table cell named here (stored as that
+    cell's text), or, with no table coordinates, one passage of the text
+    outside tables. "unmatched": not traced to the document; the rubric
+    carries a parse issue saying why. `table`/`row`/`col` are 1-based, as the decomposer saw
     them (empty columns dropped); `page` is the PDF page, None for DOCX."""
 
-    match: Literal["exact", "passage", "unmatched"]
+    match: Literal["exact", "unmatched"]
     page: DbInt | None = Field(default=None, ge=1)
     table: DbInt | None = Field(default=None, ge=1)
     row: DbInt | None = Field(default=None, ge=1)
     col: DbInt | None = Field(default=None, ge=1)
     cell_text: DbText | None = None
+    # The row's own label cell(s) and the heading over this level's column,
+    # so the instructor can find the cell in the original.
+    row_label: DbText | None = None
+    column_heading: DbText | None = None
 
 
 class ParsedLevel(BaseModel):
@@ -126,21 +130,80 @@ class CitationRecencySettingsOut(BaseModel):
     saved_setting_invalid: bool = False
 
 
+IssueCodeOut = Literal[
+    "not_in_source",
+    "joins_cells",
+    "partial_cell",
+    "not_one_row",
+    "wrong_row",
+    "shared_cell",
+    "level_left_out",
+    "other",
+]
+AcknowledgementReason = Literal["document_wording", "outside_table", "other"]
+
+
+class IssueResolution(BaseModel):
+    """How an issue stopped being open. "acknowledged": the instructor kept
+    the wording, with a reason; "rechecked": an edit made the level match the
+    document; "criterion_removed": the criterion it was about was removed."""
+
+    kind: Literal["acknowledged", "rechecked", "criterion_removed"]
+    reason_code: AcknowledgementReason | None = None
+    note: str | None = None
+    by_instructor_id: int | None = None
+    by_name: str | None = None
+    at: datetime
+
+
 class ParseIssueDetail(BaseModel):
-    """One parse issue. `code` says what kind: a level descriptor that is
-    "not_in_source", keeps only part of its cell ("partial_cell"), "joins_cells",
-    or comes from text that "differs_between_copies"; levels on the "wrong_row"
-    or in the "wrong_order"; a "shared_cell" between criteria; a
-    "level_left_out" of its row; or a whole-draft note ("draft_check",
-    "retry_changed_draft", "unread_copy_text", "injection_suspected").
-    `criterion_id`/`level` are null for whole-draft notes; `criterion_id`
-    can name a criterion the instructor has since removed."""
+    """One parse issue (BUG-566). A level descriptor "not_in_source", that
+    "joins_cells" or is only part of one ("partial_cell"); levels not on one
+    row, in order, under fitting headers ("not_one_row"); levels from a row
+    labelled for another criterion ("wrong_row"); a "shared_cell" between
+    criteria; a "level_left_out" of its row; or "other" (whole-draft notes,
+    and text that differs between repeated copies), shown as `message`.
+    `criterion_id` and `level` are null for whole-draft notes, `level` is
+    null for an issue about the whole row, and `criterion_id` can name a
+    criterion since removed. `id` is never reused within a rubric."""
 
     id: int
-    code: str
+    code: IssueCodeOut
     criterion_id: int | None = None
     level: int | None = None
     message: str
+    status: Literal["open", "resolved", "acknowledged"] = "open"
+    resolution: IssueResolution | None = None
+
+
+class SourceSummary(BaseModel):
+    """How the format was read: every page a repeated table appears on (it
+    was read once, from the first) and how many values that differ between
+    the copies were left out. The values themselves are never sent."""
+
+    copy_pages: list[int]
+    withheld_count: int
+
+
+class IssueAcknowledgement(BaseModel):
+    """The instructor keeps a flagged wording as it is, saying why. The server
+    records who and when."""
+
+    issue_id: DbInt
+    reason_code: AcknowledgementReason
+    note: DbText | None = None
+
+    @field_validator("note")
+    @classmethod
+    def _bounded(cls, value: str | None) -> str | None:
+        from app.config import get_settings
+
+        if value is None or not value.strip():
+            return None
+        limit = get_settings().rubric_acknowledgement_note_max_chars
+        if len(value) > limit:
+            raise ValueError(f"note must be at most {limit} characters")
+        return value.strip()
 
 
 class RubricOut(BaseModel):
@@ -157,6 +220,10 @@ class RubricOut(BaseModel):
     # saying which criterion and level each is about. None for rubrics parsed
     # before this field existed.
     parse_issue_details: list[ParseIssueDetail] | None = None
+    # None for versions read before BUG-566.
+    source_summary: SourceSummary | None = None
+    # Echo it as `expected_revision` on the next save.
+    revision: int = 0
     # F2.3 (V-012): nothing runs against a rubric until the instructor
     # confirms — this flips true only via PUT /rubrics/{id}/criteria
     # {confirm: true} or POST /rubrics/{id}/activate.
@@ -238,3 +305,8 @@ class UpdateCriteriaRequest(BaseModel):
 
     criteria: list[CriterionIn] = Field(min_length=1)
     confirm: bool = False
+    # The `revision` this edit was made on; a save on an older one is refused
+    # (409 rubric_changed). Omitted, the save is not checked (older clients).
+    expected_revision: DbInt | None = None
+    # Flagged wordings the instructor keeps as written (BUG-566).
+    acknowledgements: list[IssueAcknowledgement] = Field(default_factory=list)

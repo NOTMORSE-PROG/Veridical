@@ -19,14 +19,28 @@ from sqlalchemy.orm import selectinload
 
 from app.checks.citations.recency import CitationRecencyFormatSettings, effective_settings
 from app.config import Settings, get_settings
-from app.errors import ConflictError, NotFoundError
+from app.errors import (
+    ConflictError,
+    NotFoundError,
+    RubricChangedError,
+    RubricLockedError,
+    UnresolvedRubricIssuesError,
+)
 from app.ingest.admission import PreparationLease, preparation_scope
 from app.ingest.service import detect_format, save_upload, select_extractor
 from app.llm.base import LLMClient
 from app.models.enums import CriterionType, RubricParseStatus
 from app.models.group import Program
+from app.models.instructor import Instructor
 from app.models.rubric import Criterion, Rubric
 from app.models.run import CheckRun
+from app.rubric.issues import (
+    acknowledge,
+    initial_details,
+    open_issue_ids,
+    recheck,
+    source_summary,
+)
 from app.rubric.schemas import (
     CitationRecencySettingsOut,
     RubricListItem,
@@ -248,18 +262,8 @@ async def _create_rubric_from_upload(
         RubricParseStatus.needs_review if outcome.needs_review else RubricParseStatus.parsed
     )
     rubric.parse_issues = outcome.issues or None
-    rubric.parse_issue_details = [
-        {
-            "id": detail["id"],
-            "code": detail["code"],
-            "criterion_id": rows[detail["criterion"]].id
-            if detail["criterion"] is not None
-            else None,
-            "level": detail["level"],
-            "message": detail["message"],
-        }
-        for detail in outcome.issue_details
-    ] or None
+    rubric.parse_issue_details = initial_details(outcome.issue_details, rows)
+    rubric.source_snapshot = source.to_snapshot()
     await session.commit()
     await session.refresh(rubric, attribute_names=["criteria"])
     return rubric
@@ -320,6 +324,8 @@ async def get_rubric(
     )
     rubric.program = await _program_name(session, rubric.program_id)  # type: ignore[attr-defined]
     rubric.citation_recency_settings = _recency_view(rubric.citation_recency)  # type: ignore[attr-defined]
+
+    rubric.source_summary = source_summary(rubric)  # type: ignore[attr-defined]
     return rubric
 
 
@@ -394,10 +400,14 @@ async def update_criteria(
     create_rubric_from_upload)."""
     rubric = await get_rubric(session, rubric_id, instructor_id, for_update=True)
     if not rubric.can_edit_criteria:
-        raise ConflictError(
+        raise RubricLockedError(
             "This version is used by a check or belongs to the version history "
             "and can no longer be edited. Upload a new version instead "
             "(old reports stay pinned to this one)."
+        )
+    if body.expected_revision is not None and body.expected_revision != rubric.revision:
+        raise RubricChangedError(
+            "This format changed since it was loaded. Load the latest version before saving again."
         )
     existing = {c.id: c for c in rubric.criteria}
     incoming_ids = {c.id for c in body.criteria if c.id is not None}
@@ -438,7 +448,25 @@ async def update_criteria(
             row.position = position
             row.levels = levels
 
-    if body.confirm:
+    # BUG-566: the saved levels are traced to the stored source again, so an
+    # issue an edit fixed is resolved and one it caused is raised; then the
+    # instructor's acknowledgements are recorded.
+    await session.flush()
+    rows = (
+        await session.scalars(
+            select(Criterion)
+            .where(Criterion.rubric_id == rubric_id)
+            .execution_options(populate_existing=True)
+        )
+    ).all()
+    recheck(rubric, list(rows), get_settings())
+    instructor = await session.get(Instructor, instructor_id)
+    if instructor is not None:
+        acknowledge(session, rubric, body.acknowledgements, instructor)
+    rubric.revision += 1
+    blocked = open_issue_ids(rubric) if body.confirm and not rubric.is_active else []
+
+    if body.confirm and not blocked:
         # BUG-052: confirming used to reset `parse_status` to `parsed` and
         # wipe `parse_issues` unconditionally -- true in the narrow sense
         # that the instructor's review IS the human-in-the-loop resolution
@@ -455,8 +483,17 @@ async def update_criteria(
         await _activate_only(session, rubric)
 
     await session.commit()
+    if blocked:
+        # The edits and acknowledgements are saved; only activation waits.
+        raise UnresolvedRubricIssuesError(_UNRESOLVED_MESSAGE, blocked)
     await session.refresh(rubric, attribute_names=["criteria"])
     return await get_rubric(session, rubric_id, instructor_id)
+
+
+_UNRESOLVED_MESSAGE = (
+    "Some level descriptions could not be traced to the uploaded format. Correct "
+    "or keep each one before activating this format."
+)
 
 
 async def activate_rubric(session: AsyncSession, rubric_id: int, instructor_id: int) -> Rubric:
@@ -464,7 +501,13 @@ async def activate_rubric(session: AsyncSession, rubric_id: int, instructor_id: 
     active without touching its criteria (unlike confirm, which follows
     an edit)."""
     rubric = await get_rubric(session, rubric_id, instructor_id, for_update=True)
+    if rubric.is_active:
+        return rubric
+    blocked = open_issue_ids(rubric)
+    if blocked:
+        raise UnresolvedRubricIssuesError(_UNRESOLVED_MESSAGE, blocked)
     await _activate_only(session, rubric)
+    rubric.revision += 1
     await session.commit()
     return await get_rubric(session, rubric_id, instructor_id)
 

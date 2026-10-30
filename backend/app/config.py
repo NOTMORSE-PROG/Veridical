@@ -477,6 +477,8 @@ class Settings(BaseSettings):
     # closely (difflib ratio), and its own header less, sits in the wrong
     # column. Tolerates headers the extractor split ("BEGIN ER" for BEGINNER).
     rubric_level_header_min_similarity: float = Field(default=0.8, gt=0.0, le=1.0)
+    # Longest note an instructor may give when keeping a flagged wording.
+    rubric_acknowledgement_note_max_chars: int = Field(default=1000, ge=1)
     # Shown to the model in place of a value withheld for the reason above.
     rubric_withheld_value_marker: str = Field(
         default="[differs between copies, not shown]", min_length=1

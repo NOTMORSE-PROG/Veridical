@@ -5,6 +5,7 @@ against its own scratch database.
 
 import os
 import uuid
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -623,3 +624,143 @@ async def test_a_grid_upload_stores_cell_provenance_and_structured_issues(
     assert [d.message for d in out.parse_issue_details] == out.parse_issues
     invented = next(d for d in out.parse_issue_details if d.code == "not_in_source")
     assert (invented.criterion_id, invented.level) == (evidence.id, 2)
+    assert out.source_summary.model_dump() == {"copy_pages": [], "withheld_count": 0}
+
+    # Saving the level with the document's own wording resolves the issue on
+    # recheck, with no model call, and the format can then be activated.
+    from app.errors import UnresolvedRubricIssuesError
+    from app.rubric.schemas import CriterionIn, UpdateCriteriaRequest
+    from app.rubric.service import activate_rubric, update_criteria
+
+    def body(strong: str, **extra) -> UpdateCriteriaRequest:
+        rows = []
+        for criterion in out.criteria:
+            levels = [level.model_copy() for level in criterion.levels]
+            if criterion.id == evidence.id:
+                levels[1] = levels[1].model_copy(update={"descriptor": strong})
+            rows.append(
+                CriterionIn(
+                    id=criterion.id,
+                    type=criterion.type,
+                    text=criterion.text,
+                    evidence=criterion.evidence,
+                    weight=criterion.weight,
+                    levels=levels,
+                )
+            )
+        return UpdateCriteriaRequest(criteria=rows, **extra)
+
+    async with session_factory() as session:
+        with pytest.raises(UnresolvedRubricIssuesError):
+            await activate_rubric(session, rubric.id, instructor_id)
+    async with session_factory() as session:
+        saved = RubricOut.model_validate(
+            await update_criteria(
+                session, rubric.id, body("Every claim is supported by data."), instructor_id
+            )
+        )
+    fixed = next(d for d in saved.parse_issue_details if d.id == invented.id)
+    assert (fixed.status, fixed.resolution.kind) == ("resolved", "rechecked")
+    assert saved.criteria[1].levels[1].source.match == "exact"
+    assert spy.calls == settings.rubric_parse_max_retries + 1
+    async with session_factory() as session:
+        active = RubricOut.model_validate(await activate_rubric(session, rubric.id, instructor_id))
+    assert active.is_active
+
+    # Rewording it again away from the document reopens the issue.
+    async with session_factory() as session:
+        await update_criteria(session, rubric.id, body("Strong evidence."), instructor_id)
+    async with session_factory() as session:
+        reopened = RubricOut.model_validate(await get_rubric(session, rubric.id, instructor_id))
+    assert next(d for d in reopened.parse_issue_details if d.id == invented.id).status == "open"
+
+
+RUBRIC_PDF = Path(__file__).resolve().parents[2] / "Rubric-for-Oral-Presentation.pdf"
+
+
+@pytest.mark.skipif(not RUBRIC_PDF.exists(), reason="the reproduction rubric is local-only (D-007)")
+async def test_a_locked_version_is_annotated_without_touching_its_criteria(
+    session_factory, tmp_path, monkeypatch
+):
+    """The production repair (BUG-566): a version stored with the shifted
+    levels, pinned by a check, gets parse issues for exactly the affected
+    criteria; its criteria and levels stay byte-for-byte as they were."""
+    import shutil
+
+    from app.ingest import pdf as pdf_ingest
+    from app.models.enums import CriterionType
+    from app.rubric.annotate import annotate_rubric
+    from app.rubric.source import build_decomposition_source
+
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+    get_settings.cache_clear()
+    settings = get_settings()
+    source = build_decomposition_source(
+        pdf_ingest.extract_document(str(RUBRIC_PDF), settings), settings
+    )
+    by_row: dict[int, list[str]] = {}
+    for cell in source.cells:
+        by_row.setdefault(cell.row, []).append(cell.text)
+    rows = [cells for cells in by_row.values() if len(cells) == 5]
+    names = ["Beginner", "Acceptable", "Proficient", "Exemplary"]
+    stored = []
+    for label, *cells in rows:
+        levels = list(cells)
+        if label == "Purpose":  # the shape production stored
+            levels = [f"{cells[0]} {rows[2][1].split('. ')[0]}.", cells[2], "Invented.", cells[3]]
+        stored.append((label, levels))
+
+    instructor_id = await _seed_instructor(session_factory)
+    async with session_factory() as session:
+        rubric = Rubric(instructor_id=instructor_id, title="Shifted", source_file="")
+        session.add(rubric)
+        await session.flush()
+        dest = settings.data_dir / settings.rubric_upload_subdir / f"{rubric.id}.pdf"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(RUBRIC_PDF, dest)
+        rubric.source_file = str(dest)
+        for position, (label, levels) in enumerate(stored):
+            session.add(
+                Criterion(
+                    rubric_id=rubric.id,
+                    type=CriterionType.semantic,
+                    text=label,
+                    weight=1,
+                    position=position,
+                    levels=[
+                        {"level": i, "name": n, "descriptor": d, "points": float(i)}
+                        for i, (n, d) in enumerate(zip(names, levels, strict=True), start=1)
+                    ],
+                )
+            )
+        await session.commit()
+        rubric_id = rubric.id
+
+    async def criteria_now():
+        async with session_factory() as session:
+            found = await session.scalars(
+                select(Criterion).where(Criterion.rubric_id == rubric_id).order_by(Criterion.id)
+            )
+            return [(c.id, c.text, c.levels) for c in found]
+
+    before = await criteria_now()
+    async with session_factory() as session:
+        preview = await annotate_rubric(session, settings, rubric_id, apply=False)
+    assert not preview.applied and preview.issues
+    assert {i["criterion_id"] for i in preview.issues} == {before[1][0]}
+    assert preview.copy_pages == [1, 2, 3] and preview.withheld_count > 0
+    async with session_factory() as session:
+        assert (await session.get(Rubric, rubric_id)).parse_issue_details is None
+
+    async with session_factory() as session:
+        applied = await annotate_rubric(session, settings, rubric_id, apply=True)
+    assert applied.applied
+    async with session_factory() as session:
+        persisted = await session.get(Rubric, rubric_id)
+        assert persisted.parse_status == "needs_review"
+        codes = {(d["code"], d["level"]) for d in persisted.parse_issue_details}
+        assert ("joins_cells", 1) in codes and ("not_in_source", 3) in codes
+    assert await criteria_now() == before
+    async with session_factory() as session:
+        again = await annotate_rubric(session, settings, rubric_id, apply=True)
+    assert again.already_annotated and not again.applied

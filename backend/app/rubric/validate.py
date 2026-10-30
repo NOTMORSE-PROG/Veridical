@@ -231,12 +231,12 @@ class DecompositionOutcome:
     issue_details: list[dict] = field(default_factory=list)
 
 
-def _details(
-    messages: list[str], source_issues: list[SourceIssue], general: dict[str, str]
-) -> list[dict]:
+def _details(messages: list[str], source_issues: list[SourceIssue]) -> list[dict]:
     """Structured form of `messages` for the review screen. Source issues
     carry the criterion and level they are about; every other message is
-    about the draft as a whole."""
+    about the draft as a whole ("other", shown as written). Every issue
+    starts open: only the instructor acknowledges one, and only a recheck of
+    edited criteria resolves one."""
     by_message = {issue.message: issue for issue in source_issues}
     details = []
     for number, message in enumerate(messages, start=1):
@@ -244,10 +244,12 @@ def _details(
         details.append(
             {
                 "id": number,
-                "code": issue.code if issue else general.get(message, "draft_check"),
+                "code": issue.code if issue else "other",
                 "criterion": issue.criterion if issue else None,
                 "level": issue.level if issue else None,
                 "message": message,
+                "status": "open",
+                "resolution": None,
             }
         )
     return details
@@ -296,13 +298,11 @@ async def attempt_decomposition(
     # survive even a clean gate pass (see below).
     injection = detect_injection_signal(source.prompt_text)
     # Neither of these changes between attempts, so neither is retried.
-    standing: dict[str, str] = {}
+    standing: list[str] = []
     if source.unread_copy_lines:
-        standing[UNREAD_COPY_TEXT_REASON.format(count=source.unread_copy_lines)] = (
-            "unread_copy_text"
-        )
+        standing.append(UNREAD_COPY_TEXT_REASON.format(count=source.unread_copy_lines))
     if injection.suspected:
-        standing[RUBRIC_INJECTION_SUSPECTED_REASON] = "injection_suspected"
+        standing.append(RUBRIC_INJECTION_SUSPECTED_REASON)
 
     for attempt in range(1, total_attempts + 1):
         try:
@@ -338,19 +338,18 @@ async def attempt_decomposition(
             injection=injection,
         )
         if gate.ok:
-            general = dict(standing)
-            issues = []
-            if earlier_gate_issues:
-                changed = RETRY_CHANGED_DRAFT_REASON.format(issues="; ".join(earlier_gate_issues))
-                issues.append(changed)
-                general[changed] = "retry_changed_draft"
+            issues = (
+                [RETRY_CHANGED_DRAFT_REASON.format(issues="; ".join(earlier_gate_issues))]
+                if earlier_gate_issues
+                else []
+            )
             issues.extend(standing)
             return DecompositionOutcome(
                 criteria=criteria,
                 needs_review=bool(issues),
                 issues=issues,
                 attempts=attempt,
-                issue_details=_details(issues, [], general),
+                issue_details=_details(issues, []),
             )
         # A draft is ranked by its whole-draft issues, then by how much of the
         # rubric it kept, and only then by its descriptor issues: each bad
@@ -378,7 +377,7 @@ async def attempt_decomposition(
         needs_review=True,
         issues=best_issues,
         attempts=total_attempts,
-        issue_details=_details(best_issues, best_source, standing),
+        issue_details=_details(best_issues, best_source),
     )
 
 

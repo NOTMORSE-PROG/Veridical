@@ -51,6 +51,12 @@ class Rubric(Base, PkCreatedMixin):
     # BUG-566: the same issues, one object each and in the same order, naming
     # the criterion and level an issue is about (see RubricOut).
     parse_issue_details: Mapped[list[Any] | None] = mapped_column(JSONB)
+    # BUG-566: the cells and text the decomposer read (never the values
+    # withheld from it), so an edit can be rechecked without the model.
+    source_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    # Bumped by every save or activation; a client sends the revision it
+    # loaded, and an older one is refused rather than overwriting.
+    revision: Mapped[int] = mapped_column(server_default="0")
     # F2.3: nothing runs against a rubric until the instructor confirms
     # (V-012). V-013 generalizes this to "exactly one active version per
     # family" when re-uploads exist; V-012 only ever has one version to

@@ -26,6 +26,8 @@ from app.ingest.normalize import match_key, normalize
 from app.ingest.schemas import ExtractionResult, TableBlock, TextBlock
 from app.rubric.decompose import raw_text_for_decomposition
 
+SNAPSHOT_VERSION = 1
+
 
 @dataclass(frozen=True)
 class GridCell:
@@ -76,6 +78,41 @@ class DecompositionSource:
     copies_merged: int = 0
     # Lines printed only on a repeated copy, not on the copy that was read.
     unread_copy_lines: int = 0
+    # Every page a repeated table appears on (the first is the one read).
+    copy_pages: tuple[int, ...] = ()
+
+    def to_snapshot(self) -> dict:
+        """What a later recheck needs, stored with the rubric. Withheld values
+        (names typed on a copy) are never part of it; only their count is."""
+        return {
+            "version": SNAPSHOT_VERSION,
+            "cells": [[c.table, c.row, c.col, c.page, c.text] for c in self.cells],
+            "outside_lines": list(self.outside_lines),
+            "withheld_cells": [list(key) for key in self.withheld_cells],
+            "copy_pages": list(self.copy_pages),
+            "withheld_count": len(self.withheld),
+        }
+
+    @classmethod
+    def from_snapshot(cls, snapshot: dict) -> DecompositionSource | None:
+        """The stored source, for rechecking edited criteria without reading
+        the file or calling the model; None for a snapshot this code cannot
+        read."""
+        if not isinstance(snapshot, dict) or snapshot.get("version") != SNAPSHOT_VERSION:
+            return None
+        cells = tuple(
+            GridCell(table=t, row=r, col=c, page=page, text=text)
+            for t, r, c, page, text in snapshot["cells"]
+        )
+        return cls(
+            prompt_text="",
+            cells=cells,
+            outside_lines=tuple(snapshot["outside_lines"]),
+            gate_blocks=[],
+            checklist_text="",
+            withheld_cells=tuple(tuple(key) for key in snapshot["withheld_cells"]),
+            copy_pages=tuple(snapshot["copy_pages"]),
+        )
 
     @classmethod
     def from_text(cls, blocks: list[TextBlock], raw_text: str) -> DecompositionSource:
@@ -392,4 +429,15 @@ def build_decomposition_source(result: ExtractionResult, settings: Settings) -> 
         ),
         copies_merged=len(every) - len(kept),
         unread_copy_lines=unread,
+        copy_pages=tuple(
+            sorted(
+                {
+                    page
+                    for grid in kept
+                    if grid.copy_pages
+                    for page in (grid.block.page, *grid.copy_pages)
+                    if page is not None
+                }
+            )
+        ),
     )

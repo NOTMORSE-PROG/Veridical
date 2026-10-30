@@ -451,7 +451,7 @@ def test_one_row_with_its_levels_reversed_is_named():
     for level, cell in zip(levels, reversed([c for c in GRID[2][1:] if c][:4]), strict=True):
         level["descriptor"] = cell
     codes = _codes(_criteria(response), _grid_source())
-    assert ("wrong_order", 1, None) in codes
+    assert ("not_one_row", 1, None) in codes
 
 
 def test_a_level_under_a_header_with_other_points_is_named():
@@ -464,7 +464,7 @@ def test_a_level_under_a_header_with_other_points_is_named():
         ):
             level["descriptor"] = cell
     codes = _codes(_criteria(response), _grid_source())
-    assert {code for code, _, _ in codes} == {"wrong_order"}
+    assert {code for code, _, _ in codes} == {"not_one_row"}
     assert len(codes) == 12  # 3 rows x 4 levels each under another header
 
 
@@ -484,7 +484,7 @@ def test_a_level_under_a_header_with_another_name_is_named():
     swapped = response["criteria"][0]["levels"]
     swapped[0]["name"], swapped[2]["name"] = swapped[2]["name"], swapped[0]["name"]
     codes = _codes(_criteria(response), _source(rows))
-    assert ("wrong_order", 0, 1) in codes and ("wrong_order", 0, 3) in codes
+    assert ("not_one_row", 0, 1) in codes and ("not_one_row", 0, 3) in codes
 
 
 def test_swapping_two_similarly_named_rows_is_named():
@@ -561,14 +561,14 @@ def test_a_level_cell_that_differs_between_copies_is_named_not_dropped():
     ]
     for i, level in enumerate(response["criteria"][0]["levels"], start=1):
         level["level"] = i
-    assert ("differs_between_copies", 0, None) in _codes(_criteria(response), source)
+    assert ("other", 0, None) in _codes(_criteria(response), source)
     marker = SETTINGS.rubric_withheld_value_marker
     response["criteria"][0]["levels"].insert(
         2, {"level": 3, "name": "Proficient", "descriptor": marker, "points": 3}
     )
     for i, level in enumerate(response["criteria"][0]["levels"], start=1):
         level["level"] = i
-    assert ("differs_between_copies", 0, 3) in _codes(_criteria(response), source)
+    assert ("other", 0, 3) in _codes(_criteria(response), source)
 
 
 def test_a_passage_must_be_whole_words_and_end_at_a_boundary():
@@ -601,7 +601,7 @@ def test_a_passage_must_be_whole_words_and_end_at_a_boundary():
     # Text may list a scale either way round, but not out of order.
     assert _codes(levels("the purpose is clear.", "the purpose is unclear"), source) == []
     shuffled = levels("the purpose is unclear", "the purpose is missing.", "the purpose is clear.")
-    assert ("wrong_order", 0, None) in _codes(shuffled, source)
+    assert ("not_one_row", 0, None) in _codes(shuffled, source)
 
 
 @rubric_pdf_only
@@ -655,7 +655,7 @@ async def test_text_found_only_on_a_copy_is_reported_as_unread():
         source=source,
     )
     assert outcome.needs_review and outcome.attempts == 1
-    assert [d["code"] for d in outcome.issue_details] == ["unread_copy_text"]
+    assert [d["code"] for d in outcome.issue_details] == ["other"]
 
 
 def test_a_checklist_inside_one_cell_still_counts_as_separate_items():
@@ -832,7 +832,7 @@ def test_the_real_rubric_with_one_row_reversed_or_two_rows_swapped_is_not_parsed
     purpose = response["criteria"][1]
     for level, cell in zip(purpose["levels"], reversed(rows[2][1:]), strict=True):
         level["descriptor"] = cell
-    assert ("wrong_order", 1, None) in _codes(_criteria(response), source)
+    assert ("not_one_row", 1, None) in _codes(_criteria(response), source)
 
     response = _response(rows)
     use, quality = response["criteria"][6], response["criteria"][7]

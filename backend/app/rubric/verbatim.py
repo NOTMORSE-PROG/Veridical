@@ -40,15 +40,19 @@ from app.config import Settings
 from app.rubric.schemas import LevelSource, ParsedCriterion, ParsedLevel
 from app.rubric.source import DecompositionSource, GridCell
 
+# The review screen's vocabulary. "not_one_row": levels not on one row, not
+# in the row's order, or under headers that do not fit them. "wrong_row": the
+# levels' row is labelled for another criterion. "other": text that differs
+# between repeated copies (and, in validate, every whole-draft note).
 IssueCode = Literal[
     "not_in_source",
     "partial_cell",
     "joins_cells",
-    "differs_between_copies",
+    "not_one_row",
     "wrong_row",
-    "wrong_order",
     "shared_cell",
     "level_left_out",
+    "other",
 ]
 
 _NON_TEXT = re.compile(r"[\W_]+")
@@ -168,7 +172,7 @@ class _Corpus:
 
 
 _PROBLEMS: dict[IssueCode, str] = {
-    "differs_between_copies": (
+    "other": (
         "comes from text that differs between the repeated copies of this table, "
         "which VERIDICAL did not read"
     ),
@@ -180,7 +184,7 @@ _PROBLEMS: dict[IssueCode, str] = {
 
 def _problem(descriptor: str, form: str, corpus: _Corpus) -> IssueCode:
     if any(form and form in value for value in corpus.withheld_forms):
-        return "differs_between_copies"
+        return "other"
     if any(form in cell and form != cell for cell in corpus.cell_forms):
         return "partial_cell"
     sentences = [match_form(s) for s in _SENTENCE_END.split(descriptor)]
@@ -190,7 +194,7 @@ def _problem(descriptor: str, form: str, corpus: _Corpus) -> IssueCode:
     return "not_in_source"
 
 
-@dataclass
+@dataclass(eq=False)
 class _Placed:
     index: int
     criterion: ParsedCriterion
@@ -362,17 +366,17 @@ def verify_against_source(
             continue
         if candidates and passages:
             check.add(
-                "wrong_row",
+                "not_one_row",
                 index,
                 None,
                 f"'{label}': some of its levels come from a table and some from other text; "
                 "compare them with the original document",
             )
         elif passages:
-            verified[index] = _with_sources(criterion, "passage")
+            verified[index] = _with_sources(criterion, "exact")
             if not _monotonic(passages):
                 check.add(
-                    "wrong_order",
+                    "not_one_row",
                     index,
                     None,
                     f"'{label}': its levels are not in the order the document gives them; "
@@ -382,7 +386,7 @@ def verify_against_source(
             options = _orderings(candidates)
             if not options:
                 check.add(
-                    "wrong_row",
+                    "not_one_row",
                     index,
                     None,
                     f"'{label}': its levels do not come from one row of the table, in order; "
@@ -392,17 +396,25 @@ def verify_against_source(
                 pending.append((index, options))
 
     placed = _assign(pending, criteria, grid)
-    for item in placed:
-        cells = iter(item.cells)
+    for item, (row_label, headings) in _context(placed, grid).items():
         criterion = criteria[item.index]
         verified[item.index] = criterion.model_copy(
-            update={"levels": [_exact(level, next(cells)) for level in criterion.levels or []]}
+            update={
+                "levels": [
+                    _exact(level, cell, row_label, heading)
+                    for level, cell, heading in zip(
+                        criterion.levels or [], item.cells, headings, strict=True
+                    )
+                ]
+            }
         )
     _row_checks(placed, grid, check, limit)
     return verified, check.issues
 
 
-def _with_sources(criterion: ParsedCriterion, match: Literal["passage"] | None) -> ParsedCriterion:
+def _with_sources(criterion: ParsedCriterion, match: Literal["exact"] | None) -> ParsedCriterion:
+    """Every level marked with one match; a passage outside tables has no
+    table coordinates."""
     source = LevelSource(match=match or "unmatched")
     return criterion.model_copy(
         update={
@@ -413,7 +425,9 @@ def _with_sources(criterion: ParsedCriterion, match: Literal["passage"] | None) 
     )
 
 
-def _exact(level: ParsedLevel, cell: GridCell) -> ParsedLevel:
+def _exact(
+    level: ParsedLevel, cell: GridCell, row_label: str | None, heading: str | None
+) -> ParsedLevel:
     return level.model_copy(
         update={
             "descriptor": cell.text,
@@ -424,9 +438,35 @@ def _exact(level: ParsedLevel, cell: GridCell) -> ParsedLevel:
                 row=cell.row,
                 col=cell.col,
                 cell_text=cell.text,
+                row_label=row_label or None,
+                column_heading=heading or None,
             ),
         }
     )
+
+
+def _context(placed: list[_Placed], grid: _Grid) -> dict[_Placed, tuple[str, list[str | None]]]:
+    """Each placed criterion's row label and the heading over each of its
+    levels, as the instructor would find them in the document. The heading
+    line is the table's first row (or column), unless a criterion's levels
+    are on it."""
+    groups: dict[tuple[int, str], list[_Placed]] = {}
+    for item in placed:
+        groups.setdefault((item.table, item.axis), []).append(item)
+    context: dict[_Placed, tuple[str, list[str | None]]] = {}
+    for (table, axis), items in groups.items():
+        used = {s for item in items for s in item.steps}
+        level_steps = set(range(min(used), max(used) + 1))
+        header = min(grid.lines(table, axis))
+        has_header = all(item.line != header for item in items)
+        for item in items:
+            label = grid.label(table, axis, item.line, level_steps)
+            headings = [
+                (grid.at(table, axis, header, s) or None) if has_header else None
+                for s in item.steps
+            ]
+            context[item] = (label, headings)
+    return context
 
 
 def _monotonic(passages: list[list[int]]) -> bool:
@@ -490,7 +530,7 @@ def _row_checks(placed: list[_Placed], grid: _Grid, check: _Check, limit: int) -
             for s in sorted(level_steps - own):
                 if grid.is_withheld(table, axis, item.line, s):
                     check.add(
-                        "differs_between_copies",
+                        "other",
                         item.index,
                         None,
                         f"'{label}': a cell of its table row differs between the repeated "
@@ -544,7 +584,7 @@ def _direction_checks(
         for item in items:
             if item.descending != majority_descending:
                 check.add(
-                    "wrong_order",
+                    "not_one_row",
                     item.index,
                     None,
                     f"'{_excerpt(item.criterion.text, limit)}': its levels run in the "
@@ -580,7 +620,7 @@ def _direction_checks(
                 )
             if misplaced:
                 check.add(
-                    "wrong_order",
+                    "not_one_row",
                     item.index,
                     level.level,
                     f"'{_excerpt(item.criterion.text, limit)}' level '{level.name}' sits "

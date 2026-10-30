@@ -76,6 +76,30 @@ class ConflictError(VeridicalError):
     code = "conflict"
 
 
+class RubricLockedError(ConflictError):
+    """A format version a check is pinned to, or one in its version history,
+    cannot change; corrections go into a new version (F2.4)."""
+
+    code = "rubric_locked"
+
+
+class RubricChangedError(ConflictError):
+    """The format changed since the client loaded it (another tab saved)."""
+
+    code = "rubric_changed"
+
+
+class UnresolvedRubricIssuesError(ConflictError):
+    """Activation waits until every parse issue is resolved or acknowledged
+    by the instructor (BUG-566: escalate, never activate a guess)."""
+
+    code = "unresolved_rubric_issues"
+
+    def __init__(self, message: str, open_issue_ids: list[int]) -> None:
+        super().__init__(message)
+        self.details = {"open_issue_ids": open_issue_ids}
+
+
 class GoneError(VeridicalError):
     """A known resource that once existed is no longer available, such as
     a revoked/expired share link or a purged/missing stored source. Distinct
@@ -172,6 +196,9 @@ HTTP_STATUS: dict[str, int] = {
     "unauthenticated": 401,
     "not_found": 404,
     "conflict": 409,
+    "rubric_locked": 409,
+    "rubric_changed": 409,
+    "unresolved_rubric_issues": 409,
     "saved_group_changed": 409,
     "group_assignment_changed": 409,
     "gone": 410,
