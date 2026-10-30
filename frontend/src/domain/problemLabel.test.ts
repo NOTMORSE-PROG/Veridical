@@ -26,6 +26,7 @@ const EXPECTED_REACHABLE_KINDS = [
   "unverifiable_api_down",
   "unverifiable_not_found",
   "orphan_in_text_citation",
+  "outside_recency_window",
   "uncited_reference",
   "claim_possibly_unsupported",
   "claim_support_cannot_determine",

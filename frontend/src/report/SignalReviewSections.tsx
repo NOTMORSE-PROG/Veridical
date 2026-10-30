@@ -77,6 +77,7 @@ import type { BulkAction } from "./useBulkResolve";
 import { OriginalityCoverageNotice } from "./OriginalityCoverageNotice";
 import { originalityCoverageNote } from "./originalityCoverage";
 import { CitationRecencySummary } from "./CitationRecencySummary";
+import { notCountedLabel } from "../domain/findingSummary";
 
 interface FindingSelection {
   isSelected: (cluster: FlagFindingCluster) => boolean;
@@ -311,7 +312,7 @@ function SignalFindingCard({
       <li className={first.overridden ? "signal-flag-row signal-flag-row--resolved" : "signal-flag-row"}>
         <div className="signal-flag-row__summary">
           <SelectFinding cluster={cluster} selection={selection} />
-          <span className={`signal-severity signal-severity--${first.affects_readiness === false ? "low" : first.severity}`}>{first.affects_readiness === false ? "Review lead: not scored" : SEVERITY_LABEL[first.severity]}</span>
+          <span className={`signal-severity signal-severity--${first.affects_readiness === false ? "low" : first.severity}`}>{first.affects_readiness === false ? notCountedLabel(first) : SEVERITY_LABEL[first.severity]}</span>
           {!first.overridden && viewedIds.has(first.id) && (
             <span className="signal-viewed-state"><ViewedIcon />Opened</span>
           )}
@@ -350,7 +351,7 @@ function SignalFindingCard({
     <li className={allResolved ? "signal-flag-row signal-flag-row--resolved" : "signal-flag-row"}>
       <div className="signal-flag-row__summary">
         <SelectFinding cluster={cluster} selection={selection} />
-        <span className={`signal-severity signal-severity--${first.affects_readiness === false ? "low" : severity}`}>{first.affects_readiness === false ? "Review lead: not scored" : SEVERITY_LABEL[severity]}</span>
+        <span className={`signal-severity signal-severity--${first.affects_readiness === false ? "low" : severity}`}>{first.affects_readiness === false ? notCountedLabel(first) : SEVERITY_LABEL[severity]}</span>
         {viewedSummary(flags, viewedIds) && (
           <span className="signal-viewed-state"><ViewedIcon />{viewedSummary(flags, viewedIds)}</span>
         )}

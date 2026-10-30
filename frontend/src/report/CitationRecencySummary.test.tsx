@@ -8,6 +8,7 @@ describe("CitationRecencySummary", () => {
       oldest_year_in_window: 2018, counts_toward_readiness: false, n_references: 20, n_dated: 18, n_outside_window: 2, n_within_window: 16,
       n_dated_after_reference_year: 0, n_year_not_readable: 0 }} />);
     expect(screen.getByText("Citation recency: 2 of 18 dated sources are older than the 5-year window.")).toBeInTheDocument();
+    expect(screen.getByText("How this was counted")).toBeInTheDocument();
   });
 
   it("shows nothing for a run checked before the note existed", () => {

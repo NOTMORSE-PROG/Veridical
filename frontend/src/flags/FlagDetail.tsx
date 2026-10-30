@@ -34,6 +34,7 @@ import { CitationHistoryWarning } from "./CitationHistoryWarning";
 import { RecordedFindingSources } from "../report/RecordedEvidencePage";
 import { useFlag } from "./useFlag";
 import { recoverableReadError } from "../report/reportReadState";
+import { isRecencyNote, RECENCY_NOTE_LABEL } from "../domain/findingSummary";
 
 const SEVERITY_LABEL: Record<FlagOut["severity"], string> = {
   high: "High severity",
@@ -248,7 +249,7 @@ export function FlagDetailPage() {
           <h1 ref={headingRef} tabIndex={-1}>{meta?.title ?? "Evidence detail"}</h1>
           {flag?.criterion_text && <p className="signal-route-header__intro">Related criterion: {flag.criterion_text}</p>}
         </div>
-        {flag && <div className="signal-flag-status"><span className={`signal-severity signal-severity--${optionalComparison ? "low" : flag.severity}`}>{optionalComparison ? COMPARISON_LEAD_COPY.badge : SEVERITY_LABEL[flag.severity]}</span>{flag.overridden && <span className="signal-resolution-state">{flag.confirmed_citation_source ? "Source confirmed" : "Overridden"}</span>}</div>}
+        {flag && <div className="signal-flag-status"><span className={`signal-severity signal-severity--${optionalComparison ? "low" : flag.severity}`}>{optionalComparison ? COMPARISON_LEAD_COPY.badge : flag.affects_readiness === false && isRecencyNote(flag) ? RECENCY_NOTE_LABEL : SEVERITY_LABEL[flag.severity]}</span>{flag.overridden && <span className="signal-resolution-state">{flag.confirmed_citation_source ? "Source confirmed" : "Overridden"}</span>}</div>}
       </header>
 
       {!validId ? (

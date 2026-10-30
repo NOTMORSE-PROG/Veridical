@@ -39,7 +39,8 @@ describe("the format's citation recency setting", () => {
     fireEvent.change(screen.getByLabelText(/Window \(years\)/), { target: { value: "7" } });
     fireEvent.click(screen.getByRole("button", { name: "Save recency setting" }));
     expect(await screen.findByText(/New checks use this setting; existing reports keep the values they were checked with/)).toBeInTheDocument();
-    expect(bodies[0]).toEqual({ enabled: true, window_years: 7, reference_year_basis: "manuscript_year", counts_toward_readiness: false });
+    // Only what changed is sent; the rest keeps following the defaults.
+    expect(bodies[0]).toEqual({ enabled: true, window_years: 7 });
     await waitFor(() => expect(screen.getByRole("button", { name: "Use the defaults" })).toBeInTheDocument());
   });
 
@@ -49,13 +50,14 @@ describe("the format's citation recency setting", () => {
     renderWithProviders(<CitationRecencySetting familyId={FAMILY} rubricId={10} />);
     const window = await screen.findByLabelText(/Window \(years\)/);
     fireEvent.change(window, { target: { value: "0" } });
-    expect(screen.getByText("Enter a whole number of years from 1 to 100.")).toBeInTheDocument();
+    expect(window).toHaveAccessibleDescription("Enter a whole number of years from 1 to 100.");
     expect(screen.getByRole("button", { name: "Save recency setting" })).toBeDisabled();
     fireEvent.change(window, { target: { value: "12" } });
     fireEvent.click(screen.getByRole("button", { name: "Save recency setting" }));
     expect(await screen.findByText("Use a window of 1 to 100 years. Nothing was saved.")).toBeInTheDocument();
     expect(window).toHaveAttribute("aria-invalid", "true");
-    expect(bodies).toHaveLength(1);
+    await waitFor(() => expect(window).toHaveFocus());
+    expect(bodies).toEqual([{ window_years: 12 }]);
   });
 
   it("clears the format's own values with Use the defaults, and warns about a saved setting that no longer validates", async () => {

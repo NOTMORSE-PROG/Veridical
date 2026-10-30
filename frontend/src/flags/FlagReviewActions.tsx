@@ -20,6 +20,7 @@ import { useFindingCompletion, useFindingCompletionOwner } from "./useFindingCom
 import { useAuthOwner } from "../auth/queryOwner";
 import { fieldRefusal, formRefusal, isValidationRefusal, isServiceBusy, OUTCOME_UNKNOWN_COPY, REFUSAL_NOTHING_CHANGED, REFUSAL_TITLE, SERVICE_BUSY_COPY, useRefusalFocus } from "../api/fieldRefusal";
 import { RefusalAlert } from "../ui/RefusalAlert";
+import { isRecencyNote, notCountedLabel } from "../domain/findingSummary";
 
 const authenticatedLifetimes = new WeakMap<object, number>();
 let nextAuthenticatedLifetime = 0;
@@ -268,7 +269,7 @@ function ResolutionControl({ flag: observedFlag }: { flag: FlagOut }) {
   const content = <section className={terminal ? "signal-resolution-record" : optional ? "signal-evidence-section" : "signal-evidence-section signal-resolution-options"} aria-labelledby={headingId}>
     <div className={terminal ? undefined : "signal-section-heading"}><div>
       {!optional || terminal ? <p className="signal-section-kicker">{terminal ? "Instructor resolution" : "Instructor action"}</p> : null}
-      <h2 ref={headingRef} tabIndex={-1} id={headingId}>{terminal ? flag.confirmed_citation_source ? "Source confirmed" : "Finding dismissed" : optional ? "Review lead: not scored" : "Resolve only after checking the evidence"}</h2>
+      <h2 ref={headingRef} tabIndex={-1} id={headingId}>{terminal ? flag.confirmed_citation_source ? "Source confirmed" : "Finding dismissed" : optional ? notCountedLabel(flag) : "Resolve only after checking the evidence"}</h2>
     </div></div>
     {terminal ? <>
         <p>{flag.confirmed_citation_source ? `You confirmed the source after checking it: ${flag.override_reason}.` : `You dismissed this possible inconsistency: ${flag.override_reason}.`}</p>
@@ -277,7 +278,7 @@ function ResolutionControl({ flag: observedFlag }: { flag: FlagOut }) {
         <ActionLink to={`/report/${flag.check_run_id}`} variant="secondary">View updated report</ActionLink>
       </>
     : optional ? <>
-        <p>This comparison does not change readiness. You can inspect the evidence without writing a comment or dismissing it.</p>
+        <p>{isRecencyNote(flag) ? "This note does not change readiness. You can read it without writing a comment or dismissing it." : "This comparison does not change readiness. You can inspect the evidence without writing a comment or dismissing it."}</p>
       </>
     : <>
       <p>{flag.ai_verdict_summary ? "If you think this finding is wrong, dismiss it and explain why. The original evidence stays in the review record." : "VERIDICAL did not reach a conclusion. Review the evidence before deciding whether to dismiss this finding."}</p>

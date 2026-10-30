@@ -10,6 +10,11 @@ export function findingIdentity(flag: FlagSummaryOut): string {
   if (isOptionalComparisonLead(flag)) return `comparison-record:${flag.id}`;
   if (!flag.problem_kind) return `flag:${flag.id}`;
 
+  // V-092: the recency notes are one judgment about the reference list (the
+  // score makes one deduction for all of them), so they are one finding with
+  // each old source as a location.
+  if (flag.problem_kind === "outside_recency_window") return JSON.stringify([flag.check_kind, flag.problem_kind]);
+
   if (flag.check_kind === "originality_reuse") {
     return flag.matched_ref == null
       ? `flag:${flag.id}`

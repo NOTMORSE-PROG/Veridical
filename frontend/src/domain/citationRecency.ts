@@ -9,9 +9,12 @@ export const CITATION_RECENCY_COPY = {
   notChecked: "not checked",
   offByFormat: "This format turns the recency note off.",
   offByDefault: "The recency note is not turned on for this format.",
-  counted: "These notes count toward readiness.",
+  counted: "These notes count toward readiness as one finding.",
   notCounted: "These notes do not count toward readiness.",
-  oldCanBeRight: "An older source can still be the right one to cite, for example a foundational work; dismiss its note with a reason if so.",
+  details: "How this was counted",
+  // Only a counted note has a Dismiss action, so only then is it offered.
+  oldCanBeRightCounted: "An older source can still be the right one to cite, for example a foundational work; dismiss its note with a reason if so.",
+  oldCanBeRight: "An older source can still be the right one to cite, for example a foundational work.",
   unassessedReason: {
     reference_list_not_bound: "the reference list could not be told apart from the text around it",
     reference_membership_partial: "only part of the reference list could be confirmed",
@@ -35,11 +38,17 @@ export const CITATION_RECENCY_COPY = {
   } as Record<string, string>,
 } as const;
 
+// Reference numbers listed before the rest are summed up.
+const LISTED_REFERENCES = 10;
+
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
 
 function listNumbers(numbers: number[]): string {
-  if (numbers.length <= 1) return numbers.join("");
-  return `${numbers.slice(0, -1).join(", ")} and ${numbers[numbers.length - 1]}`;
+  const shown = numbers.slice(0, LISTED_REFERENCES);
+  const more = numbers.length - shown.length;
+  if (more > 0) return `${shown.join(", ")} and ${more} more`;
+  if (shown.length <= 1) return shown.join("");
+  return `${shown.slice(0, -1).join(", ")} and ${shown[shown.length - 1]}`;
 }
 
 // Where the window counts back from, in the instructor's words.
@@ -58,7 +67,10 @@ function referenceYearPhrase(recency: CitationRecencySummaryOut): string {
 
 export interface CitationRecencyNote {
   title: string;
-  lines: string[];
+  // Said beside the title.
+  summary: string[];
+  // Behind "How this was counted".
+  details: string[];
 }
 
 export function citationRecencyNote(recency: CitationRecencySummaryOut | null | undefined): CitationRecencyNote | null {
@@ -66,34 +78,41 @@ export function citationRecencyNote(recency: CitationRecencySummaryOut | null | 
   const { label } = CITATION_RECENCY_COPY;
   if (recency.status === "off") {
     return { title: `${label}: ${CITATION_RECENCY_COPY.notChecked}`,
-      lines: [recency.enabled_source === "format" ? CITATION_RECENCY_COPY.offByFormat : CITATION_RECENCY_COPY.offByDefault] };
+      summary: [recency.enabled_source === "format" ? CITATION_RECENCY_COPY.offByFormat : CITATION_RECENCY_COPY.offByDefault], details: [] };
   }
   if (recency.status === "unassessed") {
     const reason = recency.unassessed_reason ? CITATION_RECENCY_COPY.unassessedReason[recency.unassessed_reason] : undefined;
     return { title: `${label}: ${CITATION_RECENCY_COPY.notAssessed}`,
-      lines: [reason ? `Source dates were not read because ${reason}.` : "Source dates were not read for this run."] };
+      summary: [reason ? `Source dates were not read because ${reason}.` : "Source dates were not read for this run."], details: [] };
   }
   const window = recency.window_years ?? 0;
-  const lines: string[] = [];
-  if (recency.reference_year != null) {
-    lines.push(`The ${window}-year window counts back from ${referenceYearPhrase(recency)}, so sources from ${recency.oldest_year_in_window ?? recency.reference_year - window} onward are inside it.`);
+  const oldest = recency.oldest_year_in_window ?? (recency.reference_year != null ? recency.reference_year - window : null);
+  const summary: string[] = [];
+  const details: string[] = [];
+  if (recency.counts_toward_readiness != null) summary.push(recency.counts_toward_readiness ? CITATION_RECENCY_COPY.counted : CITATION_RECENCY_COPY.notCounted);
+  if (recency.reference_year != null && oldest != null) {
+    details.push(`The ${window}-year window counts back from ${referenceYearPhrase(recency)}: sources published in ${oldest} or later are inside it, and sources published before ${oldest} are noted.`);
   }
   if (recency.n_year_not_readable > 0) {
+    const numbers = recency.year_not_readable_reference_numbers ?? [];
     const reasons = Object.entries(recency.year_not_readable_reasons ?? {})
       .filter(([, count]) => count > 0)
-      .map(([reason, count]) => `${CITATION_RECENCY_COPY.unreadableReason[reason] ?? reason}: ${count}`);
-    const numbers = recency.year_not_readable_reference_numbers ?? [];
-    const which = numbers.length ? ` (${numbers.length === 1 ? "reference" : "references"} ${listNumbers(numbers)})` : "";
-    lines.push(`${plural(recency.n_year_not_readable, "source has", "sources have")} no readable year${which} and ${recency.n_year_not_readable === 1 ? "is" : "are"} not judged${reasons.length ? `: ${reasons.join("; ")}` : ""}.`);
+      .map(([reason, count]) => ({ text: CITATION_RECENCY_COPY.unreadableReason[reason] ?? reason, count }));
+    const which = numbers.length ? `${numbers.length === 1 ? "reference" : "references"} ${listNumbers(numbers)}` : "";
+    const why = reasons.length === 1 ? reasons[0].text : reasons.map((reason) => `${reason.text}: ${reason.count}`).join(", ");
+    const inside = [which, why].filter(Boolean).join(numbers.length === 1 && reasons.length === 1 ? ": " : "; ");
+    const lead = plural(recency.n_year_not_readable, "source has", "sources have");
+    summary.push(`${lead} no readable year and ${recency.n_year_not_readable === 1 ? "is" : "are"} not judged${inside ? ` (${inside})` : ""}.`);
   }
   if (recency.n_dated_after_reference_year > 0 && recency.reference_year != null) {
-    lines.push(`${plural(recency.n_dated_after_reference_year, "dated source is", "dated sources are")} later than ${recency.reference_year}.`);
+    details.push(`${plural(recency.n_dated_after_reference_year, "dated source is", "dated sources are")} later than ${recency.reference_year}; ${recency.n_dated_after_reference_year === 1 ? "it counts" : "they count"} as inside the window.`);
   }
-  if (recency.counts_toward_readiness != null) lines.push(recency.counts_toward_readiness ? CITATION_RECENCY_COPY.counted : CITATION_RECENCY_COPY.notCounted);
-  if (recency.n_outside_window > 0) lines.push(CITATION_RECENCY_COPY.oldCanBeRight);
+  if (recency.n_outside_window > 0) details.push(recency.counts_toward_readiness ? CITATION_RECENCY_COPY.oldCanBeRightCounted : CITATION_RECENCY_COPY.oldCanBeRight);
   const outside = recency.n_outside_window;
+  // The check date as the starting point moves the count, so it is said up front.
+  const fromCheckDate = recency.reference_year_basis === "check_date" && recency.reference_year != null ? `, counted from the check date (${recency.reference_year})` : "";
   const title = recency.n_dated === 0
     ? `${label}: no dated sources to compare with the ${window}-year window`
-    : `${label}: ${outside} of ${plural(recency.n_dated, "dated source", "dated sources")} ${outside === 1 ? "is" : "are"} older than the ${window}-year window`;
-  return { title, lines };
+    : `${label}: ${outside} of ${plural(recency.n_dated, "dated source", "dated sources")} ${outside === 1 ? "is" : "are"} older than the ${window}-year window${fromCheckDate}`;
+  return { title, summary, details };
 }
