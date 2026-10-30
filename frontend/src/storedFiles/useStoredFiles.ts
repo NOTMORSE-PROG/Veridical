@@ -53,6 +53,8 @@ export function useDeleteStoredFile() {
         },
       );
       void queryClient.invalidateQueries({ queryKey: ["stored-files"] });
+      // A deleted source changes what manuscript review shows for that run.
+      void queryClient.invalidateQueries({ queryKey: ["report"] });
       // A legacy Library record built from this upload leaves the Library.
       void queryClient.invalidateQueries({ queryKey: ["library"] });
       void queryClient.invalidateQueries({ queryKey: ["library-item", result.manuscript_id] });

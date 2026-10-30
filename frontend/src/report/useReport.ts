@@ -22,6 +22,9 @@ import type {
 export function useReport(checkRunId: number) {
   return useQuery({
     staleTime: REPORT_READ_FRESH_MS,
+    // Coming back to the tab always re-reads: a decision or judgment made in
+    // another tab must never be shown here as still pending.
+    refetchOnWindowFocus: "always",
     queryKey: ["report", checkRunId],
     queryFn: () => api.get<ReportOut>(`/check-runs/${checkRunId}/report`),
     structuralSharing: (current, incoming) => keepNewerAssessment(current as ReportOut | undefined, incoming as ReportOut),
@@ -32,6 +35,7 @@ export function useReport(checkRunId: number) {
 export function useEscalatedItems(checkRunId: number) {
   return useQuery({
     staleTime: REPORT_READ_FRESH_MS,
+    refetchOnWindowFocus: "always",
     queryKey: ["report", checkRunId, "escalated"],
     queryFn: () => api.get<EscalatedItemOut[]>(`/check-runs/${checkRunId}/escalated`),
     enabled: Number.isInteger(checkRunId) && checkRunId > 0,
