@@ -16,5 +16,10 @@
     "\\b(?:most|primarily|throughout|comprehensive(?:ly)?|completeness)\\b|\\bmajority\\b(?![\\s\\u002d\\u2010-\\u2015\\u2212]*vote\\b)|\\bfew\\b(?![\\s\\u002d\\u2010-\\u2015\\u2212]*shot\\b)",
     "\\bcomplete\\s+(?:documentation|coverage|inventory|assessment)\\b",
     "\\b(?:all|every|each)\\s+(?:one\\s+)?(?:of\\s+)?(?:(?:the|these|those|our)\\s+)?(?:references?|sources?|citations?|entr(?:y|ies)|items?|sections?|figures?|tables?|requirements?|components?|devices?|participants?|records?)\\b"
+  ],
+  "locatable_subclaim": [
+    "\\bpreview(?:s|ing|ed)?\\b.{0,40}\\b(?:structure|organi[sz]ation|outline)\\b",
+    "\\b(?:structure|organi[sz]ation|outline)\\b.{0,40}\\bpreview(?:s|ing|ed)?\\b",
+    "\\b(?:in|as)\\s+(?:a\\s+)?(?:single|one)\\s+sentence\\b"
   ]
 }

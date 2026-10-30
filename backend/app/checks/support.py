@@ -346,6 +346,26 @@ def adverse_rating(criterion: Any, outcome: ResultOutcome, detail: dict[str, Any
     return isinstance(level, dict) and bool(ordinals) and level.get("ordinal") == min(ordinals)
 
 
+def locatable_subclaim(criterion: Any, detail: dict[str, Any], patterns_file: Any = None) -> bool:
+    """Whether the rating claims a specific part of the paper that a passage
+    either shows or does not, such as an introduction that previews the
+    structure or a purpose stated in a single sentence.
+
+    For these the support check really can tell, so a failed check means the
+    rating is not shown in the paper, not merely that one quote is too little.
+    The descriptor patterns are data, read from the criterion's own wording.
+    """
+    patterns = _scope_patterns(patterns_file).get("locatable_subclaim", [])
+    texts = [criterion.text, getattr(criterion, "evidence", None) or ""]
+    verdict = detail.get("verdict")
+    level = match_level(criterion, verdict) if verdict else None
+    if level is not None:
+        texts += [
+            item["descriptor"] for item in criterion.levels if int(item["level"]) == level.ordinal
+        ]
+    return any(pattern.search(" ".join(text.split())) for text in texts for pattern in patterns)
+
+
 def apply_support(
     outcome: ResultOutcome,
     detail: dict[str, Any],
@@ -353,6 +373,7 @@ def apply_support(
     *,
     decide: bool = False,
     adverse: bool = False,
+    strict: bool = False,
 ) -> tuple[ResultOutcome, dict[str, Any]]:
     """Keep location-verified passages, but remove any withheld accepted rating.
 
@@ -360,7 +381,11 @@ def apply_support(
     the verified-evidence rating and records the check's reason as a
     disclosed caution instead. It still withholds an `adverse` rating (a
     claim of weakness needs evidence of the weakness), evidence that cannot
-    show the criterion at all, and any rating during a support outage."""
+    show the criterion at all, and any rating during a support outage.
+
+    `strict` (see `locatable_subclaim`): the rating names something a passage
+    can show, so an unconfirmed check sends it to the instructor rather than
+    keeping it with a caution."""
     updated = {**detail, "support_check": support}
     if support["status"] == "supported":
         updated["support_basis"] = support["reason"]
@@ -369,6 +394,7 @@ def apply_support(
         return outcome, updated
     if (
         decide
+        and not strict
         and not adverse
         and support.get("scope_guard") != "required_body_evidence_unconfirmed"
         and support.get("failure_outcome") != ResultOutcome.api_down.value
@@ -385,6 +411,8 @@ def apply_support(
     updated.pop("score", None)
     updated["reason"] = support["reason"]
     updated["support_withheld"] = True
+    if strict:
+        updated["support_gate"] = "locatable_subclaim"
     if support.get("failure_outcome") == ResultOutcome.api_down.value:
         updated["failure_phase"] = support["failure_phase"]
         return ResultOutcome.api_down, updated

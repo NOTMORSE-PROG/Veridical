@@ -6,7 +6,7 @@ import pytest
 
 from app.checks.consistency import run_semantic_checks_with_consistency
 from app.checks.escalation import gate_vote
-from app.checks.support import apply_support
+from app.checks.support import apply_support, locatable_subclaim
 from app.config import get_settings
 from app.models.enums import ResultOutcome
 from tests.test_checks_consistency import (
@@ -172,6 +172,126 @@ def test_unconfirmed_support_is_a_caution_only_when_deciding(decide_flag):
         assert updated["support_caution"] == support["reason"]
     else:
         assert outcome == ResultOutcome.escalated and "level" not in updated
+
+
+STRUCTURE_SCALE = [
+    {"level": 1, "name": "Beginner", "descriptor": "No clear introduction.", "points": 1},
+    {"level": 2, "name": "Acceptable", "descriptor": "States the main topic.", "points": 2},
+    {
+        "level": 3,
+        "name": "Proficient",
+        "descriptor": "States the main topic and previews the structure of the paper.",
+        "points": 3,
+    },
+    {"level": 4, "name": "Exemplary", "descriptor": "Engaging and complete.", "points": 4},
+]
+UNSUPPORTED = {"status": "unsupported", "reason": "The quote does not show the preview."}
+
+
+@pytest.mark.parametrize(
+    "criterion,verdict,expected",
+    [
+        (FakeCriterion(id=1, text="Introduction", levels=STRUCTURE_SCALE), "Proficient", True),
+        (FakeCriterion(id=1, text="Introduction", levels=STRUCTURE_SCALE), "Acceptable", False),
+        (FakeCriterion(id=2, text="Purpose is stated in a single sentence."), "pass", True),
+        (
+            FakeCriterion(id=3, text="Ideas flow logically", evidence="Preview the structure"),
+            "pass",
+            True,
+        ),
+        (FakeCriterion(id=4, text="Organization is logical and easy to follow."), "pass", False),
+        (FakeCriterion(id=5, text="The tone is professional throughout."), "pass", False),
+    ],
+)
+def test_locatable_subclaims_come_from_the_criterion_wording(criterion, verdict, expected):
+    """Read from the criterion's text, its evidence request and the claimed
+    level's descriptor, never from its name."""
+    assert locatable_subclaim(criterion, {"verdict": verdict}) is expected
+
+
+def test_an_unshown_locatable_subclaim_goes_to_the_instructor(decide):
+    criterion = FakeCriterion(id=1, text="Introduction", levels=STRUCTURE_SCALE)
+    detail = {"verdict": "Proficient", "level": {"name": "Proficient"}, "reasoning": "r"}
+    outcome, updated = apply_support(
+        ResultOutcome.passed,
+        detail,
+        UNSUPPORTED,
+        decide=True,
+        strict=locatable_subclaim(criterion, detail),
+    )
+    assert outcome == ResultOutcome.escalated
+    assert "level" not in updated and updated["proposed_level"] == {"name": "Proficient"}
+    assert updated["support_gate"] == "locatable_subclaim"
+    assert "support_caution" not in updated
+
+
+def test_a_whole_document_criterion_keeps_its_grade_with_a_caution(decide):
+    criterion = FakeCriterion(id=4, text="Organization is logical and easy to follow.")
+    detail = {"verdict": "pass", "reasoning": "r"}
+    outcome, updated = apply_support(
+        ResultOutcome.passed,
+        detail,
+        UNSUPPORTED,
+        decide=True,
+        strict=locatable_subclaim(criterion, detail),
+    )
+    assert outcome == ResultOutcome.passed
+    assert updated["support_caution"] == UNSUPPORTED["reason"]
+    assert "support_gate" not in updated
+
+
+def test_a_supported_locatable_subclaim_is_still_decided(decide):
+    criterion = FakeCriterion(id=1, text="Introduction", levels=STRUCTURE_SCALE)
+    detail = {"verdict": "Proficient", "level": {"name": "Proficient"}, "reasoning": "r"}
+    support = {"status": "supported", "reason": "The quote previews the chapters."}
+    outcome, updated = apply_support(
+        ResultOutcome.passed,
+        detail,
+        support,
+        decide=True,
+        strict=locatable_subclaim(criterion, detail),
+    )
+    assert outcome == ResultOutcome.passed and updated["level"] == {"name": "Proficient"}
+
+
+async def test_the_pipeline_escalates_an_unshown_structure_preview(decide):
+    """End to end through both grading passes and the support check."""
+    import json
+
+    class Unshown(ScriptedLLM):
+        async def complete(self, prompt_type, prompt, **kwargs):
+            if prompt_type != "semantic_support":
+                return await super().complete(prompt_type, prompt, **kwargs)
+            task = json.loads(prompt.split("--- TASK JSON ---\n", 1)[1])
+            return {
+                "items": [
+                    {
+                        "index": item["index"],
+                        "status": "unsupported",
+                        "reason": "No preview of the structure is shown.",
+                        "requirements": [
+                            {
+                                "key": obligation["key"],
+                                "status": "unsupported",
+                                "evidence_quotes": [],
+                            }
+                            for obligation in item["required_obligations"]
+                        ],
+                    }
+                    for item in task["items"]
+                ]
+            }
+
+    llm = Unshown([_verdict_response("Proficient"), _verdict_response("Proficient")])
+    results = await run_semantic_checks_with_consistency(
+        FakeSession(),
+        1,
+        [FakeCriterion(id=1, text="Introduction", levels=STRUCTURE_SCALE)],
+        _extraction(),
+        llm,
+    )
+    assert results[0].outcome == ResultOutcome.escalated
+    assert results[0].detail["support_gate"] == "locatable_subclaim"
 
 
 def test_support_outage_is_never_a_decided_grade():

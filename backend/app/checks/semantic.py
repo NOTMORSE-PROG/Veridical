@@ -31,6 +31,7 @@ from app.checks.support import (
     apply_support,
     check_support_available,
     context_limitation,
+    locatable_subclaim,
 )
 from app.config import Settings, get_settings
 from app.errors import ApiDownError, VeridicalError
@@ -1162,6 +1163,9 @@ async def _grade_batch(
             support[criterion.id],
             decide=get_settings().grading_decision_policy == "decide",
             adverse=adverse_rating(criterion, outcome, detail),
+            strict=locatable_subclaim(
+                criterion, detail, getattr(batch, "scope_patterns_file", None)
+            ),
         )
         results.append(await _persist(session, check_run_id, criterion, outcome, detail))
     return results
