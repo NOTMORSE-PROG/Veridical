@@ -31,6 +31,7 @@ import { ProcessStatus } from "../ui/ProcessStatus";
 import { ReadinessBand } from "../ui/ReadinessBand";
 import { isPagePastEnd } from "../api/fieldRefusal";
 import { PAGE_PAST_END_COPY } from "../domain/pagePastEnd";
+import { isWorkspaceSample } from "../demo/workspaceFixture";
 
 const QUEUES: ReadonlyArray<{
   id: ReviewDeskQueue;
@@ -77,7 +78,7 @@ function queueFromParams(params: URLSearchParams): ReviewDeskQueue {
   if (params.get("status") === "checked") return "ready_to_decide";
   if (params.get("status") === "decided") return "complete";
   if (params.get("status") === "not_checked") return "not_checked";
-  return "needs_review";
+  return isWorkspaceSample() ? "ready_to_decide" : "needs_review";
 }
 
 function formatActivity(iso: string): string {
