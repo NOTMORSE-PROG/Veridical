@@ -27,4 +27,10 @@ describe("the Needs Review headline reason", () => {
   it("says nothing for other bands", () => {
     expect(needsReviewReason({ ...base, status: "ready" } as ReportOut)).toBeNull();
   });
+  it("names a check that compared no text instead of counting it as run in part", () => {
+    expect(needsReviewReason({ ...base, originality_scope: { not_compared_reason: "reference_boundary_unclear" },
+      integrity_check_status: [{ check_kind: "originality_reuse", coverage_reason: "reference_boundary_unclear", pages_not_compared: [1, 2] }],
+    } as unknown as ReportOut)).toBe("3 checks ran only in part · 1 check could not compare any text · 9 of 9 criteria graded");
+  });
 });
+
