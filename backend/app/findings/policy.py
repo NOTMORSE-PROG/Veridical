@@ -13,6 +13,14 @@ def exclusion_reason(kind: str, detail: dict[str, Any] | None = None) -> str | N
     if kind == "citation_integrity" and (detail or {}).get("kind") == "unverifiable_api_down":
         # Older unavailable-lookup flags predate the explicit eligibility marker.
         return "unassessed_evidence"
+    if (
+        kind == "citation_integrity"
+        and (detail or {}).get("kind") == "outside_recency_window"
+        and (detail or {}).get("affects_readiness") is False
+    ):
+        # The format keeps recency as a note for the instructor, not a
+        # readiness finding. The evidence itself was read.
+        return "recency_note_not_counted"
     if (detail or {}).get("affects_readiness") is False:
         return "unassessed_evidence"
     return None

@@ -58,6 +58,12 @@ def _front_matter_blocks(result: ExtractionResult) -> list[TextBlock]:
     return [b for b in result.blocks[:40] if not b.is_furniture and b.text.strip()]
 
 
+def front_matter_blocks(result: ExtractionResult) -> list[TextBlock]:
+    """The same title-page scope, for other readers of front matter such as
+    the citation recency note's manuscript year."""
+    return _front_matter_blocks(result)
+
+
 def _split_marker_prefix(text: str, markers: frozenset[str]) -> tuple[bool, str]:
     """True plus whatever text follows the marker, when `text` starts
     with one of `markers` -- covers both title-page conventions this

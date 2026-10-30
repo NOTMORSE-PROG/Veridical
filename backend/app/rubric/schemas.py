@@ -92,6 +92,20 @@ class CriterionOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class CitationRecencySettingsOut(BaseModel):
+    """Effective values, each with where it came from ("format" when this
+    format set it, "default" when the configured default applies)."""
+
+    enabled: bool
+    window_years: int
+    reference_year_basis: Literal["manuscript_year", "check_date"]
+    counts_toward_readiness: bool
+    setting_sources: dict[str, Literal["format", "default"]]
+    # True when the saved setting no longer validates. Checks then report
+    # recency as unassessed rather than use the defaults shown here.
+    saved_setting_invalid: bool = False
+
+
 class RubricOut(BaseModel):
     id: int
     rubric_family_id: uuid.UUID
@@ -120,6 +134,10 @@ class RubricOut(BaseModel):
     # guessed, same convention as `ManuscriptListItem.program`.
     program: str | None
     criteria: list[CriterionOut]
+    # V-092: the citation recency values this format's next check will use.
+    citation_recency: CitationRecencySettingsOut | None = Field(
+        default=None, validation_alias="citation_recency_settings"
+    )
 
     model_config = {"from_attributes": True}
 

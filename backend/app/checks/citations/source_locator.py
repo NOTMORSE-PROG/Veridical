@@ -26,6 +26,7 @@ class SavedReferenceLocator(BaseModel):
         "corrected_source",
         "unverifiable_api_down",
         "unverifiable_not_found",
+        "outside_recency_window",
     ]
     reference_text_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
     doi: str | None = None

@@ -1,0 +1,52 @@
+{
+  "_comment": "How the citation recency note reads a publication year and a manuscript's own year. Kept as data so an instructor's conventions can be added without code changes. When a year cannot be read with confidence the source is counted as 'year not readable', never assumed old.",
+  "version": "citation-recency-grammar-v1",
+  "earliest_plausible_year": 1500,
+  "latest_plausible_year": 2099,
+  "undated_markers": [
+    "n.d.",
+    "n. d.",
+    "no date",
+    "undated",
+    "in press",
+    "forthcoming",
+    "in preparation",
+    "under review",
+    "accepted for publication",
+    "s.d."
+  ],
+  "_undated_note": "Markers written as two initials (n.d., s.d.) also look like author initials ('N. D. Lane'), so they only count inside parentheses or at the end of an entry.",
+  "locator_abbreviations": [
+    "p.",
+    "pp.",
+    "vol.",
+    "no.",
+    "ch.",
+    "sec."
+  ],
+  "access_note_date_span_chars": 40,
+  "date_prefixes": [
+    "In:",
+    "Published:",
+    "Published"
+  ],
+  "range_separators": "-‐‑‒–—―/",
+  "access_note_prefixes": [
+    "Retrieved",
+    "Accessed",
+    "Last accessed",
+    "Date accessed",
+    "Viewed",
+    "Visited",
+    "Available"
+  ],
+  "months": [
+    "January", "February", "March", "April", "May", "June", "July",
+    "August", "September", "October", "November", "December",
+    "Jan", "Feb", "Mar", "Apr", "Jun", "Jul", "Aug", "Sep", "Sept",
+    "Oct", "Nov", "Dec",
+    "Spring", "Summer", "Fall", "Autumn", "Winter",
+    "Enero", "Pebrero", "Marso", "Abril", "Mayo", "Hunyo", "Hulyo",
+    "Agosto", "Setyembre", "Oktubre", "Nobyembre", "Disyembre"
+  ]
+}

@@ -734,6 +734,22 @@ class Settings(BaseSettings):
         "datacite": "https://api.datacite.org/dois/{doi}",
     }
     citation_cache_stale_days: int = 30
+    # Citation recency note (V-092). Defaults for a format that does not set
+    # its own; a format's saved setting (`rubric.citation_recency`) wins per
+    # field. A source is outside the window when its year is earlier than
+    # the reference year minus the window. The reference year is the year on
+    # the manuscript's title page, or the check date when that is not clear.
+    citation_recency_enabled: bool = True
+    citation_recency_window_years: int = Field(default=5, ge=1, le=100)
+    citation_recency_reference_year_basis: Literal["manuscript_year", "check_date"] = (
+        "manuscript_year"
+    )
+    citation_recency_counts_toward_readiness: bool = False
+    # Which calendar the check date's year is read in.
+    citation_recency_timezone: str = "Asia/Manila"
+    # Optional replacement for the packaged reading grammar
+    # (app/checks/citations/data/citation_recency.json); restart after edits.
+    citation_recency_grammar_file: Path | None = None
     # Claim-support check (V-030, F5.4): batched into as few Gemini calls
     # as possible per manuscript (D-001/D-011). Local NLI was measured and
     # ruled out (DECISIONS.md D-011 follow-up: 487MB peak RSS, doesn't fit

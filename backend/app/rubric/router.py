@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_instructor, get_upload_instructor
+from app.checks.citations.recency import CitationRecencyFormatSettings
 from app.config import get_settings
 from app.db import DbInt, DbText, get_session
 from app.errors import FormatAIConfigurationError
@@ -26,6 +27,7 @@ from app.rubric.documents import (
     read_rubric_document,
 )
 from app.rubric.schemas import (
+    CitationRecencySettingsOut,
     RubricListItem,
     RubricOut,
     SetRubricFamilyProgramRequest,
@@ -38,6 +40,7 @@ from app.rubric.service import (
     get_rubric,
     list_rubric_families,
     list_rubric_versions,
+    set_rubric_family_citation_recency,
     set_rubric_family_program,
     update_criteria,
 )
@@ -236,3 +239,15 @@ async def set_rubric_family_program_route(
     instructor: Annotated[Instructor, Depends(get_current_instructor)],
 ) -> list[RubricListItem]:
     return await set_rubric_family_program(session, family_id, body.program_id, instructor.id)
+
+
+@router.put(
+    "/rubric-families/{family_id}/citation-recency", response_model=CitationRecencySettingsOut
+)
+async def set_rubric_family_citation_recency_route(
+    family_id: uuid.UUID,
+    body: CitationRecencyFormatSettings,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    instructor: Annotated[Instructor, Depends(get_current_instructor)],
+) -> CitationRecencySettingsOut:
+    return await set_rubric_family_citation_recency(session, family_id, body, instructor.id)

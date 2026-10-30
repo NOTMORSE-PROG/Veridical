@@ -26,5 +26,6 @@
   "percentage_sum_off": "Table percentages may not sum to 100%",
   "group_count_exceeds_total": "Group sample sizes may not match the stated total",
   "reuse_same_instructor_resubmission": "Possible resubmission of your own Library record",
-  "possible_metadata_mismatch": "Possible metadata mismatch"
+  "possible_metadata_mismatch": "Possible metadata mismatch",
+  "outside_recency_window": "Source older than the recency window"
 }

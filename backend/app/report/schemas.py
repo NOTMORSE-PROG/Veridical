@@ -238,6 +238,44 @@ class IntegrityCheckStatusOut(BaseModel):
     n_source_candidates_withheld: int = Field(default=0, ge=0)
 
 
+class CitationRecencySummaryOut(BaseModel):
+    """V-092: the citation recency note's summary for this run, read from
+    the values the check recorded (never today's format setting). Counts,
+    not percentages: a source is either inside the window, outside it, or
+    has no readable year, and the last group is never judged."""
+
+    status: Literal["assessed", "unassessed", "off"]
+    # Why the list was not read for dates ("reference_list_not_bound",
+    # "reference_membership_partial", "reference_list_unavailable",
+    # "source_unavailable", "no_references", "format_setting_invalid",
+    # "recency_policy_unavailable"). None when assessed or off.
+    unassessed_reason: str | None = None
+    window_years: int | None = None
+    window_source: Literal["format", "default"] | None = None
+    counts_toward_readiness: bool | None = None
+    reference_year: int | None = None
+    reference_year_basis: Literal["manuscript_year", "check_date"] | None = None
+    # The title-page line the manuscript year was read from, and where.
+    reference_year_evidence_text: str | None = None
+    reference_year_evidence_anchor: str | None = None
+    # Why the manuscript's own year was not used when the format asked for
+    # it: "manuscript_year_not_found", "manuscript_year_ambiguous",
+    # "manuscript_year_after_check_date",
+    # "manuscript_year_precedes_cited_source".
+    reference_year_fallback_reason: str | None = None
+    oldest_year_in_window: int | None = None
+    n_references: int = Field(default=0, ge=0)
+    n_dated: int = Field(default=0, ge=0)
+    n_outside_window: int = Field(default=0, ge=0)
+    n_within_window: int = Field(default=0, ge=0)
+    n_dated_after_reference_year: int = Field(default=0, ge=0)
+    n_year_not_readable: int = Field(default=0, ge=0)
+    # "no_date" (n.d., in press), "no_year", "conflicting_years", "no_text".
+    year_not_readable_reasons: dict[str, int] = Field(default_factory=dict)
+    # 1-based reference numbers, as an instructor counts the list.
+    year_not_readable_reference_numbers: list[int] = Field(default_factory=list)
+
+
 class OriginalityScopeOut(BaseModel):
     library_passage_indexing: LibraryPassageIndexingSummary | None = None
     """V-077 (D-028): what the originality check compared against, shown on
@@ -357,6 +395,9 @@ class ReportOut(BaseModel):
     # V-077: None when this run has no originality result (skipped, failed,
     # or still running); CoverageStatement owns those states.
     originality_scope: OriginalityScopeOut | None = None
+    # V-092: None for runs made before the recency note existed, or with no
+    # citation-integrity result yet.
+    citation_recency: CitationRecencySummaryOut | None = None
 
 
 class PublicCriterionResultOut(BaseModel):

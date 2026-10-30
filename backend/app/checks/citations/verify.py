@@ -13,7 +13,9 @@ those are, by themselves, evidence of anything wrong with the manuscript.
 
 import re
 from dataclasses import asdict, dataclass, replace
+from datetime import UTC, datetime
 from enum import StrEnum
+from zoneinfo import ZoneInfoNotFoundError
 
 import httpx
 from sqlalchemy import select
@@ -41,6 +43,15 @@ from app.checks.citations.numbered import (
     explicit_reference_label,
 )
 from app.checks.citations.projection import SOURCE_FIELDS, project_quoted_metadata
+from app.checks.citations.recency import (
+    RecencyAssessment,
+    assess_recency,
+    check_year_of,
+    load_grammar,
+    off_summary,
+    resolve_policy,
+    unassessed_summary,
+)
 from app.checks.citations.source_locator import with_reference_locator
 from app.checks.citations.support import (
     ClaimSupportInput,
@@ -80,6 +91,7 @@ from app.llm.base import LLMClient
 from app.models.citation import Citation
 from app.models.enums import CheckKind, CitationParseStatus, FlagSeverity, ResultOutcome
 from app.models.manuscript import Manuscript
+from app.models.rubric import Rubric
 from app.models.run import CheckResult, CheckRun, Flag
 
 
@@ -547,6 +559,43 @@ def _with_reference_anchor(
     return replace(draft, page_anchor=anchor)
 
 
+async def _citation_recency(
+    session: AsyncSession,
+    check_run_id: int,
+    citations: list[Citation],
+    extraction: ExtractionResult,
+    settings: Settings,
+    blocked_reason: str | None,
+) -> RecencyAssessment:
+    """The recency note (V-092) under the format's setting for this run.
+
+    Runs only on a reference list whose entries are bound to the source; a
+    list that could not be established is reported as unassessed rather
+    than read for dates."""
+    row = (
+        await session.execute(
+            select(CheckRun.created_at, Rubric.citation_recency)
+            .outerjoin(Rubric, Rubric.id == CheckRun.rubric_id)
+            .where(CheckRun.id == check_run_id)
+        )
+    ).one_or_none()
+    try:
+        policy = resolve_policy(row.citation_recency if row else None, settings)
+    except ValueError:
+        return RecencyAssessment(unassessed_summary("format_setting_invalid"))
+    if not policy.enabled:
+        return RecencyAssessment(off_summary(policy))
+    if blocked_reason:
+        return RecencyAssessment(unassessed_summary(blocked_reason, policy))
+    try:
+        grammar = load_grammar(settings.citation_recency_grammar_file)
+        check_date = row.created_at if row and row.created_at else datetime.now(UTC)
+        check_year = check_year_of(check_date, settings)
+    except (OSError, ValueError, UnicodeError, ZoneInfoNotFoundError):
+        return RecencyAssessment(unassessed_summary("recency_policy_unavailable", policy))
+    return assess_recency(citations, extraction, policy, grammar, check_year)
+
+
 async def run_citation_integrity_check(
     session: AsyncSession,
     client: httpx.AsyncClient,
@@ -618,6 +667,16 @@ async def run_citation_integrity_check(
             "n_linkage_unassessed": len(citations),
             "n_claim_support_checked": 0,
             "claim_support_inventory_status": "not_captured",
+            "citation_recency": (
+                await _citation_recency(
+                    session,
+                    check_run_id,
+                    citations,
+                    extraction,
+                    settings,
+                    "reference_list_not_bound" if citations else "no_references",
+                )
+            ).summary,
             "n_flags": 0,
             "reference_metadata_coverage": [
                 {
@@ -676,8 +735,15 @@ async def run_citation_integrity_check(
             )
         )
         if not metadata_only:
+            recency = await _citation_recency(
+                session, check_run_id, citations, extraction, settings, "source_unavailable"
+            )
             return await persist_source_limitation(
-                session, check_run_id, CheckKind.citation_integrity, extraction
+                session,
+                check_run_id,
+                CheckKind.citation_integrity,
+                extraction,
+                supplemental_detail={"citation_recency": recency.summary},
             )
     body_blocks = (
         []
@@ -1076,6 +1142,30 @@ async def run_citation_integrity_check(
     else:
         outcome = ResultOutcome.passed
 
+    # Recency notes are low-severity observations about the reference list
+    # itself; they never change the check's coverage outcome above.
+    recency = await _citation_recency(
+        session,
+        check_run_id,
+        citations,
+        extraction,
+        settings,
+        "no_references"
+        if not citations
+        else "reference_membership_partial"
+        if membership_partial
+        else "reference_list_unavailable"
+        if selection.issues
+        else None,
+    )
+    for draft in recency.flags:
+        citation = references_by_index.get(draft.detail["order_index"])
+        flag_drafts.append(
+            _with_reference_anchor(
+                with_reference_locator(draft, citation), citation.order_index, locations
+            )
+        )
+
     result = CheckResult(
         check_run_id=check_run_id,
         criterion_id=None,
@@ -1165,6 +1255,7 @@ async def run_citation_integrity_check(
             "n_claim_support_skipped_parse_failure": skipped_support["parse_failure"],
             "n_claim_support_skipped_ai_not_configured": skipped_support["ai_not_configured"],
             "n_claim_support_skipped_ai_key_rejected": skipped_support["ai_key_rejected"],
+            "citation_recency": recency.summary,
             "n_flags": len(flag_drafts),
         },
     )

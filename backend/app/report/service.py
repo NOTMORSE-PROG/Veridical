@@ -57,6 +57,7 @@ from app.models.rubric import Criterion, Rubric
 from app.models.run import CheckResult, CheckRun, Flag, ReadinessReport
 from app.report.assessment import assessment_write, lock_assessment
 from app.report.automatic_grade import clean_caution
+from app.report.citation_recency import recency_summary
 from app.report.cited_work import cited_work
 from app.report.document_projection import project_docx_source
 from app.report.docx_images import manuscript_docx_image_for
@@ -808,6 +809,14 @@ async def report_out_for_check_run(
                 )
             )
 
+    citation_row = await session.scalar(
+        select(CheckResult).where(
+            CheckResult.check_run_id == check_run_id,
+            CheckResult.kind == CheckKind.citation_integrity,
+        )
+    )
+    citation_recency = recency_summary(citation_row.detail if citation_row is not None else None)
+
     # V-077 (D-028): what the originality check compared against. Read from
     # the run's own F7 result, never recomputed from today's Library size,
     # so an old report keeps describing the comparison it actually made.
@@ -950,6 +959,7 @@ async def report_out_for_check_run(
             [row.outcome for row in forensics_rows], [row.detail for row in forensics_rows]
         ),
         originality_scope=originality_scope,
+        citation_recency=citation_recency,
         levelled_rating=levelled_rating,
     )
 
