@@ -2,7 +2,7 @@
 export type AuditEventOrigin = "instructor" | "automated" | "unknown";
 
 const INSTRUCTOR_EVENTS: ReadonlySet<string> = new Set([
-  "flag_overridden", "flag_annotated", "escalation_resolved", "judgment_revised", "judgment_recorded",
+  "flag_overridden", "flag_annotated", "flag_finding_confirmed", "escalation_resolved", "judgment_revised", "judgment_recorded",
   "report_decided", "report_reopened", "manuscript_purged", "check_run_cancel_requested",
   "citation_source_confirmed", "manuscript_ingestion_failure_dismissed", "library_entry_edited",
   "manuscript_group_selected",
@@ -13,7 +13,9 @@ const AUTOMATED_EVENTS: ReadonlySet<string> = new Set([
   "manuscript_withdrawn_from_corpus", "internal_agreement_check_computed",
   "citation_integrity_check_computed", "statistical_forensics_check_computed",
   "originality_reuse_check_computed", "library_entry_added", "library_entry_failed",
-  "library_entry_needs_decision",
+  "library_entry_needs_decision", "internal_agreement_source_scope_recorded",
+  "citation_integrity_source_scope_recorded", "statistical_forensics_source_scope_recorded",
+  "originality_reuse_source_scope_recorded",
 ]);
 
 export function auditEventOrigin(eventType: string): AuditEventOrigin {
