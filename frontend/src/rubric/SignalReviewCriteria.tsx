@@ -61,22 +61,34 @@ const LEVEL_PART: Record<string, string> = { name: "name", descriptor: "descript
 // Levels come from the uploaded format and are not edited on this screen.
 const LEVELS_HINT = "Levels come from the uploaded format, so correct it there and upload the format again.";
 
-function serverFieldErrors(error: unknown, submittedKeys: readonly string[]): { byRow: ServerFieldErrors; other: string[] } {
+const OTHER_FIELD_LABEL: Record<string, string> = { weight: "Relative weight", type: "Type" };
+
+function serverFieldErrors(error: unknown, submittedKeys: readonly string[]): { byRow: ServerFieldErrors; other: string[]; count: number } {
   const byRow: ServerFieldErrors = new Map();
+  const levels = new Map<string, string[]>();
   const other: string[] = [];
-  if (!(error instanceof ApiError) || error.code !== "validation_error") return { byRow, other };
+  let count = 0;
+  if (!(error instanceof ApiError) || error.code !== "validation_error") return { byRow, other, count };
   for (const [field, message] of error.fieldMessages) {
+    count += 1;
     const match = /^criteria\.(\d+)\.(text|evidence|levels)(?:\.(\d+)\.(name|descriptor))?\b/.exec(field);
     const key = match ? submittedKeys[Number(match[1])] : undefined;
-    // A refusal this editor cannot place on a field is still listed, never dropped.
-    if (!match || !key) { if (!other.includes(message)) other.push(message); continue; }
+    // A refusal this editor cannot place on a field is still listed, never
+    // dropped, with its criterion and field when the server named them.
+    if (!match || !key) {
+      const place = /^criteria\.(\d+)\.(\w+)/.exec(field);
+      other.push(place ? `Criterion ${Number(place[1]) + 1}, ${OTHER_FIELD_LABEL[place[2]] ?? place[2]}: ${message}` : message);
+      continue;
+    }
     const name = match[2] as ServerField;
-    const text = name === "levels"
-      ? `${match[3] !== undefined ? `Level ${Number(match[3]) + 1}${match[4] ? ` ${LEVEL_PART[match[4]]}` : ""}: ` : ""}${message} ${LEVELS_HINT}`
-      : message;
-    if (!byRow.get(key)?.[name]) byRow.set(key, { ...byRow.get(key), [name]: text });
+    if (name === "levels") {
+      // Each refused level keeps its own reason.
+      const part = match[3] !== undefined ? `Level ${Number(match[3]) + 1}${match[4] ? ` ${LEVEL_PART[match[4]]}` : ""}: ` : "";
+      levels.set(key, [...(levels.get(key) ?? []), `${part}${message}`]);
+      byRow.set(key, { ...byRow.get(key), levels: `${levels.get(key)!.join(" ")} ${LEVELS_HINT}` });
+    } else if (!byRow.get(key)?.[name]) byRow.set(key, { ...byRow.get(key), [name]: message });
   }
-  return { byRow, other };
+  return { byRow, other, count };
 }
 
 const SERVER_FIELD_LABEL: Record<ServerField, string> = { text: "Criterion text", evidence: "Evidence expected", levels: "Levels" };
@@ -278,6 +290,8 @@ function CriteriaEditor({ id }: { id: number }) {
   const resolvingBlocker = useRef(false);
   const focusErrorsAfterDialog = useRef(false);
   const focusRefusalAfterDialog = useRef(false);
+  // The leave dialog shows a save error only when its own save failed.
+  const [leaveSaveFailed, setLeaveSaveFailed] = useState(false);
   useRouteFocus("Review prepared criteria - VERIDICAL", headingRef);
 
   function announce(text: string) {
@@ -329,6 +343,7 @@ function CriteriaEditor({ id }: { id: number }) {
   }, [dirty]);
 
   useEffect(() => {
+    if (blocker.state !== "blocked") setLeaveSaveFailed(false);
     if (blocker.state === "blocked") resolvingBlocker.current = false;
     else if (focusErrorsAfterDialog.current) {
       focusErrorsAfterDialog.current = false;
@@ -452,6 +467,7 @@ function CriteriaEditor({ id }: { id: number }) {
 
   function saveAndLeave() {
     if (resolvingBlocker.current || blocker.state !== "blocked") return;
+    setLeaveSaveFailed(false);
     setAttempted("save");
     if (invalidCriteria(currentRows)) {
       focusErrorsAfterDialog.current = true;
@@ -468,6 +484,7 @@ function CriteriaEditor({ id }: { id: number }) {
         onSuccess: () => { setSavedRows(submitted); blocker.proceed(); },
         onError: (error) => {
           resolvingBlocker.current = false;
+          setLeaveSaveFailed(true);
           // The refused fields are on the page, not in the dialog: go back to them.
           if (error instanceof ApiError && error.status === 422) { focusRefusalAfterDialog.current = true; resolveBlocker("keep"); }
         },
@@ -475,13 +492,16 @@ function CriteriaEditor({ id }: { id: number }) {
     );
   }
 
-  const { byRow: fieldErrors, other: otherRefusals } = serverFieldErrors(save.error, submittedKeys.current);
+  const { byRow: fieldErrors, other: otherRefusals, count: refusalCount } = serverFieldErrors(save.error, submittedKeys.current);
   // Every refused field still unchanged since the save, in page order.
   const refused = currentRows.flatMap((row, index) =>
     (Object.entries(fieldErrors.get(row.key) ?? {}) as [ServerField, string][])
       .filter(([field]) => !editedSinceRefusal.has(`${row.key}.${field}`))
       .map(([field, message]) => ({ key: row.key, index, field, message })));
-  const needing = refused.length + otherRefusals.length;
+  // Every refusal counts once; a changed field takes its own refusals off the count.
+  const changedRefusals = currentRows.reduce((total, row) => total + (["text", "evidence"] as const)
+    .filter((field) => fieldErrors.get(row.key)?.[field] && editedSinceRefusal.has(`${row.key}.${field}`)).length, 0);
+  const needing = Math.max(0, refusalCount - changedRefusals);
   // A refused save keeps nothing: the whole set was not saved.
   const saveError = save.error instanceof ApiError && save.error.status === 422
     ? fieldErrors.size > 0 || otherRefusals.length > 0
@@ -494,7 +514,7 @@ function CriteriaEditor({ id }: { id: number }) {
       <button type="button" className="signal-text-link" onClick={() => focusRefusedField(item.key, item.field)}>
         Criterion {item.index + 1}, {SERVER_FIELD_LABEL[item.field]}</button>: {item.message}
     </li>)}
-    {otherRefusals.map((message) => <li key={message}>Other values: {message}</li>)}
+    {otherRefusals.map((message, index) => <li key={`${index}-${message}`}>{message}</li>)}
   </ul>;
 
   return (
@@ -597,7 +617,7 @@ function CriteriaEditor({ id }: { id: number }) {
           onClose={() => resolveBlocker("keep")}
           actions={<><Button variant="secondary" disabled={save.isPending} onClick={() => resolveBlocker("keep")}>Keep editing</Button><Button variant="danger" disabled={save.isPending} onClick={() => resolveBlocker("leave")}>Leave without saving</Button><Button variant="brand" busy={save.isPending} onClick={saveAndLeave}>Save draft and leave</Button></>}
         >
-          <div className="signal-dialog-copy"><p>Your unsaved criteria changes will be discarded if you leave now.</p>{saveError && <Alert title="Could not save" tone="error" role="alert">{saveError}</Alert>}</div>
+          <div className="signal-dialog-copy"><p>Your unsaved criteria changes will be discarded if you leave now.</p>{leaveSaveFailed && saveError && <Alert title="Could not save" tone="error" role="alert">{saveError}</Alert>}</div>
         </Dialog>
       )}
       {uploadOpen && <UploadRubricModal familyId={rubric.rubric_family_id} onClose={() => setUploadOpen(false)} />}
