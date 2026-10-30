@@ -51,6 +51,10 @@ export const BULK_REVIEW_COPY = {
   counter: (used: number) => `${used} of ${BULK_RESOLVE_MAX_TEXT_CHARS} characters`,
   tooLong: `Keep it to ${BULK_RESOLVE_MAX_TEXT_CHARS} characters.`,
   cancel: "Cancel",
+  refusedTitle: "These findings were not changed",
+  requestRefused: "This request was not accepted. The selection may have changed: close this dialog and select the findings again.",
+  unconfirmedTitle: "The change could not be confirmed",
+  unconfirmedBody: "It may or may not have been saved. Review the current findings before trying again.",
   done: (action: BulkAction, changed: number, unchanged: number) => {
     const verb = action === "confirm" ? "confirmed" : "dismissed";
     const head = `${plural(changed, "finding", "findings")} ${verb}`;

@@ -437,6 +437,25 @@ describe("FlagDetailPage", () => {
     expect(screen.getByRole("button", { name: "Confirm dismissal" })).toBeEnabled();
   });
 
+  it("never puts a refusal of something else under the reason", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/flags/5": FLAG,
+      "/flags/5/override": new Response(JSON.stringify({ detail: [{ type: "missing", loc: ["body", "expected_revision"], msg: "Field required", input: {} }] }), { status: 422 }) }));
+    renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId", reviewRunId: 20 });
+    await screen.findByText(/Wang, S\./);
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss finding" }));
+    const reason = await screen.findByRole("textbox", { name: "Reason (required)" });
+    fireEvent.change(reason, { target: { value: "Checked the cited source myself." } });
+    const confirm = screen.getByRole("button", { name: "Confirm dismissal" });
+    await waitFor(() => expect(confirm).toBeEnabled());
+    fireEvent.click(confirm);
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Nothing was changed");
+    expect(alert).toHaveTextContent("This request was not accepted. Reload the page and try again.");
+    await waitFor(() => expect(alert).toHaveFocus());
+    expect(reason).not.toHaveAttribute("aria-invalid");
+    expect(screen.queryByText("Saving could not be confirmed")).not.toBeInTheDocument();
+  });
+
   it("submits the override with the reason and shows the AI finding + the instructor's own reason side by side afterward", async () => {
     const overriddenFlag = {
       ...FLAG,
