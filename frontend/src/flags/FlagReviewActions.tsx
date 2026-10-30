@@ -18,7 +18,7 @@ import { useFlagActionReview } from "./useFlagActionReview";
 import { FlagActionCurrentReview } from "./FlagActionCurrentReview";
 import { useFindingCompletion, useFindingCompletionOwner } from "./useFindingCompletion";
 import { useAuthOwner } from "../auth/queryOwner";
-import { fieldRefusal, formRefusal, isValidationRefusal, isServiceBusy, REFUSAL_NOTHING_CHANGED, REFUSAL_TITLE, SERVICE_BUSY_COPY, useRefusalFocus } from "../api/fieldRefusal";
+import { fieldRefusal, formRefusal, isValidationRefusal, isServiceBusy, OUTCOME_UNKNOWN_COPY, REFUSAL_NOTHING_CHANGED, REFUSAL_TITLE, SERVICE_BUSY_COPY, useRefusalFocus } from "../api/fieldRefusal";
 import { RefusalAlert } from "../ui/RefusalAlert";
 
 const authenticatedLifetimes = new WeakMap<object, number>();
@@ -121,6 +121,8 @@ const confirmedAtFormatter = new Intl.DateTimeFormat(undefined, { dateStyle: "me
 function ConfirmFinding({ flag }: { flag: FlagOut }) {
   const [note, setNote] = useState("");
   const confirm = useConfirmFinding(flag.id);
+  const outcomeUnknown = confirm.isError && !isValidationRefusal(confirm.error) && !isServiceBusy(confirm.error)
+    && !(confirm.error instanceof ApiError && confirm.error.status >= 400 && confirm.error.status < 500);
   const review = useFlagActionReview(flag, "confirm-finding");
   const noteId = useId();
   const refusalId = useId();
@@ -141,8 +143,14 @@ function ConfirmFinding({ flag }: { flag: FlagOut }) {
       onChange={event => { if (refusal) confirm.reset(); setNote(event.target.value); }} />
     {refusal && <p id={refusalId} className="signal-field-error">{refusal} {REFUSAL_NOTHING_CHANGED}</p>}
     {requestRefusal && <RefusalAlert title={REFUSAL_TITLE} message={requestRefusal} takeFocus={!refusal} />}
-    {confirm.isError && !isValidationRefusal(confirm.error) && <p role="alert" className="signal-field-error">{confirm.error instanceof Error ? confirm.error.message : "The finding could not be confirmed. Try again."}</p>}
-    <Button variant="primary" disabled={confirm.isPending || !review.canSubmit} onClick={() => {
+    {/* A known refusal says what the server said; a failure whose outcome is
+        unknown never invites a blind retry of an audited action. */}
+    {confirm.isError && !isValidationRefusal(confirm.error) && <p role="alert" className="signal-field-error">{isServiceBusy(confirm.error) ? `${SERVICE_BUSY_COPY.title}. ${SERVICE_BUSY_COPY.body}`
+      : confirm.error instanceof ApiError && confirm.error.status >= 400 && confirm.error.status < 500 ? confirm.error.message
+      : OUTCOME_UNKNOWN_COPY}</p>}
+    {/* After an outcome nobody can know, the action waits for a reload rather
+        than offering a second write. */}
+    <Button variant="primary" disabled={confirm.isPending || !review.canSubmit || outcomeUnknown} onClick={() => {
       if (!review.isCurrent() || !isAssessmentRevision(review.expectedRevision)) return;
       confirm.mutate({ note: note.trim() || null, expected_revision: review.expectedRevision });
     }}>{confirm.isPending ? "Confirming" : "Confirm finding"}</Button>

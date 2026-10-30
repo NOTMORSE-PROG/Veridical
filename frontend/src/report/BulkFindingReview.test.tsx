@@ -169,12 +169,23 @@ describe("bulk confirm and dismiss", () => {
     expect(screen.queryByText(/Check what you entered/)).not.toBeInTheDocument();
   });
 
-  it("says nothing changed when the service is unavailable before acting", async () => {
-    respond({ error: { code: "unavailable", message: "The service is busy. Try again in a moment." } }, 503);
+  it("says nothing changed only for the server's own busy refusal, never for a bare 503", async () => {
+    respond({ error: { code: "source_read_unavailable", message: "raw server text" } }, 503);
     dialog("confirm", FLAGS, [1, 2, 3]);
     fireEvent.click(screen.getByRole("button", { name: "Confirm as real issues" }));
     const alert = await screen.findByRole("alert");
     expect(within(alert).getByText("These findings were not changed")).toBeInTheDocument();
+    expect(alert).toHaveTextContent("Nothing was changed and what you typed is kept. Try again in a moment.");
+    expect(alert).not.toHaveTextContent("raw server text");
+  });
+
+  it("calls a bare 503 unconfirmed and does not offer the same write again", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 503 })));
+    dialog("confirm", FLAGS, [1, 2, 3]);
+    fireEvent.click(screen.getByRole("button", { name: "Confirm as real issues" }));
+    const alert = await screen.findByRole("alert");
+    expect(within(alert).getByText("The change could not be confirmed")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Confirm as real issues" })).toBeDisabled();
   });
 
   it.each([[500, { error: { code: "internal", message: "Something went wrong on our side." } }], [504, {}]])(

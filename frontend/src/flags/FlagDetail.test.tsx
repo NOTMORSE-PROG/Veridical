@@ -437,9 +437,9 @@ describe("FlagDetailPage", () => {
     expect(screen.getByRole("button", { name: "Confirm dismissal" })).toBeEnabled();
   });
 
-  it.each([429, 503])("says the service is busy on a %s, keeps the reason and does not call the assessment changed", async (status) => {
+  it.each([[429, "rate_limited"], [503, "source_read_unavailable"]])("says the service is busy on a %s %s, keeps the reason and does not call the assessment changed", async (status, code) => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/flags/5": FLAG,
-      "/flags/5/override": new Response(JSON.stringify({ error: { code: "unavailable", message: "Service unavailable" } }), { status }) }));
+      "/flags/5/override": new Response(JSON.stringify({ error: { code, message: "Service unavailable" } }), { status }) }));
     renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId", reviewRunId: 20 });
     await screen.findByText(/Wang, S\./);
     fireEvent.click(screen.getByRole("button", { name: "Dismiss finding" }));
@@ -448,11 +448,25 @@ describe("FlagDetailPage", () => {
     const confirm = screen.getByRole("button", { name: "Confirm dismissal" });
     await waitFor(() => expect(confirm).toBeEnabled());
     fireEvent.click(confirm);
-    expect(await screen.findByText("Nothing was changed and your reason is kept. Try again in a moment.")).toBeInTheDocument();
+    expect(await screen.findByText("Nothing was changed and what you typed is kept. Try again in a moment.")).toBeInTheDocument();
     expect(screen.queryByText("Saving could not be confirmed")).not.toBeInTheDocument();
     expect(screen.queryByText(/assessment changed/i)).not.toBeInTheDocument();
     expect(reason).toHaveValue("Checked the cited source myself.");
     await waitFor(() => expect(screen.getByRole("button", { name: "Confirm dismissal" })).toBeEnabled());
+  });
+
+  it("does not claim nothing changed for a bare 503 from a gateway", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/flags/5": FLAG, "/flags/5/override": new Response("", { status: 503 }) }));
+    renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId", reviewRunId: 20 });
+    await screen.findByText(/Wang, S\./);
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss finding" }));
+    const reason = await screen.findByRole("textbox", { name: "Reason (required)" });
+    fireEvent.change(reason, { target: { value: "Checked the cited source myself." } });
+    const confirm = screen.getByRole("button", { name: "Confirm dismissal" });
+    await waitFor(() => expect(confirm).toBeEnabled());
+    fireEvent.click(confirm);
+    expect(await screen.findByText("Saving could not be confirmed")).toBeInTheDocument();
+    expect(screen.queryByText(/Nothing was changed/)).not.toBeInTheDocument();
   });
 
   it("never puts a refusal of something else under the reason", async () => {
