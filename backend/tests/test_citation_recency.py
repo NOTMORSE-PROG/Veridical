@@ -288,7 +288,7 @@ def test_flag_shape_and_honest_wording():
     assert flag.detail["affects_readiness"] is False
     assert exclusion_reason("citation_integrity", flag.detail) == "recency_note_not_counted"
     reason = flag.detail["reason"]
-    assert reason.startswith("Published 2018, which is older than the 5-year window")
+    assert reason.startswith("Published 2018, which is older than the 5-year recency window")
     assert "this format sets" in reason
     assert "dismiss this note with a reason" in reason
     assert "%" not in reason
@@ -301,7 +301,7 @@ def test_default_window_wording_does_not_claim_the_format_set_it():
     flag = assess_recency(
         [_citation(0, "A, B. (2010). Old. J.", 2010, PARSED)], None, policy, load_grammar(), 2026
     ).flags[0]
-    assert "the default 5-year window" in flag.detail["reason"]
+    assert "the default 5-year recency window" in flag.detail["reason"]
 
 
 def test_counting_toward_readiness_is_a_format_choice():
@@ -442,3 +442,91 @@ def test_report_summary_is_absent_for_older_runs_and_malformed_records():
     )
     assert unassessed.unassessed_reason == "no_references"
     assert recency_sentences(unassessed)[0].startswith("Source recency: not assessed")
+
+
+# ---------------------------------------------------------------------------
+# Entries with no real date must not pick up a page, title or edition year
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        # A page range after a volume and issue, with no publication year.
+        "Hochreiter, S. Long short-term memory. Neural Computation, 9(8), 1735–1780.",
+        "Hochreiter, S. Long short-term memory. Neural Computation, 9(8), 1735-1780.",
+        # A single page or article number after a volume and issue.
+        "Hochreiter, S. Long short-term memory. Neural Computation, 9(8), 1735.",
+    ],
+)
+def test_pages_after_volume_and_issue_are_never_a_year(grammar, raw):
+    assert _read(grammar, raw).status == "not_readable"
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "Reyes, J. (n.d). Barangay health report, 2008. Iloilo City.",
+        "Reyes, J. (nd). Barangay health report, 2008. Iloilo City.",
+        "Reyes, J. n.d. Barangay health report, 2008. Iloilo City.",
+        "Reyes, J. (In-press). Barangay health report, 2008. Iloilo City.",
+        "Reyes, J. (s.f.). Informe de salud, 2008. Iloilo City.",
+        "Reyes, J. (N.D.). Barangay health report, 2008. Iloilo City.",
+    ],
+)
+def test_loose_undated_markers_keep_a_title_year_from_being_read(grammar, raw):
+    reading = _read(grammar, raw)
+    assert (reading.status, reading.reason) == ("not_readable", "no_date")
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "Gay, L. R. (2016, 15th ed. 2022). Educational research. Pearson.",
+        "Cruz, A. (2012, updated 2024). Barangay profile. Iloilo City.",
+        "Cruz, A. (2012). Barangay profile. Iloilo City, c2021.",
+        "Cruz, A. (2012). Barangay profile. Iloilo City, © 2021.",
+    ],
+)
+def test_a_newer_edition_or_copyright_year_makes_the_entry_unreadable(grammar, raw):
+    reading = _read(grammar, raw, 2016 if raw.startswith("Gay") else 2012, PARSED)
+    assert (reading.status, reading.reason) == ("not_readable", "conflicting_years")
+
+
+def test_initials_in_capitals_are_still_names(grammar):
+    raw = "Bibby, C. J., N. D. Burgess, and D. A. Hill. (1992). Bird census techniques. Academic."
+    assert _read(grammar, raw, 1992, PARSED).year == 1992
+
+
+def test_export_names_the_real_cause_of_a_missing_assessment():
+    by_default = recency_summary(
+        {"citation_recency": {"status": "off", "setting_sources": {"enabled": "default"}}}
+    )
+    assert recency_sentences(by_default) == []
+    by_format = recency_summary(
+        {"citation_recency": {"status": "off", "setting_sources": {"enabled": "format"}}}
+    )
+    assert recency_sentences(by_format) == [
+        "Source recency: not checked; this format turns the recency note off."
+    ]
+    invalid = recency_summary(
+        {
+            "citation_recency": {
+                "status": "unassessed",
+                "unassessed_reason": "format_setting_invalid",
+            }
+        }
+    )
+    assert recency_sentences(invalid) == [
+        "Source recency: not assessed, because the format's saved recency setting is not valid."
+    ]
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "PSA. (n. d). Census, 2015.",
+        "Smith, J. Title. Publisher, 1998. Ed.2022.",
+    ],
+)
+def test_spacing_variants_and_abbreviated_editions_are_not_read(grammar, raw):
+    assert _read(grammar, raw).status == "not_readable"

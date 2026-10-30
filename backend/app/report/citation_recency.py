@@ -36,6 +36,7 @@ def recency_summary(detail: dict[str, Any] | None) -> CitationRecencySummaryOut 
         return CitationRecencySummaryOut(
             status=saved["status"],
             unassessed_reason=_text(saved.get("unassessed_reason")),
+            enabled_source=sources.get("enabled") if isinstance(sources, dict) else None,
             window_years=_year(saved.get("window_years")),
             window_source=sources.get("window_years") if isinstance(sources, dict) else None,
             counts_toward_readiness=saved.get("counts_toward_readiness")
@@ -86,17 +87,36 @@ _FALLBACK_NOTES = {
 }
 
 
+_UNASSESSED_CAUSES = {
+    "reference_list_not_bound": (
+        "the reference list could not be matched to the document reliably enough to date "
+        "its entries"
+    ),
+    "reference_membership_partial": "only part of the reference list could be told apart",
+    "reference_list_unavailable": "the reference list could not be located reliably",
+    "source_unavailable": "the document's text could not be read reliably",
+    "no_references": "no reference list entries were found",
+    "format_setting_invalid": "the format's saved recency setting is not valid",
+    "recency_policy_unavailable": "the recency reading rules could not be loaded",
+}
+
+
 def recency_sentences(summary: CitationRecencySummaryOut | None) -> list[str]:
     """Plain sentences for the exported report. Counts only."""
     if summary is None:
         return []
     if summary.status == "off":
-        return ["Source recency: not checked; this format turns the recency note off."]
+        # A format that never turned the note on gets no line about it.
+        return (
+            ["Source recency: not checked; this format turns the recency note off."]
+            if summary.enabled_source == "format"
+            else []
+        )
     if summary.status == "unassessed":
-        return [
-            "Source recency: not assessed, because the reference list could not be "
-            "read reliably enough to date its entries."
-        ]
+        cause = _UNASSESSED_CAUSES.get(
+            summary.unassessed_reason or "", "the reference list could not be checked"
+        )
+        return [f"Source recency: not assessed, because {cause}."]
     window = summary.window_years
     basis = (
         f"the year on the manuscript's title page ({summary.reference_year_evidence_text}, "

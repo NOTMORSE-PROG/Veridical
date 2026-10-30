@@ -1,21 +1,39 @@
 {
   "_comment": "How the citation recency note reads a publication year and a manuscript's own year. Kept as data so an instructor's conventions can be added without code changes. When a year cannot be read with confidence the source is counted as 'year not readable', never assumed old.",
-  "version": "citation-recency-grammar-v1",
+  "version": "citation-recency-grammar-v2",
   "earliest_plausible_year": 1500,
   "latest_plausible_year": 2099,
+  "_range_note": "A printed range longer than this many years is not a publication date (page ranges such as 1735-1780 are the usual case).",
+  "max_range_span_years": 2,
   "undated_markers": [
-    "n.d.",
-    "n. d.",
     "no date",
     "undated",
     "in press",
+    "in-press",
     "forthcoming",
     "in preparation",
     "under review",
     "accepted for publication",
-    "s.d."
+    "sin fecha",
+    "walang petsa"
   ],
-  "_undated_note": "Markers written as two initials (n.d., s.d.) also look like author initials ('N. D. Lane'), so they only count inside parentheses or at the end of an entry.",
+  "_undated_abbreviations_note": "Abbreviations also look like author initials ('N. D. Lane'). They count when written in lower case anywhere, or in any case inside parentheses or at the end of an entry.",
+  "undated_abbreviations": [
+    "n.d.",
+    "n. d.",
+    "n.d",
+    "n. d",
+    "nd",
+    "s.d.",
+    "s.f.",
+    "s/f"
+  ],
+  "_copyright_note": "A copyright year ('c2021', '© 2021') is another date in the entry; a newer one makes the entry ambiguous.",
+  "copyright_marks": [
+    "©",
+    "c",
+    "c."
+  ],
   "locator_abbreviations": [
     "p.",
     "pp.",

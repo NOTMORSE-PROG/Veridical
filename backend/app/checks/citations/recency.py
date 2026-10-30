@@ -133,12 +133,14 @@ class RecencyGrammar:
     sha256: str
     earliest_year: int
     latest_year: int
+    max_range_span: int
     undated: re.Pattern[str]
     access_note: re.Pattern[str]
     access_note_date_span: int
     year_or_range: str
     standalone_year: re.Pattern[str]
-    date_positions: tuple[re.Pattern[str], ...]
+    copyright_year: re.Pattern[str] | None
+    date_positions: tuple[tuple[str, re.Pattern[str]], ...]
     title_page_date_line: re.Pattern[str]
 
 
@@ -148,7 +150,10 @@ class _GrammarData(BaseModel):
     version: str = Field(min_length=1)
     earliest_plausible_year: int = Field(ge=1000, le=2999)
     latest_plausible_year: int = Field(ge=1000, le=2999)
+    max_range_span_years: int = Field(ge=1, le=20)
     undated_markers: list[str] = Field(min_length=1)
+    undated_abbreviations: list[str] = Field(default_factory=list)
+    copyright_marks: list[str] = Field(default_factory=list)
     locator_abbreviations: list[str] = Field(default_factory=list)
     access_note_date_span_chars: int = Field(ge=0, le=500)
     date_prefixes: list[str] = Field(default_factory=list)
@@ -189,37 +194,45 @@ def load_grammar(path: Path | None = None) -> RecencyGrammar:
     )
     positions = [
         # "(2019)", "(2019a)", "(2019, May 3)", "(May 2019)", "(2019-2020)"
-        rf"\(\s*{month_day}?{year_or_range}\s*(?:,[^()]*)?\)",
+        ("parenthesized", rf"\(\s*{month_day}?{year_or_range}\s*(?:,[^()]*)?\)"),
         # ", 2019." as in IEEE and many journal styles; "May 2019"
-        rf"(?:,\s*|\b{month_day}){year_or_range}{end}",
+        ("after_comma_or_month", rf"(?:,\s*|\b{month_day}){year_or_range}{end}"),
         # "Smith, J. 2019. Title" (author-date without parentheses)
-        rf"(?<=\.\s){not_locator}{year_or_range}\.(?=\s|$)",
+        ("author_date", rf"(?<=\.\s){not_locator}{year_or_range}\.(?=\s|$)"),
     ]
     if raw.date_prefixes:
-        positions.append(rf"(?:{_alternatives(raw.date_prefixes)})\s*{year_or_range}{end}")
+        positions.append(
+            ("prefixed", rf"(?:{_alternatives(raw.date_prefixes)})\s*{year_or_range}{end}")
+        )
     access = _alternatives(raw.access_note_prefixes)
-    initials = [m for m in raw.undated_markers if re.fullmatch(r"\w\.\s*\w\.", m.strip())]
-    words = [m for m in raw.undated_markers if m not in initials]
-    undated = []
-    if words:
-        undated.append(rf"(?<!\w)(?:{_alternatives(words)})(?!\w)")
-    if initials:
-        # Inside parentheses, or closing the entry.
-        undated.append(rf"\(\s*(?:{_alternatives(initials)})")
-        undated.append(rf"(?<!\w)(?:{_alternatives(initials)})\s*\.?\s*$")
+    undated = [rf"(?i:(?<!\w)(?:{_alternatives(raw.undated_markers)})(?!\w))"]
+    if raw.undated_abbreviations:
+        abbreviations = _alternatives(raw.undated_abbreviations)
+        # Any case inside parentheses or closing the entry; lower case
+        # anywhere (initials are capitals: "N. D. Lane").
+        undated.append(rf"(?i:\(\s*(?:{abbreviations})(?!\w))")
+        undated.append(rf"(?i:(?<!\w)(?:{abbreviations})\s*\.?\s*$)")
+        undated.append(rf"(?<!\w)(?:{abbreviations})(?!\w)")
+    copyright_year = (
+        re.compile(rf"(?:{_alternatives(raw.copyright_marks)})\s?(?P<year>\d{{4}})(?!\d)")
+        if raw.copyright_marks
+        else None
+    )
     return RecencyGrammar(
         version=raw.version,
         sha256=hashlib.sha256(content).hexdigest(),
         earliest_year=raw.earliest_plausible_year,
         latest_year=raw.latest_plausible_year,
-        undated=re.compile("|".join(undated), re.I),
+        max_range_span=raw.max_range_span_years,
+        undated=re.compile("|".join(undated)),
+        copyright_year=copyright_year,
         access_note=re.compile(
             rf"\b(?:{access})\b\s*(?::|on\b|from\b|at\b|(?=(?:{months})\.?\s+\d|\d))", re.I
         ),
         access_note_date_span=raw.access_note_date_span_chars,
         year_or_range=year_or_range,
         standalone_year=re.compile(year),
-        date_positions=tuple(re.compile(pattern, re.I) for pattern in positions),
+        date_positions=tuple((name, re.compile(pattern, re.I)) for name, pattern in positions),
         title_page_date_line=re.compile(rf"^\s*{month_day}?(?P<year>\d{{4}})\.?\s*$", re.I),
     )
 
@@ -240,6 +253,14 @@ _QUOTED = re.compile(r"“[^”]*”|\"[^\"]*\"|«[^»]*»")
 # A period closing a sentence: followed by space and a capital or an opening
 # bracket. Initials ("J. P. Rizal") also match, which only ends a note early.
 _SENTENCE_END = re.compile(r"\.\s+(?=[A-Z(\[])")
+
+# "9(8)," just before a number: a journal volume and issue, so the number
+# that follows is a page. An empty issue ("17(), 2007") is how some styles
+# print a volume with no issue before the year, and is left alone.
+_VOLUME_ISSUE_BEFORE = re.compile(r"\d+\s*\(\s*\d[^()]*\)\s*$")
+
+_PAGES_AFTER = re.compile(r"\s*,\s*pp?\.\s*\d")
+_ABBREVIATED_YEAR = re.compile(r"(?<=[A-Za-z]{2}\.)\d{4}(?!\d)")
 
 YearStatus = Literal["dated", "not_readable"]
 
@@ -262,8 +283,8 @@ def _span_year(match: re.Match[str], grammar: RecencyGrammar) -> tuple[int, str]
         start, end = match.group("start"), match.group("end")
         first = int(start)
         last = int(end) if len(end) == 4 else int(start[:2] + end)
-        if last <= first:
-            # "2019-18" or "1995-1990" are not ranges; read neither year.
+        if last <= first or last - first > grammar.max_range_span:
+            # "2019-18" is not a range, and "1735-1780" is a page range.
             return None
         text = match.group("range")
         value = last
@@ -316,14 +337,26 @@ def read_publication_year(
 
     candidates: dict[int, str] = {}
     covered: list[tuple[int, int]] = []
-    for pattern in grammar.date_positions:
+    for name, pattern in grammar.date_positions:
         for match in pattern.finditer(text):
+            if (
+                name == "after_comma_or_month"
+                and _VOLUME_ISSUE_BEFORE.search(text, 0, match.start())
+                and not _PAGES_AFTER.match(text, match.end())
+            ):
+                # "Neural Computation, 9(8), 1735." The number after a
+                # volume and issue is a page, unless labelled pages follow
+                # it ("33(3), 2023, pp. 396-406").
+                continue
             token = _span_year(match, grammar)
             if token is None:
                 continue
             value, printed = token
             candidates.setdefault(value, printed)
-            covered.append(match.span())
+            # Only the date itself is covered: another year inside the same
+            # parentheses ("(2016, 15th ed. 2022)") is still compared below.
+            group = "single" if match.group("single") else "range"
+            covered.append(match.span(group))
     if not candidates:
         return YearReading("not_readable", reason="no_year")
     if len(candidates) > 1:
@@ -338,10 +371,22 @@ def read_publication_year(
     def inside(position: int) -> bool:
         return any(start <= position < end for start, end in covered)
 
-    for other in grammar.standalone_year.finditer(text):
-        if inside(other.start()):
+    others = [
+        (other.start(), int(other.group(0)[:4])) for other in grammar.standalone_year.finditer(text)
+    ]
+    # A year run onto an abbreviation ("Ed.2022", "Rev.2021") is never read as
+    # a date, but a newer one still makes the entry ambiguous.
+    others.extend(
+        (other.start(), int(other.group(0))) for other in _ABBREVIATED_YEAR.finditer(text)
+    )
+    if grammar.copyright_year is not None:
+        others.extend(
+            (other.start("year"), int(other.group("year")))
+            for other in grammar.copyright_year.finditer(text)
+        )
+    for position, other_year in others:
+        if inside(position):
             continue
-        other_year = int(other.group(0)[:4])
         if other_year >= grammar.earliest_year and value < other_year <= check_year:
             return YearReading("not_readable", reason="conflicting_years")
     return YearReading("dated", year=value, year_text=printed)
@@ -433,9 +478,9 @@ _BASIS_PHRASE = {
 def outside_window_wording(year_text: str, policy: RecencyPolicy, reference: ReferenceYear) -> str:
     oldest = reference.year - policy.window_years
     window = (
-        f"the {policy.window_years}-year window this format sets for related literature"
+        f"the {policy.window_years}-year recency window this format sets for cited sources"
         if policy.sources.get("window_years") == "format"
-        else f"the default {policy.window_years}-year window for related literature"
+        else f"the default {policy.window_years}-year recency window for cited sources"
     )
     return (
         f"Published {year_text}, which is older than {window}. The window counts back from "

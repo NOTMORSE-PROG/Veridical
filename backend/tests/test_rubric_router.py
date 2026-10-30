@@ -429,3 +429,40 @@ def test_list_rubric_families_and_versions(client, tmp_path):
 
     versions = client.get(f"/rubric-families/{v1['rubric_family_id']}/versions").json()
     assert [v["version"] for v in versions] == [2, 1]
+
+
+def test_citation_recency_setting_round_trips_and_carries_to_a_new_version(client, tmp_path):
+    v1 = _upload(client, tmp_path, title="V1")
+    assert v1["citation_recency"]["setting_sources"]["window_years"] == "default"
+    family_url = f"/rubric-families/{v1['rubric_family_id']}/citation-recency"
+
+    resp = client.put(family_url, json={"enabled": True, "window_years": 3})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["window_years"] == 3
+    assert resp.json()["setting_sources"]["window_years"] == "format"
+    assert client.get(f"/rubrics/{v1['id']}").json()["citation_recency"]["enabled"] is True
+
+    for bad in ({"window_years": 0}, {"window_years": "3"}, {"basis": "x"}):
+        assert client.put(family_url, json=bad).status_code == 422
+
+    _confirm(client, v1["id"], v1["criteria"])
+    path = _rubric_pdf(tmp_path)
+    with path.open("rb") as fh:
+        resp = client.post(
+            "/rubrics",
+            params={"title": "V2", "family_id": v1["rubric_family_id"]},
+            files={"file": ("rubric.pdf", fh, "application/pdf")},
+        )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["citation_recency"]["window_years"] == 3
+
+    cleared = client.put(family_url, json={})
+    assert cleared.json()["setting_sources"]["window_years"] == "default"
+
+
+def test_citation_recency_setting_404s_for_an_unknown_family(client):
+    resp = client.put(
+        "/rubric-families/00000000-0000-0000-0000-000000000000/citation-recency",
+        json={"enabled": True},
+    )
+    assert resp.status_code == 404
