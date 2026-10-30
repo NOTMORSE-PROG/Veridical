@@ -15,6 +15,7 @@ import { Dialog } from "../ui/Dialog";
 import { useMediaQuery } from "../ui/useMediaQuery";
 import type { FlagFindingCluster } from "./flagClusters";
 import { useBulkResolveFlags, type BulkAction, type BulkResolveOut } from "./useBulkResolve";
+import { fieldRefusal, formRefusal, isValidationRefusal, REFUSAL_NOTHING_CHANGED, useRefusalFocus } from "../api/fieldRefusal";
 
 // While the bar is fixed to the screen, its measured height keeps focused
 // controls clear of it (scroll padding reads this variable).
@@ -109,7 +110,13 @@ export function BulkResolveDialog({ action, clusters, checkRunId, expectedRevisi
   // the student, so it is guarded as firmly as dismissing.
   const needsAcknowledgement = unopened > 0;
   const unacknowledged = attempted && needsAcknowledgement && !acknowledged;
-  const error = resolve.error instanceof ApiError ? resolve.error.message : resolve.error ? "The change could not be confirmed. Review the current findings before trying again." : null;
+  // A refusal of this dialog's own text shows under it; anything else the
+  // server refused (the selection, the request as a whole) is said once below.
+  const textField = action === "confirm" ? "note" : "reason";
+  const refusal = fieldRefusal(resolve.error, textField);
+  useRefusalFocus(refusal, textRef);
+  const error = isValidationRefusal(resolve.error) ? formRefusal(resolve.error, [textField])
+    : resolve.error instanceof ApiError ? resolve.error.message : resolve.error ? "The change could not be confirmed. Review the current findings before trying again." : null;
 
   function submit() {
     setAttempted(true);
@@ -145,10 +152,12 @@ export function BulkResolveDialog({ action, clusters, checkRunId, expectedRevisi
         <label htmlFor={fieldId}>{action === "confirm" ? BULK_REVIEW_COPY.note : BULK_REVIEW_COPY.reason}</label>
         <p id={`${fieldId}-hint`} className="signal-field-hint">{action === "confirm" ? BULK_REVIEW_COPY.noteHint : BULK_REVIEW_COPY.reasonHint}</p>
         <textarea id={fieldId} ref={textRef} rows={4} value={text} required={action === "dismiss"} disabled={resolve.isPending}
-          aria-invalid={invalid || undefined} aria-describedby={`${fieldId}-hint ${fieldId}-count${invalid ? ` ${fieldId}-error` : ""}`}
-          onChange={(event) => { onText(event.target.value); setAttempted(false); }} />
+          aria-invalid={invalid || Boolean(refusal) || undefined}
+          aria-describedby={`${fieldId}-hint ${fieldId}-count${invalid ? ` ${fieldId}-error` : refusal ? ` ${fieldId}-refusal` : ""}`}
+          onChange={(event) => { if (refusal) resolve.reset(); onText(event.target.value); setAttempted(false); }} />
         <p id={`${fieldId}-count`} className={tooLong ? "signal-field-error" : "signal-field-hint"}>{BULK_REVIEW_COPY.counter(trimmed.length)}</p>
         {invalid && <p id={`${fieldId}-error`} role="alert" className="signal-field-error">{tooLong ? BULK_REVIEW_COPY.tooLong : BULK_REVIEW_COPY.reasonMissing}</p>}
+        {!invalid && refusal && <p id={`${fieldId}-refusal`} role="alert" className="signal-field-error">{refusal} {REFUSAL_NOTHING_CHANGED}</p>}
       </div>
       {needsAcknowledgement && <div className="signal-field">
         <label className="signal-bulk-dialog__acknowledge">
