@@ -11,7 +11,7 @@ import type { ManuscriptGroup } from "../api/types";
 import { StaleUploadContextError } from "../api/uploadOutcome";
 import { useUploadScope } from "../auth/useUploadScope";
 import { ownedGroupQueryKey, useGroupQueryOwner } from "./groupQueryOwner";
-import { clearGroupDraft, keepGroupDraft } from "./groupDraft";
+import { clearGroupDraft, keepGroupDraft, normalizeName, readGroupDraft } from "./groupDraft";
 
 export type AssignmentRecovery = "saved_details" | "current_assignment";
 export type AssignmentState =
@@ -60,13 +60,15 @@ export function useGroupAssignment(manuscriptId: number) {
       await attempt.verify();
       if (!attempt.isCurrent()) return;
       setState({ kind: "saved", result });
-      if (sent.kind === "proposal") clearGroupDraft(attempt.actorId, manuscriptId);
+      // Any confirmed assignment replaces what was typed before, including a
+      // saved group chosen instead.
+      clearGroupDraft(attempt.actorId, manuscriptId);
       invalidateViews();
     } catch (error) {
       if (!attempt.isCurrent() || error instanceof StaleUploadContextError) return;
       if (sent.kind === "proposal") {
         const { group_name, member_names, program_id } = sent.body;
-        keepGroupDraft(attempt.actorId, manuscriptId, { group_name, member_names, program_id });
+        keepGroupDraft(attempt.actorId, manuscriptId, { group_name, member_names, program_id, refused: !dispatched || isKnownAssignmentRejection(error) });
       }
       if (error instanceof ApiError && error.status === 401 && error.code === "unauthenticated") {
         attempt.rejectActor();
@@ -107,6 +109,9 @@ export function useGroupAssignment(manuscriptId: number) {
       await attempt.verify();
       if (!attempt.isCurrent()) return;
       client.setQueryData(ownedGroupQueryKey("manuscript-group", readOwner, manuscriptId), current);
+      // The read shows the typed group was saved after all: nothing to restore.
+      const draft = readGroupDraft(attempt.actorId, manuscriptId);
+      if (draft && current.group && normalizeName(current.group.name) === normalizeName(draft.group_name)) clearGroupDraft(attempt.actorId, manuscriptId);
       setState({ kind: "unknown", checking: false, current });
     } catch (error) {
       if (!attempt.isCurrent() || error instanceof StaleUploadContextError) return;

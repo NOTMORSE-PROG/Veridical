@@ -160,7 +160,7 @@ export function GroupAssignmentFields({ manuscriptId, initialProposal, actionsTa
       </div>}
       {baseline && <>
         {initialProposal === undefined && <GroupProposalFields manuscriptId={manuscriptId} proposal={EMPTY} draft={draft} currentGroup={changing ? baseline.group ?? undefined : undefined} manualEntry expectedGroupId={baseline.group?.id ?? null} confirm={confirm} cancelLabel={cancelLabel} active={ready && intent === "proposal" && !useSource && state.kind !== "unknown"} onUseSaved={() => setIntent("saved")} onDone={onDone} actionsTarget={actionsTarget} />}
-        {source && <GroupProposalFields manuscriptId={manuscriptId} proposal={source} draft={draft} manualEntry={!hasSourceFields(source)} expectedGroupId={baseline.group?.id ?? null} confirm={confirm} cancelLabel={cancelLabel} active={ready && intent === "proposal" && useSource && state.kind !== "unknown"} onUseSaved={() => setIntent("saved")} onDone={onDone} actionsTarget={actionsTarget} />}
+        {source && <GroupProposalFields manuscriptId={manuscriptId} proposal={source} draft={initialProposal !== undefined ? draft : undefined} manualEntry={!hasSourceFields(source)} expectedGroupId={baseline.group?.id ?? null} confirm={confirm} cancelLabel={cancelLabel} active={ready && intent === "proposal" && useSource && state.kind !== "unknown"} onUseSaved={() => setIntent("saved")} onDone={onDone} actionsTarget={actionsTarget} />}
       </>}
       {ready && intent === null && state.kind !== "unknown" && <ProposalActions target={actionsTarget}><button type="button" disabled={working} onClick={() => onDone(null)} className={groupSecondary}>{cancelLabel}</button></ProposalActions>}
     </div>
