@@ -482,11 +482,18 @@ def outside_window_wording(year_text: str, policy: RecencyPolicy, reference: Ref
         if policy.sources.get("window_years") == "format"
         else f"the default {policy.window_years}-year recency window for cited sources"
     )
+    # Only a note that counts toward readiness can be dismissed on screen, so
+    # only that note says how to dismiss it.
+    closing = (
+        "foundational work; if so, dismiss this note with a reason."
+        if policy.counts_toward_readiness
+        else "foundational work."
+    )
     return (
         f"Published {year_text}, which is older than {window}. The window counts back from "
         f"{reference.year}, {_BASIS_PHRASE[reference.basis]}, so sources from {oldest} onward "
-        "fall inside it. An older source can still be the right one to cite, for example a "
-        "foundational work; if so, dismiss this note with a reason."
+        f"fall inside it. An older source can still be the right one to cite, for example a "
+        f"{closing}"
     )
 
 
