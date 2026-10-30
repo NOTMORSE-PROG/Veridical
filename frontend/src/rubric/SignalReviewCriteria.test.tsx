@@ -208,7 +208,7 @@ describe("SignalReviewCriteriaPage", () => {
     renderWithProviders(<SignalReviewCriteriaPage />, { route: "/rubric/5/review", path: "/rubric/:rubricId/review", authInstructorId: 1 });
     const field = await screen.findByLabelText("Criterion text, criterion 1");
     fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
-    expect(await screen.findByText("One value was not saved. Your edits are still on this page.", { exact: false })).toBeInTheDocument();
+    expect(await screen.findByText("Nothing was saved. One value needs changing. Your edits are still on this page.", { exact: false })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Criterion 1, Criterion text" })).toBeInTheDocument();
     await waitFor(() => expect(field).toHaveAccessibleDescription(sentence));
     expect(field).toHaveAttribute("aria-invalid", "true");
@@ -228,12 +228,16 @@ describe("SignalReviewCriteriaPage", () => {
     renderWithProviders(<SignalReviewCriteriaPage />, { route: "/rubric/5/review", path: "/rubric/:rubricId/review", authInstructorId: 1 });
     await screen.findByLabelText("Criterion text, criterion 2");
     fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
-    expect(await screen.findByText("2 values were not saved. Your edits are still on this page.", { exact: false })).toBeInTheDocument();
+    expect(await screen.findByText("Nothing was saved. 2 values need changing. Your edits are still on this page.", { exact: false })).toBeInTheDocument();
     await waitFor(() => expect(screen.getByLabelText("Evidence expected, criterion 1")).toHaveAccessibleDescription(sentence));
     expect(screen.getByLabelText("Criterion text, criterion 2")).toHaveAccessibleDescription("Some of the information sent was not accepted. Check what you entered and try again.");
     expect(screen.getByLabelText("Criterion text, criterion 2")).not.toHaveAccessibleDescription(sentence);
     fireEvent.click(screen.getByRole("button", { name: "Criterion 2, Criterion text" }));
     expect(screen.getByLabelText("Criterion text, criterion 2")).toHaveFocus();
+    // Changing a different field of criterion 1 leaves its evidence refusal in place.
+    fireEvent.change(screen.getByLabelText("Criterion text, criterion 1"), { target: { value: "Edited text" } });
+    expect(screen.getByLabelText("Evidence expected, criterion 1")).toHaveAccessibleDescription(sentence);
+    expect(screen.getByRole("button", { name: "Criterion 1, Evidence expected" })).toBeInTheDocument();
   });
 
   it.each([200, 503, 422])("valid save-and-leave handles HTTP %s without losing edits", async (status) => {
@@ -253,10 +257,14 @@ describe("SignalReviewCriteriaPage", () => {
     if (status === 200) {
       await waitFor(() => expect(screen.getByLabelText("Criterion text, criterion 1")).toHaveValue("New version criterion"));
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    } else if (status === 422) {
+      // A refusal names fields on the page, so the dialog closes and the page shows it.
+      expect(await screen.findByText(/One or more criterion values were rejected/)).toBeInTheDocument();
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      expect(screen.getByLabelText("Criterion text, criterion 1")).toHaveValue("Retain this corrected criterion");
     } else {
       const dialog = await screen.findByRole("dialog");
-      const expected = status === 422 ? /One or more criterion values were rejected/ : /Request failed \(503\)/;
-      expect(await within(dialog).findByText(expected)).toBeInTheDocument();
+      expect(await within(dialog).findByText(/Request failed \(503\)/)).toBeInTheDocument();
       expect(screen.getByLabelText("Criterion text, criterion 1")).toHaveValue("Retain this corrected criterion");
     }
   });
