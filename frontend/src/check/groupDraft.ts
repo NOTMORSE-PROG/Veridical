@@ -5,6 +5,9 @@ export interface GroupDraft {
   group_name: string;
   member_names: string[];
   program_id: number | null;
+  // The server definitely refused the save (so nothing was saved), as
+  // opposed to a result that could not be confirmed.
+  refused: boolean;
 }
 
 const key = (actorId: number, manuscriptId: number) => `veridical.group-draft.v1.${actorId}.${manuscriptId}`;
@@ -18,7 +21,7 @@ export function readGroupDraft(actorId: number | undefined, manuscriptId: number
     if (typeof draft.group_name !== "string" || !Array.isArray(draft.member_names)
       || !draft.member_names.every((name) => typeof name === "string")
       || !(draft.program_id === null || Number.isSafeInteger(draft.program_id))) return null;
-    return { group_name: draft.group_name, member_names: draft.member_names, program_id: draft.program_id ?? null };
+    return { group_name: draft.group_name, member_names: draft.member_names, program_id: draft.program_id ?? null, refused: draft.refused === true };
   } catch {
     return null;
   }
@@ -31,4 +34,9 @@ export function keepGroupDraft(actorId: number, manuscriptId: number, draft: Gro
 export function clearGroupDraft(actorId: number | undefined, manuscriptId: number) {
   if (actorId === undefined) return;
   try { window.sessionStorage.removeItem(key(actorId, manuscriptId)); } catch { /* Nothing to clear. */ }
+}
+
+// How a group name compares: spacing and letter case do not make a new name.
+export function normalizeName(value: string) {
+  return value.replace(/[ \t\n\r\f\v]+/g, " ").replace(/^ +| +$/g, "").toLowerCase();
 }

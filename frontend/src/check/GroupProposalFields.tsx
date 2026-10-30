@@ -13,7 +13,7 @@ import type { ConfirmGroupResponse, CurrentGroup, TitlePageProposal } from "../a
 import type { GroupProposalInput } from "../api/groupAssignmentOutcome";
 import { fieldRefusal, formRefusal, isValidationRefusal, REFUSAL_NOTHING_CHANGED } from "../api/fieldRefusal";
 import { GROUP_REQUEST_REFUSED } from "./groupRefusalCopy";
-import type { GroupDraft } from "./groupDraft";
+import { normalizeName, type GroupDraft } from "./groupDraft";
 
 export interface GroupProposalController {
   isPending: boolean;
@@ -48,10 +48,6 @@ function PlusCircleIcon() {
       <path d="M12 8v8M8 12h8" />
     </svg>
   );
-}
-
-function normalizeName(value: string) {
-  return value.replace(/[ \t\n\r\f\v]+/g, " ").replace(/^ +| +$/g, "").toLowerCase();
 }
 
 function memberIdentity(names: string[]) {
@@ -343,12 +339,14 @@ export function GroupProposalFields({
 
   return (
     <div hidden={!active} inert={!active} className={active ? "signal-group-proposal" : "hidden"}>
-      {draft && (
-        <p className="text-sm font-medium text-ink">
-          These are the details you entered last time. They may not have been saved, so check them before confirming.
+      {/* A restored draft replaces the note about where the fields came from. */}
+      {draft ? (
+        <p id={`${groupNameErrId}-draft`} className="text-sm font-medium text-ink">
+          {draft.refused
+            ? "These are the details you entered last time. They were not saved. Check them before confirming."
+            : "These are the details you entered last time. They may not have been saved, so check them before confirming."}
         </p>
-      )}
-      {currentGroup ? (
+      ) : currentGroup ? (
         <p className="text-sm text-ink-secondary">
           These fields start from the current group record. Changing them can assign this manuscript
           to another group or create a separate group. Other manuscripts are not edited here.
@@ -392,7 +390,7 @@ export function GroupProposalFields({
             placeholder="e.g. VERIDICAL"
             disabled={confirm.isPending}
             aria-invalid={invalid || groupNameRefusal ? "true" : undefined}
-            aria-describedby={invalid ? groupNameErrId : groupNameRefusal ? `${groupNameErrId}-refusal` : undefined}
+            aria-describedby={[draft && `${groupNameErrId}-draft`, invalid ? groupNameErrId : groupNameRefusal ? `${groupNameErrId}-refusal` : null].filter(Boolean).join(" ") || undefined}
             onChange={(event) => {
               setGroupName(event.target.value);
               setGroupNameEdited(true);

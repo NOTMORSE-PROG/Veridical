@@ -11,7 +11,7 @@ const initial = { manuscript_id: 9, group: { id: 3, name: "Ungrouped", member_na
 const saved = { id: 7, name: "Practice team", member_names: ["Maria", "Ana"], program_id: 1, program: "IT", title: "Saved title", fingerprint: "a".repeat(64) };
 const other = { ...saved, id: 8, program: "CS", member_names: [], fingerprint: "b".repeat(64) };
 const outlets: HTMLElement[] = [];
-function mount(proposal: TitlePageProposal = empty) {
+function mount(proposal: TitlePageProposal | null = empty) {
   const outlet = document.createElement("div"); document.body.append(outlet); outlets.push(outlet);
   const onDone = vi.fn();
   const get = vi.spyOn(api, "get").mockImplementation(async (path) => {
@@ -21,6 +21,7 @@ function mount(proposal: TitlePageProposal = empty) {
     if (path === "/groups/7") return structuredClone(saved) as never;
     if (path === "/groups/8") return structuredClone(other) as never;
     if (path === "/programs") return [{ id: 1, name: "IT" }] as never;
+    if (path === "/manuscripts/9/group-proposal") return { ...empty, short_name: { value: "Title page team", anchor: "p. 1" } } as never;
     if (path.startsWith("/groups/collision-check")) return { collision: false, existing_group_name: null } as never;
     throw new Error("Unexpected GET: " + path);
   });
@@ -30,7 +31,7 @@ function mount(proposal: TitlePageProposal = empty) {
     },
   }) satisfies GroupSelectionOutput as never);
   const patch = vi.spyOn(api, "patch").mockResolvedValue({ group_id: 10, group_label: "New team", program: null, title: null, matched: false, outcome: "created" });
-  renderWithProviders(<GroupAssignmentFields manuscriptId={9} initialProposal={proposal} actionsTarget={outlet} onDone={onDone} />, { uploadInstructorId: 4 });
+  renderWithProviders(<GroupAssignmentFields manuscriptId={9} initialProposal={proposal ?? undefined} actionsTarget={outlet} onDone={onDone} />, { uploadInstructorId: 4 });
   return { outlet, onDone, get, post, patch };
 }
 async function chooseSaved() {
@@ -152,6 +153,26 @@ describe("explicit group assignment", () => {
     await waitFor(() => expect(second.patch).toHaveBeenCalledTimes(1));
     expect(second.patch.mock.calls[0][1]).toMatchObject({ group_name: "Draft team", member_names: ["Maria Santos"] });
     await waitFor(() => expect(window.sessionStorage.length).toBe(0));
+  });
+  it("keeps a draft out of the title-page form, says a refused save was not saved, and forgets it after a saved group is assigned", async () => {
+    window.sessionStorage.setItem("veridical.group-draft.v1.4.9", JSON.stringify({ group_name: "Typed team", member_names: ["Ana"], program_id: null, refused: true }));
+    // Opened from Review Desk (no proposal handed in), as when changing an assignment.
+    const control = mount(null);
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Group name" })).toHaveValue("Typed team"));
+    const name = screen.getByRole("textbox", { name: "Group name" });
+    expect(screen.getByText("These are the details you entered last time. They were not saved. Check them before confirming.")).toBeInTheDocument();
+    expect(name).toHaveAccessibleDescription(/They were not saved/);
+    expect(screen.queryByText(/These fields start from the current group record/)).not.toBeInTheDocument();
+
+    const titlePage = await screen.findByRole("button", { name: "Review title-page proposal" });
+    await waitFor(() => expect(titlePage).toBeEnabled());
+    fireEvent.click(titlePage);
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Group name" })).toHaveValue("Title page team"));
+
+    await chooseSaved();
+    fireEvent.click(screen.getByRole("button", { name: "Assign to selected group" }));
+    await waitFor(() => expect(control.post).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(window.sessionStorage.getItem("veridical.group-draft.v1.4.9")).toBeNull());
   });
   it("freezes an unknown proposal result, reads current facts and returns to review without a retry or success callback", async () => {
     const control = mount();
