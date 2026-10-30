@@ -55,12 +55,11 @@ async def _execute(
                 if result is False:
                     outcome = AdmissionState.busy
     finally:
+        worst_delay = probe.stop()
         # Closing the analytical session rolls back unsafe work before cleanup.
         await lease.stop()
         logger.info(
-            "Check run %s turn ended; worst event-loop delay %.2f s",
-            lease.run_id,
-            await probe.stop(),
+            "Check run %s turn ended; worst event-loop delay %.2f s", lease.run_id, worst_delay
         )
         try:
             async with asyncio.timeout(settings.pipeline_coordination_timeout_seconds):

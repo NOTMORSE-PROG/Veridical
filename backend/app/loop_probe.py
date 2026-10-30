@@ -28,10 +28,10 @@ class LoopLagProbe:
             self._task = asyncio.create_task(self._run(), name="event-loop-probe")
         return self
 
-    async def stop(self) -> float:
+    def stop(self) -> float:
+        """Stop sampling and return the worst delay seen. Nothing is awaited,
+        so a caller's cleanup cannot be cut short here."""
         if self._task is not None:
             self._task.cancel()
-            # Wait without absorbing a cancellation aimed at the caller.
-            await asyncio.wait([self._task])
             self._task = None
         return self.worst
