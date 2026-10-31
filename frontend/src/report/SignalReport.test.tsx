@@ -134,6 +134,21 @@ describe("SignalReportPage", () => {
     expect(reads["/check-runs/5/share"]).toBe(1);
   });
 
+  it.each([
+    [false, "1 open finding · 1 source-age note"],
+    [true, "2 open findings"],
+  ])("counts source-age notes apart from findings unless the format counts them (counted=%s)", async (counted, label) => {
+    const recency = (id: number, excerpt: string): FlagSummaryOut => ({ ...FLAG, id, check_kind: "citation_integrity", severity: "low",
+      problem_kind: "outside_recency_window", evidence_excerpt: excerpt, page_anchor: `reference #${id}`,
+      affects_readiness: counted, readiness_exclusion_reason: counted ? null : "recency_note_not_counted" });
+    stubReport(BASE_REPORT, [], [
+      { ...FLAG, id: 8, check_kind: "citation_integrity", severity: "low", problem_kind: "orphan_in_text_citation", evidence_excerpt: "Cruz, 2020" },
+      recency(9, "Biggs, J. (1996). Enhancing teaching."), recency(10, "Tang, C. (2011). Teaching for quality."),
+    ]);
+    renderWithProviders(<SignalReportPage />, { route: "/report/5?section=findings&module=citation_integrity", path: "/report/:checkRunId" });
+    expect(await screen.findByText(label)).toBeInTheDocument();
+  });
+
   it("records the decision on the report and offers grade changes beside the records", async () => {
     stubReport({ ...BASE_REPORT, results: [{ ...BASE_REPORT.results[0],
       resolution: { type: "mark_pass", reason: "Checked against the manuscript.", ai_majority_verdict: null } }] });

@@ -77,7 +77,7 @@ import type { BulkAction } from "./useBulkResolve";
 import { OriginalityCoverageNotice } from "./OriginalityCoverageNotice";
 import { originalityCoverageNote } from "./originalityCoverage";
 import { CitationRecencySummary } from "./CitationRecencySummary";
-import { notCountedLabel } from "../domain/findingSummary";
+import { isUncountedRecencyNote, notCountedLabel, sourceAgeNotesLabel } from "../domain/findingSummary";
 
 interface FindingSelection {
   isSelected: (cluster: FlagFindingCluster) => boolean;
@@ -1104,7 +1104,9 @@ export function SignalFlagsPanel({
   const usableFlags = flags !== undefined && (flags.length > 0 || optional.state === "success");
   const hasOptional = selectedModule === "originality_reuse" && Boolean(optional.snapshot?.total);
   const onlyOptional = optional.state === "success" && hasOptional && otherFlags?.length === 0;
-  const openFindingCount = clusterFlagFindings(otherFlags?.filter(isOpenFinding) ?? []).length;
+  const openFlags = otherFlags?.filter(isOpenFinding) ?? [];
+  const openFindingCount = clusterFlagFindings(openFlags.filter((flag) => !isUncountedRecencyNote(flag))).length;
+  const openSourceAgeNotes = clusterFlagFindings(openFlags.filter(isUncountedRecencyNote)).length;
   // BUG-167: defaults the FILTER to the worst unresolved severity present,
   // not the declaration order -- see `defaultFlagView`'s own comment for
   // why this is a filter-default decision, not a reorder.
@@ -1139,13 +1141,13 @@ export function SignalFlagsPanel({
 
   return (
     <section id="integrity-signals" tabIndex={-1} className="signal-review-section" aria-labelledby="flags-heading">
-      <div className="signal-review-section__heading"><div><p className="signal-section-kicker">Integrity record</p><h2 id="flags-heading" tabIndex={-1}>Integrity signals</h2></div>{usableFlags && !onlyOptional && <span>{flagsLastLoaded ? "Last loaded: " : ""}{openFindingCount} {hasOptional ? "other open" : "open"} finding{openFindingCount === 1 ? "" : "s"}</span>}</div>
+      <div className="signal-review-section__heading"><div><p className="signal-section-kicker">Integrity record</p><h2 id="flags-heading" tabIndex={-1}>Integrity signals</h2></div>{usableFlags && !onlyOptional && <span>{flagsLastLoaded ? "Last loaded: " : ""}{openFindingCount} {hasOptional ? "other open" : "open"} finding{openFindingCount === 1 ? "" : "s"}{openSourceAgeNotes > 0 && ` · ${sourceAgeNotesLabel(openSourceAgeNotes)}`}</span>}</div>
       {!onlyOptional && <p className="signal-review-section__intro">These are possible inconsistencies, not accusations. Open a signal to inspect its excerpt, source anchor, and available instructor action.</p>}
       <div className="signal-integrity-review-body">
       <IntegrityModuleNavigation selected={selectedModule} controls={`signal-selected-module-${checkRunId}`}
         modules={review?.assessment?.integrity_modules}
         stateLabels={originalityNote ? { originality_reuse: originalityNote.tag } : undefined}
-        counts={new Map(["internal_agreement", "citation_integrity", "statistical_forensics", "originality_reuse"].map(kind => [kind, flags?.filter(flag => flag.check_kind === kind).length ?? 0]))}
+        counts={new Map(["internal_agreement", "citation_integrity", "statistical_forensics", "originality_reuse"].map(kind => [kind, flags?.filter(flag => flag.check_kind === kind && !isUncountedRecencyNote(flag)).length ?? 0]))}
         onSelect={kind => { const next = new URLSearchParams(moduleParams); next.set("module", kind); next.set("review_step", "findings"); [FLAG_VIEW_PARAM, CLUSTERS_OPEN_PARAM, VISIBLE_COUNT_PARAM].forEach(key => next.delete(key)); setModuleParams(next, { replace: true }); }} />
       <div id={`signal-selected-module-${checkRunId}`}>
 
@@ -1204,14 +1206,15 @@ export function SignalPublicFlags({
 }) {
   const otherFlags = flags.filter((flag) => !isOptionalComparisonLead(flag));
   const optional = comparisonLeadCollection(checkRunId, { data: flags, fetchStatus: "idle", isSuccess: true, isError: false });
-  const findingCount = clusterFlagFindings(otherFlags).length;
+  const findingCount = clusterFlagFindings(otherFlags.filter((flag) => !isUncountedRecencyNote(flag))).length;
+  const sourceAgeNotes = clusterFlagFindings(otherFlags.filter(isUncountedRecencyNote)).length;
   const visibleOtherFlags = selectedRecordId === undefined ? otherFlags : otherFlags.filter(flag => flag.id === selectedRecordId);
   const selectedOptional = selectedRecordId === undefined || optional.snapshot?.ordinalById.has(selectedRecordId);
   const hasOptional = Boolean(optional.snapshot?.total);
   const onlyOptional = hasOptional && otherFlags.length === 0;
   return (
     <section id="integrity-signals" tabIndex={-1} className="signal-review-section" aria-labelledby="flags-heading">
-      <div className="signal-review-section__heading"><div><p className="signal-section-kicker">Integrity record</p><h2 id="flags-heading">Possible inconsistencies</h2></div>{!onlyOptional && <span>{findingCount} {hasOptional ? "other " : ""}finding{findingCount === 1 ? "" : "s"}</span>}</div>
+      <div className="signal-review-section__heading"><div><p className="signal-section-kicker">Integrity record</p><h2 id="flags-heading">Possible inconsistencies</h2></div>{!onlyOptional && <span>{findingCount} {hasOptional ? "other " : ""}finding{findingCount === 1 ? "" : "s"}{sourceAgeNotes > 0 && ` · ${sourceAgeNotesLabel(sourceAgeNotes)}`}</span>}</div>
       {!onlyOptional && <p className="signal-review-section__intro">These are possible inconsistencies, not accusations. This shared view shows the bounded evidence the instructor chose to share; it does not expose the private Audit trail.</p>}
       {(!selectedModule || selectedModule === "statistical_forensics") && <StatisticalCheckScope scope={statisticalScope} />}
       {(!selectedModule || selectedModule === "originality_reuse") && <OriginalityScope scope={originalityScope} />}

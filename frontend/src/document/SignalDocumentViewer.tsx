@@ -82,6 +82,7 @@ import { InWorkspaceBar, LeadingChevronIcon, WorkspaceBarContext } from "./Works
 import { OriginalityCoverageNotice } from "../report/OriginalityCoverageNotice";
 import { originalityCoverageNote } from "../report/originalityCoverage";
 import { CitationRecencySummary } from "../report/CitationRecencySummary";
+import { isUncountedRecencyNote } from "../domain/findingSummary";
 
 type ReviewFilter = "open" | "resolved" | "all";
 const FINDINGS_PAGE_PARAM = "findings_page";
@@ -1203,7 +1204,7 @@ export function SignalDocumentViewerPage() {
                 {!isExploring && !isDecision && !selectedFinding && <div className="signal-document-module-overview">
                   <IntegrityModuleNavigation selected={selectedModule} controls="workspace-module-records" modules={reportQuery.data?.integrity_modules}
                     stateLabels={originalityCoverageNote(reportQuery.data) ? { originality_reuse: originalityCoverageNote(reportQuery.data)!.tag } : undefined}
-                    counts={new Map(["internal_agreement", "citation_integrity", "statistical_forensics", "originality_reuse"].map(kind => [kind, flags?.filter(flag => flag.check_kind === kind).length ?? 0]))}
+                    counts={new Map(["internal_agreement", "citation_integrity", "statistical_forensics", "originality_reuse"].map(kind => [kind, flags?.filter(flag => flag.check_kind === kind && !isUncountedRecencyNote(flag)).length ?? 0]))}
                     onSelect={kind => { setFindingsListClosed(false); updateTask(next => { next.set("module", kind); ["finding", "flag", "location", "reading", "anchor", "view", "pane", "lead_view", "lead_return", "lead_visible", FINDINGS_PAGE_PARAM].forEach(key => next.delete(key)); next.set("view", "queue"); }); }} />
                   {findingsListClosed ? <p role="status" className="signal-field-hint">Findings list closed. Choose a check to open it again.</p> : <IntegrityModuleSummary kind={selectedModule} />}
                   {!findingsListClosed && selectedModule === "citation_integrity" && reportQuery.data && <CitationRecencySummary recency={reportQuery.data.citation_recency} />}

@@ -38,3 +38,15 @@ export function severityLabel(flag: Pick<FlagSummaryOut, "severity" | "affects_r
 export function findingTitle(flag: FlagSummaryOut): string {
   return problemLabel(flag.problem_kind) ?? flag.criterion_text ?? "Possible inconsistency";
 }
+
+// A recency note the format does not count toward readiness is a note about
+// source age, not a finding: it is listed, but never adds to a finding count.
+// One the format counts is part of the count, as the single finding the
+// score deducts for.
+export function isUncountedRecencyNote(flag: KindCarrier & Pick<FlagSummaryOut, "affects_readiness">): boolean {
+  return isRecencyNote(flag) && flag.affects_readiness === false;
+}
+
+export function sourceAgeNotesLabel(count: number): string {
+  return `${count} source-age ${count === 1 ? "note" : "notes"}`;
+}
