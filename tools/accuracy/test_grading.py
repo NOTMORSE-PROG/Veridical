@@ -96,3 +96,82 @@ def test_stability_with_nothing_decided_reports_no_coefficients():
     summary = stability(grades("A", [None] * 3, [False] * 3), SCALE, repeats=3)
     assert summary.units == 0
     assert summary.fleiss_kappa is None and summary.ac1 is None
+
+
+def test_repeat_scores_skip_stopped_runs_and_use_the_grader_level(tmp_path):
+    import json
+
+    from tools.accuracy.grading_repeat_scores import score_repeats
+
+    levels = [
+        {"name": n, "points": p} for n, p in (("Beginner", 1), ("Proficient", 3), ("Exemplary", 4))
+    ]
+    criteria = [
+        {"id": 1, "text": "Intro", "levels": levels},
+        {"id": 2, "text": "Tone", "levels": levels},
+    ]
+    (tmp_path / "setup.json").write_text(json.dumps({"criteria": criteria}))
+    pages = tmp_path / "pages"
+    pages.mkdir()
+    (pages / "thesis.json").write_text(json.dumps({"pages": {"1": "The study previews chapters."}}))
+
+    def record(repeat, intro, tone_outcome, overridden=False):
+        intro_detail = {
+            "level": {"name": intro},
+            "support_check": {"status": "supported"},
+            "evidence": [{"quote": "previews chapters", "anchor": "page 1"}],
+        }
+        if overridden:
+            intro_detail = {
+                **intro_detail,
+                "level": {"name": "Beginner"},
+                "original_result": {"level": {"name": intro}},
+                "resolution": {},
+            }
+        return {
+            "document": "thesis",
+            "results": [
+                {
+                    "criterion_id": 1,
+                    "kind": "semantic",
+                    "outcome": "passed",
+                    "detail": intro_detail,
+                },
+                {
+                    "criterion_id": 2,
+                    "kind": "semantic",
+                    "outcome": tone_outcome,
+                    "detail": {
+                        "level": {"name": "Proficient"},
+                        "support_check": {"status": "unsupported"},
+                    },
+                },
+            ],
+        }
+
+    for number, data in (
+        (1, record(1, "Proficient", "passed", overridden=True)),
+        (2, record(2, "Proficient", "escalated")),
+    ):
+        folder = tmp_path / "repeats" / f"r{number}"
+        folder.mkdir(parents=True)
+        (folder / "thesis.json").write_text(json.dumps(data))
+    stopped = tmp_path / "repeats" / "r2" / "stopped"
+    stopped.mkdir()
+    (stopped / "other.json").write_text(
+        json.dumps(record(2, "Exemplary", "passed") | {"document": "other"})
+    )
+
+    rows, details = score_repeats(
+        tmp_path, pages, image_page_max_chars=5, targets={"repeat_all_equal": 0.95}
+    )
+    by_metric = {row.metric: row for row in rows}
+    stable = by_metric["every repeat gave the same level"]
+    assert (stable.numerator, stable.denominator) == (1, 1)
+    assert stable.extra["decided_escalated_flips"] == [["thesis", "Tone"]]
+    assert stable.extra["target"] == 0.95
+    support = by_metric["automatic grades whose support check passed (repeats)"]
+    assert (support.numerator, support.denominator) == (2, 3)
+    grounded = by_metric["quotes found on the cited page (repeats)"]
+    assert (grounded.numerator, grounded.denominator) == (2, 2)
+    assert details["stopped"] == ["repeats/r2/stopped/other.json"]

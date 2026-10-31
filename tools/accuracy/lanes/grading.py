@@ -212,4 +212,14 @@ def run(ctx) -> tuple[list, dict]:
             targets=config.get("targets", {}),
         )
         rows += live_rows
+    if (folder / "setup.json").exists() and (folder / "repeats").is_dir():
+        from tools.accuracy.grading_repeat_scores import score_repeats
+
+        repeat_rows, details["repeats"] = score_repeats(
+            folder,
+            folder / "pages",
+            image_page_max_chars=config.get("image_page_max_chars", 40),
+            targets=config.get("targets", {}),
+        )
+        rows += repeat_rows
     return rows, details
