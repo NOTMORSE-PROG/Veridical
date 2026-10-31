@@ -6,7 +6,6 @@ import { useRouteFocus } from "../routing/useRouteFocus";
 import { ActionLink } from "../ui/ActionLink";
 import { Button } from "../ui/Button";
 import { SignalMark, SignalWordmark } from "../ui/SignalMark";
-import { PracticeAction } from "./PreparedReview";
 
 const STAGES = [
   {
@@ -94,7 +93,6 @@ function ServiceUnavailable({ retry }: { retry: () => void }) {
           VERIDICAL is temporarily unavailable.
         </h1>
         <p>Your work has not changed. Try the connection again in a moment.</p>
-        <PracticeAction />
         <div>
           <Button type="button" variant="secondary" onClick={retry}>
             Try again
@@ -142,7 +140,6 @@ function LandingPage() {
             <p className="signal-hero__account-note">
               Accounts are issued by your program administrator.
             </p>
-            <PracticeAction />
           </div>
         </section>
 
