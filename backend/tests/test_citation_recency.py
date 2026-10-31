@@ -290,7 +290,10 @@ def test_flag_shape_and_honest_wording():
     reason = flag.detail["reason"]
     assert reason.startswith("Published 2018, which is older than the 5-year recency window")
     assert "this format sets" in reason
-    assert "dismiss this note with a reason" in reason
+    # A note that does not count toward readiness has no Dismiss action on
+    # screen, so its wording does not ask for one.
+    assert reason.endswith("for example a foundational work.")
+    assert "dismiss" not in reason.lower()
     assert "%" not in reason
     for accusing in ("outdated", "invalid", "fail", "unacceptable"):
         assert accusing not in reason.lower()
@@ -313,6 +316,10 @@ def test_counting_toward_readiness_is_a_format_choice():
     ).flags[0]
     assert "affects_readiness" not in flag.detail
     assert exclusion_reason("citation_integrity", flag.detail) is None
+    # A counted note can be dismissed, so it says how.
+    assert flag.detail["reason"].endswith(
+        "for example a foundational work; if so, dismiss this note with a reason."
+    )
 
 
 def test_turning_the_note_off_reads_nothing():
