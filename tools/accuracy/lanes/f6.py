@@ -28,6 +28,10 @@ from app.checks.forensics.service import _compute_forensics_findings
 from app.ingest.schemas import TableBlock, TextBlock
 
 LANE = "f6"
+SCOPE = (
+    "Known-answer cases planted into stored extractions of the permitted theses: "
+    "tests the checks, not PDF extraction. Not instructor-labelled."
+)
 ERROR_TYPES = ("p_nongross", "p_gross", "grim_impossible", "percent_sum_off")
 CONTROL_TYPES = ("p_correct", "grim_possible", "percent_sum_ok")
 PER_TYPE = 20

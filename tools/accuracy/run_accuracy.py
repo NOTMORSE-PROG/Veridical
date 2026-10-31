@@ -33,13 +33,15 @@ def main() -> None:
         seed=args.seed,
         code_commit=git_commit(ROOT),
     )
-    rows, details = [], {}
+    rows, details, scopes = [], {}, {}
     for lane in args.lane:
         module = importlib.import_module(f"tools.accuracy.lanes.{lane}")
         lane_rows, lane_details = module.run(ctx)
         rows += lane_rows
         details[lane] = lane_details
-    out = write_report(ctx, args.lane, rows, details)
+        # Every lane must say what its numbers measure.
+        scopes[lane] = module.SCOPE
+    out = write_report(ctx, args.lane, rows, details, scopes)
     print(HEADER)
     print((out / "report.md").read_text(encoding="utf-8"))
     print("Written to", out)

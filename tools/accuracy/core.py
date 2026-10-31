@@ -22,8 +22,8 @@ from app.ingest.schemas import ExtractionResult
 # D-016: below this many units a rate is indicative only, never a baseline.
 MIN_VIABLE_N = 30
 HEADER = (
-    "Known-answer/seeded measurement, NOT instructor-labelled accuracy. Cases are "
-    "planted into stored extractions, so this tests the checks, not PDF extraction."
+    "Measured on known-answer cases or internal proxies, NOT instructor-labelled "
+    "accuracy. Each lane states its scope below."
 )
 
 
@@ -122,7 +122,9 @@ def git_commit(repo: Path) -> str:
         return "unknown"
 
 
-def write_report(ctx: Context, lanes: list[str], rows: list[MetricRow], details: dict) -> Path:
+def write_report(
+    ctx: Context, lanes: list[str], rows: list[MetricRow], details: dict, scopes: dict[str, str]
+) -> Path:
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     out = ctx.output / f"{stamp}-{'-'.join(lanes)}"
     out.mkdir(parents=True, exist_ok=True)
@@ -131,6 +133,7 @@ def write_report(ctx: Context, lanes: list[str], rows: list[MetricRow], details:
         "generated_at": stamp,
         "code_commit": ctx.code_commit,
         "seed": ctx.seed,
+        "scopes": scopes,
         "rows": [asdict(row) for row in rows],
         "details": details,
     }
@@ -151,6 +154,8 @@ def _markdown(payload: dict) -> str:
         "",
         f"Code {payload['code_commit']}, seed {payload['seed']}, "
         f"generated {payload['generated_at']}.",
+        "",
+        *[f"- **{lane}**: {scope}" for lane, scope in payload["scopes"].items()],
         "",
         "| Lane | Metric | Split | Result | 95% Wilson | n | Note |",
         "|---|---|---|---|---|---|---|",
