@@ -602,13 +602,16 @@ async def run_originality_reuse_check(
                 own_chapter_index=match.own_chapter_index,
                 matched_chapter_index=match.matched_chapter_index,
             )
-        if supporting is not None and not shares_wording(
-            supporting.own_text, supporting.matched_text, settings
+        if supporting is not None and (
+            not shares_wording(supporting.own_text, supporting.matched_text, settings)
+            or (match.level != "exact_duplicate" and supporting.level is None)
         ):
-            # BUG-620: the best evidence for this section match shares no
-            # wording, so the section is similar in topic, not reused. A
-            # near-identical section (exact level) is evidenced by its own
-            # passages, which are confirmed separately above.
+            # BUG-620: a section is reported as reused only when its best
+            # evidence is itself a match: it shares wording and, for a
+            # high-similarity section, clears the passage bar on its own. A
+            # section that sits near the threshold on topic, with a weaker
+            # passage (shared standard text, say) as its only evidence, is
+            # counted instead. A near-identical section keeps its evidence.
             unconfirmed += 1
             continue
         if supporting is not None:

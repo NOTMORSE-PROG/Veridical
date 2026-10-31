@@ -1840,3 +1840,43 @@ async def _flag_kinds(session_factory, result_id: int) -> list[str]:
                 )
             ).all()
         )
+
+
+async def test_a_section_match_whose_only_evidence_is_below_the_passage_bar_is_not_raised(
+    session_factory,
+):
+    """BUG-620: a section sitting near the similarity bar on topic, with a
+    weaker passage (shared standard text) as its only evidence, is counted,
+    not reported as reuse. The same shared sentence is planted on both sides."""
+    shared = (
+        "Usability is the degree to which a product or system can be used by specified "
+        "users to achieve specified goals with effectiveness, efficiency and satisfaction."
+    )
+    settings = get_settings().model_copy(
+        update={
+            "reuse_high_similarity_threshold": 0.3,
+            "reuse_passage_high_similarity_threshold": 0.99,
+            "reuse_passage_exact_duplicate_threshold": 0.995,
+        }
+    )
+    source_id, _ = await _seed_manuscript_and_run(session_factory, group_label="Standard A")
+    await _add_to_library(
+        session_factory,
+        source_id,
+        _extraction(CH1 + " " + shared, "A different second chapter about the server setup."),
+    )
+    own_id, own_run = await _seed_manuscript_and_run(session_factory, group_label="Standard B")
+    async with session_factory() as session:
+        result = await _run_with_saved_source(
+            session,
+            own_id,
+            own_run,
+            _extraction(
+                "Students in the pilot section answered a survey about the timetable. " + shared,
+                "Another unrelated chapter on deployment to the campus network.",
+            ),
+            settings,
+        )
+    kinds = await _flag_kinds(session_factory, result.id)
+    assert not any(kind.startswith("reuse_high_similarity") for kind in kinds)
+    assert result.detail["n_similar_without_shared_wording"] >= 1
