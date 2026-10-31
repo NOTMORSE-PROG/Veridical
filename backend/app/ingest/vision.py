@@ -206,6 +206,11 @@ def images_read_for_tables(result: ExtractionResult) -> bool | None:
     failed, malformed or uncued image means tables were not ruled out."""
     if result.image_readings is None:
         return None
+    # One reading per image, in order; any other ledger rules nothing out.
+    if result.image_reading_version != "v1" or [
+        reading.image_index for reading in result.image_readings
+    ] != list(range(len(result.images))):
+        return False
     for reading in result.image_readings:
         completed = reading.status == "classified_only" or (
             reading.status == "transcribed" and reading.reason is None

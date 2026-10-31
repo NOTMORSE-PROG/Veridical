@@ -141,12 +141,19 @@ def _summary(**counts):
     return ImageReadingSummary(**{**dict.fromkeys(ImageReadingSummary.model_fields, 0), **counts})
 
 
+def _ledger(result, *readings):
+    result.image_reading_version = "v1"
+    result.image_readings = list(readings)
+    return result
+
+
 def _reading(index, status, reason=None, attempted=True):
     return ImageReading(image_index=index, status=status, reason=reason, attempted=attempted)
 
 
 def test_checked_counts_only_readings_that_completed():
     result = _result(images=[IMAGE] * 11)
+    result.image_reading_version = "v1"
     result.image_readings = [
         _reading(0, "transcribed"),
         _reading(1, "transcribed", "low_confidence"),
@@ -285,11 +292,58 @@ def test_images_count_as_read_for_tables_only_when_every_one_could_be(readings, 
     result = _result(images=[IMAGE] * len(readings))
     if merged:
         result.images[-1] = result.images[-1].model_copy(update={"piece_count": 40})
-    result.image_readings = [
-        _reading(index, status, reason, attempted=status not in {"not_selected"})
-        for index, (status, reason) in enumerate(readings)
-    ]
+    _ledger(
+        result,
+        *[
+            _reading(index, status, reason, attempted=status not in {"not_selected"})
+            for index, (status, reason) in enumerate(readings)
+        ],
+    )
     assert vision.images_read_for_tables(result) is expected
+
+
+def test_a_ledger_that_does_not_match_the_images_rules_nothing_out():
+    result = _ledger(_result(images=[IMAGE, IMAGE]), _reading(0, "transcribed"))
+    assert vision.images_read_for_tables(result) is False
+    result = _ledger(_result(images=[IMAGE]), _reading(0, "transcribed"))
+    result.image_reading_version = None
+    assert vision.images_read_for_tables(result) is False
+
+
+async def test_the_rule_context_carries_the_readings_into_the_table_rule(monkeypatch):
+    """Without this wiring the rule falls back to vision_status, which says
+    done even when the only cued image came back as a chart and the rest were
+    never read."""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from app.checks.rules import context, get_rule
+    from app.checks.rules.tables import RULE_ID
+    from app.config import Settings
+    from app.models.enums import ResultOutcome
+    from tests.test_checks_structural_rules import FakeCriterion
+
+    class Rows:
+        def scalars(self):
+            return self
+
+        def all(self):
+            return []
+
+    extraction = _ledger(
+        _result(images=[IMAGE, (100.0, 400.0, 320.0, 520.0)]),
+        _reading(0, "classified_only", "content_not_transcribed"),
+        _reading(1, "not_selected", "no_table_cue", attempted=False),
+    )
+    extraction.vision_status = "done"
+    monkeypatch.setattr(context, "load_raw_store_async", AsyncMock(return_value=extraction))
+    session = SimpleNamespace(execute=AsyncMock(return_value=Rows()))
+    ctx = await context.build_rule_context(
+        session, SimpleNamespace(id=1, content_hash=None), Settings(_env_file=None)
+    )
+    assert ctx.images_read_for_tables is False
+    criterion = FakeCriterion(text="Tables must be properly formatted with captions")
+    assert get_rule(RULE_ID).run(criterion, ctx).outcome == ResultOutcome.escalated
 
 
 def test_an_extraction_saved_without_readings_leaves_the_rule_to_its_status():
