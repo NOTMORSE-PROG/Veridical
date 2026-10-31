@@ -47,6 +47,8 @@ def _agreement_thresholds(settings: Settings) -> dict[str, float | int]:
         "scope_statement_max_chars": settings.agreement_scope_statement_max_chars,
         "contradiction_confirmations": settings.agreement_contradiction_confirmations,
         "quote_min_chars": settings.agreement_quote_min_chars,
+        "context_locate_chars": settings.agreement_context_locate_chars,
+        "scope_min_word_chars": settings.agreement_scope_min_word_chars,
     }
 
 

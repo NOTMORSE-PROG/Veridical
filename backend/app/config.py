@@ -918,7 +918,13 @@ class Settings(BaseSettings):
     # a "could not determine" note. The same pair has been answered both
     # ways on two runs of one manuscript, so one answer is not enough to
     # accuse.
-    agreement_contradiction_confirmations: int = Field(default=1, ge=0)
+    agreement_contradiction_confirmations: int = Field(default=1, ge=1)
+    # How much of a statement (characters) is compared when finding it among
+    # the manuscript's sentences; list items can be longer than one sentence.
+    agreement_context_locate_chars: int = Field(default=80, ge=20)
+    # Words shorter than this ("the", "of", "to") carry no topic when ranking
+    # scope statements by the words they share with a finding.
+    agreement_scope_min_word_chars: int = Field(default=3, ge=1)
     # A contradiction must quote both sides; a quote shorter than this many
     # letters and digits ("not", "the system") proves nothing about where it
     # came from, so it does not count as a quote.

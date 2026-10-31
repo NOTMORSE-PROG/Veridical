@@ -65,3 +65,13 @@ def reuse_reasoning(detail: dict[str, Any], recorded_excerpt: str) -> str | None
     if str(detail.get("kind", "")).startswith("reuse_"):
         return reuse_reason(detail)
     return recorded
+
+
+def problem_kind_of(detail: dict[str, Any] | None) -> str | None:
+    """The kind a finding is shown and grouped as. An undecided agreement pair
+    whose text also looked like it addressed a grader is shown as that
+    signal, so it is never folded into the undecided pairs (BUG-160)."""
+    kind = (detail or {}).get("kind")
+    if kind == "agreement_cannot_determine" and (detail or {}).get("injection_suspected"):
+        return "agreement_injection_suspected"
+    return kind

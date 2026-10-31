@@ -63,10 +63,6 @@ PARTIAL_WORDING = (
     'a possible incomplete implementation, please check manually. Objective: "{intent}" '
     '| Result: "{outcome}"'
 )
-CANNOT_DETERMINE_WORDING = (
-    "Could not determine whether this result addresses this objective. Please "
-    "check manually if this matters for your review."
-)
 # BUG-160: a "consistent" verdict is silence, and silence is exactly what must
 # not happen when the text behind that verdict is suspect — a manipulated
 # "consistent" would otherwise vanish with no trace. Both texts are the
@@ -255,8 +251,14 @@ def _quoted(text: str) -> str:
     return text.replace('"', "'")
 
 
-def _build_prompt(pairs: list[Candidate]) -> str:
-    lines = []
+SECOND_READING_NOTE = (
+    "SECOND READING: these pairs are being checked again, independently. Judge each one "
+    "afresh from its own texts; do not assume any earlier answer."
+)
+
+
+def _build_prompt(pairs: list[Candidate], *, second_reading: bool = False) -> str:
+    lines = [SECOND_READING_NOTE] if second_reading else []
     for i, pair in enumerate(pairs):
         context = pair.context
         objective_where = pair.intent.anchor + (
@@ -285,9 +287,13 @@ def _build_prompt(pairs: list[Candidate]) -> str:
 
 
 async def _judge_batch(
-    llm: LLMClient, pairs: list[Candidate], *, check_run_id: int | None
+    llm: LLMClient,
+    pairs: list[Candidate],
+    *,
+    check_run_id: int | None,
+    second_reading: bool = False,
 ) -> dict[int, PairVerdict]:
-    prompt = _build_prompt(pairs)
+    prompt = _build_prompt(pairs, second_reading=second_reading)
     response = await llm.complete(
         PROMPT_TYPE, prompt, prompt_version=PROMPT_VERSION, check_run_id=check_run_id
     )
@@ -301,18 +307,53 @@ async def _judge_batch(
     return {v.index: v for v in parsed.verdicts}
 
 
-def _norm_quote(text: str) -> str:
-    """Letters and digits only, with words broken across PDF lines ("envi-
-    ronmental") joined: a quote must be the same words in the same order, but
-    a model that repairs a line-break hyphen or a space before a bracket has
-    still quoted the text."""
-    joined = re.sub(r"(\w)-\s+(\w)", r"\1\2", text.translate(_QUOTE_CHARS))
-    return re.sub(r"[^0-9a-z]", "", joined.lower())
+def _normalized_with_positions(text: str) -> tuple[str, list[int]]:
+    """The text lower-cased, with curly quotes straightened, words broken
+    across PDF lines ("envi- ronmental") joined and runs of whitespace made
+    one space, plus where each kept character sits in the original.
+
+    Punctuation, signs and decimal points are kept: "9.5%" is not "95%", "<"
+    is not ">", and "notable" is not "not able"."""
+    source = text.translate(_QUOTE_CHARS)
+    kept: list[str] = []
+    where: list[int] = []
+    i = 0
+    while i < len(source):
+        char = source[i]
+        if char == "-" and kept and kept[-1].isalpha():
+            j = i + 1
+            while j < len(source) and source[j].isspace():
+                j += 1
+            if j > i + 1 and j < len(source) and source[j].islower():
+                i = j  # a line-break hyphen: the word continues on the next line
+                continue
+        if char.isspace():
+            if kept and kept[-1] != " ":
+                kept.append(" ")
+                where.append(i)
+            i += 1
+            continue
+        kept.append(char.lower())
+        where.append(i)
+        i += 1
+    return "".join(kept), where
 
 
-def _quote_in(quote: str | None, *sources: str, min_chars: int) -> bool:
-    needle = _norm_quote(quote or "")
-    return len(needle) >= min_chars and any(needle in _norm_quote(s) for s in sources)
+def _quoted_span(quote: str | None, sources: tuple[str, ...], *, min_chars: int):
+    """The manuscript's own words a quote matches, and which source they are
+    in, or None. The quote must sit on word boundaries, so it cannot start or
+    end inside a word or join two words into one."""
+    needle, _ = _normalized_with_positions(quote or "")
+    needle = needle.strip(" .,;:'\"")
+    if len(re.sub(r"[^0-9a-z]", "", needle)) < min_chars:
+        return None
+    pattern = re.compile(r"(?<![0-9a-z])" + re.escape(needle) + r"(?![0-9a-z])")
+    for index, source in enumerate(sources):
+        haystack, where = _normalized_with_positions(source)
+        found = pattern.search(haystack)
+        if found:
+            return index, source[where[found.start()] : where[found.end() - 1] + 1]
+    return None
 
 
 def _named_systems(text: str, cues: AgreementCues) -> set[str]:
@@ -325,33 +366,52 @@ def _named_systems(text: str, cues: AgreementCues) -> set[str]:
     }
 
 
-def contradiction_problem(
+FINDING_QUOTE_SOURCES = ("finding", "text_before", "text_after")
+
+
+@dataclass(frozen=True)
+class VerifiedQuotes:
+    """The manuscript's own words a contradiction rests on, as found in the
+    text that was sent, and where the finding side came from."""
+
+    objective: str
+    finding: str
+    finding_source: str
+
+
+def check_contradiction(
     candidate: Candidate, verdict: PairVerdict, cues: AgreementCues, *, min_quote_chars: int
-) -> str | None:
-    """Why a contradictory verdict cannot stand as a finding, or None.
+) -> tuple[str | None, VerifiedQuotes | None]:
+    """Why a contradictory verdict cannot stand as a finding (or None), and
+    the quoted words found in the manuscript when it can.
 
     Checked against the text that was actually sent, so a contradiction is
     never raised on words the manuscript does not contain."""
     if verdict.reason_category not in contradiction_reasons():
-        return "reason_not_named"
-    if not _quote_in(verdict.objective_quote, candidate.intent.text, min_chars=min_quote_chars):
-        return "objective_quote_not_found"
+        return "reason_not_named", None
+    objective = _quoted_span(
+        verdict.objective_quote, (candidate.intent.text,), min_chars=min_quote_chars
+    )
+    if objective is None:
+        return "objective_quote_not_found", None
     finding_side = (candidate.outcome.text, candidate.context.before, candidate.context.after)
-    if not _quote_in(verdict.finding_quote, *finding_side, min_chars=min_quote_chars):
-        return "finding_quote_not_found"
+    finding = _quoted_span(verdict.finding_quote, finding_side, min_chars=min_quote_chars)
+    if finding is None:
+        return "finding_quote_not_found", None
     # Two different named systems (a "CollarID" objective against an
-    # "AirSpecs" result) are two different things, whatever the wording.
+    # "AirSpecs" result) are two different things, whatever the wording. The
+    # finding side is read from the sentence the quote came from as well.
     objective_names = _named_systems(candidate.intent.text, cues)
-    finding_text = " ".join(finding_side)
-    finding_names = _named_systems(candidate.outcome.text, cues)
+    finding_text = " ".join({candidate.outcome.text, finding_side[finding[0]]})
+    finding_names = _named_systems(finding_text, cues)
     if (
         objective_names
         and finding_names
         and not objective_names & finding_names
         and not any(name in finding_text for name in objective_names)
     ):
-        return "different_named_system"
-    return None
+        return "different_named_system", None
+    return None, VerifiedQuotes(objective[1], finding[1], FINDING_QUOTE_SOURCES[finding[0]])
 
 
 @dataclass
@@ -360,6 +420,7 @@ class Judged:
     verdict: PairVerdict | None = None
     final: str | None = None
     downgrade: str | None = None
+    quotes: VerifiedQuotes | None = None
     # What each re-ask answered, kept so a withheld contradiction can be traced.
     confirmations: list[str] = field(default_factory=list)
 
@@ -371,13 +432,17 @@ async def _judge_all(
     check_run_id: int | None,
     chunk_size: int,
     counters: dict[str, int],
+    second_reading: bool = False,
 ) -> None:
     """Judge every pair in batches; fills `verdict`, counts skips by cause."""
     for start in range(0, len(judged), chunk_size):
         chunk = judged[start : start + chunk_size]
         try:
             verdicts = await _judge_batch(
-                llm, [j.candidate for j in chunk], check_run_id=check_run_id
+                llm,
+                [j.candidate for j in chunk],
+                check_run_id=check_run_id,
+                second_reading=second_reading,
             )
         except AIUnavailableError as exc:
             counters[exc.cause] += len(judged) - start
@@ -428,7 +493,7 @@ async def judge_pairs(
             continue
         item.final = item.verdict.verdict
         if item.final == "contradictory":
-            problem = contradiction_problem(
+            problem, item.quotes = check_contradiction(
                 item.candidate,
                 item.verdict,
                 cues,
@@ -441,16 +506,19 @@ async def judge_pairs(
         standing = [j for j in judged if j.final == "contradictory"]
         if not standing:
             break
-        again = [Judged(j.candidate) for j in standing]
-        confirm_counters = dict.fromkeys(counters, 0)
+        # The second reading is a different request (its own header, pairs in
+        # reverse order), so it can never be answered from a cached copy of
+        # the first one.
+        again = [Judged(j.candidate) for j in reversed(standing)]
         await _judge_all(
             llm,
             again,
             check_run_id=check_run_id,
             chunk_size=chunk_size,
-            counters=confirm_counters,
+            counters=counters,
+            second_reading=True,
         )
-        for original, repeat in zip(standing, again, strict=True):
+        for original, repeat in zip(standing, reversed(again), strict=True):
             original.confirmations.append(repeat.verdict.verdict if repeat.verdict else "none")
             # The first answer's reason and quotes were already checked against
             # the sent text; the re-ask only has to reach the same verdict.
@@ -480,7 +548,11 @@ def _common_detail(candidate: Candidate, verdict: PairVerdict) -> dict:
 
 
 def _candidate_to_flag(
-    candidate: Candidate, verdict: PairVerdict, final: str, injection: InjectionSignal
+    candidate: Candidate,
+    verdict: PairVerdict,
+    final: str,
+    injection: InjectionSignal,
+    quotes: VerifiedQuotes | None = None,
 ) -> AgreementFlagDraft | None:
     anchor = candidate.intent.anchor
     common_detail = _common_detail(candidate, verdict)
@@ -490,7 +562,9 @@ def _candidate_to_flag(
         common_detail["injection_suspected"] = True
         common_detail["injection_matched_pattern"] = injection.matched_pattern_id
         common_detail["injection_matched_snippet"] = injection.matched_snippet
-    if final in SILENT_VERDICTS:
+    # A suspect text is a finding whatever the verdict was: a silent or
+    # undecided answer must not hide it (BUG-160).
+    if final in (*SILENT_VERDICTS, "cannot_determine"):
         if not injection.suspected:
             return None
         return AgreementFlagDraft(
@@ -506,8 +580,9 @@ def _candidate_to_flag(
                 **common_detail,
             },
         )
-    if final == "contradictory":
+    if final == "contradictory" and quotes is not None:
         reason_label = contradiction_reasons()[verdict.reason_category]
+        # The instructor sees the manuscript's own words, not the model's copy.
         return AgreementFlagDraft(
             severity=FlagSeverity.high,
             evidence_excerpt=candidate.intent.text,
@@ -515,13 +590,12 @@ def _candidate_to_flag(
             detail={
                 "kind": "agreement_contradictory",
                 "reason": CONTRADICTORY_WORDING.format(
-                    reason=reason_label,
-                    intent=verdict.objective_quote,
-                    outcome=verdict.finding_quote,
+                    reason=reason_label, intent=quotes.objective, outcome=quotes.finding
                 ),
                 "reason_category": verdict.reason_category,
-                "objective_quote": verdict.objective_quote,
-                "finding_quote": verdict.finding_quote,
+                "objective_quote": quotes.objective,
+                "finding_quote": quotes.finding,
+                "finding_quote_source": quotes.finding_source,
                 **common_detail,
             },
         )
@@ -538,19 +612,8 @@ def _candidate_to_flag(
                 **common_detail,
             },
         )
-    # cannot_determine is coverage, not a finding, unless the text is suspect.
-    if not injection.suspected:
-        return None
-    return AgreementFlagDraft(
-        severity=FlagSeverity.low,
-        evidence_excerpt=candidate.intent.text,
-        page_anchor=anchor,
-        detail={
-            "kind": "agreement_cannot_determine",
-            "reason": CANNOT_DETERMINE_WORDING,
-            **common_detail,
-        },
-    )
+    # cannot_determine is coverage, not a finding; it goes in the undecided list.
+    return None
 
 
 def _unmatched_intent_flag(intent: Statement) -> AgreementFlagDraft:
@@ -637,7 +700,7 @@ async def run_agreement_pairing(
         injection = detect_injection_signal(
             f"{item.candidate.intent.text} {item.candidate.outcome.text}"
         )
-        draft = _candidate_to_flag(item.candidate, item.verdict, item.final, injection)
+        draft = _candidate_to_flag(item.candidate, item.verdict, item.final, injection, item.quotes)
         if draft is not None:
             flags.append(draft)
         elif item.final == "cannot_determine":

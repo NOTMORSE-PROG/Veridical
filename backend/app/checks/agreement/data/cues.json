@@ -208,6 +208,27 @@
     "EfficientNet",
     "YoloV",
     "LangChain",
-    "HuggingFace"
+    "HuggingFace",
+    "IoT",
+    "IIoT",
+    "WiFi",
+    "LoRa",
+    "LoRaWAN",
+    "ZigBee",
+    "NodeMCU",
+    "BlueTooth",
+    "PoE",
+    "NoSQL",
+    "GraphQL",
+    "WebSocket",
+    "WebSockets",
+    "WebRTC",
+    "OAuth",
+    "TinyML",
+    "MicroPython",
+    "CircuitPython",
+    "RasPi",
+    "FreeRTOS",
+    "OpenAPI"
   ]
 }

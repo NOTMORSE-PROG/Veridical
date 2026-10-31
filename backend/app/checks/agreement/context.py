@@ -39,17 +39,12 @@ from app.config import Settings
 from app.ingest.schemas import ExtractionResult
 from app.ml.embeddings import cosine_similarity, embed_texts
 
-# How much of a statement is compared when locating it among the document's
-# sentences: list items can be longer than one sentence.
-_LOCATE_PREFIX = 80
-# Words this short ("the", "of", "to") carry no topic.
-_MIN_WORD = 3
 _WORD = re.compile(r"[a-z0-9]+")
 
 
-def _grams(text: str) -> set[str]:
+def _grams(text: str, min_word: int) -> set[str]:
     """Content words and adjacent word pairs, for shared-phrase ranking."""
-    words = [w for w in _WORD.findall(text.lower()) if len(w) >= _MIN_WORD]
+    words = [w for w in _WORD.findall(text.lower()) if len(w) >= min_word]
     return set(words) | {f"{a} {b}" for a, b in zip(words, words[1:], strict=False)}
 
 
@@ -106,13 +101,19 @@ def document_sentences(extraction: ExtractionResult, *, heading_max_words: int) 
     return sentences
 
 
-def _locate(statement: Statement, sentences: list[Sentence]) -> int | None:
-    key = _normalize(statement.text).lower()[:_LOCATE_PREFIX]
-    for index, sentence in enumerate(sentences):
-        own = sentence.text.lower()
-        if key in own or own[:_LOCATE_PREFIX] in key:
-            return index
-    return None
+def _locate(statement: Statement, sentences: list[Sentence], prefix: int) -> int | None:
+    """Where the statement sits. Theses repeat results in the abstract and the
+    summary, so a sentence at the statement's own anchor wins over the same
+    words elsewhere; another place is used only when the anchor has none."""
+    key = _normalize(statement.text).lower()[:prefix]
+    matches = [
+        index
+        for index, sentence in enumerate(sentences)
+        if key in sentence.text.lower()
+        or (len(sentence.text) >= prefix and sentence.text.lower()[:prefix] in key)
+    ]
+    at_anchor = [i for i in matches if sentences[i].anchor == statement.anchor]
+    return (at_anchor or matches or [None])[0]
 
 
 def _clip_left(text: str, limit: int) -> str:
@@ -178,10 +179,11 @@ class DocumentContext:
             s.text: v for s, v in zip(self.scope_statements, self._scope_vectors, strict=True)
         }
         finding_vector = embed_texts([outcome.text], self.settings)[0]
-        added = _grams(outcome.text) - _grams(intent.text)
+        min_word = self.settings.agreement_scope_min_word_chars
+        added = _grams(outcome.text, min_word) - _grams(intent.text, min_word)
 
         def score(sentence: Sentence) -> float:
-            own = _grams(sentence.text)
+            own = _grams(sentence.text, min_word)
             lexical = len(added & own) / math.sqrt(1 + len(own))
             return lexical + cosine_similarity(finding_vector, vectors[sentence.text])
 
@@ -193,7 +195,7 @@ class DocumentContext:
 
     def for_pair(self, intent: Statement, outcome: Statement) -> PairContext:
         settings = self.settings
-        found = _locate(outcome, self.sentences)
+        found = _locate(outcome, self.sentences, self.settings.agreement_context_locate_chars)
         before = after = ""
         finding_heading = None
         exclude = {_normalize(intent.text).lower(), _normalize(outcome.text).lower()}
@@ -211,7 +213,9 @@ class DocumentContext:
             before = _clip_left(" ".join(s.text for s in before_sentences), budget)
             after = _clip_right(" ".join(s.text for s in after_sentences), budget)
             exclude |= {s.text.lower() for s in (*before_sentences, *after_sentences)}
-        located_intent = _locate(intent, self.sentences)
+        located_intent = _locate(
+            intent, self.sentences, self.settings.agreement_context_locate_chars
+        )
         return PairContext(
             before=before,
             after=after,

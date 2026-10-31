@@ -1207,9 +1207,7 @@ export function SignalFlagsPanel({
             selection={review ? selection : undefined}
           />
         )
-        : onlyOptional || (selectedModule === "originality_reuse" && originalityNote) ? null : optional.state === "success" ? showUndecided
-          ? <EmptyState className="signal-integrity-empty" id={`signal-module-empty-${checkRunId}`} title="No possible inconsistencies found"><p>Some pairs could not be decided. See below. This does not establish that the manuscript passed.</p></EmptyState>
-          : <EmptyState className="signal-integrity-empty" id={`signal-module-empty-${checkRunId}`} title={emptyState.title}
+        : onlyOptional || (selectedModule === "originality_reuse" && originalityNote) ? null : optional.state === "success" ? <EmptyState className="signal-integrity-empty" id={`signal-module-empty-${checkRunId}`} title={emptyState.title}
           action={emptyState.limits ? <ActionLink to={`/report/${checkRunId}?section=limits`} variant="secondary">Open assessment limits</ActionLink> : undefined}><p>{emptyState.description}</p></EmptyState>
           : <p>{optional.state === "error" ? "Other findings could not be loaded." : optional.state === "paused" ? "Waiting to load other findings." : optional.state === "fetching" ? "Loading other findings." : "Other findings are not available."}</p>}
       {showUndecided && <UndeterminedPairs checkRunId={checkRunId} undetermined={agreementModule?.undetermined} legacy={undecidedLegacy}
