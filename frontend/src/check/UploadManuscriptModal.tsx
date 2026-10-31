@@ -35,6 +35,7 @@ import { formatChoiceLabel } from "../domain/formatIdentity";
 import { UploadRefusedError } from "../api/directManuscriptUpload";
 import { UPLOAD_REFUSAL_COPY } from "../domain/uploadRefusal";
 import { ActionLink } from "../ui/ActionLink";
+import { imageReadingLine } from "./uploadImageReading";
 
 function formatUploadDate(value: string): string {
   return new Date(value).toLocaleString(undefined, {
@@ -232,6 +233,7 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
   const summary = ingest.data;
 
   const extractionNotes = summary?.notes.filter((note) => note.trim()) ?? [];
+  const imageLine = summary ? imageReadingLine(summary) : null;
   const showsVisionUnavailable =
     summary?.vision_status === "unavailable" &&
     summary.images + summary.tables + summary.equations > 0;
@@ -329,6 +331,9 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
               {summary.existing_upload
                 ? `Upload complete. This is the same file you uploaded on ${formatUploadDate(summary.existing_upload.created_at)}.`
                 : "Upload complete."}
+              {/* The image limit is part of what an instructor must hear before
+                  starting a check, not only something to find by reading on. */}
+              {imageLine ? ` ${imageLine}` : ""}
             </p>
             {summary.existing_upload && (
               <section className="signal-group-flow rounded-md border border-border bg-status-neutral-bg px-3 py-3 text-sm text-ink">
@@ -361,6 +366,7 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
                   : "Page count is not available for this upload."}
               {" "}{summary.citations} reference {summary.citations === 1 ? "record" : "records"} extracted.
             </p>
+            {imageLine && <p className="signal-upload-summary__counts">{imageLine}</p>}
             {(extractionNotes.length > 0 || showsVisionUnavailable) && (
               <section className="signal-upload-summary__notes" aria-label="Extraction notes">
                 <h4>Extraction notes</h4>

@@ -118,6 +118,10 @@ class RuleContext:
     heading_max_chars: int = field(default_factory=lambda: _settings().ingest_heading_max_chars)
     heading_bold_ratio_min: float = field(default_factory=lambda: _settings().ingest_bold_ratio_min)
     heading_size_delta: float = field(default_factory=lambda: _settings().ingest_heading_size_delta)
+    # Whether every image that could hold a table has a completed reading,
+    # from the saved readings. None for an extraction saved without them;
+    # the table rule then falls back to `vision_status`.
+    images_read_for_tables: bool | None = None
 
 
 @dataclass(frozen=True)

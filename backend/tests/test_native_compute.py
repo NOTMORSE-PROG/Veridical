@@ -49,6 +49,8 @@ def source(tmp_path):
         page = doc.new_page()
         page.insert_text((40, 40), "Results and analysis", fontsize=18)
         page.insert_text((40, 65), "An authored native-compute software acceptance control.")
+        # A table caption just above the image, so the helper prepares its crop.
+        page.insert_text((50, 92), "Table 1 Mean scores")
         pix = pymupdf.Pixmap(pymupdf.csRGB, (0, 0, 100, 100), False)
         pix.clear_with(150)
         page.insert_image(pymupdf.Rect(50, 100, 250, 300), pixmap=pix)

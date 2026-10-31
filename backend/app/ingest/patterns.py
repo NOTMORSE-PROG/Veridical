@@ -64,6 +64,12 @@ class HeadingPatterns:
     # Chapter-title keywords whose images get vision priority (F1.3):
     # where result tables/statistics live. Substring match, casefolded.
     vision_priority_sections: tuple[str, ...]
+    # Cues that an image may hold a table or an equation (F1.3).
+    vision_table_caption: re.Pattern[str]
+    vision_equation_number: re.Pattern[str]
+    vision_caption_gap_pts: float
+    vision_caption_overlap_pts: float
+    vision_column_slack_pts: float
     furniture: tuple[re.Pattern[str], ...]
     toc_line_suffix: re.Pattern[str]
     title_page: TitlePagePatterns
@@ -76,6 +82,17 @@ class HeadingPatterns:
             return False
         prefix = self.reference_heading_prefix.match(title)
         return prefix is not None and normalize(title[prefix.end() :]) in self.reference_titles
+
+
+def _non_negative(value: object, name: str) -> float:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(value)
+        or value < 0
+    ):
+        raise ValueError(f"vision_cues.{name} must be a non-negative number")
+    return float(value)
 
 
 def load_patterns(path: Path | None = None) -> HeadingPatterns:
@@ -129,6 +146,13 @@ def load_patterns(path: Path | None = None) -> HeadingPatterns:
         not isinstance(title, str) or not normalize(title) for title in ancillary_titles
     ):
         raise ValueError("Reuse ancillary titles must be a list of nonempty strings")
+    # A custom patterns file written before these cues existed, or naming only
+    # some of them, takes the rest from the shipped file.
+    shipped_cues = json.loads(_DEFAULT_FILE.read_text(encoding="utf-8"))["vision_cues"]
+    custom_cues = raw.get("vision_cues", {})
+    if not isinstance(custom_cues, dict):
+        raise ValueError("vision_cues must be an object")
+    cues = {**shipped_cues, **custom_cues}
     return HeadingPatterns(
         chapter=re.compile(raw["chapter"], ci),
         numbered=re.compile(raw["numbered"]),
@@ -155,6 +179,13 @@ def load_patterns(path: Path | None = None) -> HeadingPatterns:
         reference_url_geometry_tolerance_pts=url_tolerance,
         standalone_heading_label=re.compile(label_pattern, ci),
         vision_priority_sections=tuple(s.casefold() for s in raw["vision_priority_sections"]),
+        vision_table_caption=re.compile(cues["table_caption"], ci),
+        vision_equation_number=re.compile(cues["equation_number"], ci),
+        vision_caption_gap_pts=_non_negative(cues["caption_gap_pts"], "caption_gap_pts"),
+        vision_caption_overlap_pts=_non_negative(
+            cues["caption_overlap_pts"], "caption_overlap_pts"
+        ),
+        vision_column_slack_pts=_non_negative(cues["column_slack_pts"], "column_slack_pts"),
         furniture=tuple(re.compile(p, ci) for p in raw["furniture"]),
         toc_line_suffix=re.compile(raw["toc_line_suffix"]),
         title_page=TitlePagePatterns(

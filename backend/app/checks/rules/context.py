@@ -16,6 +16,7 @@ from app.ingest.analytical_source import (
 )
 from app.ingest.patterns import load_patterns
 from app.ingest.service import load_raw_store_async
+from app.ingest.vision import images_read_for_tables
 from app.models.citation import Citation
 from app.models.manuscript import Manuscript
 
@@ -47,6 +48,7 @@ async def build_rule_context(
         tables=extraction.tables,
         vision_status=extraction.vision_status,
         has_images=bool(extraction.images),
+        images_read_for_tables=images_read_for_tables(extraction),
         citations=list(citations),
         margin_tolerance_pts=settings.structural_margin_tolerance_pts,
         citation_style_min_ratio=settings.structural_citation_style_min_ratio,

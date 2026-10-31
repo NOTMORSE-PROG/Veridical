@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from app.checks.escalation import NEEDS_REVIEW_OUTCOMES
 from app.checks.rules import ReferenceInventory, RuleContext, get_rule, registered_rules
 from app.checks.rules.bounds import extract_bound, to_points
 from app.checks.rules.claim_scope import WORD_COUNT_RULE_ID
@@ -47,6 +48,7 @@ def _ctx(
     vision_status: str = "none",
     has_images: bool = False,
     citations: list | None = None,
+    images_read_for_tables: bool | None = None,
 ) -> RuleContext:
     settings = get_settings()
     return RuleContext(
@@ -58,6 +60,7 @@ def _ctx(
         tables=tables or [],
         vision_status=vision_status,
         has_images=has_images,
+        images_read_for_tables=images_read_for_tables,
         citations=citations or [],
         margin_tolerance_pts=settings.structural_margin_tolerance_pts,
         citation_style_min_ratio=settings.structural_citation_style_min_ratio,
@@ -506,7 +509,7 @@ def test_table_formatting_still_fails_when_vision_ran_and_genuinely_found_none()
 
 
 @pytest.mark.parametrize("vision_status", ["unavailable", "none"])
-def test_table_formatting_is_not_applicable_when_images_exist_but_were_never_confirmed_read(
+def test_table_formatting_escalates_when_images_exist_but_were_never_confirmed_read(
     vision_status,
 ):
     """BUG-175, live-reproduced against real production data:
@@ -530,8 +533,42 @@ def test_table_formatting_is_not_applicable_when_images_exist_but_were_never_con
     spec = get_rule(TABLE_FORMAT_RULE_ID)
     criterion = FakeCriterion(text="Tables must be properly formatted with captions")
     outcome = spec.run(criterion, _ctx(tables=[], vision_status=vision_status, has_images=True))
-    assert outcome.outcome == ResultOutcome.not_applicable
-    assert "not confirmed read" in outcome.detail["reason"]
+    # Escalated, not left out of the composite as not applicable: dropping
+    # the criterion would raise the band of a thesis whose tables are
+    # uncaptioned screenshots. Not failed either: no table absence was shown.
+    assert outcome.outcome == ResultOutcome.escalated
+    assert outcome.outcome in NEEDS_REVIEW_OUTCOMES
+    assert outcome.detail["reason"].startswith(
+        "Tables could not be verified: images were not read for tables."
+    )
+    assert "may be pasted as images" in outcome.detail["reason"]
+
+
+def test_a_finished_image_pass_does_not_rule_out_tables_unless_every_image_was_read():
+    """The pass can finish with the one cued image unreadable, or with
+    uncued images never read: no absence of tables was shown, so the
+    criterion goes to the instructor. Only when every image that could hold
+    a table was read and none held one does it fail."""
+    spec = get_rule(TABLE_FORMAT_RULE_ID)
+    criterion = FakeCriterion(text="Tables must be properly formatted with captions")
+    unread = _ctx(tables=[], vision_status="done", has_images=True, images_read_for_tables=False)
+    assert spec.run(criterion, unread).outcome == ResultOutcome.escalated
+    read = _ctx(tables=[], vision_status="done", has_images=True, images_read_for_tables=True)
+    assert spec.run(criterion, read).outcome == ResultOutcome.failed
+    # The saved readings win over the status, both ways.
+    status_only = _ctx(
+        tables=[], vision_status="none", has_images=True, images_read_for_tables=True
+    )
+    assert spec.run(criterion, status_only).outcome == ResultOutcome.failed
+
+
+def test_table_formatting_without_images_keeps_failing_when_no_table_is_found():
+    spec = get_rule(TABLE_FORMAT_RULE_ID)
+    criterion = FakeCriterion(text="Tables must be properly formatted with captions")
+    for status in ("none", "unavailable"):
+        outcome = spec.run(criterion, _ctx(tables=[], vision_status=status, has_images=False))
+        assert outcome.outcome == ResultOutcome.failed
+        assert outcome.detail["reason"] == "No tables were found in the manuscript."
 
 
 def test_table_formatting_still_fails_for_docx_even_with_images_and_unresolved_vision():

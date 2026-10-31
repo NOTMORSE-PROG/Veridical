@@ -10,6 +10,7 @@ from app.ingest.quality import (
 )
 from app.ingest.references import select_references
 from app.ingest.schemas import ExistingUploadOut, IngestSummary, TitlePageProposalOut
+from app.ingest.vision import summarize_image_readings
 
 
 def ingestion_receipt(manuscript, result, citations, proposal, existing):
@@ -33,6 +34,7 @@ def ingestion_receipt(manuscript, result, citations, proposal, existing):
         tables=len(result.tables),
         equations=len(result.equations),
         vision_status=result.vision_status,
+        image_reading=summarize_image_readings(result),
         citations=citations,
         section_tree=result.section_tree,
         notes=notes,

@@ -16,10 +16,9 @@ from app.ingest.schemas import ExtractionResult, FigureReading, ImageBlock, Sect
 from app.ingest.source_digest import file_sha256
 
 
-def _selected_indices(
-    result: ExtractionResult, patterns: HeadingPatterns, settings: Settings
-) -> list[int]:
-    sized = [
+def sized_indices(result: ExtractionResult, settings: Settings) -> list[int]:
+    """PDF images large enough to be worth reading at all."""
+    return [
         index
         for index, img in enumerate(result.images)
         if result.anchor_kind == "page"
@@ -27,6 +26,53 @@ def _selected_indices(
         and img.bbox is not None
         and readable_size(img, settings)
     ]
+
+
+def cued_indices(
+    result: ExtractionResult, patterns: HeadingPatterns, settings: Settings
+) -> set[int]:
+    """Sized images with a table or equation cue beside them: a table caption
+    just above or below, or an equation number level with the image's right
+    edge. Most thesis images are figures and screenshots, and most tables are
+    typed text read without a model call, so only these are worth a call."""
+    blocks_by_page: dict[int, list] = defaultdict(list)
+    for block in result.blocks:
+        if block.page is not None and block.bbox is not None and not block.is_furniture:
+            blocks_by_page[block.page].append(block)
+    gap, slack = patterns.vision_caption_gap_pts, patterns.vision_column_slack_pts
+    overlap = patterns.vision_caption_overlap_pts
+    cued = set()
+    for index in sized_indices(result, settings):
+        image = result.images[index]
+        x0, y0, x1, y1 = image.bbox
+        for block in blocks_by_page.get(image.page, ()):
+            bx0, by0, bx1, by1 = block.bbox
+            text = block.text.strip()
+            same_column = bx1 >= x0 - slack and bx0 <= x1 + slack
+            # A tight caption may touch or overlap the image edge; its middle
+            # must still be outside the image.
+            middle = (by0 + by1) / 2
+            above = middle < y0 and -overlap <= y0 - by1 <= gap
+            below = middle > y1 and -overlap <= by0 - y1 <= gap
+            if same_column and (above or below) and patterns.vision_table_caption.match(text):
+                cued.add(index)
+                break
+            level = by0 < y1 and by1 > y0
+            if level and bx0 >= x1 - slack and patterns.vision_equation_number.match(text):
+                cued.add(index)
+                break
+    return cued
+
+
+def _selected_indices(
+    result: ExtractionResult,
+    patterns: HeadingPatterns,
+    settings: Settings,
+    cued: set[int] | None = None,
+) -> list[int]:
+    if cued is None:
+        cued = cued_indices(result, patterns, settings)
+    sized = [index for index in sized_indices(result, settings) if index in cued]
     priority_pages = _priority_page_ranges(result.section_tree.nodes, patterns)
 
     def is_priority(img: ImageBlock) -> bool:

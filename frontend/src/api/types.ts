@@ -301,6 +301,25 @@ export interface GroupCollisionOut {
   existing_group_name: string | null;
 }
 
+// checked + unclear + not_checked is the number of images; the reasons from
+// no_cue on add up to not_checked.
+export interface ImageReadingSummary {
+  /** Readings that completed, one model call each. */
+  checked: number;
+  /** Of those, how many held a table or an equation read with confidence. */
+  with_content: number;
+  /** Read, but the answer could not be validated or was too uncertain. */
+  unclear: number;
+  not_checked: number;
+  no_cue: number;
+  too_small: number;
+  /** No page position to read from; every image in a Word file. */
+  unsupported: number;
+  over_limit: number;
+  unavailable: number;
+  not_requested: number;
+}
+
 export interface IngestSummary {
   manuscript_id: number;
   // BUG-043: echoes back what the server actually persisted, so a client
@@ -316,6 +335,9 @@ export interface IngestSummary {
   equations: number;
   citations: number;
   vision_status: "none" | "done" | "unavailable";
+  // What the upload's image reading did. Absent for older uploads, or when
+  // the counts did not add up (the receipt is still accepted without them).
+  image_reading?: ImageReadingSummary;
   notes: string[];
   // V-063: the auto-proposed group/program, deterministically extracted
   // from the title page -- the confirm dialog's own data source.

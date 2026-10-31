@@ -36,13 +36,14 @@ from app.config import Settings
 from app.errors import ApiDownError, QuotaExhaustedError
 from app.ingest.admission import PreparationLease
 from app.ingest.image_source import _crop as _native_crop
-from app.ingest.image_source import _selected_indices, readable_size
+from app.ingest.image_source import _selected_indices, cued_indices, readable_size
 from app.ingest.patterns import HeadingPatterns
 from app.ingest.schemas import (
     EquationBlock,
     ExtractionResult,
     ImageBlock,
     ImageReading,
+    ImageReadingSummary,
     TableBlock,
 )
 from app.llm import LLMNotConfiguredError
@@ -147,7 +148,8 @@ def prepare_image_readings(
     *,
     enabled: bool = True,
 ) -> list[int]:
-    selected = _selected_indices(result, patterns, settings) if enabled else []
+    cued = cued_indices(result, patterns, settings) if enabled else set()
+    selected = _selected_indices(result, patterns, settings, cued) if enabled else []
     result.image_reading_version = "v1"
     result.image_readings = []
     for index, image in enumerate(result.images):
@@ -157,12 +159,69 @@ def prepare_image_readings(
             reason = "unsupported_source"
         elif not readable_size(image, settings):
             reason = "size_filter"
+        elif index not in cued:
+            reason = "no_table_cue"
         else:
             reason = "not_attempted" if index in selected else "selection_limit"
         result.image_readings.append(
             ImageReading(image_index=index, status="not_selected", reason=reason)
         )
     return selected
+
+
+_NOT_CHECKED_BUCKET = {
+    "no_table_cue": "no_cue",
+    "size_filter": "too_small",
+    "unsupported_source": "unsupported",
+    "selection_limit": "over_limit",
+    "vision_disabled": "not_requested",
+}
+
+
+def summarize_image_readings(result: ExtractionResult) -> ImageReadingSummary | None:
+    readings = result.image_readings
+    if readings is None:
+        return None
+    counts = dict.fromkeys(ImageReadingSummary.model_fields, 0)
+    for reading in readings:
+        if reading.status == "classified_only" or (
+            reading.status == "transcribed" and reading.reason is None
+        ):
+            counts["checked"] += 1
+            counts["with_content"] += reading.status == "transcribed"
+        elif reading.status in {"transcribed", "invalid_response"}:
+            counts["unclear"] += 1
+        else:
+            # Never read: no cue, too small, over the limit, or the reader
+            # (or the crop) was unavailable, including a call that failed.
+            counts["not_checked"] += 1
+            counts[_NOT_CHECKED_BUCKET.get(reading.reason or "", "unavailable")] += 1
+    return ImageReadingSummary(**counts)
+
+
+def images_read_for_tables(result: ExtractionResult) -> bool | None:
+    """True only when every image that could hold a table has a completed
+    reading. A single image too small to read (an icon or a logo) cannot hold
+    one; an image merged from small pieces can, and it is never read. A
+    failed, malformed or uncued image means tables were not ruled out."""
+    if result.image_readings is None:
+        return None
+    # One reading per image, in order; any other ledger rules nothing out.
+    if result.image_reading_version != "v1" or [
+        reading.image_index for reading in result.image_readings
+    ] != list(range(len(result.images))):
+        return False
+    for reading in result.image_readings:
+        completed = reading.status == "classified_only" or (
+            reading.status == "transcribed" and reading.reason is None
+        )
+        image = (
+            result.images[reading.image_index] if reading.image_index < len(result.images) else None
+        )
+        too_small = reading.reason == "size_filter" and image is not None and image.piece_count == 1
+        if not completed and not too_small:
+            return False
+    return True
 
 
 def mark_pending_unavailable(result: ExtractionResult, reason: str) -> None:

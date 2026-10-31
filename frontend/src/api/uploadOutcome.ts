@@ -71,7 +71,21 @@ export function validateIngestReceipt(value: unknown): IngestSummary {
   if (prior !== null && (!object(prior) || !positive(prior.manuscript_id)
     || !timestamp(prior.created_at) || !nullableString(prior.original_filename)
     || !(prior.purged_at === null || timestamp(prior.purged_at)))) throw new UnconfirmedUploadError();
-  return v as unknown as IngestSummary;
+  if (v.image_reading === undefined || imageReading(v.image_reading, v.images as number)) return v as unknown as IngestSummary;
+  return { ...(v as unknown as IngestSummary), image_reading: undefined };
+}
+
+// Counts that do not add up are dropped, not trusted; the upload itself is
+// still confirmed, and the screen then says nothing about image reading.
+const REASONS = ["no_cue", "too_small", "unsupported", "over_limit", "unavailable", "not_requested"] as const;
+
+function imageReading(value: unknown, images: number): IngestSummary["image_reading"] {
+  const keys = ["checked", "with_content", "unclear", "not_checked", ...REASONS] as const;
+  if (!object(value) || !keys.every((key) => natural(value[key]))) return undefined;
+  const v = value as Record<(typeof keys)[number], number>;
+  if (v.with_content > v.checked || v.checked + v.unclear + v.not_checked !== images
+    || REASONS.reduce((sum, key) => sum + v[key], 0) !== v.not_checked) return undefined;
+  return Object.fromEntries(keys.map((key) => [key, v[key]])) as unknown as IngestSummary["image_reading"];
 }
 
 export function validateRubricReceipt(value: unknown, familyId?: string): Rubric {
