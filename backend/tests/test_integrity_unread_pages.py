@@ -6,7 +6,12 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from app.checks.citations import verify
-from app.checks.source_quality import unread_pages_detail, without_unread_pages
+from app.checks.source_quality import (
+    readable_pages_copy,
+    source_limitation_detail,
+    unread_pages_detail,
+    without_unread_pages,
+)
 from app.config import Settings
 from app.ingest.patterns import load_patterns
 from app.ingest.quality import reading_order_issues
@@ -104,6 +109,21 @@ def test_readable_copy_drops_text_and_keeps_table_positions():
     assert readable.unread_pages == [2]
     assert extraction.unread_pages is None and not extraction.tables[0].low_confidence
     assert "unread_pages" not in readable.model_dump()
+
+
+def test_the_checks_are_given_the_readable_pages_when_the_limit_is_confined():
+    extraction = _source(CITES_REYES)
+    readable, unread = readable_pages_copy(extraction, max_unread_ratio=0.5)
+    assert unread == [2]
+    assert CITES_REYES not in [block.text for block in readable.blocks]
+    assert source_limitation_detail(readable) is None
+
+
+def test_the_whole_document_is_kept_when_too_many_pages_are_unread():
+    extraction = _source(CITES_REYES, unresolved=(1, 2))
+    readable, unread = readable_pages_copy(extraction, max_unread_ratio=0.5)
+    assert unread == [] and readable is extraction
+    assert source_limitation_detail(readable) is not None
 
 
 def test_a_more_specific_recorded_limit_is_kept():

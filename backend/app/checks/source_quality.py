@@ -81,6 +81,16 @@ def unread_page_scope(extraction: ExtractionResult, max_unread_ratio: float) -> 
     return sorted(unread)
 
 
+def readable_pages_copy(
+    extraction: ExtractionResult, max_unread_ratio: float
+) -> tuple[ExtractionResult, list[int]]:
+    """What the integrity checks are given (BUG-507): every page whose reading
+    order is established, and the pages left out. The pipeline and the accuracy
+    harness both call this, so a measured figure describes the check as it runs."""
+    unread = unread_page_scope(extraction, max_unread_ratio) or []
+    return (without_unread_pages(extraction, unread) if unread else extraction), unread
+
+
 def without_unread_pages(extraction: ExtractionResult, pages: list[int]) -> ExtractionResult:
     """A copy for analyses that read every page except `pages` (from
     `unread_page_scope`). Their text is dropped; their tables are kept but

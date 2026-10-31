@@ -48,9 +48,8 @@ from app.checks.rules.context import build_rule_context
 from app.checks.semantic import record_ungraded
 from app.checks.source_quality import (
     SOURCE_READING_ORDER_UNRESOLVED,
-    unread_page_scope,
+    readable_pages_copy,
     unread_pages_detail,
-    without_unread_pages,
 )
 from app.checks.structural import run_structural_check
 from app.config import Settings, get_settings
@@ -823,11 +822,12 @@ async def _run_integrity_stage(
     if None in existing:
         extraction = await load_raw_store_async(settings, manuscript.id)
         extraction = bind_analytical_source(extraction, manuscript.content_hash)
-        unread_pages = unread_page_scope(extraction, settings.analysis_unread_pages_max_ratio) or []
+        # Check the pages whose reading order is established instead of none
+        # at all; each check records the pages it left out.
+        extraction, unread_pages = readable_pages_copy(
+            extraction, settings.analysis_unread_pages_max_ratio
+        )
         if unread_pages:
-            # Check the pages whose reading order is established instead of
-            # none at all; each check records the pages it left out.
-            extraction = without_unread_pages(extraction, unread_pages)
             for result in unannotated:
                 await _record_unread_pages(session, check_run.id, result, unread_pages)
 
