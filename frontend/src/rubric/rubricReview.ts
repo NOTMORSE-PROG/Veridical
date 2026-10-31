@@ -156,10 +156,17 @@ export type FormatReviewState =
 
 /** The live review state. Only the open items decide it: parse_status
  * says how preparation went and stays "needs_review" after every item is
- * kept. Formats prepared before items were recorded have no state here. */
-export function formatReviewState(rubric: Pick<Rubric, "is_active" | "parse_status" | "parse_issue_details">): FormatReviewState {
+ * kept. Formats prepared before items were recorded have no state here.
+ * A clean upload also has no items (the server stores null), but its levels
+ * carry where they were found, which is how the two are told apart. */
+export function formatReviewState(
+  rubric: Pick<Rubric, "is_active" | "parse_status" | "parse_issue_details"> & { criteria?: Rubric["criteria"] },
+): FormatReviewState {
   const details = rubric.parse_issue_details;
-  if (details === null || details === undefined) return { kind: "legacy" };
+  if (details === null || details === undefined) {
+    const traced = rubric.criteria?.some((criterion) => criterion.levels?.some((level) => level.source)) ?? false;
+    return traced ? { kind: "all_match" } : { kind: "legacy" };
+  }
   const open = details.filter((issue) => issue.status === "open").length;
   if (open) return rubric.is_active ? { kind: "active_with_items", open } : { kind: "to_check", open };
   return rubric.parse_status === "needs_review" ? { kind: "flagged_all_checked" } : { kind: "all_match" };

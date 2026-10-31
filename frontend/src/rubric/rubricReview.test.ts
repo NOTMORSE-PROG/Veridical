@@ -32,6 +32,13 @@ describe("format review state (labelling contract)", () => {
     expect(formatReviewLabel({ kind: "legacy" })).toBeNull();
     expect(formatReviewLabel(formatReviewState({ is_active: false, parse_status: "parsed", parse_issue_details: [] }))).toBe("All level descriptions match the document");
   });
+
+  it("tells a clean upload, which also has no items, from an older format by its traced levels", () => {
+    const traced = { level: 1, name: "Beginner", descriptor: "d", points: 1, source: { match: "exact" as const, page: 1, table: 1, row: 2, col: 2, cell_text: "d", row_label: "Purpose", column_heading: "BEGINNER 1" } };
+    const criterion = { id: 1, type: "semantic" as const, text: "Purpose", evidence: null, weight: 1, position: 0 };
+    expect(formatReviewState({ is_active: false, parse_status: "parsed", parse_issue_details: null, criteria: [{ ...criterion, levels: [traced] }] })).toEqual({ kind: "all_match" });
+    expect(formatReviewState({ is_active: false, parse_status: "parsed", parse_issue_details: null, criteria: [{ ...criterion, levels: [{ ...traced, source: undefined }] }] })).toEqual({ kind: "legacy" });
+  });
 });
 
 describe("keeping wording", () => {
