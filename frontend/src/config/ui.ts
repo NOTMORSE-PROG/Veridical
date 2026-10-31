@@ -34,6 +34,14 @@ export const RUBRIC_KEEP_REASONS = [
   { value: "other", label: "Other reason" },
 ] as const;
 export const RUBRIC_KEEP_NOTE_MAX_LENGTH = INSTRUCTOR_NOTE_MAX_LENGTH;
+// Issues that say a level's wording is not where the document puts it. Keeping
+// one needs a note, so the record says what the instructor compared rather
+// than a reason that contradicts the flag.
+export const RUBRIC_KEEP_NOTE_REQUIRED_CODES: readonly string[] = [
+  "not_in_source", "joins_cells", "partial_cell", "wrong_column", "wrong_row", "shared_cell",
+];
+// Criterion text can be a paragraph; names in buttons and summaries are cut here.
+export const RUBRIC_CRITERION_NAME_MAX_CHARS = 60;
 // API encoding units for criterion results, independent of readiness thresholds.
 export const CRITERION_SCORE_UNITS = { none: 0, full: 100 } as const;
 // Stored check_result.score uses Numeric(5, 2). This bounds acknowledgment

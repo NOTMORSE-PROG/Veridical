@@ -134,9 +134,16 @@ describe("rubric review before activation (BUG-566)", () => {
     expect(screen.getByText("Choose why you are keeping this wording.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("radio", { name: "The document says it this way" }));
     fireEvent.click(screen.getByRole("button", { name: "Keep wording" }));
+    // Wording VERIDICAL could not find needs a note saying what was compared.
+    expect(screen.getByText("Add a note saying what you compared.")).toBeInTheDocument();
+    expect(screen.getByLabelText("Note")).toHaveFocus();
+    expect(screen.getByLabelText("Note")).toHaveAccessibleDescription(/Say what you compared in the original/);
+    fireEvent.change(screen.getByLabelText("Note"), { target: { value: "Same as page 1, Proficient" } });
+    fireEvent.click(screen.getByRole("button", { name: "Keep wording" }));
 
     const proficient = screen.getByRole("heading", { level: 4, name: "Proficient" }).closest("li")!;
     expect(within(proficient).getByText("Kept as written")).toBeInTheDocument();
+    expect(screen.getByText("Levelled criterion · 2 levels · 1 kept as written")).toBeInTheDocument();
     expect(within(proficient).getByText("Kept as written: The document says it this way. Not saved yet.", { exact: false })).toBeInTheDocument();
     // What VERIDICAL raised stays on the level after it is kept.
     expect(within(proficient).getByText("VERIDICAL could not find this wording in the document. Compare it with the original.")).toBeInTheDocument();
@@ -149,8 +156,7 @@ describe("rubric review before activation (BUG-566)", () => {
     fireEvent.click(keepButton());
     fireEvent.click(screen.getByRole("radio", { name: "Other reason" }));
     fireEvent.click(screen.getByRole("button", { name: "Keep wording" }));
-    // Other needs a note saying what the reason is.
-    expect(screen.getByText("Add a note for this reason.")).toBeInTheDocument();
+    expect(screen.getByText("Add a note saying what you compared.")).toBeInTheDocument();
     expect(screen.getByLabelText("Note")).toHaveFocus();
     fireEvent.change(screen.getByLabelText("Note"), { target: { value: "  Matches the printed copy  " } });
     fireEvent.click(screen.getByRole("button", { name: "Keep wording" }));
@@ -162,6 +168,7 @@ describe("rubric review before activation (BUG-566)", () => {
       acknowledgements: [{ issue_id: 11, reason_code: "other", note: "Matches the printed copy" }],
     });
     expect(await screen.findByText("Kept by Ana Reyes, Oct 30, 2026: The document says it this way", { exact: false })).toBeInTheDocument();
+    expect(screen.getByText("Levelled criterion · 2 levels · 1 kept as written")).toBeInTheDocument();
 
     // The next save starts from the revision the server returned.
     fireEvent.click(screen.getByRole("button", { name: "Confirm and activate format" }));
@@ -191,12 +198,13 @@ describe("rubric review before activation (BUG-566)", () => {
 
     fireEvent.click(keepButton());
     fireEvent.click(screen.getByRole("radio", { name: "The document says it this way" }));
+    fireEvent.change(screen.getByLabelText("Note"), { target: { value: "Checked against page 1" } });
     fireEvent.click(screen.getByRole("button", { name: "Keep wording" }));
     fireEvent.click(screen.getByRole("button", { name: "Confirm and activate format" }));
     await waitFor(() => expect(puts(fetchMock)).toHaveLength(2));
     // Revision 5, from the refusal: taking 6 from the later read would
     // overwrite the other tab's save.
-    expect(puts(fetchMock)[1]).toMatchObject({ confirm: true, expected_revision: 5, acknowledgements: [{ issue_id: 11, reason_code: "document_wording" }] });
+    expect(puts(fetchMock)[1]).toMatchObject({ confirm: true, expected_revision: 5, acknowledgements: [{ issue_id: 11, reason_code: "document_wording", note: "Checked against page 1" }] });
   });
 
   it("keeps the instructor's edits when the format changed elsewhere, and reloads only after they agree", async () => {
@@ -308,8 +316,11 @@ describe("rubric review before activation (BUG-566)", () => {
     const fetchMock = serve(() => rubric({ is_active: true }));
     renderPage();
     expect(await screen.findByText("1 item to check in this active format. Changes can be saved once every item is kept.")).toBeInTheDocument();
+    expect(screen.getByText(/upload a corrected copy of the format as a new version\./)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Confirm and activate format" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save draft" })).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Criterion text, criterion 1"), { target: { value: "Introduction, edited" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
     const summary = await screen.findByRole("alert");
     expect(summary).toHaveTextContent("Check these items before saving changes to this active format");
     expect(summary).toHaveTextContent("Nothing was saved. Your edits are still on this page.");
@@ -323,9 +334,10 @@ describe("rubric review before activation (BUG-566)", () => {
     renderPage();
     fireEvent.click(await screen.findByRole("button", { name: "Keep this wording, Purpose, Proficient" }));
     fireEvent.click(screen.getByRole("radio", { name: "The document says it this way" }));
+    fireEvent.change(screen.getByLabelText("Note"), { target: { value: "Checked against page 1" } });
     fireEvent.click(screen.getByRole("button", { name: "Keep wording" }));
     fireEvent.change(screen.getByLabelText("Criterion text, criterion 1"), { target: { value: "Introduction, edited" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(puts(fetchMock)).toHaveLength(1));
     const summary = await screen.findByRole("alert");
@@ -355,5 +367,67 @@ describe("rubric review before activation (BUG-566)", () => {
     fireEvent.keyDown(screen.getByRole("radio", { name: "Other reason" }), { key: "Escape" });
     expect(screen.queryByRole("button", { name: "Keep wording" })).not.toBeInTheDocument();
     await waitFor(() => expect(keepButton()).toHaveFocus());
+  });
+
+  it("keeps the form open on Escape once something has been entered", async () => {
+    serve(() => rubric());
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Keep this wording, Purpose, Proficient" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Other reason" }));
+    fireEvent.keyDown(screen.getByRole("radio", { name: "Other reason" }), { key: "Escape" });
+    expect(screen.getByRole("button", { name: "Keep wording" })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "Other reason" })).toBeChecked();
+  });
+
+  it("keeps a row note without a note unless the reason is Other", async () => {
+    const leftOut: RubricIssueDetail = { id: 14, criterion_id: 2, level: null, code: "level_left_out", message: "Row has text under Acceptable.", status: "open", resolution: null };
+    const fetchMock = serve(() => rubric({ parse_issue_details: [leftOut] }));
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Keep this wording, Purpose" }));
+    expect(screen.getByLabelText("Note (optional)")).toBeInTheDocument();
+    expect(screen.queryByText(/Say what you compared in the original/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("radio", { name: "Other reason" }));
+    fireEvent.click(screen.getByRole("button", { name: "Keep wording" }));
+    expect(screen.getByText("Add a note for this reason.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("radio", { name: "The document says it this way" }));
+    fireEvent.click(screen.getByRole("button", { name: "Keep wording" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
+    await waitFor(() => expect(puts(fetchMock)).toHaveLength(1));
+    expect(puts(fetchMock)[0]).toMatchObject({ acknowledgements: [{ issue_id: 14, reason_code: "document_wording", note: null }] });
+  });
+
+  it("offers the next item from a level that was just kept", async () => {
+    const beginner: RubricIssueDetail = { ...ISSUE, id: 13, level: 1, code: "wrong_column", message: "Under another level." };
+    serve(() => rubric({ parse_issue_details: [beginner, ISSUE] }));
+    renderPage();
+    expect(await screen.findByText("2 items to check before this format can be activated")).toBeInTheDocument();
+    expect(screen.getByText(/You cannot correct a level's wording on this page yet\..*leave this format inactive and upload a corrected copy\./)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Keep this wording, Purpose, Beginner" }));
+    fireEvent.click(screen.getByRole("radio", { name: "The document says it this way" }));
+    fireEvent.change(screen.getByLabelText("Note"), { target: { value: "The original has it under Beginner" } });
+    fireEvent.click(screen.getByRole("button", { name: "Keep wording" }));
+
+    expect(within(beginnerRow()).getByText("Kept as written")).toBeInTheDocument();
+    fireEvent.click(within(beginnerRow()).getByRole("button", { name: "Next item" }));
+    expect(screen.getByRole("heading", { level: 4, name: "Proficient" })).toHaveFocus();
+    expect(screen.getByText("Item 1 of 1: Purpose · Proficient.")).toBeInTheDocument();
+  });
+
+  it("says when a refused save on an active format would reopen wording that was kept", async () => {
+    const kept: RubricIssueDetail = { ...ISSUE, status: "acknowledged", resolution: { kind: "acknowledged", reason_code: "document_wording", note: "Checked", by_instructor_id: 1, by_name: "Ana Reyes", at: "2026-10-30T10:00:00Z" } };
+    const fetchMock = serve(() => rubric({ is_active: true, parse_issue_details: [kept] }), (_url, init) => init?.method === "PUT"
+      ? new Response(JSON.stringify({ error: { code: "unresolved_rubric_issues", message: "Open", details: { open_issue_ids: [11], revision: 4 } } }), { status: 409 })
+      : undefined);
+    renderPage();
+    expect(await screen.findByText(/This format is active\. Saved changes apply to new checks straight away\./)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Criterion text, criterion 1"), { target: { value: "Introduction, edited" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => expect(puts(fetchMock)).toHaveLength(1));
+    const summary = await screen.findByRole("alert");
+    expect(summary).toHaveTextContent("Saving these changes would reopen an item you kept");
+    expect(summary).not.toHaveTextContent("no longer matches the document");
+    expect(screen.getByLabelText("Criterion text, criterion 1")).toHaveValue("Introduction, edited");
   });
 });

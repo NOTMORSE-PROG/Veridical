@@ -3,7 +3,7 @@
 // quiet; only the ones VERIDICAL could not match ask for a decision.
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import type { RubricAcknowledgementReason, RubricIssueDetail, RubricLevel, RubricSourceSummary } from "../api/types";
-import { RUBRIC_KEEP_NOTE_MAX_LENGTH, RUBRIC_KEEP_REASONS } from "../config/ui";
+import { RUBRIC_KEEP_NOTE_MAX_LENGTH, RUBRIC_KEEP_NOTE_REQUIRED_CODES, RUBRIC_KEEP_REASONS } from "../config/ui";
 import { Button } from "../ui/Button";
 import { useShowSourcePage } from "./sourcePage";
 import {
@@ -58,7 +58,13 @@ export function RubricReviewStatus({ total, open, readOnly, isActive, legacy, on
         ? `All ${items(total)} kept or settled.${isActive ? "" : " You can activate this format."}`
         : "Every level description VERIDICAL could place matches a cell in the document. Read each criterion before you activate.";
   return <div className={`signal-review-status${open ? " is-open" : ""}`} role="status">
-    <p>{text}</p>
+    <div className="signal-copy-flow">
+      <p>{text}</p>
+      {open > 0 && !readOnly && <p className="signal-review-status__hint">
+        You cannot correct a level's wording on this page yet. For now, keep the wording with a note, remove the criterion,
+        {isActive ? " or upload a corrected copy of the format as a new version." : " or leave this format inactive and upload a corrected copy."}
+      </p>}
+    </div>
     {open > 0 && <Button variant="secondary" onClick={onFirst}>Go to first item</Button>}
   </div>;
 }
@@ -90,8 +96,9 @@ export function SourceReadingSummary({ summary }: { summary: RubricSourceSummary
   </details>;
 }
 
-function KeepWordingForm({ headingId, onKeep, onCancel }: {
+function KeepWordingForm({ headingId, noteRequired, onKeep, onCancel }: {
   headingId: string;
+  noteRequired: boolean;
   onKeep: (reason: RubricAcknowledgementReason, note: string | null) => void;
   onCancel: () => void;
 }) {
@@ -103,14 +110,18 @@ function KeepWordingForm({ headingId, onKeep, onCancel }: {
   const noteRef = useRef<HTMLTextAreaElement>(null);
   useEffect(() => { firstRef.current?.focus(); }, []);
   const missingReason = tried && reason === null;
-  const missingNote = tried && reason === "other" && !note.trim();
+  const needsNote = noteRequired || reason === "other";
+  const missingNote = tried && needsNote && !note.trim();
   return <form className="signal-keep-form" aria-labelledby={headingId}
-    onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); onCancel(); } }}
+    onKeyDown={(event) => {
+      // Escape closes an untouched form; once something is entered, Cancel does.
+      if (event.key === "Escape" && reason === null && !note.trim()) { event.preventDefault(); onCancel(); }
+    }}
     onSubmit={(event) => {
       event.preventDefault();
       setTried(true);
       if (reason === null) { firstRef.current?.focus(); return; }
-      if (reason === "other" && !note.trim()) { noteRef.current?.focus(); return; }
+      if (needsNote && !note.trim()) { noteRef.current?.focus(); return; }
       onKeep(reason, note.trim() ? note.trim() : null);
     }}>
     <p id={`${id}-consequence`}>VERIDICAL will grade with this wording exactly as shown.</p>
@@ -124,11 +135,13 @@ function KeepWordingForm({ headingId, onKeep, onCancel }: {
       </label>)}
     </fieldset>
     <div className="signal-criterion-field">
-      <label htmlFor={`${id}-note`}>{reason === "other" ? "Note" : "Note (optional)"}</label>
+      <label htmlFor={`${id}-note`}>{needsNote ? "Note" : "Note (optional)"}</label>
+      {noteRequired && <small id={`${id}-note-hint`}>Say what you compared in the original, for example where it has this wording.</small>}
       <textarea id={`${id}-note`} ref={noteRef} rows={2} maxLength={RUBRIC_KEEP_NOTE_MAX_LENGTH} value={note}
-        aria-invalid={missingNote || undefined} aria-describedby={missingNote ? `${id}-note-error` : undefined}
+        aria-invalid={missingNote || undefined}
+        aria-describedby={[noteRequired ? `${id}-note-hint` : "", missingNote ? `${id}-note-error` : ""].filter(Boolean).join(" ") || undefined}
         onChange={(event) => setNote(event.target.value)} />
-      {missingNote && <small id={`${id}-note-error`} className="signal-field-error">Add a note for this reason.</small>}
+      {missingNote && <small id={`${id}-note-error`} className="signal-field-error">{noteRequired ? "Add a note saying what you compared." : "Add a note for this reason."}</small>}
     </div>
     <div className="signal-keep-form__actions">
       <Button type="submit" variant="secondary">Keep wording</Button>
@@ -197,7 +210,12 @@ export function CriterionLevels({
   const statuses = levels.map((level) => levelStatus(level, issues.filter((issue) => issue.level === level.level), pending));
   const needsAttention = [...statuses, rowStatus].some((status) => status?.kind === "check" || status?.kind === "kept_pending");
   const allMatch = statuses.every((status) => status.kind === "matches") && rowStatus === null;
-  const row = rowLocation(levels);
+  // Counts the same levels the "Kept as written" tag marks, saved or not.
+  const kept = statuses.filter((status) => status.kind === "kept" || status.kind === "kept_pending").length;
+  // The row is where the levels that matched were found; a misplaced level
+  // can point at another criterion's row.
+  const matchedRow = rowLocation(levels.filter((_, index) => statuses[index].kind === "matches"));
+  const row = matchedRow.text ? matchedRow : rowLocation(levels);
   const rowHeadingId = levelAnchorId(criterionKey, null);
   // Once open, the list stays open: settling the last item must not fold it
   // away from under the instructor.
@@ -214,11 +232,17 @@ export function CriterionLevels({
       onClick={(event) => { showPage(page, event.currentTarget); onPageShown(page); }}>Show page {page}</Button>;
   }
 
+  function nextButton(fromIssues: readonly RubricIssueDetail[]) {
+    const next = nextAfter(fromIssues);
+    return next ? <div className="signal-level-row__actions"><Button variant="quiet" onClick={() => onGo(next)}>Next item</Button></div> : null;
+  }
+
   function actions(target: number | "row", targetIssues: readonly RubricIssueDetail[], headingId: string, label: string) {
     if (!targetIssues.length) return null;
     const actionId = `${headingId}-keep`;
     const next = nextAfter(targetIssues);
     if (keeping === target && !readOnly) return <KeepWordingForm headingId={headingId}
+      noteRequired={targetIssues.some((issue) => RUBRIC_KEEP_NOTE_REQUIRED_CODES.includes(issue.code))}
       onCancel={() => { setKeeping(null); focusLater(actionId); }}
       onKeep={(reason, note) => { onKeep(targetIssues, reason, note); setKeeping(null); focusLater(headingId); }} />;
     return <div className="signal-level-row__actions">
@@ -236,17 +260,19 @@ export function CriterionLevels({
       onUndo={() => { onUndoKeep(rowIssues); focusLater(`${rowHeadingId}-keep`); }} />
     {row.text && levels.length > 0 && <p className="signal-level-row__location"><span>{row.text}</span>{showPageButton(row.page, "whole row")}</p>}
     {rowStatus.kind === "check" && actions("row", rowStatus.issues, rowHeadingId, criterionName)}
+    {rowStatus.kind === "kept_pending" && nextButton(rowStatus.issues)}
   </div>;
   if (!levels.length) return rowBlock ? <div className="signal-levels">{rowBlock}</div> : null;
 
   return <details id={`criterion-levels-${criterionKey}`} className="signal-levels" open={open}
     onToggle={(event) => setOpen(event.currentTarget.open)}>
-    <summary aria-describedby={summaryDescribedBy}>Levelled criterion · {levels.length} levels{allMatch ? " · all match the document" : ""}</summary>
+    <summary aria-describedby={summaryDescribedBy}>Levelled criterion · {levels.length} levels{allMatch ? " · all match the document" : ""}{kept ? ` · ${kept} kept as written` : ""}</summary>
     {rowBlock}
     <ol>{levels.map((level, index) => {
       const status = statuses[index];
       const headingId = levelAnchorId(criterionKey, level.level);
-      const own = level.source && level.source.page !== null ? { page: level.source.page, text: sourceLocation(level.source) } : null;
+      const ownText = level.source && level.source.match !== "unmatched" ? sourceLocation(level.source) : null;
+      const own = level.source && ownText ? { page: level.source.page, text: ownText } : null;
       // A level that could not be placed still points at its criterion's row.
       const location = own ?? (row.text ? row : null);
       const levelIssues = status.kind === "check" || status.kind === "kept_pending" || status.kind === "kept" ? status.issues : [];
@@ -262,6 +288,7 @@ export function CriterionLevels({
           <span>{location.text}</span>{showPageButton(location.page, level.name)}
         </p>}
         {status.kind === "check" && actions(level.level, status.issues, headingId, `${criterionName}, ${level.name}`)}
+        {status.kind === "kept_pending" && nextButton(status.issues)}
       </li>;
     })}</ol>
   </details>;

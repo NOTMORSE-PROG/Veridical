@@ -7072,6 +7072,9 @@
     font-weight: var(--signal-weight-semibold);
   }
 
+  /* The level list's own span rule is more specific; keep the tag on one line. */
+  .signal-levels .signal-level-tag { display: inline-flex; }
+  .signal-levels .signal-level-tag span { display: inline; color: inherit; font-size: inherit; }
   .signal-level-tag svg { display: inline-block; flex: none; }
   .signal-level-tag--check { color: var(--color-signal-review-text); }
   .signal-level-tag--not-checked,
@@ -7128,11 +7131,12 @@
   }
 
   .signal-review-status p { margin: 0; font-weight: var(--signal-weight-semibold); }
+  .signal-review-status .signal-review-status__hint { font-weight: var(--signal-weight-medium); font-size: var(--signal-type-label); }
 
   .signal-review-nav {
     position: sticky;
     inset-block-start: 0;
-    z-index: var(--signal-z-raised);
+    z-index: var(--signal-z-sticky);
     display: flex;
     flex-wrap: wrap;
     align-items: center;

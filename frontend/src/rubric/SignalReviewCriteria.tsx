@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useBlocker, useParams } from "react-router";
 import { ApiError } from "../api/client";
 import type { CriterionType, RubricAcknowledgementReason, RubricIssueDetail, RubricLevel } from "../api/types";
-import { WEIGHT_IMPORTANCE_PREVIEW } from "../config/ui";
+import { RUBRIC_CRITERION_NAME_MAX_CHARS, WEIGHT_IMPORTANCE_PREVIEW } from "../config/ui";
 import { useRouteFocus } from "../routing/useRouteFocus";
 import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
@@ -301,7 +301,8 @@ function CriteriaEditor({ id }: { id: number }) {
   // Set when activation (or, on an active format, any save) was refused for
   // items still to check; `unknown` counts items a refused save would have
   // raised that this page has not seen.
-  const [blocked, setBlocked] = useState<{ kind: "activate" | "save"; unknown: number } | null>(null);
+  // `reopened` counts kept items the refused edit would have reopened.
+  const [blocked, setBlocked] = useState<{ kind: "activate" | "save"; unknown: number; reopened: number } | null>(null);
   const conflictRef = useRef<HTMLDivElement>(null);
   const focusConflictAfterDialog = useRef(false);
   const [discardOpen, setDiscardOpen] = useState(false);
@@ -373,10 +374,13 @@ function CriteriaEditor({ id }: { id: number }) {
   const focusBlockedSummary = useRef(false);
   useEffect(() => {
     if (!blocked) { focusBlockedSummary.current = false; return; }
-    if (!focusBlockedSummary.current || !blockedRef.current) return;
+    // Behind the leave dialog the page is inert; wait until it has closed.
+    if (!focusBlockedSummary.current || !blockedRef.current || blocker.state === "blocked") return;
     focusBlockedSummary.current = false;
-    blockedRef.current.scrollIntoView({ block: "nearest" });
-    blockedRef.current.focus({ preventScroll: true });
+    requestAnimationFrame(() => {
+      blockedRef.current?.scrollIntoView({ block: "nearest" });
+      blockedRef.current?.focus({ preventScroll: true });
+    });
   });
 
   useEffect(() => {
@@ -443,7 +447,9 @@ function CriteriaEditor({ id }: { id: number }) {
     : [];
 
   function criterionName(row: CriterionRow, index: number): string {
-    return tidy(row.text) || `Criterion ${index + 1}`;
+    const name = tidy(row.text);
+    if (!name) return `Criterion ${index + 1}`;
+    return name.length > RUBRIC_CRITERION_NAME_MAX_CHARS ? `${name.slice(0, RUBRIC_CRITERION_NAME_MAX_CHARS).trimEnd()}…` : name;
   }
 
   function issuePlace(issue: RubricIssueDetail): { label: string; anchor: string } {
@@ -514,19 +520,27 @@ function CriteriaEditor({ id }: { id: number }) {
     const ids = Array.isArray(error.details.open_issue_ids) ? error.details.open_issue_ids : [];
     focusBlockedSummary.current = true;
     if (rubric!.is_active) {
-      const unknown = ids.filter((id) => !pageIssues.some((issue) => issue.id === id)).length;
-      setBlocked({ kind: "save", unknown });
+      // Every refused item the page is not already listing as open: either a
+      // kept item the edit would reopen, or one that would newly fail.
+      const listed = new Set(openItems.map((issue) => issue.id));
+      const refused = ids.filter((id): id is number => typeof id === "number" && !listed.has(id));
+      const reopened = refused.filter((id) => pending.has(id)
+        || pageIssues.some((issue) => issue.id === id && issue.status === "acknowledged")).length;
+      setBlocked({ kind: "save", unknown: refused.length - reopened, reopened });
       announce("Nothing was saved. Check these items first.");
-      void refetch();
       return;
     }
     setSavedRows(submitted);
     setRemovedStack([]);
-    setPending(new Map());
-    setBlocked({ kind: "activate", unknown: 0 });
+    setBlocked({ kind: "activate", unknown: 0, reopened: 0 });
     announce("Your changes were saved. The format was not activated.");
     if (revision !== null) setLoadedRevision(revision);
-    void refetch().then((result) => { if (revision === null && result.data) setLoadedRevision(result.data.revision ?? null); });
+    void refetch().then((result) => {
+      if (!result.isSuccess) return;
+      // The server stored the kept wording; the fresh read now shows it.
+      setPending(new Map());
+      if (revision === null) setLoadedRevision(result.data.revision ?? null);
+    });
   }
 
   // Any save of an active format, and any activation, waits until every item
@@ -534,7 +548,7 @@ function CriteriaEditor({ id }: { id: number }) {
   function blockedBeforeSaving(confirm: boolean): boolean {
     if (!openItems.length || !(rubric!.is_active || confirm)) return false;
     focusBlockedSummary.current = true;
-    setBlocked({ kind: rubric!.is_active ? "save" : "activate", unknown: 0 });
+    setBlocked({ kind: rubric!.is_active ? "save" : "activate", unknown: 0, reopened: 0 });
     return true;
   }
 
@@ -550,6 +564,8 @@ function CriteriaEditor({ id }: { id: number }) {
 
   function savedAnnouncement(out: { parse_issue_details?: RubricIssueDetail[] | null }, confirm: boolean) {
     if (confirm) return "Format confirmed and activated.";
+    // An active format's changes are live as soon as they are saved.
+    if (rubric!.is_active) return "Saved. New checks use this version.";
     if (!out.parse_issue_details) return "Draft saved.";
     const left = out.parse_issue_details.filter((issue) => issue.status === "open").length;
     return left ? `Draft saved. ${left} ${left === 1 ? "item" : "items"} to check remain.` : "Draft saved.";
@@ -739,12 +755,13 @@ function CriteriaEditor({ id }: { id: number }) {
             {rubric.parse_issues?.length ? <ul>{rubric.parse_issues.map((issue) => <li key={issue}>{issue}</li>)}</ul> : null}
           </Alert>
         )}
-        {blocked && openItems.length + blocked.unknown > 0 && (
+        {blocked && openItems.length + blocked.unknown + blocked.reopened > 0 && (
           <div ref={blockedRef} tabIndex={-1} role="alert" className="signal-error-summary signal-criteria-errors">
             <h2>{blocked.kind === "save" ? "Check these items before saving changes to this active format" : "Check these items before activating"}</h2>
             {blocked.kind === "save" && <p>Nothing was saved. Your edits are still on this page.</p>}
             <ul>{openItems.map((issue) => <li key={issue.id}><button type="button" onClick={() => goToIssue(issue)}>
               {issuePlace(issue).label}: {issueCopy(issue)}</button></li>)}</ul>
+            {blocked.reopened > 0 && <p>Saving these changes would reopen {blocked.reopened === 1 ? "an item" : `${blocked.reopened} items`} you kept, because the wording {blocked.reopened === 1 ? "it was" : "they were"} kept for would change. Change it back before saving.</p>}
             {blocked.unknown > 0 && <p>Saving these changes would also leave {blocked.unknown === 1 ? "one level description" : `${blocked.unknown} level descriptions`} that no longer {blocked.unknown === 1 ? "matches" : "match"} the document. Change {blocked.unknown === 1 ? "it" : "them"} back before saving.</p>}
           </div>
         )}
@@ -796,7 +813,8 @@ function CriteriaEditor({ id }: { id: number }) {
               <Button variant="secondary" onClick={distributeWeights}>Set equal relative weights</Button>
               <p>Weights are relative. VERIDICAL shows importance as Low, Medium, or High.</p>
               <p>Saving or confirming requires text and a relative weight greater than zero for every criterion. Evidence expected is optional.</p>
-              {details !== null && <p>You can save a draft at any time. Activation waits until each item is checked and kept, or no longer applies.</p>}
+              {details !== null && !rubric.is_active && <p>You can save a draft at any time. Activation waits until each item is checked and kept, or no longer applies.</p>}
+              {rubric.is_active && <p>This format is active. Saved changes apply to new checks straight away.</p>}
             </div>
             <div>
               <Button
@@ -805,9 +823,9 @@ function CriteriaEditor({ id }: { id: number }) {
                 aria-disabled={save.isPending || undefined}
                 onClick={() => attemptSave(false)}
               >
-                Save draft
+                {rubric.is_active ? "Save changes" : "Save draft"}
               </Button>
-              <Button
+              {!rubric.is_active && <Button
                 variant="brand"
                 aria-busy={save.isPending || undefined}
                 aria-disabled={save.isPending || undefined}
@@ -815,7 +833,7 @@ function CriteriaEditor({ id }: { id: number }) {
                 onClick={() => attemptSave(true)}
               >
                 Confirm and activate format
-              </Button>
+              </Button>}
             </div>
           </div>
         )}
@@ -839,7 +857,7 @@ function CriteriaEditor({ id }: { id: number }) {
         <Dialog
           title="Leave without saving your changes?"
           onClose={() => resolveBlocker("keep")}
-          actions={<><Button variant="secondary" disabled={save.isPending} onClick={() => resolveBlocker("keep")}>Keep editing</Button><Button variant="danger" disabled={save.isPending} onClick={() => resolveBlocker("leave")}>Leave without saving</Button><Button variant="brand" busy={save.isPending} onClick={saveAndLeave}>Save draft and leave</Button></>}
+          actions={<><Button variant="secondary" disabled={save.isPending} onClick={() => resolveBlocker("keep")}>Keep editing</Button><Button variant="danger" disabled={save.isPending} onClick={() => resolveBlocker("leave")}>Leave without saving</Button><Button variant="brand" busy={save.isPending} onClick={saveAndLeave}>{rubric.is_active ? "Save changes and leave" : "Save draft and leave"}</Button></>}
         >
           <div className="signal-dialog-copy"><p>Your unsaved criteria changes will be discarded if you leave now.</p>{leaveSaveFailed && saveError && <Alert title="Could not save" tone="error" role="alert">{saveError}</Alert>}</div>
         </Dialog>
