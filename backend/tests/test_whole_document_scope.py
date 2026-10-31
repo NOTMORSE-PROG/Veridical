@@ -10,7 +10,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.checks.support import _capability_failure, locatable_subclaim
+from app.checks.support import _capability_failure, apply_support, locatable_subclaim
+from app.models.enums import ResultOutcome
 
 NAMES = ("BEGINNER", "ACCEPTABLE", "PROFICIENT", "EXEMPLARY")
 
@@ -153,14 +154,80 @@ def test_the_strict_locatable_gate_is_unchanged(item, level):
     assert locatable_subclaim(item, {"verdict": level})
 
 
+# The same format as parsed for an earlier version: its Purpose evidence request
+# says "clearly and consistently stated", which is about the purpose statement,
+# not about the whole paper.
+PURPOSE_EARLIER_PARSE = criterion(
+    "Purpose",
+    "A reader evaluates whether the paper's purpose or central argument is clearly and "
+    "consistently stated.",
+    "The purpose or argument is generally unclear. Central purpose or argument is not clearly "
+    "identified.",
+    "The paper's purpose is clearly stated in a single sentence. The central purpose or argument "
+    "is not consistently clear throughout the paper.",
+    "The paper's purpose is clearly stated.",
+    "The paper's purpose is clearly and concisely stated in a single sentence, which is engaging, "
+    "and thought provoking.",
+)
+
+
+def test_a_purpose_statement_described_as_consistently_stated_stays_locatable():
+    assert guard(PURPOSE_EARLIER_PARSE, "EXEMPLARY") is None
+    assert guard(PURPOSE_EARLIER_PARSE, "PROFICIENT") is None
+    assert locatable_subclaim(PURPOSE_EARLIER_PARSE, {"verdict": "EXEMPLARY"})
+
+
+@pytest.mark.parametrize(
+    "descriptor",
+    [
+        "The paper has numerous grammatical errors.",
+        "There are frequent spelling and grammar errors.",
+        "The writing has many grammatical and spelling errors.",
+        "There are occasional grammatical or mechanical errors.",
+        "The writing is error-free.",
+        "The paper is free from grammatical, spelling, and mechanical errors.",
+        "Errors are rare.",
+        "The tone is inconsistently professional.",
+        "Readers gain important insights.",
+    ],
+)
+def test_other_formats_wording_for_a_whole_paper_property_is_recognised(descriptor):
+    item = criterion("Writing", None, "Poor.", "Fair.", descriptor, "Best.")
+    assert guard(item, "PROFICIENT") is not None
+
+
 @pytest.mark.parametrize(
     "text",
     [
         "The system logs each error code it receives.",
         "A reader examines the methodology chapter.",
         "The study reports an error rate of 3%.",
+        # How the format parser phrases an evidence request, about one place.
+        "A reader can locate the purpose statement in chapter 1.",
+        "The objectives are consistent with the problem statement.",
     ],
 )
 def test_wording_about_one_place_is_not_mistaken_for_the_whole_paper(text):
     item = criterion(text, None, "Done.", "Done well.", "Done very well.", "Done best.")
     assert guard(item, "PROFICIENT") is None
+
+
+@pytest.mark.parametrize("decide", [True, False])
+def test_a_whole_paper_weakness_claimed_from_one_quote_goes_to_the_instructor(decide):
+    # The lowest level is a claim of weakness: it needs evidence of the
+    # weakness, and one quote cannot show an error rate, so it is never kept.
+    failure = guard(GRAMMAR, "BEGINNER")
+    detail = {"verdict": "BEGINNER", "level": {"name": "BEGINNER"}, "evidence": []}
+    outcome, updated = apply_support(
+        ResultOutcome.passed, detail, failure, decide=decide, adverse=True
+    )
+    assert outcome == ResultOutcome.escalated
+    assert updated["support_withheld"] and "verdict" not in updated
+
+
+def test_a_whole_paper_grade_is_kept_with_a_caution_under_decide():
+    failure = guard(TONE, "EXEMPLARY")
+    detail = {"verdict": "EXEMPLARY", "level": {"name": "EXEMPLARY"}, "evidence": []}
+    outcome, updated = apply_support(ResultOutcome.passed, detail, failure, decide=True)
+    assert outcome == ResultOutcome.passed
+    assert updated["support_caution"] and updated["support_check"]["status"] == "unsupported"
