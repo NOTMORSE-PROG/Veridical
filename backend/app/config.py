@@ -1161,6 +1161,16 @@ class Settings(BaseSettings):
     reuse_confirm_shingle_words: int = Field(default=5, ge=1)
     reuse_confirm_shingle_share: float = Field(default=0.5, ge=0, le=1)
     reuse_confirm_run_words: int = Field(default=12, ge=1)
+    # The shingle-share test needs this many words in the shorter passage; a
+    # few-word fragment shares half its shingles with almost anything.
+    reuse_confirm_share_min_words: int = Field(default=30, ge=1)
+    # How many nearest Library passages are tried, in order, for one own
+    # passage before it is given up: a nearer topic-only passage must not hide
+    # the real source one rank below it.
+    reuse_confirm_candidates: int = Field(default=5, ge=1)
+    # Withheld leads written to the audit event, so a past decision can be
+    # reconstructed after the Library changes.
+    reuse_confirm_audit_limit: int = Field(default=50, ge=0)
 
     # --- Library (V-066, F7.1/F7.2 surfaces) -----------------------------------
     # How many chapters' worth of passage excerpt the library shows for a

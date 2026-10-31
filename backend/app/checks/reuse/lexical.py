@@ -48,11 +48,19 @@ def longest_common_run(a: str, b: str) -> int:
     return best
 
 
+def wording_evidence(a: str, b: str, settings: Settings) -> dict:
+    """The two measures, and whether either confirms shared wording. The
+    share test only counts when the shorter passage is long enough for half
+    its shingles to mean something."""
+    share = shingle_overlap(a, b, settings.reuse_confirm_shingle_words)
+    run = longest_common_run(a, b)
+    long_enough = min(len(words(a)), len(words(b))) >= settings.reuse_confirm_share_min_words
+    confirmed = (long_enough and share >= settings.reuse_confirm_shingle_share) or (
+        run >= settings.reuse_confirm_run_words
+    )
+    return {"shingle_share": round(share, 3), "longest_run": run, "confirmed": confirmed}
+
+
 def shares_wording(a: str, b: str, settings: Settings) -> bool:
     """Whether two passages share wording, not just a topic."""
-    if (
-        shingle_overlap(a, b, settings.reuse_confirm_shingle_words)
-        >= settings.reuse_confirm_shingle_share
-    ):
-        return True
-    return longest_common_run(a, b) >= settings.reuse_confirm_run_words
+    return wording_evidence(a, b, settings)["confirmed"]

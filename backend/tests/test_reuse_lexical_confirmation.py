@@ -48,12 +48,53 @@ def test_same_genre_text_without_shared_wording_is_not_confirmed():
     assert not shares_wording(REQUIREMENTS_A, REQUIREMENTS_B, settings)
 
 
-def test_a_short_copy_inside_a_longer_passage_is_confirmed_by_its_run():
-    settings = _settings()
-    own = "Some surrounding words of the host thesis come first. " + COPIED
-    other = COPIED + " The source then goes on to discuss something else entirely here."
-    assert longest_common_run(own, other) >= settings.reuse_confirm_run_words
-    assert shares_wording(own, other, settings)
+def _filler(prefix: str, count: int) -> list[str]:
+    # Letter-only words: the tokenizer drops digits.
+    letters = "abcdefghijklmnopqrstuvwxyz"
+    return [f"{prefix}{a}{b}" for a in letters for b in letters][:count]
+
+
+def test_one_long_shared_run_confirms_when_the_shingle_share_is_low():
+    """The run test alone: two long passages share one 13-word run."""
+    run = _filler("run", 13)
+    own = " ".join(_filler("own", 60) + run)
+    other = " ".join(run + _filler("oth", 60))
+    assert shingle_overlap(own, other, 5) < 0.5
+    assert shares_wording(own, other, _settings())
+    assert not shares_wording(own, other, _settings(reuse_confirm_run_words=50))
+
+
+def _segments(sep_prefix: str, count: int, size: int) -> tuple[list[list[str]], str]:
+    segments = [_filler(f"s{chr(97 + k)}", size) for k in range(count)]
+    seps = _filler(sep_prefix, count)
+    text = " ".join(" ".join(seg) + " " + sep for seg, sep in zip(segments, seps, strict=True))
+    return segments, text
+
+
+def test_a_high_shingle_share_confirms_without_a_long_run():
+    """The share test alone: many 10-word runs, none as long as 12 words."""
+    _, own = _segments("xa", 6, 10)
+    _, other = _segments("xb", 6, 10)
+    assert longest_common_run(own, other) < 12
+    assert shingle_overlap(own, other, 5) >= 0.5
+    assert shares_wording(own, other, _settings())
+    assert not shares_wording(own, other, _settings(reuse_confirm_shingle_share=1.0))
+
+
+def test_the_share_is_taken_over_the_shorter_passage():
+    """A short passage whose shingles all recur in a much longer one."""
+    _, own = _segments("xa", 4, 10)
+    _, body = _segments("xb", 4, 10)
+    other = body + " " + " ".join(_filler("pad", 300))
+    assert longest_common_run(own, other) < 12
+    assert shares_wording(own, other, _settings())
+
+
+def test_a_fragment_too_short_for_the_share_test_needs_a_long_run():
+    fragment = "System should provide functionality to give personalized results"
+    assert shingle_overlap(fragment, REQUIREMENTS_A, 5) == 1.0
+    assert not shares_wording(fragment, REQUIREMENTS_A, _settings())
+    assert shares_wording(fragment, REQUIREMENTS_A, _settings(reuse_confirm_share_min_words=5))
 
 
 def test_lightly_edited_text_keeps_enough_shared_wording():

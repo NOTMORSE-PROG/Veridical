@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.service import write_audit_event
 from app.checks.reuse.embed import compute_document_embeddings, compute_passage_embeddings
-from app.checks.reuse.lexical import shares_wording
+from app.checks.reuse.lexical import wording_evidence
 from app.checks.reuse.query import (
     PassageMatch,
     SimilarityMatch,
@@ -308,6 +308,24 @@ def _remap(match, remapped: dict[int, tuple[int, int]]):
     )
 
 
+def _wording(evidence: dict) -> dict:
+    return {"shingle_share": evidence["shingle_share"], "longest_run": evidence["longest_run"]}
+
+
+def _withheld_lead(granularity: str, match, level, own: str, other: str, settings) -> dict:
+    """A match that was not raised, with the wording evidence it was judged
+    on (BUG-620). Only the opaque matched record id, as everywhere in audit."""
+    evidence = wording_evidence(own, other, settings)
+    return {
+        "granularity": granularity,
+        "matched_manuscript_id": match.matched_manuscript_id,
+        "similarity": round(match.similarity, 3),
+        "level": level,
+        "reason": "no_shared_wording",
+        **evidence,
+    }
+
+
 def _has_text(extraction: ExtractionResult) -> bool:
     return any(not block.is_furniture and block.text.strip() for block in extraction.blocks)
 
@@ -476,7 +494,16 @@ async def run_originality_reuse_check(
     passages = await asyncio.get_running_loop().run_in_executor(
         None, compute_passage_embeddings, extraction, settings
     )
-    passage_query_result = await query_similar_passages(session, manuscript_id, passages, settings)
+    passage_query_result = await query_similar_passages(
+        session,
+        manuscript_id,
+        passages,
+        settings,
+        # BUG-620: a passage match needs shared wording, tried over the
+        # nearest few candidates so a topic match cannot hide the real source.
+        confirm=lambda m: wording_evidence(m.own_text, m.matched_text, settings)["confirmed"],
+        candidates=settings.reuse_confirm_candidates,
+    )
     # V-077: byte-identical Library copies (two instructors adding the same
     # file) are reported against ONE representative, so a single source can
     # never read as two. Remaps only ids that already matched.
@@ -563,15 +590,12 @@ async def run_originality_reuse_check(
     # BUG-620: a similarity match is a finding only when the two passages
     # also share wording. Same-genre text (two requirements lists, two
     # signature blocks) sits close in the static embedding with no words in
-    # common; those leads are counted, not raised.
-    unconfirmed = 0
-    confirmed_passages = []
-    for passage_match in passage_matches:
-        if shares_wording(passage_match.own_text, passage_match.matched_text, settings):
-            confirmed_passages.append(passage_match)
-        else:
-            unconfirmed += 1
-    passage_matches = confirmed_passages
+    # common; those leads are counted and audited, not raised.
+    withheld_leads = [
+        _withheld_lead("passage", m, m.level, m.own_text, m.matched_text, settings)
+        for m in passage_query_result.unconfirmed
+        if m.matched_manuscript_id != resubmission_source_id
+    ]
 
     coarse_drafts = []
     for match in whole_and_chapter_matches:
@@ -602,25 +626,30 @@ async def run_originality_reuse_check(
                 own_chapter_index=match.own_chapter_index,
                 matched_chapter_index=match.matched_chapter_index,
             )
-        if supporting is not None and (
-            not shares_wording(supporting.own_text, supporting.matched_text, settings)
-            or (match.level != "exact_duplicate" and supporting.level is None)
-        ):
+        if supporting is not None:
+            lead = _withheld_lead(
+                "section",
+                match,
+                match.level,
+                supporting.own_text,
+                supporting.matched_text,
+                settings,
+            )
             # BUG-620: a section is reported as reused only when its best
             # evidence is itself a match: it shares wording and, for a
             # high-similarity section, clears the passage bar on its own. A
-            # section that sits near the threshold on topic, with a weaker
-            # passage (shared standard text, say) as its only evidence, is
-            # counted instead. A near-identical section keeps its evidence.
-            unconfirmed += 1
-            continue
-        if supporting is not None:
-            detail["supporting_passage"] = _supporting_passage_detail(supporting)
-        elif match.level != "exact_duplicate":
-            # Nothing to show and nothing to confirm: a high-similarity
-            # section with no passage evidence is topic, not text.
-            unconfirmed += 1
-            continue
+            # section near the threshold on topic, evidenced only by a weaker
+            # passage (shared standard text, say), is counted instead.
+            if not lead["confirmed"]:
+                withheld_leads.append(lead)
+                continue
+            if match.level != "exact_duplicate" and supporting.level is None:
+                withheld_leads.append({**lead, "reason": "evidence_below_passage_bar"})
+                continue
+            detail["supporting_passage"] = {
+                **_supporting_passage_detail(supporting),
+                "shared_wording": _wording(lead),
+            }
         elif severity == FlagSeverity.high:
             # Ticket's own fallback clause: "If a finding genuinely cannot
             # be evidenced, it should not be high severity." No real
@@ -629,10 +658,11 @@ async def run_originality_reuse_check(
             # passage archive at all (an image-only match, or one
             # ingested before F7.4 existed), or, for a chapter-level
             # match, this specific chapter pair has no passage on one or
-            # both sides even though other chapters do -- this finding can
-            # no longer force Not Ready (BUG-150) on evidence the
-            # instructor has no way to check (charter judgment rule 1).
-            # A near-identical match like this one is kept as a lead.
+            # both sides even though other chapters do (a chapter-level
+            # aggregate match can be driven by diffuse similarity spread
+            # across many passages, not one strong pairing) -- this
+            # finding can no longer force Not Ready (BUG-150) on evidence
+            # the instructor has no way to check (charter judgment rule 1).
             severity = FlagSeverity.med
             detail["evidence_unavailable"] = True
         coarse_drafts.append((severity, reason, anchor, detail))
@@ -682,9 +712,16 @@ async def run_originality_reuse_check(
             # Later Library mutations must not rewrite this report's scope.
             "library_passage_indexing": query_result.library_passage_indexing,
             "n_flags": n_flags,
-            # BUG-620: similarity matches not raised because the passages
-            # share no wording (topic or layout only).
-            "n_similar_without_shared_wording": unconfirmed,
+            # BUG-620: matches not raised. Kept apart because they mean
+            # different things: passages that share no wording (topic or
+            # layout only), and sections whose only evidence is a passage too
+            # weak to be a match itself.
+            "n_similar_without_shared_wording": sum(
+                lead["reason"] == "no_shared_wording" for lead in withheld_leads
+            ),
+            "n_sections_evidence_below_passage_bar": sum(
+                lead["reason"] == "evidence_below_passage_bar" for lead in withheld_leads
+            ),
             "first_upload_context": first_upload,
             "passages_found": len(passages),
         },
@@ -715,6 +752,9 @@ async def run_originality_reuse_check(
     for passage_match in passage_matches:
         severity, evidence_excerpt, page_anchor, detail = _passage_match_to_flag_draft(
             passage_match, first_upload=first_upload
+        )
+        detail["shared_wording"] = _wording(
+            wording_evidence(passage_match.own_text, passage_match.matched_text, settings)
         )
         session.add(
             Flag(
@@ -756,7 +796,13 @@ async def run_originality_reuse_check(
                 "confirm_shingle_words": settings.reuse_confirm_shingle_words,
                 "confirm_shingle_share": settings.reuse_confirm_shingle_share,
                 "confirm_run_words": settings.reuse_confirm_run_words,
+                "confirm_share_min_words": settings.reuse_confirm_share_min_words,
+                "confirm_candidates": settings.reuse_confirm_candidates,
             },
+            # BUG-620: what was not raised and why, so a past decision can be
+            # reconstructed after the Library changes. Opaque ids only.
+            "withheld_leads": withheld_leads[: settings.reuse_confirm_audit_limit],
+            "n_withheld_leads": len(withheld_leads),
             "matched_manuscript_ids": matched_manuscript_ids,
             "resubmission_source_id": resubmission_source_id,
         },
