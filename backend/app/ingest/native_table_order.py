@@ -22,6 +22,7 @@ from app.ingest.native_table_models import (
     TableCharacterRun,
     TableGridOrderWitness,
 )
+from app.ingest.normalize import NUL
 from app.ingest.schemas import Line
 
 Rect = tuple[float, float, float, float]
@@ -32,7 +33,9 @@ class TableOrderUnresolved(ValueError):
 
 
 def whitespace_text(value: str) -> str:
-    return " ".join(value.split())
+    # Line text has NUL dropped at extraction, but PyMuPDF's characters and
+    # table cells still carry it, so every comparison here drops it too.
+    return " ".join(value.replace(NUL, "").split())
 
 
 def text_digest(value: str) -> str:

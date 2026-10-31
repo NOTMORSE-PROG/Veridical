@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import get_settings
 from app.errors import ApiDownError, QuotaExhaustedError, RuntimeApiKeyRejectedError
+from app.ingest.normalize import NUL
 from app.llm.pool import ModelSpec, pool_daily_capacity
 from app.llm.result import GenerationResult, generation_result
 from app.models.audit import AuditLog
@@ -218,6 +219,28 @@ class LLMQueue:
         return value
 
     @staticmethod
+    def without_nul(value: Any) -> Any:
+        """Drop NUL from every string in a prompt or its context.
+
+        Extraction already drops NUL, but extractions stored before it did are
+        still read as they are. A prompt built from one would fail the audit
+        write (PostgreSQL text and JSONB cannot hold U+0000) after the model
+        call had been paid for, so the answer would never be cached. Values
+        without NUL are returned as the same objects.
+        """
+        if isinstance(value, str):
+            return value.replace(NUL, "") if NUL in value else value
+        if isinstance(value, dict):
+            cleaned = {key: LLMQueue.without_nul(item) for key, item in value.items()}
+            return value if all(cleaned[k] is v for k, v in value.items()) else cleaned
+        if isinstance(value, list | tuple):
+            cleaned = [LLMQueue.without_nul(item) for item in value]
+            if all(new is old for new, old in zip(cleaned, value, strict=True)):
+                return value
+            return cleaned if isinstance(value, list) else tuple(cleaned)
+        return value
+
+    @staticmethod
     def _input_hash(
         prompt_version: str,
         model: str,
@@ -259,6 +282,7 @@ class LLMQueue:
         check_run_id: int | None = None,
         **context: Any,
     ) -> dict[str, Any]:
+        prompt, context = self.without_nul(prompt), self.without_nul(context)
         # Bound memory to currently waiting requests. The shared runtime queue
         # coalesces identical misses; separate processes still require DB locking.
         key = self._input_hash(

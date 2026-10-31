@@ -174,6 +174,7 @@ class FakeLLMClient(LLMClient):
     async def complete(
         self, prompt_type: str, prompt: str, *, prompt_version: str = "unversioned", **context: Any
     ) -> dict[str, Any]:
+        prompt, context = LLMQueue.without_nul(prompt), LLMQueue.without_nul(context)
         # A per-pass fixture (`<type>__<consistency_pass>.json`) lets V-022's
         # self-consistency voting be exercised deterministically in fake
         # mode (ticket AC) — e.g. `semantic_grading__pass_2.json` can script

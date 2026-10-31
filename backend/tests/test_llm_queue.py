@@ -1109,3 +1109,43 @@ async def test_alias_records_are_scoped_by_owner_and_budget_day(session_factory,
     status = await queue.get_quota_status()
     assert status["recorded_budget_debits"] == 1 and status["cache_hits_today"] == 0
     assert status["legacy_models"] == []
+
+
+async def test_nul_in_a_prompt_from_an_older_extraction_is_dropped_before_the_call(
+    session_factory,
+):
+    """BUG-550: extractions stored before NUL was dropped still carry it. The
+    model call must not be paid for and then lost to a failed audit write."""
+    from app.ingest.normalize import NUL
+
+    transport = ScriptedTransport(responses=[{"ok": True}])
+    queue = _make_queue(session_factory, transport)
+    request = dict(
+        prompt_type="semantic_grading",
+        prompt=f"Chapter{NUL}One",
+        prompt_version="v1",
+        excerpts=[f"a{NUL}b", ("c", f"d{NUL}")],
+    )
+    assert await queue.submit(**request) == {"ok": True}
+    assert await queue.submit(**request) == {"ok": True}
+
+    assert len(transport.calls) == 1  # the second request was a cache hit
+    assert transport.calls[0]["prompt"] == "ChapterOne"
+    assert transport.calls[0]["context"]["excerpts"] == ["ab", ("c", "d")]
+    async with session_factory() as session:
+        events = (await session.scalars(select(AuditLog).order_by(AuditLog.id))).all()
+    answered = {"llm_call", "llm_cache_hit"}
+    assert [e.event_type for e in events if e.event_type in answered] == [
+        "llm_call",
+        "llm_cache_hit",
+    ]
+    assert all(NUL not in str(event.payload) for event in events)
+
+
+def test_without_nul_returns_clean_values_unchanged():
+    from app.ingest.normalize import NUL
+
+    clean = {"prompt": "text", "items": ["a", ("b", 1)], "image": b"\x00raw"}
+    assert LLMQueue.without_nul(clean) is clean
+    assert LLMQueue.without_nul({"image": b"\x00raw"})["image"] == b"\x00raw"
+    assert LLMQueue.without_nul(NUL * 2) == ""

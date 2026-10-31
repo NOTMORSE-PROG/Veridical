@@ -11,11 +11,31 @@ from app.ingest.normalize import NUL, match_key, normalize
 from app.report.page_text import _native_lines
 
 
-def glyph_zero_pdf(path: Path, text: str, *, link: bool = False) -> Path:
+def glyph_zero_pdf(path: Path, text: str, *, link: bool = False, table: bool = False) -> Path:
     """One Helvetica line drawn with a raw content stream, so a `\\000` in
     `text` is glyph code 0 -- what PyMuPDF extracts as U+0000. Drawing it
-    through insert_text would re-encode the character."""
+    through insert_text would re-encode the character.
+
+    With `table`, the line is the first row of a ruled two-by-two grid and
+    `text` is a TJ array body, so a kerning gap can carry one line across
+    the column rule."""
     content = f"BT /F1 12 Tf 72 700 Td ({text}) Tj ET".encode()
+    if table:
+        rules = " ".join(
+            f"{x0} {y0} m {x1} {y1} l S"
+            for x0, y0, x1, y1 in (
+                (60, 660, 360, 660),
+                (60, 700, 360, 700),
+                (60, 740, 360, 740),
+                (60, 660, 60, 740),
+                (200, 660, 200, 740),
+                (360, 660, 360, 740),
+            )
+        )
+        content = (
+            f"1 w {rules} BT /F1 12 Tf 72 712 Td [({text})] TJ ET "
+            "BT /F1 12 Tf 72 672 Td (Cost) Tj ET BT /F1 12 Tf 212 672 Td (Price) Tj ET"
+        ).encode()
     objs = [
         b"<</Type/Catalog/Pages 2 0 R>>",
         b"<</Type/Pages/Kids[3 0 R]/Count 1>>",
@@ -88,3 +108,25 @@ def test_clean_pdf_keeps_its_stored_bytes(tmp_path):
     result = pdf.extract_document(str(path), get_settings())
     assert result.nul_characters_removed == 0
     assert "nul_characters_removed" not in result.model_dump_json()
+
+
+def test_table_line_crossing_cells_keeps_its_order_with_nul(tmp_path):
+    """PyMuPDF's characters and cell text keep the NUL that line text drops,
+    so table ordering compared unequal text and gave up on the table."""
+
+    def extract(name: str, first_word: str):
+        path = glyph_zero_pdf(tmp_path / name, first_word + "ment) -9000 (Laptop", table=True)
+        return pdf.extract_document(str(path), get_settings())
+
+    clean = extract("clean.pdf", "Develop")
+    glyph_zero = extract("glyph_zero.pdf", r"Develop\000")
+
+    assert glyph_zero.nul_characters_removed == 1
+    assert [order.status for order in clean.reading_order] == ["ordered"]
+    assert [order.status for order in glyph_zero.reading_order] == ["ordered"]
+    assert [block.text for block in glyph_zero.blocks] == [block.text for block in clean.blocks]
+    assert [table.rows for table in glyph_zero.tables] == [
+        [["Development", "Laptop"], ["Cost", "Price"]]
+    ]
+    stored = glyph_zero.model_dump_json()
+    assert NUL not in stored and "\\u0000" not in stored
