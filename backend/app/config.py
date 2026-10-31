@@ -482,6 +482,9 @@ class Settings(BaseSettings):
     # Keeping a wording VERIDICAL could not trace to the document needs a
     # note saying why, for these issue codes (the review screen asks for the
     # same list; see frontend config/ui.ts RUBRIC_KEEP_NOTE_REQUIRED_CODES).
+    # "whole_format" stands for every item about the whole format
+    # (criterion_id null), whatever its code: the note is the only record of
+    # what the instructor compared.
     rubric_keep_note_required_codes: list[str] = Field(
         default_factory=lambda: [
             "not_in_source",
@@ -490,7 +493,18 @@ class Settings(BaseSettings):
             "wrong_column",
             "wrong_row",
             "shared_cell",
+            "whole_format",
         ]
+    )
+    # Which keep reasons fit which item. A whole-format item accepts only
+    # these; the "only" ones say the whole original was compared, so they are
+    # refused on a level's wording (422 acknowledgement_reason_mismatch).
+    # Keep in step with frontend config/ui.ts RUBRIC_KEEP_REASONS_BY_CODE.
+    rubric_whole_format_keep_reasons: list[str] = Field(
+        default_factory=lambda: ["compared_whole_format", "other"]
+    )
+    rubric_whole_format_only_keep_reasons: list[str] = Field(
+        default_factory=lambda: ["compared_whole_format"]
     )
     # Shown to the model in place of a value withheld for the reason above.
     rubric_withheld_value_marker: str = Field(

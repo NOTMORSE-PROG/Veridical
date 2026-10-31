@@ -392,14 +392,14 @@ def test_keeping_a_flagged_wording_records_who_when_and_why(client, tmp_path):
     uploaded = _upload(client, tmp_path)
     issue = uploaded["parse_issue_details"][0]
     route = f"/rubrics/{uploaded['id']}/criteria"
-    ack = {"issue_id": issue["id"], "reason_code": "document_wording", "note": " As printed. "}
+    ack = {"issue_id": issue["id"], "reason_code": "compared_whole_format", "note": " As printed. "}
     resp = client.put(route, json={"criteria": uploaded["criteria"], "acknowledgements": [ack]})
     assert resp.status_code == 200, resp.text
     kept = next(d for d in resp.json()["parse_issue_details"] if d["id"] == issue["id"])
     assert kept["status"] == "acknowledged"
     resolution = kept["resolution"]
     assert resolution["kind"] == "acknowledged"
-    assert resolution["reason_code"] == "document_wording"
+    assert resolution["reason_code"] == "compared_whole_format"
     assert resolution["note"] == "As printed."
     assert resolution["by_name"] and resolution["by_instructor_id"] and resolution["at"]
     unknown = {"issue_id": 999, "reason_code": "other", "note": None}
@@ -424,20 +424,111 @@ def test_a_hand_saved_single_level_does_not_break_the_recheck(client, tmp_path):
     assert resp.status_code == 200, resp.text
 
 
-def test_a_whole_format_note_can_be_kept_without_a_reason(client, tmp_path):
-    """Only wording that could not be traced to the document needs a note;
-    a whole-format note ("other") is kept with none."""
+def _whole_format_issue(rubric):
+    issue = rubric["parse_issue_details"][0]
+    assert issue["code"] == "other" and issue["criterion_id"] is None
+    return issue
+
+
+def test_a_whole_format_item_needs_a_note_saying_what_was_compared(client, tmp_path):
+    """A whole-format item has no wording to keep: the note is the only record
+    of what the instructor compared, so it is refused without one and nothing
+    is saved."""
     uploaded = _upload(client, tmp_path)
-    issue = uploaded["parse_issue_details"][0]
-    assert issue["code"] == "other"
-    ack = {"issue_id": issue["id"], "reason_code": "other", "note": None}
+    issue = _whole_format_issue(uploaded)
+    route = f"/rubrics/{uploaded['id']}/criteria"
+    bare = {"issue_id": issue["id"], "reason_code": "compared_whole_format", "note": None}
+    refused = client.put(route, json={"criteria": uploaded["criteria"], "acknowledgements": [bare]})
+    assert refused.status_code == 422, refused.text
+    assert refused.json()["error"]["code"] == "acknowledgement_note_required"
+    assert refused.json()["error"]["details"]["issue_ids"] == [issue["id"]]
+    unchanged = client.get(f"/rubrics/{uploaded['id']}").json()
+    assert unchanged["revision"] == uploaded["revision"]
+    assert _whole_format_issue(unchanged)["status"] == "open"
+    noted = {**bare, "note": "Read pages 1 to 3 against every criterion."}
+    resp = client.put(route, json={"criteria": uploaded["criteria"], "acknowledgements": [noted]})
+    assert resp.status_code == 200, resp.text
+    kept = _whole_format_issue(resp.json())
+    assert kept["status"] == "acknowledged"
+    assert kept["resolution"]["reason_code"] == "compared_whole_format"
+    assert kept["resolution"]["note"] == "Read pages 1 to 3 against every criterion."
+
+
+def test_a_keep_reason_must_fit_the_item(client, tmp_path):
+    """The whole-format reason is refused on a level, and a level's wording
+    reasons are refused on a whole-format item, so the record never states
+    the wrong reason."""
+    uploaded = _upload(client, tmp_path)
+    issue = _whole_format_issue(uploaded)
+    route = f"/rubrics/{uploaded['id']}/criteria"
+    wording = {"issue_id": issue["id"], "reason_code": "document_wording", "note": "As printed."}
+    resp = client.put(route, json={"criteria": uploaded["criteria"], "acknowledgements": [wording]})
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["error"]["code"] == "acknowledgement_reason_mismatch"
+    assert resp.json()["error"]["details"]["issue_ids"] == [issue["id"]]
+    explained = {**wording, "reason_code": "other"}
     resp = client.put(
-        f"/rubrics/{uploaded['id']}/criteria",
-        json={"criteria": uploaded["criteria"], "acknowledgements": [ack]},
+        route, json={"criteria": uploaded["criteria"], "acknowledgements": [explained]}
     )
     assert resp.status_code == 200, resp.text
-    kept = next(d for d in resp.json()["parse_issue_details"] if d["id"] == issue["id"])
-    assert kept["status"] == "acknowledged" and kept["resolution"]["note"] is None
+
+
+def test_a_kept_whole_format_item_opens_again_when_a_criterion_is_removed(client, tmp_path):
+    """The item was checked against the criteria that existed then. Removing
+    one reopens it; adding one cannot cover less of the format and does not."""
+    uploaded = _upload(client, tmp_path)
+    assert len(uploaded["criteria"]) >= 2
+    issue = _whole_format_issue(uploaded)
+    route = f"/rubrics/{uploaded['id']}/criteria"
+    ack = {
+        "issue_id": issue["id"],
+        "reason_code": "compared_whole_format",
+        "note": "Compared all pages.",
+    }
+    kept = client.put(route, json={"criteria": uploaded["criteria"], "acknowledgements": [ack]})
+    assert kept.status_code == 200, kept.text
+    assert _whole_format_issue(kept.json())["status"] == "acknowledged"
+
+    added = {"type": "semantic", "text": "Delivery", "weight": 1}
+    grown = client.put(route, json={"criteria": [*kept.json()["criteria"], added]})
+    assert grown.status_code == 200, grown.text
+    assert _whole_format_issue(grown.json())["status"] == "acknowledged"
+
+    fewer = grown.json()["criteria"][1:]
+    shrunk = client.put(route, json={"criteria": fewer})
+    assert shrunk.status_code == 200, shrunk.text
+    reopened = _whole_format_issue(shrunk.json())
+    assert reopened["status"] == "open" and reopened["resolution"] is None
+    assert reopened["id"] == issue["id"]
+
+
+def test_an_active_format_keeps_its_criteria_until_a_reopened_item_is_checked_again(
+    client, tmp_path
+):
+    """On an active format, removing a criterion that a kept whole-format item
+    was checked against is refused and nothing is saved, unless the item is
+    checked again in the same save."""
+    uploaded = _upload(client, tmp_path)
+    issue = _whole_format_issue(uploaded)
+    active = _confirm(client, uploaded["id"], uploaded["criteria"])
+    assert active["is_active"] is True
+    route = f"/rubrics/{uploaded['id']}/criteria"
+    fewer = active["criteria"][1:]
+    refused = client.put(route, json={"criteria": fewer})
+    assert refused.status_code == 409, refused.text
+    assert issue["id"] in refused.json()["error"]["details"]["open_issue_ids"]
+    unchanged = client.get(f"/rubrics/{uploaded['id']}").json()
+    assert len(unchanged["criteria"]) == len(active["criteria"])
+    assert _whole_format_issue(unchanged)["status"] == "acknowledged"
+    again = {
+        "issue_id": issue["id"],
+        "reason_code": "compared_whole_format",
+        "note": "Compared again without it.",
+    }
+    resp = client.put(route, json={"criteria": fewer, "acknowledgements": [again]})
+    assert resp.status_code == 200, resp.text
+    assert len(resp.json()["criteria"]) == len(fewer)
+    assert _whole_format_issue(resp.json())["resolution"]["note"] == "Compared again without it."
 
 
 def test_a_missing_keep_note_is_refused_in_the_standard_envelope():
@@ -641,3 +732,97 @@ def test_citation_recency_setting_404s_for_an_unknown_family(client):
         json={"enabled": True},
     )
     assert resp.status_code == 404
+
+
+def test_a_kept_whole_format_item_opens_again_when_a_criterion_is_reworded(client, tmp_path):
+    uploaded = _upload(client, tmp_path)
+    issue = _whole_format_issue(uploaded)
+    route = f"/rubrics/{uploaded['id']}/criteria"
+    ack = {
+        "issue_id": issue["id"],
+        "reason_code": "compared_whole_format",
+        "note": "Compared all pages.",
+    }
+    kept = client.put(route, json={"criteria": uploaded["criteria"], "acknowledgements": [ack]})
+    assert kept.status_code == 200, kept.text
+    # Saving again unchanged leaves it kept.
+    same = client.put(route, json={"criteria": kept.json()["criteria"]})
+    assert _whole_format_issue(same.json())["status"] == "acknowledged"
+    reworded = [{**c} for c in same.json()["criteria"]]
+    reworded[0]["text"] = "Something else entirely"
+    resp = client.put(route, json={"criteria": reworded})
+    assert resp.status_code == 200, resp.text
+    assert _whole_format_issue(resp.json())["status"] == "open"
+
+
+def _criterion(criterion_id, text):
+    from app.models.rubric import Criterion
+
+    return Criterion(id=criterion_id, rubric_id=1, text=text, levels=None)
+
+
+def _kept_whole_format(resolution):
+    return {
+        "id": 1,
+        "code": "other",
+        "criterion_id": None,
+        "level": None,
+        "message": "the criteria cover too little of the format",
+        "status": "acknowledged",
+        "resolution": resolution,
+    }
+
+
+def test_an_item_kept_before_criteria_were_recorded_takes_the_current_criteria():
+    """It is not reopened on every save (that would make an active format
+    impossible to save); it is checked against the criteria from then on."""
+    from app.models.rubric import Rubric
+    from app.rubric.issues import reopen_whole_format
+
+    resolution = {"kind": "acknowledged", "reason_code": "other", "note": "Old keep.", "at": "x"}
+    rubric = Rubric(parse_issue_details=[_kept_whole_format(resolution)])
+    rows = [_criterion(1, "Purpose"), _criterion(2, "Content")]
+    reopen_whole_format(rubric, rows)
+    detail = rubric.parse_issue_details[0]
+    assert detail["status"] == "acknowledged"
+    assert set(detail["resolution"]["criteria"]) == {"1", "2"}
+    reopen_whole_format(rubric, rows[:1])
+    assert rubric.parse_issue_details[0]["status"] == "open"
+
+
+def test_the_whole_format_reason_is_refused_on_a_level():
+    from app.errors import AcknowledgementReasonMismatchError
+    from app.models.instructor import Instructor
+    from app.models.rubric import Rubric
+    from app.rubric.issues import acknowledge
+    from app.rubric.schemas import IssueAcknowledgement
+
+    level_issue = {
+        "id": 3,
+        "code": "joins_cells",
+        "criterion_id": 1,
+        "level": 2,
+        "message": "m",
+        "status": "open",
+        "resolution": None,
+    }
+    rubric = Rubric(parse_issue_details=[level_issue])
+    ack = IssueAcknowledgement(
+        issue_id=3, reason_code="compared_whole_format", note="Compared the whole original."
+    )
+
+    class _Session:
+        def add(self, _row):
+            raise AssertionError("nothing is recorded for a refused keep")
+
+    with pytest.raises(AcknowledgementReasonMismatchError) as caught:
+        acknowledge(
+            _Session(),
+            rubric,
+            [ack],
+            Instructor(id=1, display_name="Ana"),
+            [_criterion(1, "Purpose")],
+            get_settings(),
+        )
+    assert caught.value.details == {"issue_ids": [3]}
+    assert rubric.parse_issue_details[0]["status"] == "open"

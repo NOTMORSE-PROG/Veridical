@@ -141,7 +141,12 @@ IssueCodeOut = Literal[
     "level_left_out",
     "other",
 ]
-AcknowledgementReason = Literal["document_wording", "outside_table", "other"]
+# "compared_whole_format": the instructor compared the criteria with the
+# whole original, for an item about the whole format; the other reasons are
+# about one level's wording.
+AcknowledgementReason = Literal[
+    "document_wording", "outside_table", "compared_whole_format", "other"
+]
 
 
 class IssueResolution(BaseModel):

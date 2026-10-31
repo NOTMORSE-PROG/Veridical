@@ -61,8 +61,8 @@ describe("keeping wording", () => {
     const formatIssue = { criterion_id: null, code: "other" };
     expect(reasonKey(formatIssue)).toBe("whole_format");
     expect(reasonKey({ criterion_id: 2, code: "other" })).toBe("other");
-    expect(keepReasonsFor([reasonKey(formatIssue)]).map((reason) => reason.value)).toEqual(["document_wording", "other"]);
-    expect(keepReasonLabel("document_wording", reasonKey(formatIssue))).toBe("I compared the criteria with the original, and nothing in it is missing");
+    expect(keepReasonsFor([reasonKey(formatIssue)]).map((reason) => reason.value)).toEqual(["compared_whole_format", "other"]);
+    expect(keepReasonLabel("compared_whole_format", reasonKey(formatIssue))).toBe("I compared the criteria with the original, and nothing in it is missing");
     expect(keepNoteRequired([reasonKey(formatIssue)])).toBe(true);
   });
 

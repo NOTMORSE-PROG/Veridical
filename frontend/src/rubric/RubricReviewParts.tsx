@@ -3,14 +3,16 @@
 // quiet; only the ones VERIDICAL could not match ask for a decision.
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import type { RubricAcknowledgementReason, RubricIssueDetail, RubricLevel, RubricSourceSummary } from "../api/types";
-import { RUBRIC_KEEP_NOTE_MAX_LENGTH, RUBRIC_KEEP_NOTE_MIN_CHARS, RUBRIC_REVIEW_STATE_LABELS } from "../config/ui";
+import {
+  RUBRIC_KEEP_NOTE_MAX_LENGTH, RUBRIC_KEEP_NOTE_MIN_CHARS, RUBRIC_REVIEW_STATE_LABELS, RUBRIC_WHOLE_FORMAT_RECHECK_LABEL,
+} from "../config/ui";
 import { Button } from "../ui/Button";
 import { useShowSourcePage, type SourceTarget } from "./sourcePage";
 import { useRubric } from "./useRubric";
 import {
   columnLevelName, formatReviewLabel, formatReviewState, issueStatus, itemsToCheck, keepNoteRequired, keepReasonLabel,
   keepReasonsFor, levelAnchorId, levelIssueCopy, levelStatus, noteHasContent, reasonKey, rowLocation, shortDate, sourceLocation,
-  type FormatReviewState, type LevelStatus, type PendingAcknowledgement,
+  type FormatReviewState, type LevelStatus, type OpenedAgain, type PendingAcknowledgement,
 } from "./rubricReview";
 
 function Icon({ children }: { children: ReactNode }) {
@@ -137,7 +139,7 @@ export function SourceReadingSummary({ summary }: { summary: RubricSourceSummary
   </details>;
 }
 
-function KeepWordingForm({ headingId, place, codes, consequence, wholeFormat = false, initial, serverError, onKeep, onCancel }: {
+function KeepWordingForm({ headingId, place, codes, consequence, wholeFormat = false, again, initial, serverError, onKeep, onCancel }: {
   headingId: string;
   // "Purpose, Proficient": names this form's buttons, since several forms
   // can be open at once.
@@ -147,6 +149,8 @@ function KeepWordingForm({ headingId, place, codes, consequence, wholeFormat = f
   // A warning about the whole format: the instructor records what they
   // compared, and no single wording is being kept.
   wholeFormat?: boolean;
+  // Checking an item again after the criteria changed: what changed.
+  again?: OpenedAgain;
   // Set when the server refused this keep: the form opens again with what
   // was chosen, and says why at the note.
   initial?: { reason: RubricAcknowledgementReason; note: string | null };
@@ -155,7 +159,9 @@ function KeepWordingForm({ headingId, place, codes, consequence, wholeFormat = f
   onCancel: () => void;
 }) {
   const id = useId();
-  const reasons = keepReasonsFor(codes);
+  // Checking again, the comparison reason names the change it covers.
+  const reasons = keepReasonsFor(codes).map((option) => again && wholeFormat && option.value === "compared_whole_format"
+    ? { ...option, label: RUBRIC_WHOLE_FORMAT_RECHECK_LABEL } : option);
   const [reason, setReason] = useState<RubricAcknowledgementReason | null>(
     initial && reasons.some((option) => option.value === initial.reason) ? initial.reason : null);
   const [note, setNote] = useState(initial?.note ?? "");
@@ -200,6 +206,12 @@ function KeepWordingForm({ headingId, place, codes, consequence, wholeFormat = f
       if (noteProblem) { noteRef.current?.focus(); return; }
       onKeep(reason, note.trim() ? note.trim() : null);
     }}>
+    {again && <div className="signal-copy-flow" id={`${id}-again`}>
+      <p>{again.kind === "unsaved" ? "Check it again with your changes, which are not saved yet:" : "Check it again with the change you saved:"}</p>
+      {again.changes.length > 0
+        ? <ul>{again.changes.map((change) => <li key={change}>{change}</li>)}</ul>
+        : <p>The criteria changed since you checked it.</p>}
+    </div>}
     <p id={`${id}-consequence`}>{wholeFormat
       ? "Once you mark this as checked, VERIDICAL grades with the criteria on this page as they are."
       : `${consequence ? `${consequence} ` : ""}VERIDICAL will grade with this wording exactly as shown.`}</p>
@@ -238,9 +250,11 @@ function KeepWordingForm({ headingId, place, codes, consequence, wholeFormat = f
   </form>;
 }
 
-function IssueResolution({ status, readOnly, undoLabel, onUndo, pending, copyFor, wholeFormat = false }: {
+function IssueResolution({ status, readOnly, undoLabel, onUndo, pending, copyFor, wholeFormat = false, openAgain }: {
   status: LevelStatus;
   wholeFormat?: boolean;
+  // Kept items an edit opens again.
+  openAgain?: ReadonlyMap<number, OpenedAgain>;
   readOnly: boolean;
   undoLabel: string;
   onUndo: () => void;
@@ -254,7 +268,16 @@ function IssueResolution({ status, readOnly, undoLabel, onUndo, pending, copyFor
   const raised = <ul className={`signal-level-row__issues${status.kind === "check" ? "" : " is-settled"}`}>
     {status.issues.map((issue) => <li key={issue.id}>{copyFor(issue)}</li>)}
   </ul>;
-  if (status.kind === "check") return raised;
+  if (status.kind === "check") {
+    const again = status.issues.map((issue) => openAgain?.get(issue.id)).find(Boolean);
+    if (!again) return raised;
+    const verb = wholeFormat ? "checked" : "kept";
+    return <>{raised}<p className="signal-level-row__note">
+      {again.kind === "unsaved"
+        ? `You ${verb} this before. The change you are saving would open it again, so ${wholeFormat ? "check it again" : "decide again"} before saving.`
+        : `You ${verb} this before. The change you saved opened it again, so ${wholeFormat ? "check it again" : "decide again"}.`}
+    </p></>;
+  }
   const first = status.issues[0];
   if (status.kind === "kept_pending") {
     const kept = pending.get(first.id);
@@ -277,7 +300,7 @@ function IssueResolution({ status, readOnly, undoLabel, onUndo, pending, copyFor
  * because they are about how the levels fit together. */
 export function CriterionLevels({
   criterionKey, criterionName, levels, issues, pending, readOnly, onKeep, onUndoKeep, onPageShown, nextAfter, onGo, onSave,
-  noteRefused, summaryDescribedBy, forceOpen = false, rowHeading, wholeFormat = false, formatPage = null,
+  noteRefused, openAgain, summaryDescribedBy, forceOpen = false, rowHeading, wholeFormat = false, formatPage = null,
 }: {
   criterionKey: string;
   criterionName: string;
@@ -294,6 +317,8 @@ export function CriterionLevels({
   onSave: () => void;
   // Issues whose keep the server refused for want of a note.
   noteRefused: ReadonlySet<number>;
+  // Kept items an edit opens again.
+  openAgain?: ReadonlyMap<number, OpenedAgain>;
   summaryDescribedBy?: string;
   forceOpen?: boolean;
   rowHeading?: string;
@@ -371,16 +396,17 @@ export function CriterionLevels({
     const consequence = under && level ? `Keeping it means ${level.name} is graded with the wording the document gives ${under}.` : null;
     const refused = targetIssues.filter((issue) => noteRefused.has(issue.id));
     const codes = targetIssues.map(reasonKey);
+    const again = targetIssues.map((issue) => openAgain?.get(issue.id)).find(Boolean);
     if (refused.length && !readOnly) {
       const kept = pending.get(refused[0].id);
       return <KeepWordingForm headingId={headingId} place={placeLabel(placeName)} codes={codes} consequence={consequence} wholeFormat={wholeFormat}
-        initial={kept ? { reason: kept.reason_code, note: kept.note } : undefined}
+        again={again} initial={kept ? { reason: kept.reason_code, note: kept.note } : undefined}
         serverError={`Nothing was saved. Add a note saying what you compared before ${wholeFormat ? "marking this as checked" : "keeping this wording"}.`}
         onCancel={() => { onUndoKeep(targetIssues); focusLater(actionId); }}
         onKeep={(reason, note) => { onKeep(targetIssues, reason, note); focusLater(headingId); }} />;
     }
     if (keeping.has(target) && !readOnly) return <KeepWordingForm headingId={headingId} place={placeLabel(placeName)}
-      codes={codes} consequence={consequence} wholeFormat={wholeFormat}
+      codes={codes} consequence={consequence} wholeFormat={wholeFormat} again={again}
       onCancel={() => { stopKeeping(target); focusLater(actionId); }}
       onKeep={(reason, note) => { onKeep(targetIssues, reason, note); stopKeeping(target); focusLater(headingId); }} />;
     const next = nextAfter(targetIssues);
@@ -397,7 +423,7 @@ export function CriterionLevels({
       <h4 id={rowHeadingId} tabIndex={-1}><span className="sr-only">{criterionName}:</span> {rowHeading ?? (levels.length ? "How these levels fit the table" : "About this criterion")}</h4>
       <LevelStatusTag kind={rowStatus.kind} wholeFormat={wholeFormat} />
     </div>
-    <IssueResolution status={rowStatus} readOnly={readOnly} pending={pending} wholeFormat={wholeFormat}
+    <IssueResolution status={rowStatus} readOnly={readOnly} pending={pending} wholeFormat={wholeFormat} openAgain={openAgain}
       undoLabel={`Undo ${wholeFormat ? "marking as checked" : "keeping"}, ${criterionName}`} copyFor={copyFor(undefined)}
       onUndo={() => { onUndoKeep(rowIssues); focusLater(`${rowHeadingId}-keep`); }} />
     {row.text && levels.length > 0 && <p className="signal-level-row__location"><span>{row.text}</span>{showPageButton(row.page, "whole row", { location: row.text, text: null, kind: "row" })}</p>}
@@ -440,7 +466,7 @@ export function CriterionLevels({
           <LevelStatusTag kind={status.kind} />
         </div>
         <p className="signal-level-row__descriptor">{level.descriptor}</p>
-        <IssueResolution status={status} readOnly={readOnly} pending={pending} undoLabel={`Undo keeping, ${criterionName}, ${level.name}`}
+        <IssueResolution status={status} readOnly={readOnly} pending={pending} openAgain={openAgain} undoLabel={`Undo keeping, ${criterionName}, ${level.name}`}
           copyFor={copyFor(level)} onUndo={() => { onUndoKeep(levelIssues); focusLater(`${headingId}-keep`); }} />
         {location?.text && target && <p className="signal-level-row__location">
           <span>{location.text}</span>{showPageButton(location.page, level.name, target)}

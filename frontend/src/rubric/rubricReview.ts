@@ -6,6 +6,15 @@ import {
   RUBRIC_KEEP_REASONS_BY_CODE, RUBRIC_REVIEW_STATE_LABELS, RUBRIC_WHOLE_FORMAT_ISSUE_KEY, type RubricKeepReasonOption,
 } from "../config/ui";
 
+/** A kept item an edit opens again. "unsaved": a refused save of an active
+ * format would open it, and it is shown open until that change is saved or
+ * undone. "saved": a saved draft change opened it. `changes` says, in words,
+ * what changed since it was checked. */
+export interface OpenedAgain {
+  kind: "unsaved" | "saved";
+  changes: readonly string[];
+}
+
 export interface PendingAcknowledgement {
   issue_id: number;
   reason_code: RubricAcknowledgementReason;
