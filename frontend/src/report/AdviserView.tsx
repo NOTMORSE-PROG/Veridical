@@ -17,6 +17,7 @@ import { unconfirmedAutomaticRuleRows } from "../domain/ruleScope";
 import { SharedAssessmentContext } from "./SharedAssessmentContext";
 import { SharedEvidencePacket, useSharedEvidenceManifest } from "./SharedEvidencePacket";
 import { IntegrityModuleNavigation, IntegrityModuleSummary, selectedIntegrityModule } from "./IntegrityModules";
+import { AgreementScopeSummary } from "./AgreementCheckScope";
 import { CitationSourceLinks } from "../flags/CitationSourceLinks";
 import { CitationComparison } from "../flags/CitationComparison";
 import { isLegacyUndecided } from "../domain/undecidedPairs";
@@ -112,7 +113,8 @@ export function AdviserViewPage() {
   const { report, flags: savedFlags } = data;
   // Undecided agreement pairs make no claim; they are counted apart from findings.
   const flags = savedFlags.filter(flag => !isLegacyUndecided(flag));
-  const undecidedCount = (report.integrity_modules?.find(module => module.check_kind === "internal_agreement")?.undetermined?.count ?? 0)
+  const agreementModule = report.integrity_modules?.find(module => module.check_kind === "internal_agreement");
+  const undecidedCount = (agreementModule?.undetermined?.count ?? 0)
     + savedFlags.filter(isLegacyUndecided).length;
   const manifest = !evidence.isError && evidence.fetchStatus === "idle"
     && evidence.data?.assessment_revision === report.assessment_revision
@@ -197,6 +199,9 @@ export function AdviserViewPage() {
           }} />
         <div id="shared-selected-module">
           <IntegrityModuleSummary kind={selectedModule} />
+          {selectedModule === "internal_agreement" && agreementModule?.agreement_scope && <AgreementScopeSummary scope={agreementModule.agreement_scope}
+            findings={moduleFlags.filter(flag => !isOptionalComparisonLead(flag)).length} undecided={undecidedCount}
+            compared={agreementModule.undetermined?.compared_count ?? null} />}
           {params.has("finding") && requestedGroupIndex < 0 && <p role="status">Requested finding is unavailable in this module. Showing its first shared finding.</p>}
           {findingGroups.length > 0 && <>
             <p>{findingGroups.length} review item{findingGroups.length === 1 ? "" : "s"} in this module, across {moduleFlags.length} saved record{moduleFlags.length === 1 ? "" : "s"}. Choose an item to read its explanation and evidence.</p>

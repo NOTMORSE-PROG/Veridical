@@ -79,6 +79,8 @@ import type { BulkAction } from "./useBulkResolve";
 import { OriginalityCoverageNotice } from "./OriginalityCoverageNotice";
 import { originalityCoverageNote } from "./originalityCoverage";
 import { CitationRecencySummary } from "./CitationRecencySummary";
+import { AgreementCheckScope } from "./AgreementCheckScope";
+import { AGREEMENT_SCOPE_COPY } from "../domain/agreementScope";
 import { isRecencyNote, isUncountedRecencyNote, notCountedLabel, sourceAgeNotesLabel } from "../domain/findingSummary";
 
 interface FindingSelection {
@@ -1128,6 +1130,10 @@ export function SignalFlagsPanel({
   const agreementModule = review?.assessment?.integrity_modules?.find(module => module.check_kind === "internal_agreement");
   const undecidedCount = (agreementModule?.undetermined?.count ?? 0) + undecidedLegacy.length;
   const showUndecided = selectedModule === "internal_agreement" && undecidedCount > 0;
+  // BUG-617: say what the agreement check covered, so no findings never
+  // reads as a check that did not run.
+  const agreementScope = selectedModule === "internal_agreement" ? agreementModule?.agreement_scope ?? null : null;
+  const agreementStatus = review?.assessment?.integrity_check_status?.find(status => status.check_kind === "internal_agreement");
   // V-092: source-age notes the format does not count are listed apart from
   // findings, so no finding count, filter or selection includes them.
   const sourceAgeNoteFlags = flags?.filter((flag) => flag.check_kind === selectedModule && isUncountedRecencyNote(flag)) ?? [];
@@ -1192,6 +1198,11 @@ export function SignalFlagsPanel({
       {selectedModule === "citation_integrity" && <CitationRecencySummary recency={review?.assessment?.citation_recency} />}
       {selectedModule === "originality_reuse" && <OriginalityScope scope={originalityScope} showAddAction />}
       {selectedModule === "originality_reuse" && <OriginalityCoverageNotice report={review?.assessment} />}
+      {agreementScope && <AgreementCheckScope checkRunId={checkRunId} scope={agreementScope}
+        findings={optional.state === "success" ? otherFlags?.length ?? 0 : null}
+        undecided={undecidedCount} compared={agreementModule?.undetermined?.compared_count ?? null}
+        interrupted={agreementModule?.state === "incomplete" || Boolean(agreementStatus && (agreementStatus.n_skipped_quota || agreementStatus.n_skipped_api_down || agreementStatus.n_skipped_parse_failure))}
+        limitsLink={Boolean(emptyState.limits)} />}
       {review && active && <BulkSelectionBar slot="before" findings={selectedClusters.length} locations={selectedLocations} elsewhere={selectedElsewhere} decided={Boolean(review.decision)}
         onAction={(action) => { setBulkMessage(""); setBulkAction(action); }}
         onClear={() => { setSelectedIds(new Set()); document.getElementById("flags-heading")?.focus(); }} />}
@@ -1206,8 +1217,9 @@ export function SignalFlagsPanel({
             selection={review ? selection : undefined}
           />
         )
-        : onlyOptional || (selectedModule === "originality_reuse" && originalityNote) ? null : optional.state === "success" ? <EmptyState className="signal-integrity-empty" id={`signal-module-empty-${checkRunId}`} title={emptyState.title}
-          action={emptyState.limits ? <ActionLink to={`/report/${checkRunId}?section=limits`} variant="secondary">Open assessment limits</ActionLink> : undefined}><p>{emptyState.description}</p></EmptyState>
+        : onlyOptional || (selectedModule === "originality_reuse" && originalityNote) || agreementScope ? null : optional.state === "success" ? <EmptyState className="signal-integrity-empty" id={`signal-module-empty-${checkRunId}`} title={emptyState.title}
+          action={emptyState.limits ? <ActionLink to={`/report/${checkRunId}?section=limits`} variant="secondary">Open assessment limits</ActionLink> : undefined}><p>{emptyState.description}</p>
+          {selectedModule === "internal_agreement" && agreementStatus?.coverage_reason === "statement_roles_unverified" && <p>{AGREEMENT_SCOPE_COPY.olderNoScope}</p>}</EmptyState>
           : <p>{optional.state === "error" ? "Other findings could not be loaded." : optional.state === "paused" ? "Waiting to load other findings." : optional.state === "fetching" ? "Loading other findings." : "Other findings are not available."}</p>}
       {showUndecided && <UndeterminedPairs checkRunId={checkRunId} undetermined={agreementModule?.undetermined} legacy={undecidedLegacy}
         incomplete={agreementModule?.state === "incomplete"} />}

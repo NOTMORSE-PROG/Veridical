@@ -106,7 +106,7 @@ export function UndeterminedPairs({ checkRunId, undetermined, legacy, incomplete
   </section>;
 }
 
-function Statement({ label, text, anchor, linkLabel, checkRunId, controlId, location }: {
+export function Statement({ label, text, anchor, linkLabel, checkRunId, controlId, location }: {
   label: string; text: string; anchor: string; linkLabel: string; checkRunId: number; controlId: string;
   location: ReturnType<typeof useLocation>;
 }) {

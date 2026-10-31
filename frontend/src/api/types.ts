@@ -722,11 +722,33 @@ export interface ReportOut extends ReportCommon {
   integrity_check_status: IntegrityCheckStatusOut[];
 }
 
+export interface AgreementSetAsideOut {
+  text: string;
+  page_anchor?: string | null;
+  role: string;
+}
+
+/** What the agreement check covered (BUG-617). Coverage only: no verdict
+ * counts. A part the run did not record is null, never 0. */
+export interface AgreementScopeOut {
+  n_objectives?: number | null;
+  n_results?: number | null;
+  results_section_identified?: boolean | null;
+  n_results_set_aside?: number | null;
+  n_results_too_short?: number | null;
+  set_aside_by_role: { role: string; count: number }[];
+  /** Empty on shared (adviser) copies. */
+  set_aside: AgreementSetAsideOut[];
+  absence_leads_withheld: boolean;
+}
+
 export interface IntegrityModuleOut {
   check_kind: "internal_agreement" | "citation_integrity" | "statistical_forensics" | "originality_reuse";
   state: "completed" | "partial" | "incomplete" | "not_applicable" | "not_recorded";
   /** Agreement pairs the check compared but could not decide: coverage, not findings. */
   undetermined?: UndeterminedPairsOut | null;
+  /** internal_agreement only: what the check covered (BUG-617). Absent for older runs. */
+  agreement_scope?: AgreementScopeOut | null;
 }
 
 export interface UndeterminedPairsOut {

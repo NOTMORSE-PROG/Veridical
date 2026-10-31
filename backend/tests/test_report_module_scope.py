@@ -110,3 +110,125 @@ def test_undecided_agreement_pairs_reach_the_report_as_coverage():
 def test_a_run_without_a_usable_list_shows_none(undetermined):
     assert agreement({"undetermined": undetermined}).undetermined is None
     assert agreement({}).undetermined is None
+
+
+def scope(detail):
+    rows = [
+        SimpleNamespace(
+            kind=CheckKind.internal_agreement,
+            criterion_id=None,
+            outcome=ResultOutcome.escalated,
+            detail=detail,
+        )
+    ]
+    return next(
+        row.agreement_scope
+        for row in integrity_modules(rows, set())
+        if row.check_kind == "internal_agreement"
+    )
+
+
+def _set_aside(text, page, chapter_role, heading_role=None):
+    return {
+        "text": text,
+        "anchor": page,
+        "chapter": "2",
+        "chapter_role": chapter_role,
+        "heading": None,
+        "heading_role": heading_role,
+    }
+
+
+REPORT_44 = {
+    "n_intents": 17,
+    "n_outcomes": 34,
+    "absence_leads_withheld": True,
+    "verdict_counts": {"consistent": 30, "unrelated": 1},
+    "results_sections": {
+        "results_section_identified": True,
+        "n_results_kept": 29,
+        "n_results_set_aside": 3,
+        "n_results_too_short": 2,
+        "set_aside": [
+            _set_aside("Smith found that users preferred it.", "p. 20", "literature"),
+            _set_aside("Cruz reported higher accuracy.", "p. 22", "literature"),
+            _set_aside("Lee showed a faster response.", "p. 27", None, "literature"),
+        ],
+    },
+}
+
+
+def test_what_the_agreement_check_covered_reaches_the_report():
+    value = scope(REPORT_44)
+    assert (value.n_objectives, value.n_results) == (17, 34)
+    assert value.results_section_identified is True
+    assert (value.n_results_set_aside, value.n_results_too_short) == (3, 2)
+    assert [(r.role, r.count) for r in value.set_aside_by_role] == [("literature", 3)]
+    assert value.set_aside[0].text.startswith("Smith found")
+    assert value.set_aside[0].page_anchor == "p. 20"
+    # The heading's role is used when the chapter's is not a set-aside one.
+    assert value.set_aside[2].role == "literature"
+    assert value.absence_leads_withheld is True
+    # Coverage only: no verdict counts ever reach the report.
+    assert "verdict" not in str(value.model_dump())
+
+
+def test_parts_a_run_did_not_record_stay_unknown_not_zero():
+    value = scope({"n_intents": 4, "n_outcomes": 6})
+    assert value.results_section_identified is None
+    assert value.n_results_set_aside is None and value.n_results_too_short is None
+    assert value.set_aside == [] and value.set_aside_by_role == []
+    assert value.absence_leads_withheld is False
+
+
+def test_a_malformed_set_aside_entry_makes_that_part_unknown():
+    detail = {
+        "n_intents": 4,
+        "results_sections": {"n_results_set_aside": 2, "set_aside": [{"anchor": "p. 2"}]},
+    }
+    value = scope(detail)
+    assert value.n_results_set_aside is None and value.set_aside == []
+
+
+@pytest.mark.parametrize(
+    "detail",
+    [None, {}, {"n_intents": None}, {"n_intents": -1}, {"n_intents": True}, {"n_intents": "17"}],
+)
+def test_a_run_saved_before_the_scope_was_recorded_shows_none(detail):
+    assert scope(detail) is None
+
+
+def test_other_modules_carry_no_agreement_scope():
+    rows = [
+        SimpleNamespace(
+            kind=CheckKind.citation_integrity,
+            criterion_id=None,
+            outcome=ResultOutcome.passed,
+            detail=REPORT_44,
+        )
+    ]
+    module = next(m for m in integrity_modules(rows, set()) if m.check_kind == "citation_integrity")
+    assert module.agreement_scope is None
+
+
+def test_a_shared_copy_keeps_the_counts_but_not_the_statements():
+    from app.report.module_scope import public_modules
+
+    rows = [
+        SimpleNamespace(
+            kind=CheckKind.internal_agreement,
+            criterion_id=None,
+            outcome=ResultOutcome.escalated,
+            detail=REPORT_44,
+        )
+    ]
+    [shared] = [
+        m
+        for m in public_modules(integrity_modules(rows, set()))
+        if m.check_kind == "internal_agreement"
+    ]
+    assert shared.agreement_scope.n_results_set_aside == 3
+    assert [(r.role, r.count) for r in shared.agreement_scope.set_aside_by_role] == [
+        ("literature", 3)
+    ]
+    assert shared.agreement_scope.set_aside == []
