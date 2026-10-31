@@ -48,6 +48,7 @@ from tools.accuracy.core import git_commit  # noqa: E402
 
 from app.config import Settings, get_settings  # noqa: E402
 from app.db import sqlalchemy_url  # noqa: E402
+from app.errors import ApiDownError  # noqa: E402
 from app.llm.base import LLMClient  # noqa: E402
 from app.llm.client import GeminiLLMClient  # noqa: E402
 from app.llm.pool import load_model_pool  # noqa: E402
@@ -73,8 +74,12 @@ class HarnessStop(RuntimeError):
     """The run must end now: the provider said 429, or a guard failed."""
 
 
-class HarnessRefused(RuntimeError):
-    """A model call this harness does not measure; nothing was spent."""
+class HarnessRefused(ApiDownError):
+    """A model call this harness does not measure; nothing was spent.
+
+    Raised as the product's own "AI service unavailable" error, so each check
+    records what it could not assess and the run carries on: the citation
+    check's lookups still run, which the reference-based criteria need."""
 
 
 class BudgetedTransport:
@@ -427,6 +432,13 @@ def degraded_reason(record: dict) -> str | None:
         return f"criteria left unassessed: {', '.join(unassessed)}"
     if not any(r["kind"] == "semantic" for r in record["results"]):
         return "no criterion was graded"
+    if not any(r["kind"] == "citation_integrity" for r in record["results"]):
+        # The reference-based criteria are judged from this check's lookups.
+        return "the citation check did not run"
+    for result in record["results"]:
+        strategy = (result.get("detail") or {}).get("reference_strategy") or {}
+        if any(reading.get("error") for reading in strategy.get("readings") or []):
+            return "a reference-list reading failed"
     return None
 
 

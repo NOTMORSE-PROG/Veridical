@@ -183,11 +183,13 @@ def test_an_unlockable_ledger_stops_the_run_without_sending(tmp_path, monkeypatc
     assert inner.calls == 0
 
 
-def record(stage, *outcomes):
-    return {
-        "check_run": {"stage_status": {"stages": {"semantic": stage}}},
-        "results": [{"kind": "semantic", "outcome": o} for o in outcomes],
-    }
+def record(stage, *outcomes, citation="api_down"):
+    # The citation check's own outcome reads api_down whenever its refused
+    # claim-support calls were skipped; its lookups still ran.
+    results = [{"kind": "semantic", "outcome": o} for o in outcomes]
+    if citation:
+        results.append({"kind": "citation_integrity", "outcome": citation})
+    return {"check_run": {"stage_status": {"stages": {"semantic": stage}}}, "results": results}
 
 
 @pytest.mark.parametrize(
@@ -206,6 +208,26 @@ def test_a_degraded_run_is_never_scored(candidate):
 
 def test_a_fully_graded_run_is_scored():
     assert degraded_reason(record({"status": "done"}, "passed", "escalated", "failed")) is None
+
+
+def test_a_run_without_the_citation_check_is_not_scored():
+    reason = degraded_reason(record({"status": "done"}, "passed", citation=None))
+    assert reason == "the citation check did not run"
+
+
+def test_a_failed_reference_reading_is_not_scored():
+    candidate = record({"status": "done"}, "escalated")
+    candidate["results"][0]["detail"] = {
+        "reference_strategy": {"readings": [{"reading": 1, "level": None, "error": "ApiDownError"}]}
+    }
+    assert degraded_reason(candidate) == "a reference-list reading failed"
+
+
+def test_a_refused_call_is_the_products_own_unavailable_error():
+    # So each check records what it could not assess and the run carries on.
+    from app.errors import ApiDownError
+
+    assert issubclass(HarnessRefused, ApiDownError)
 
 
 def test_safe_settings_pass_the_guards(monkeypatch):

@@ -293,6 +293,7 @@ def run(ctx) -> tuple[list, dict]:
             folder / "pages",
             image_page_max_chars=config.get("image_page_max_chars", 40),
             targets=config.get("targets", {}),
+            groups=config.get("criterion_groups"),
         )
         rows += repeat_rows
     return rows, details

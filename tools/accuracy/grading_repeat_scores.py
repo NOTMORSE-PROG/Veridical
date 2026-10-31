@@ -120,7 +120,22 @@ def common_scale(criteria) -> tuple[str, ...]:
     return scale
 
 
-def score_repeats(folder: Path, pages_dir: Path, *, image_page_max_chars: int, targets: dict):
+def criterion_group(criterion_text: str, groups: dict | None) -> str:
+    """The criterion's fixed group, by the name before its first colon. The
+    group is set once from the criterion's own descriptors and kept as data,
+    so before/after comparisons do not move with the level the grader claimed."""
+    name = criterion_text.split(":", 1)[0].strip()
+    return (groups or {}).get(name, "ungrouped")
+
+
+def score_repeats(
+    folder: Path,
+    pages_dir: Path,
+    *,
+    image_page_max_chars: int,
+    targets: dict,
+    groups: dict | None = None,
+):
     setup = _load(folder / "setup.json")
     criteria = {c["id"]: c for c in setup["criteria"]}
     repeat_dirs = sorted(p for p in (folder / "repeats").glob("r*") if p.is_dir())
@@ -157,7 +172,9 @@ def score_repeats(folder: Path, pages_dir: Path, *, image_page_max_chars: int, t
                         "outcome": result["outcome"],
                         "level": level,
                         "support": (detail.get("support_check") or {}).get("status"),
-                        "strategy": strategy(criterion, detail),
+                        "group": criterion_group(criterion["text"], groups),
+                        # The older reading, by the level claimed: kept for reference only.
+                        "claimed_strategy": strategy(criterion, detail),
                         "decision_basis": decision_basis(detail),
                     }
                 )
@@ -250,8 +267,8 @@ def score_repeats(folder: Path, pages_dir: Path, *, image_page_max_chars: int, t
             },
         ),
     ]
-    for name in (LOCATABLE, WHOLE_DOCUMENT, SINGLE_PASSAGE):
-        group = [d for d in automatic if d["strategy"] == name]
+    for name in sorted({d["group"] for d in decisions}):
+        group = [d for d in automatic if d["group"] == name]
         rows.append(
             rate_row(
                 LANE,

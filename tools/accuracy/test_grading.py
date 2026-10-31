@@ -207,8 +207,18 @@ def test_repeat_scores_skip_stopped_runs_and_use_the_grader_level(tmp_path):
     assert (proposed.numerator, proposed.denominator) == (2, 2)
     # One thesis is one cluster, so nothing here can be more than indicative.
     assert stable.extra["clusters"] == 1 and stable.indicative
-    by_strategy = by_metric["automatic grades whose support check passed: single passage"]
-    assert (by_strategy.numerator, by_strategy.denominator) == (2, 3)
+    # No groups were given, so every criterion is "ungrouped".
+    by_group = by_metric["automatic grades whose support check passed: ungrouped"]
+    assert (by_group.numerator, by_group.denominator) == (2, 3)
+
+
+def test_a_criterion_keeps_its_group_whatever_level_was_claimed():
+    from tools.accuracy.grading_repeat_scores import criterion_group
+
+    groups = {"Tone": "whole document"}
+    assert criterion_group("Tone: Professionalism of the writing tone", groups) == "whole document"
+    assert criterion_group("Tone", groups) == "whole document"
+    assert criterion_group("Grammar: errors", groups) == "ungrouped"
 
 
 def test_strict_stability_counts_a_steady_escalation_as_the_same_result():
