@@ -657,11 +657,13 @@ async def test_an_older_run_that_left_the_body_out_does_not_read_as_no_text(sess
     # Any other selection issue left the body out too in those runs.
     report = await scope(legacy, ["unreadable_reference_number"])
     assert report.originality_scope.not_compared_reason == "reference_list_unconfirmed"
-    # A list whose place is unknown is still refused today: it reads as the
-    # current refusal, never as a file with no text.
-    for issue in ("ambiguous_reference_heading", "invalid_source_line_inventory"):
-        report = await scope(legacy, [issue, "ambiguous_reference_end"])
-        assert report.originality_scope.not_compared_reason == "reference_boundary_unclear"
+    # An ambiguous heading is still refused today: it reads as the current
+    # refusal, never as a file with no text.
+    report = await scope(legacy, ["ambiguous_reference_heading", "ambiguous_reference_end"])
+    assert report.originality_scope.not_compared_reason == "reference_boundary_unclear"
+    # A damaged line record was a source problem; a current run stops there.
+    report = await scope(legacy, ["invalid_source_line_inventory", "ambiguous_reference_heading"])
+    assert report.originality_scope.not_compared_reason == "source_unresolved"
 
 
 async def test_deciding_an_already_decided_report_is_rejected(session_factory):

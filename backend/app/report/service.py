@@ -422,14 +422,18 @@ def source_pages_unassessed(detail: dict) -> list[int] | None:
 
 def _legacy_reference_refusal(
     originality: dict, citation: dict | None
-) -> Literal["reference_list_unconfirmed", "reference_boundary_unclear"] | None:
+) -> (
+    Literal["reference_list_unconfirmed", "reference_boundary_unclear", "source_unresolved"] | None
+):
     """Why an older originality row compared no text, when it was not an
     empty file. Rows saved before the body could be compared without a
     confirmed reference list left the whole body out whenever the list had
     any selection issue, and recorded it as a file with no text. Rows written
     since always carry pages_not_compared, so they never match. A list whose
-    place is unknown is still refused today, which the current reason for a
-    body that cannot be told apart from its references already says."""
+    heading is ambiguous is still refused today, which the current reason for
+    a body that cannot be told apart from its references already says. A
+    damaged line record was a source problem, not a reference-list one; a
+    current run stops at the source check for it."""
     if originality.get("comparison_ran") is not False or "pages_not_compared" in originality:
         return None
     if originality.get("note") != NO_TEXT_NOTE or originality.get("not_compared_reason"):
@@ -440,6 +444,8 @@ def _legacy_reference_refusal(
     )
     if not codes:
         return None
+    if "invalid_source_line_inventory" in codes:
+        return "source_unresolved"
     if codes & REFERENCE_LOCATION_UNKNOWN:
         return "reference_boundary_unclear"
     return "reference_list_unconfirmed"

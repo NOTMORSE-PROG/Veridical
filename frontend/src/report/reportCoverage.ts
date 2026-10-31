@@ -7,7 +7,9 @@ import { NATIVE_MATH_HISTORY_TITLE, NATIVE_MATH_HISTORY_LIMIT } from "../domain/
 import { CITATION_HISTORY_REPORT_LIMIT, CITATION_HISTORY_TITLE } from "../domain/citationHistory";
 import { descriptiveAssumptionLimit } from "./statisticalScopeCopy";
 import { originalityCoverageNote } from "./originalityCoverage";
-import { pageRanges, unbrokenRange } from "../domain/criterionSourceCoverage";
+import { createElement } from "react";
+import { pageRanges } from "../domain/criterionSourceCoverage";
+import { PageRanges } from "./PageRanges";
 
 const INTEGRITY_LABEL: Record<IntegrityCheckStatusOut["check_kind"], string> = {
   internal_agreement: "Internal agreement",
@@ -50,8 +52,6 @@ function readablePages(status: IntegrityCheckStatusOut): number[] {
   return [...new Set((status.source_pages_unassessed ?? []).filter((page) => Number.isSafeInteger(page) && page > 0))].sort((a, b) => a - b);
 }
 
-const shownRanges = (pages: number[]) => pageRanges(pages).split(", ").map(unbrokenRange).join(", ");
-
 function withUnreadPages(item: CoverageStatementItem, status: IntegrityCheckStatusOut, allUnread: number[],
   scope?: ReportOut["originality_scope"]): CoverageStatementItem {
   const count = status.n_source_pages_unassessed;
@@ -65,14 +65,18 @@ function withUnreadPages(item: CoverageStatementItem, status: IntegrityCheckStat
     : !pages.length
       ? `${noun(count)} could not be read reliably. This record does not say which; check the manuscript yourself.`
       : pages.length === allUnread.length
-        ? `${noun(pages.length)} could not be read reliably, so this check left ${pages.length === 1 ? "it" : "them"} out. ${pages.length === 1 ? "It is" : "They are"} listed under ${UNREAD_PAGES_COPY.label}.`
-        : `${pages.length === 1 ? "Page" : "Pages"} ${shownRanges(pages)} could not be read reliably, so this check left ${pages.length === 1 ? "it" : "them"} out.`;
+        ? `${noun(pages.length)} could not be read reliably, so this check left ${pages.length === 1 ? "it" : "them"} out. ${pages.length === 1 ? "It is" : "They are"} listed above, under ${UNREAD_PAGES_COPY.label}.`
+        : `${pages.length === 1 ? "Page" : "Pages"} ${pageRanges(pages)} could not be read reliably, so this check left ${pages.length === 1 ? "it" : "them"} out.`;
   return { ...item, subIssues: [...(item.subIssues ?? []), line] };
 }
 
 export const UNREAD_PAGES_COPY = {
   label: "Pages not read",
-  detail: (pages: number[]) => `${pages.length === 1 ? "Page" : "Pages"} ${shownRanges(pages)} could not be read in a reliable order, so the checks listed below left ${pages.length === 1 ? "it" : "them"} out. Open ${pages.length === 1 ? "it" : "each one"} in manuscript review to check ${pages.length === 1 ? "it" : "them"} yourself.`,
+  detail: (pages: number[]) => [
+    `${pages.length === 1 ? "Page" : "Pages"} `,
+    createElement(PageRanges, { key: "pages", pages }),
+    ` could not be read in a reliable order, so the checks listed below left ${pages.length === 1 ? "it" : "them"} out. Open ${pages.length === 1 ? "it" : "each one"} in manuscript review to check ${pages.length === 1 ? "it" : "them"} yourself.`,
+  ],
   detailsLabel: "links to the pages not read",
 };
 
@@ -87,7 +91,7 @@ function unreadPagesItem(statuses: IntegrityCheckStatusOut[], checkRunId: number
     detail: UNREAD_PAGES_COPY.detail(pages),
     detailsLabel: UNREAD_PAGES_COPY.detailsLabel,
     sources: pageRanges(pages).split(", ").map((range) => ({
-      label: `${range.includes("-") ? "Pages" : "Page"} ${unbrokenRange(range)}`,
+      label: `${range.includes("-") ? "Pages" : "Page"} ${range}`,
       to: `/report/${checkRunId}/document?anchor=${encodeURIComponent(`page ${range.split("-")[0]}`)}`,
     })),
   };

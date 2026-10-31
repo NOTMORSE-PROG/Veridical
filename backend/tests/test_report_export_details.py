@@ -460,7 +460,7 @@ def test_export_lists_the_unread_pages_behind_the_count():
     text = " ".join(_text(build_report_pdf(data)).split())
     assert text.count("12-14, 40-41") == 1
     assert "5 source pages unassessed (pages 12-14, 40-41)" in text
-    assert "5 source pages unassessed (the same pages as Internal agreement)" in text
+    assert "5 source pages unassessed (the pages listed under Internal agreement)" in text
     assert "6 source pages unassessed; pages recorded (2): 12-13" in text
 
 

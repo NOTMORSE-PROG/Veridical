@@ -72,7 +72,7 @@ it("names PDF pages left out of an assessment and keeps them on the private row"
   const unread: Coverage = { ...zero, native_math_inventory_state: "not_applicable", native_math_inventory_scope: null,
     n_native_equations_unlocated: null, unread_pages: [45, 46, 47, 53] };
   show(unread);
-  expect(screen.getByText(/Pages 45‑47, 53 could not be read in a reliable order/)).toBeVisible();
+  expect(screen.getByText((_, element) => element?.tagName === "P" && /Pages 45-47, 53 could not be read in a reliable order/.test(element.textContent ?? ""))).toBeVisible();
   expect(screen.getByText(/Check those pages before relying on it/)).toBeVisible();
   const unreadRow: CriterionResultOut = { ...row, source_coverage: unread };
   const details = criterionAssessmentDetails(unreadRow, false);
@@ -99,7 +99,7 @@ it("says image content was not assessed, with or without unread pages, and leave
 it("shows the unread-page line and the image line together", () => {
   show({ ...zero, native_math_inventory_state: "not_applicable", native_math_inventory_scope: null,
     n_native_equations_unlocated: null, unread_pages: [2, 4], images_not_assessed: true });
-  expect(screen.getByText(/Pages 2, 4 could not be read in a reliable order/)).toBeVisible();
+  expect(screen.getByText((_, element) => element?.tagName === "P" && /Pages 2, 4 could not be read in a reliable order/.test(element.textContent ?? ""))).toBeVisible();
   expect(screen.getByText(/Image content not assessed/)).toBeVisible();
   const both: CriterionResultOut = { ...row, source_coverage: { ...zero, native_math_inventory_state: "not_applicable", native_math_inventory_scope: null,
     n_native_equations_unlocated: null, unread_pages: [2, 4], images_not_assessed: true } };

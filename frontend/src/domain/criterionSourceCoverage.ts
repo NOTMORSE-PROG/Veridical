@@ -45,9 +45,6 @@ export function criterionCoverageSuffix(value: CriterionSourceCoverage | null): 
   return (value.n_native_equations_unassessed ?? 0) > 0 ? ": source content omitted" : "";
 }
 
-/** "45-47" -> "45‑47": a range read on screen must not wrap at its hyphen. */
-export const unbrokenRange = (range: string) => range.replace("-", "‑");
-
 /** [45, 46, 47, 53] -> "45-47, 53" */
 export function pageRanges(pages: number[]): string {
   const runs: number[][] = [];

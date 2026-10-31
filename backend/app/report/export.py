@@ -818,9 +818,9 @@ def _unread_pages_line(
     pages = tuple(sorted(set(coverage.source_pages_unassessed or ())))
     line = f"{count} source pages unassessed"
     if not pages:
-        return line + " (which pages was not recorded)"
+        return line + " (which pages were not recorded)"
     if pages in listed:
-        return line + f" (the same pages as {listed[pages]})"
+        return line + f" (the pages listed under {listed[pages]})"
     listed[pages] = label
     if len(pages) != count:
         return line + f"; pages recorded ({len(pages)}): {_page_ranges(list(pages))}"
