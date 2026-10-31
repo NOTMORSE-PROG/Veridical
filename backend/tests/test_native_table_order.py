@@ -10,6 +10,13 @@ import pymupdf
 import pytest
 
 from app.config import Settings
+from app.ingest.native_table_order import (
+    NativeCell,
+    NativeGrid,
+    TableOrderUnresolved,
+    saved_table_witness_valid,
+    validate_grid,
+)
 from app.ingest.patterns import load_patterns
 from app.ingest.pdf import _extract_open_document, _native_tables_in_source_space
 from app.ingest.quality import reading_order_issues
@@ -238,7 +245,10 @@ def test_two_tables_keep_intermediate_prose_and_independent_identities():
     assert text.index("12") < text.index("Prose between") < text.index("Second table")
 
 
-def test_merged_cells_retain_native_data_but_are_outside_the_admitted_grid_family():
+def test_a_merged_cell_on_exact_grid_lines_is_read_once_at_its_top_left_slot():
+    """A header spanning two columns is the table's own structure: its one
+    rectangle sits on the grid's lines and covers the slot beside it, so the
+    page is ordered row by row with the header read once."""
     with pymupdf.open() as doc:
         page = doc.new_page()
         for x in (60, 280):
@@ -250,10 +260,238 @@ def test_merged_cells_retain_native_data_but_are_outside_the_admitted_grid_famil
         page.insert_text((65, 140), "Alpha", fontsize=10)
         page.insert_text((175, 140), "12", fontsize=10)
         result = extract(doc)
-    assert result.reading_order[0].status == "unresolved"
-    assert result.reading_order[0].table_order is None
+    record = result.reading_order[0]
+    assert record.status == "ordered", record.reason
+    assert not reading_order_issues(result)
     assert "Merged header" in result.tables[0].rows[0][0]
-    assert reading_order_issues(result)
+    [grid] = record.table_order.tables
+    assert [(cell.row, cell.column) for cell in grid.cells] == [(0, 0), (1, 0), (1, 1)]
+    assert saved_table_witness_valid(result, record)
+
+
+def _three_column_table(page, *, split_from, split_to, texts):
+    """Header row plus two body rows; the line between the body rows runs
+    only from `split_from` to `split_to`, so one column's body is merged."""
+    for x in (60, 160, 260, 360):
+        page.draw_line((x, 80), (x, 170))
+    for y in (80, 110, 170):
+        page.draw_line((60, y), (360, y))
+    page.draw_line((split_from, 140), (split_to, 140))
+    for (x, y), text in texts:
+        page.insert_text((x, y), text, fontsize=10)
+
+
+def test_a_merged_cell_with_one_entry_per_row_is_left_unread():
+    """A remarks column whose inner line was not drawn: "done" belongs to W1
+    and "late" to W2. Read as one block it would put W2's remark in W1's
+    row, so the page stays unread."""
+    with pymupdf.open() as doc:
+        page = doc.new_page()
+        _three_column_table(
+            page,
+            split_from=60,
+            split_to=260,
+            texts=[
+                ((65, 100), "Week"),
+                ((165, 100), "Task"),
+                ((265, 100), "Remarks"),
+                ((65, 130), "W1"),
+                ((165, 130), "Plan"),
+                ((265, 130), "done"),
+                ((65, 160), "W2"),
+                ((165, 160), "Build"),
+                ((265, 160), "late"),
+            ],
+        )
+        result = extract(doc)
+    record = result.reading_order[0]
+    assert record.status == "unresolved"
+    assert record.reason == "native_table_merged_cell_text_across_rows"
+
+
+def test_a_row_span_label_in_its_first_row_is_still_read():
+    with pymupdf.open() as doc:
+        page = doc.new_page()
+        _three_column_table(
+            page,
+            split_from=160,
+            split_to=360,
+            texts=[
+                ((65, 100), "Group"),
+                ((165, 100), "Task"),
+                ((265, 100), "Score"),
+                ((65, 130), "Alpha"),
+                ((165, 130), "Plan"),
+                ((265, 130), "90"),
+                ((165, 160), "Build"),
+                ((265, 160), "85"),
+            ],
+        )
+        result = extract(doc)
+    record = result.reading_order[0]
+    assert record.status == "ordered", record.reason
+    assert saved_table_witness_valid(result, record)
+
+
+def _grid(*cells, rows=2, columns=2, bbox=(0.0, 0.0, 100.0, 100.0)):
+    return NativeGrid(bbox, rows, columns, [NativeCell(r, c, rect, "") for r, c, rect in cells])
+
+
+PAGE = (0.0, 0.0, 600.0, 800.0)
+
+
+def test_a_full_grid_still_validates_as_before():
+    validate_grid(
+        _grid(
+            (0, 0, (0.0, 0.0, 50.0, 50.0)),
+            (0, 1, (50.0, 0.0, 100.0, 50.0)),
+            (1, 0, (0.0, 50.0, 50.0, 100.0)),
+            (1, 1, (50.0, 50.0, 100.0, 100.0)),
+        ),
+        PAGE,
+        0.01,
+    )
+
+
+@pytest.mark.parametrize(
+    "cells, reason",
+    [
+        # A span that ends between grid lines.
+        (
+            [
+                (0, 0, (0.0, 0.0, 70.0, 50.0)),
+                (1, 0, (0.0, 50.0, 50.0, 100.0)),
+                (1, 1, (50.0, 50.0, 100.0, 100.0)),
+            ],
+            "native_table_merged_cell",
+        ),
+        # Two cells claiming one slot, as a list misread as a table does.
+        (
+            [
+                (0, 0, (0.0, 0.0, 100.0, 50.0)),
+                (0, 1, (50.0, 0.0, 100.0, 50.0)),
+                (1, 0, (0.0, 50.0, 50.0, 100.0)),
+                (1, 1, (50.0, 50.0, 100.0, 100.0)),
+            ],
+            "native_table_cells_overlap",
+        ),
+        # A slot no cell covers.
+        (
+            [
+                (0, 0, (0.0, 0.0, 50.0, 50.0)),
+                (0, 1, (50.0, 0.0, 100.0, 50.0)),
+                (1, 0, (0.0, 50.0, 50.0, 100.0)),
+            ],
+            "native_table_merged_cell",
+        ),
+        # A row with no cell starting on it has no line to read from.
+        (
+            [(0, 0, (0.0, 0.0, 50.0, 100.0)), (0, 1, (50.0, 0.0, 100.0, 100.0))],
+            "native_table_merged_cell",
+        ),
+    ],
+)
+def test_a_merged_cell_off_the_grid_lines_stays_unresolved(cells, reason):
+    with pytest.raises(TableOrderUnresolved, match=reason):
+        validate_grid(_grid(*cells), PAGE, 0.01)
+
+
+def _two_by_two_with_header(covered_text):
+    """A header spanning both columns over two plain cells."""
+    from app.ingest.native_table_order import NativeTableProposal, snapshot_native_table
+
+    table = SimpleNamespace(
+        row_count=2,
+        col_count=2,
+        bbox=(0.0, 0.0, 100.0, 100.0),
+        rows=[
+            SimpleNamespace(cells=[(0.0, 0.0, 100.0, 50.0), None]),
+            SimpleNamespace(cells=[(0.0, 50.0, 50.0, 100.0), (50.0, 50.0, 100.0, 100.0)]),
+        ],
+    )
+    proposal = NativeTableProposal(page_bbox=PAGE)
+    snapshot_native_table(
+        table, [["Header", covered_text], ["a", "b"]], proposal, Settings(_env_file=None)
+    )
+    return proposal
+
+
+def test_a_covered_slot_with_text_of_its_own_is_refused_with_its_reason():
+    assert _two_by_two_with_header(None).problem is None
+    assert _two_by_two_with_header("stray").problem == "native_table_merged_cell"
+
+
+def test_a_saved_table_with_text_in_a_covered_slot_fails_its_check():
+    with pymupdf.open() as doc:
+        page = doc.new_page()
+        for x in (60, 280):
+            page.draw_line((x, 80), (x, 150))
+        page.draw_line((170, 115), (170, 150))
+        for y in (80, 115, 150):
+            page.draw_line((60, y), (280, y))
+        page.insert_text((65, 100), "Merged header", fontsize=10)
+        page.insert_text((65, 140), "Alpha", fontsize=10)
+        page.insert_text((175, 140), "12", fontsize=10)
+        result = extract(doc)
+    record = result.reading_order[0]
+    assert saved_table_witness_valid(result, record)
+    result.tables[0].rows[0][1] = "stray"
+    assert not saved_table_witness_valid(result, record)
+
+
+FULL = [
+    (0, 0, (0.0, 0.0, 50.0, 50.0)),
+    (0, 1, (50.0, 0.0, 100.0, 50.0)),
+    (1, 0, (0.0, 50.0, 50.0, 100.0)),
+    (1, 1, (50.0, 50.0, 100.0, 100.0)),
+]
+
+
+@pytest.mark.parametrize(
+    "cells",
+    [
+        # Cells out of row-major order.
+        [FULL[1], FULL[0], FULL[2], FULL[3]],
+        # A row whose cells disagree about where it starts.
+        [
+            FULL[0],
+            (0, 1, (50.0, 0.0, 100.0, 50.0)),
+            (1, 0, (0.0, 50.0, 50.0, 100.0)),
+            (1, 1, (50.0, 52.0, 100.0, 100.0)),
+        ],
+        # The first line is not on the table's edge.
+        [(0, 0, (0.0, 2.0, 50.0, 50.0)), (0, 1, (50.0, 2.0, 100.0, 50.0)), FULL[2], FULL[3]],
+        # A cell outside the table.
+        [FULL[0], FULL[1], FULL[2], (1, 1, (50.0, 50.0, 110.0, 100.0))],
+    ],
+)
+def test_a_grid_whose_lines_do_not_hold_is_refused(cells):
+    with pytest.raises(TableOrderUnresolved):
+        validate_grid(_grid(*cells), PAGE, 0.01)
+
+
+def test_rows_that_do_not_increase_are_refused():
+    grid = _grid(
+        (0, 0, (0.0, 0.0, 100.0, 0.005)),
+        (1, 0, (0.0, 0.005, 100.0, 100.0)),
+        rows=2,
+        columns=1,
+    )
+    with pytest.raises(TableOrderUnresolved):
+        validate_grid(grid, PAGE, 0.01)
+
+
+def test_a_list_misread_as_a_table_is_refused_as_overlapping_cells():
+    # The first cell covers the second, which ends between row lines.
+    grid = _grid(
+        (0, 0, (0.0, 0.0, 100.0, 50.0)),
+        (0, 1, (36.0, 0.0, 100.0, 30.0)),
+        (1, 0, (0.0, 50.0, 100.0, 100.0)),
+        rows=2,
+        columns=2,
+    )
+    with pytest.raises(TableOrderUnresolved, match="native_table_cells_overlap"):
+        validate_grid(grid, PAGE, 0.01)
 
 
 @pytest.mark.parametrize("rotation", [0, 90, 180, 270])
