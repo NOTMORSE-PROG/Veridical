@@ -8,6 +8,7 @@ const ORIGIN_NOT_PROVABLE = new Map([
   ["library_entry_removed", "an instructor or a maintenance cleanup can remove a Library record"],
   ["library_orphan_corpus_rows_removed", "an operator cleanup, neither an instructor nor the pipeline"],
   ["public_report_details_recorded", "written when an instructor creates a share link, but records no actor"],
+  ["rubric_issues_annotated", "an operator repair of a stored format version, neither an instructor nor the pipeline"],
 ]);
 // Helpers and filters that forward an event name they were given.
 const PASS_THROUGH = new Set(["event_type", "row.event_type"]);
