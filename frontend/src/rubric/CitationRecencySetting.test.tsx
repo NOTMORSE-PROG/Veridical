@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CitationRecencySettingsOut } from "../api/types";
 import { renderWithProviders } from "../test/renderWithProviders";
@@ -57,6 +57,9 @@ describe("the format's citation recency setting", () => {
     expect(await screen.findByText("Use a window of 1 to 100 years. Nothing was saved.")).toBeInTheDocument();
     expect(window).toHaveAttribute("aria-invalid", "true");
     await waitFor(() => expect(window).toHaveFocus());
+    // Nothing scheduled after the refusal may take focus back to Save.
+    await act(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    expect(window).toHaveFocus();
     expect(bodies).toEqual([{ window_years: 12 }]);
   });
 

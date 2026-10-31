@@ -95,9 +95,12 @@ export function CitationRecencySetting({ familyId, rubricId }: { familyId: strin
       // Save is now disabled and Use the defaults may be gone, so focus goes
       // to the confirmation instead of falling to the page.
       requestAnimationFrame(() => statusRef.current?.focus());
-    } catch {
+    } catch (error) {
       // A refused window takes focus itself; anything else returns to Save.
-      requestAnimationFrame(() => { if (!fieldRefusal(save.error, "window_years")) saveRef.current?.focus(); });
+      // Read the refusal from this error: `save` here is the render the click
+      // came from, whose error was still empty, so it would always send focus
+      // to Save and could take it back from the window after the window had it.
+      requestAnimationFrame(() => { if (!fieldRefusal(error, "window_years")) saveRef.current?.focus(); });
     }
   }
 
