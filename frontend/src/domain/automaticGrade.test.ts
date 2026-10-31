@@ -36,6 +36,18 @@ describe("automaticGradeLines", () => {
     expect(automaticGradeChip({ agreeing_passes: 2, grading_passes: 2 })).toBeNull();
   });
 
+  it("shows a note added after the check where a caution would be, saying it came later", () => {
+    const later_note = "Added after this check: quotes cannot confirm this grade.";
+    const row = { agreeing_passes: 2, grading_passes: 2, later_note };
+    expect(automaticGradeCaution(row)).toBe(later_note);
+    expect(automaticGradeChip(row)).toBe(AUTOMATIC_GRADE_COPY.chip_scope_caution);
+    // A caution saved with the check comes first.
+    expect(automaticGradeCaution({ ...row, support_caution: "The quote shows the topic only." }))
+      .toBe("The quote check did not support this grade: The quote shows the topic only.");
+    // Nothing for a grade the AI did not choose.
+    expect(automaticGradeCaution({ later_note })).toBeNull();
+  });
+
   it("says nothing for rows the AI did not grade", () => {
     expect(automaticGradeLines({})).toEqual([]);
     expect(automaticGradeLines({ support_caution: "orphaned caution" })).toEqual([]);

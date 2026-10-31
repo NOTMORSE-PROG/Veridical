@@ -17,7 +17,7 @@ export const AUTOMATIC_GRADE_COPY = {
   changeAgain: "Change grade again",
 } as const;
 
-type AutomaticGradeRow = Pick<CriterionResultOut, "decision_basis" | "support_caution" | "support_caution_scope" | "agreeing_passes" | "grading_passes">;
+type AutomaticGradeRow = Pick<CriterionResultOut, "decision_basis" | "support_caution" | "support_caution_scope" | "later_note" | "agreeing_passes" | "grading_passes">;
 
 const fill = (template: string, values: Record<string, string | number>) =>
   template.replace(/\{(\w+)\}/g, (_match, key: string) => String(values[key]));
@@ -67,8 +67,11 @@ const STALE_NO_GRADE = /[\s;,.]*no automatic grade was assigned\.?\s*$/i;
 
 // The specific caution on an automatic grade, shown apart from how it was chosen.
 export function automaticGradeCaution(row: AutomaticGradeRow): string | null {
+  if (automaticGradeLines(row).length === 0) return null;
   const reason = row.support_caution?.replace(STALE_NO_GRADE, "").trim();
-  if (!reason || automaticGradeLines(row).length === 0) return null;
+  // A note added after the check (BUG-611) stands in the same place, already
+  // worded to say it came later.
+  if (!reason) return row.later_note || null;
   // A level quoted passages cannot show at all: the caution says what the
   // grade is about, not that a check failed.
   const template = row.support_caution_scope ? AUTOMATIC_GRADE_COPY.scope_caution : AUTOMATIC_GRADE_COPY.caution;
@@ -78,7 +81,8 @@ export function automaticGradeCaution(row: AutomaticGradeRow): string | null {
 // The short label beside the grade, in the same terms as the caution below it.
 export function automaticGradeChip(row: AutomaticGradeRow): string | null {
   if (!automaticGradeCaution(row)) return null;
-  return row.support_caution_scope ? AUTOMATIC_GRADE_COPY.chip_scope_caution : AUTOMATIC_GRADE_COPY.chip_caution;
+  const scope = row.support_caution_scope || (!row.support_caution && Boolean(row.later_note));
+  return scope ? AUTOMATIC_GRADE_COPY.chip_scope_caution : AUTOMATIC_GRADE_COPY.chip_caution;
 }
 
 export function fillAutomaticConfirmation(count: number): string {

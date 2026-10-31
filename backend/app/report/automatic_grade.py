@@ -22,6 +22,7 @@ class AutomaticGradeRow(Protocol):
     decision_basis: str | None
     support_caution: str | None
     support_caution_scope: bool
+    later_note: str | None
     agreeing_passes: int | None
     grading_passes: int | None
 
@@ -57,9 +58,13 @@ def automatic_grade_lines(row: AutomaticGradeRow) -> list[str]:
 def automatic_grade_caution(row: AutomaticGradeRow) -> str | None:
     """The evidence caution on an automatic grade, shown apart from how it
     was chosen. None when there is no automatic grade to qualify."""
-    reason = clean_caution(row.support_caution)
-    if reason is None or not automatic_grade_lines(row):
+    if not automatic_grade_lines(row):
         return None
+    reason = clean_caution(row.support_caution)
+    if reason is None:
+        # A note added after the check (BUG-611) stands in the same place,
+        # already worded to say it came later.
+        return getattr(row, "later_note", None)
     # A level quoted passages cannot show at all: say what the grade is about,
     # not that a check failed.
     template = "scope_caution" if getattr(row, "support_caution_scope", False) else "caution"

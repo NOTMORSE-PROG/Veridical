@@ -526,6 +526,7 @@ export interface CriterionResultOut extends ResultRowCommon {
   reason_codes?: string[] | null;
   support_caution?: string | null;
   support_caution_scope?: boolean;
+  later_note?: string | null;
   agreeing_passes?: number | null;
   grading_passes?: number | null;
   /** V-087: each grading pass's choice, in pass order, for AI-decided grades;
@@ -545,6 +546,7 @@ export interface PublicCriterionResultOut extends ResultRowCommon {
   decision_basis?: CriterionResultOut["decision_basis"];
   support_caution?: string | null;
   support_caution_scope?: boolean;
+  later_note?: string | null;
   agreeing_passes?: number | null;
   grading_passes?: number | null;
 }

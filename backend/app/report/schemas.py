@@ -121,6 +121,9 @@ class CriterionResultOut(BaseModel):
     # The evidence check could not apply to this kind of level (BUG-608), so
     # the caution is shown without "not confirmed".
     support_caution_scope: bool = False
+    # Added at report time to a grade saved before the whole-paper rule
+    # (BUG-611); never part of the stored result.
+    later_note: str | None = None
     agreeing_passes: int | None = None
     grading_passes: int | None = None
     # What each grading pass chose, in pass order, so the instructor can see
@@ -510,6 +513,9 @@ class PublicCriterionResultOut(BaseModel):
     # The evidence check could not apply to this kind of level (BUG-608), so
     # the caution is shown without "not confirmed".
     support_caution_scope: bool = False
+    # Added at report time to a grade saved before the whole-paper rule
+    # (BUG-611); never part of the stored result.
+    later_note: str | None = None
     agreeing_passes: int | None = None
     grading_passes: int | None = None
     # V-069 AC5: the adviser view carries the level too, same as the
