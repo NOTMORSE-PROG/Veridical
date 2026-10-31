@@ -100,6 +100,17 @@ class UnresolvedRubricIssuesError(ConflictError):
         self.details = {"open_issue_ids": open_issue_ids, "revision": revision}
 
 
+class AcknowledgementNoteRequiredError(VeridicalError):
+    """Keeping a wording that could not be traced to the document needs the
+    instructor's reason in a note; `details.issue_ids` names the issues."""
+
+    code = "acknowledgement_note_required"
+
+    def __init__(self, message: str, issue_ids: list[int]) -> None:
+        super().__init__(message)
+        self.details = {"issue_ids": issue_ids}
+
+
 class GoneError(VeridicalError):
     """A known resource that once existed is no longer available, such as
     a revoked/expired share link or a purged/missing stored source. Distinct
@@ -199,6 +210,7 @@ HTTP_STATUS: dict[str, int] = {
     "rubric_locked": 409,
     "rubric_changed": 409,
     "unresolved_rubric_issues": 409,
+    "acknowledgement_note_required": 422,
     "saved_group_changed": 409,
     "group_assignment_changed": 409,
     "gone": 410,

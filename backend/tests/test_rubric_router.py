@@ -408,6 +408,42 @@ def test_a_hand_saved_single_level_does_not_break_the_recheck(client, tmp_path):
     assert resp.status_code == 200, resp.text
 
 
+def test_a_whole_format_note_can_be_kept_without_a_reason(client, tmp_path):
+    """Only wording that could not be traced to the document needs a note;
+    a whole-format note ("other") is kept with none."""
+    uploaded = _upload(client, tmp_path)
+    issue = uploaded["parse_issue_details"][0]
+    assert issue["code"] == "other"
+    ack = {"issue_id": issue["id"], "reason_code": "other", "note": None}
+    resp = client.put(
+        f"/rubrics/{uploaded['id']}/criteria",
+        json={"criteria": uploaded["criteria"], "acknowledgements": [ack]},
+    )
+    assert resp.status_code == 200, resp.text
+    kept = next(d for d in resp.json()["parse_issue_details"] if d["id"] == issue["id"])
+    assert kept["status"] == "acknowledged" and kept["resolution"]["note"] is None
+
+
+def test_a_missing_keep_note_is_refused_in_the_standard_envelope():
+    import asyncio
+    import json
+
+    from app.errors import AcknowledgementNoteRequiredError
+    from app.main import veridical_error_handler
+
+    resp = asyncio.run(
+        veridical_error_handler(None, AcknowledgementNoteRequiredError("Add a note.", [4, 7]))
+    )
+    assert resp.status_code == 422
+    assert json.loads(resp.body) == {
+        "error": {
+            "code": "acknowledgement_note_required",
+            "message": "Add a note.",
+            "details": {"issue_ids": [4, 7]},
+        }
+    }
+
+
 def test_a_save_on_an_older_revision_is_refused(client, tmp_path):
     uploaded = _upload(client, tmp_path)
     route = f"/rubrics/{uploaded['id']}/criteria"

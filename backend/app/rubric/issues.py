@@ -18,7 +18,7 @@ from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
-from app.errors import NotFoundError
+from app.errors import AcknowledgementNoteRequiredError, NotFoundError
 from app.models.audit import AuditLog
 from app.models.enums import RubricParseStatus
 from app.models.instructor import Instructor
@@ -170,15 +170,32 @@ def acknowledge(
     acknowledgements: list[IssueAcknowledgement],
     instructor: Instructor,
     rows: list[Criterion],
+    settings: Settings,
 ) -> None:
     """Record the instructor keeping flagged wordings as written, with who,
     when and why, in the rubric and in the audit log. The wording kept is
-    recorded too, so a later rewording reopens the issue."""
+    recorded too, so a later rewording reopens the issue. Keeping a wording
+    that could not be traced to the document needs a note saying why: the
+    audit then shows the instructor's reason, not only that it was kept."""
     if not acknowledgements:
         return
     by_row = {row.id: row for row in rows}
     details = copy.deepcopy(rubric.parse_issue_details or [])
     by_id = {detail["id"]: detail for detail in details}
+    needs_note = set(settings.rubric_keep_note_required_codes)
+    unexplained = [
+        ack.issue_id
+        for ack in acknowledgements
+        if ack.note is None
+        and (detail := by_id.get(ack.issue_id)) is not None
+        and detail["status"] == "open"
+        and detail["code"] in needs_note
+    ]
+    if unexplained:
+        raise AcknowledgementNoteRequiredError(
+            "Add a note saying why each of these level descriptions is kept as written.",
+            unexplained,
+        )
     for ack in acknowledgements:
         detail = by_id.get(ack.issue_id)
         if detail is None:

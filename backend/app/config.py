@@ -479,6 +479,19 @@ class Settings(BaseSettings):
     rubric_level_header_min_similarity: float = Field(default=0.8, gt=0.0, le=1.0)
     # Longest note an instructor may give when keeping a flagged wording.
     rubric_acknowledgement_note_max_chars: int = Field(default=1000, ge=1)
+    # Keeping a wording VERIDICAL could not trace to the document needs a
+    # note saying why, for these issue codes (the review screen asks for the
+    # same list; see frontend config/ui.ts RUBRIC_KEEP_NOTE_REQUIRED_CODES).
+    rubric_keep_note_required_codes: list[str] = Field(
+        default_factory=lambda: [
+            "not_in_source",
+            "joins_cells",
+            "partial_cell",
+            "wrong_column",
+            "wrong_row",
+            "shared_cell",
+        ]
+    )
     # Shown to the model in place of a value withheld for the reason above.
     rubric_withheld_value_marker: str = Field(
         default="[differs between copies, not shown]", min_length=1

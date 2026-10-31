@@ -461,7 +461,7 @@ async def update_criteria(
     recheck(rubric, list(rows), get_settings())
     instructor = await session.get(Instructor, instructor_id)
     if instructor is not None:
-        acknowledge(session, rubric, body.acknowledgements, instructor, list(rows))
+        acknowledge(session, rubric, body.acknowledgements, instructor, list(rows), get_settings())
     rubric_revision = rubric.revision
     if rubric.is_active:
         # An active version grades every new check, so it never holds an open

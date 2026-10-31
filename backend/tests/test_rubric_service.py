@@ -681,9 +681,20 @@ async def test_a_grid_upload_stores_cell_provenance_and_structured_issues(
         "resolved"
     )
 
-    # Kept as written in the same save, the change goes through.
+    # Keeping wording that is not the document's needs a reason in a note:
+    # without one the save is refused, naming the issue.
+    from app.errors import AcknowledgementNoteRequiredError
     from app.rubric.schemas import IssueAcknowledgement
 
+    bare = IssueAcknowledgement(issue_id=invented.id, reason_code="document_wording", note="  ")
+    async with session_factory() as session:
+        with pytest.raises(AcknowledgementNoteRequiredError) as unexplained:
+            await update_criteria(
+                session, rubric.id, body("Strong evidence.", acknowledgements=[bare]), instructor_id
+            )
+    assert unexplained.value.details == {"issue_ids": [invented.id]}
+
+    # Kept as written, with a note, in the same save: the change goes through.
     keep = IssueAcknowledgement(issue_id=invented.id, reason_code="other", note="Panel wording.")
     async with session_factory() as session:
         kept = RubricOut.model_validate(
