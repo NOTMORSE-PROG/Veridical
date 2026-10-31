@@ -332,7 +332,10 @@ def run(ctx: Context) -> tuple[list[MetricRow], dict]:
         )
     )
     rows += real_precision_rows(ctx.golden, LANE)
+    config = _config(ctx)
     return rows, {
+        "seed": config["seed"],
+        "dev_only_hosts": sorted(config["dev_only_hosts"]),
         "plants": records,
         "unmatched_new_findings_by_kind": dict(unmatched),
         "twin_natural_findings": {k: len(v) for k, v in twins.items()},
