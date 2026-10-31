@@ -19,21 +19,21 @@ describe("upload image reading line", () => {
 
   it("gives every unread image a reason", () => {
     expect(imageReadingLine(pdf(92, reading({ not_checked: 92, no_cue: 89, too_small: 3 })))).toBe(
-      `92 images found. None was read for a table or equation: 89 had no recognised table or equation caption beside them; 3 were too small to hold one. ${IMAGE_READING_LIMIT}`,
+      `92 images found. None was read for a table or equation: 89 had no recognised table or equation caption beside them; 3 were too small, or drawn as small pieces, to be read. ${IMAGE_READING_LIMIT}`,
     );
   });
 
   it("never reports a pass that found nothing, or failed, as done", () => {
     expect(imageReadingLine(pdf(81, reading({ checked: 12, not_checked: 69, over_limit: 60, no_cue: 9 })))).toBe(
-      `81 images found. 12 were read for a table or equation; none held one. 69 were not read: 9 had no recognised table or equation caption beside them; 60 were over the reading limit for one manuscript. ${IMAGE_READING_LIMIT}`,
+      `81 images found. 12 were read for a table or equation; none contained one. 69 were not read: 9 had no recognised table or equation caption beside them; 60 were over the reading limit for one manuscript. ${IMAGE_READING_LIMIT}`,
     );
     expect(imageReadingLine(pdf(3, reading({ unclear: 3 })))).toBe(`3 images found. 3 could not be read reliably. ${IMAGE_READING_LIMIT}`);
     expect(imageReadingLine(pdf(3, reading({ checked: 1, not_checked: 2, unavailable: 2 }))))
-      .toContain("2 were not read: 2 could not be read because the image reader was unavailable.");
+      .toContain("2 were not read: 2 could not be read this time (the image reader or the image region was unavailable).");
   });
 
   it("adds no limit when every image was read", () => {
-    expect(imageReadingLine(pdf(1, reading({ checked: 1, with_content: 1 })))).toBe("1 image found. 1 was read for a table or equation; 1 held one.");
+    expect(imageReadingLine(pdf(1, reading({ checked: 1, with_content: 1 })))).toBe("1 image found. 1 was read for a table or equation; 1 contained a table or equation.");
   });
 
   it("says Word images are not read, without offering a caption as the reason", () => {

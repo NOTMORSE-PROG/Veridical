@@ -34,7 +34,7 @@
   "caption": "^(?:table|figure|fig\\.)\\s+\\d",
   "vision_cues": {
     "_comment": "An image is sent to the table/equation reading prompt only with one of these cues beside it. Most thesis images are figures, screenshots and photos, and most tables are typed text that is read without a model call. Distances are PDF points; a caption may overlap the image edge by caption_overlap_pts, as tight Word captions do. table_caption allows run-together Word numbering ('Table32.2:'), a letter prefix ('Table A-1') and short roman numerals. An uncued image is recorded as not checked, never as read.",
-    "table_caption": "^(?:table|talahanayan|tbl\\.)\\s*(?:[a-z]-?\\d|\\d|[ivxlc]{1,4}(?=[\\s.:-]))",
+    "table_caption": "^(?:table|talahanayan|tbl\\.?)\\s*(?:[a-z][-.]?\\d|\\d|[ivxlc]{1,4}(?=[\\s.:-]|$))",
     "equation_number": "^\\(\\s*\\d+(?:\\.\\d+)*[a-z]?\\s*\\)$",
     "caption_gap_pts": 60,
     "caption_overlap_pts": 6,

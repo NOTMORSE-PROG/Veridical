@@ -69,6 +69,13 @@ def _cued(result):
         (_block("Table 2.2: Trade structure", (100, 316, 300, 330)), True),
         # Mostly inside the image: a label in a picture, not its caption.
         (_block("Table 2.2: Trade structure", (100, 230, 300, 244)), False),
+        # Within the overlap, but its middle is inside the image.
+        (_block("Table 2.2", (100, 196, 300, 206)), False),
+        # Middle above the image, but runs deep into it.
+        (_block("Table 2.2: Trade structure", (100, 150, 300, 240)), False),
+        # A roman-numeral caption alone in its block, its title on the next line.
+        (_block("TABLE IV", (100, 170, 300, 182)), True),
+        (_block("Table A.1 Respondent profile", (100, 180, 300, 192)), True),
         # Word's run-together caption numbering, lettered and Filipino captions.
         (_block("Table32.2: Trade structure", (100, 180, 300, 192)), True),
         (_block("Table A-1 Respondent profile", (100, 180, 300, 192)), True),

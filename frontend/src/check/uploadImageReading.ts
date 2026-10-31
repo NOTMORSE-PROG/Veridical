@@ -8,9 +8,11 @@ const was = (n: number) => (n === 1 ? "was" : "were");
 // readable, so the caption reason must not be offered there.
 const NOT_READ: [keyof ImageReadingSummary, (n: number) => string][] = [
   ["no_cue", (n) => `${count(n, "had", "had")} no recognised table or equation caption beside ${n === 1 ? "it" : "them"}`],
-  ["too_small", (n) => `${n} ${was(n)} too small to hold one`],
+  // Also images drawn as many small pieces, which are never read whatever
+  // their outline.
+  ["too_small", (n) => `${n} ${was(n)} too small, or drawn as small pieces, to be read`],
   ["over_limit", (n) => `${n} ${was(n)} over the reading limit for one manuscript`],
-  ["unavailable", (n) => `${n} could not be read because the image reader was unavailable`],
+  ["unavailable", (n) => `${n} could not be read this time (the image reader or the image region was unavailable)`],
   ["not_requested", (n) => `${n} ${was(n)} not requested for reading`],
   ["unsupported", (n) => `${n} had no page position to read from`],
 ];
@@ -27,7 +29,7 @@ export function imageReadingLine(summary: Pick<IngestSummary, "images" | "image_
     parts.push("Images in Word files are not read for tables or equations.");
   } else {
     if (reading.checked > 0) {
-      parts.push(`${reading.checked} ${was(reading.checked)} read for a table or equation; ${reading.with_content === 0 ? "none held one" : `${reading.with_content} held one`}.`);
+      parts.push(`${reading.checked} ${was(reading.checked)} read for a table or equation; ${reading.with_content === 0 ? "none contained one" : `${reading.with_content} contained a table or equation`}.`);
     }
     if (reading.unclear > 0) parts.push(`${reading.unclear} could not be read reliably.`);
     if (reading.not_checked > 0) {
