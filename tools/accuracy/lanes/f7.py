@@ -82,7 +82,9 @@ LIMITATIONS = (
     "files are not covered.",
     "Light paraphrase uses a fixed synonym table and swaps two sentences; the embedding model "
     "ignores word order, so the swap tests nothing on its own.",
-    "Heavy paraphrases are model-written, not written by a person.",
+    "Heavy paraphrases are model-written, not written by a person. F7.2 claims no paraphrase "
+    "detection: with the shared-wording rule (BUG-620) heavy paraphrase is not detected, because "
+    "it shares as little wording as a same-topic match. The heavy rows show how many are found.",
     "A host is kept from matching its own Library copy through the product's same-group "
     "exclusion, so that rule is assumed here. Library entries here have a group while real "
     "Library submissions do not; checked copies have no content hash, so the same-file, "
@@ -258,11 +260,21 @@ def make_excerpt(
     (plus `excerpt.slack_words`)."""
     blocks = [b for b in extraction.blocks if not b.is_furniture and b.text.strip()]
     slack, attempts = config["excerpt"]["slack_words"], config["excerpt"]["attempts"]
+    # Headings are not prose: an excerpt never starts on one or runs past one.
+    headings = {" ".join(node.title.split()).casefold() for node in _section_nodes(extraction)}
+
+    def heading(block) -> bool:
+        return " ".join(block.text.split()).casefold() in headings
 
     def starts_sentence(i: int) -> bool:
         first = blocks[i].text.lstrip()[:1]
         before = blocks[i - 1].text.rstrip()[-1:] if i else "."
-        return first.isupper() and before in ".!?"
+        return (
+            first.isupper()
+            and before in ".!?"
+            and not heading(blocks[i])
+            and len(blocks[i].text.split()) >= config["excerpt"]["start_words"]
+        )
 
     starts = [i for i in range(len(blocks)) if blocks[i].page in allowed and starts_sentence(i)]
     if not starts:
@@ -271,7 +283,7 @@ def make_excerpt(
         start, target = rng.choice(starts), rng.randint(low, high)
         taken, words = [], 0
         for block in blocks[start:]:
-            if block.page not in allowed:
+            if block.page not in allowed or (taken and heading(block)):
                 break
             taken.append(block)
             words += len(block.text.split())
@@ -294,6 +306,16 @@ def make_excerpt(
                 used += len(" ".join(block.text.split())) + 1
             return Excerpt(doc, text, sorted(set(pages)))
     raise ValueError(f"No {low}-{high} word excerpt could be cut from {doc}")
+
+
+def _section_nodes(extraction) -> list:
+    tree = getattr(extraction, "section_tree", None)
+    found, stack = [], list(getattr(tree, "nodes", None) or [])
+    while stack:
+        node = stack.pop()
+        found.append(node)
+        stack.extend(getattr(node, "children", None) or [])
+    return found
 
 
 def _config(ctx: Context) -> dict:
@@ -359,10 +381,12 @@ def build_cases(
     words = config["excerpt_words"]
     # A pair seen while designing the lane is dev only, in either direction.
     dev_pairs = {frozenset(pair) for pair in config.get("dev_only_pairs", [])}
-    shared = {
-        side: [i for i in items if split_of(f"boilerplate|{i['id']}", config) == side]
-        for side in ("dev", "holdout")
-    }
+    ordered = sorted(
+        items,
+        key=lambda i: hashlib.sha256(f"{config['seed']}|boilerplate|{i['id']}".encode()).digest(),
+    )
+    half = round(len(ordered) * (1 - config["split"]["holdout_share"]))
+    shared = {"dev": ordered[:half], "holdout": ordered[half:]}
     if not all(shared.values()):
         raise ValueError("Each split needs at least one shared standard text; add items")
 
@@ -521,8 +545,10 @@ def place_plants(extraction, case: dict, config: dict) -> list[Plant]:
             i for i, b in enumerate(extraction.blocks) if b.page == page and not b.is_furniture
         ]
         if on_page:
-            left = margin + (
-                config["block_quote_indent_points"] if plant["type"] == "block_quote" else 0
+            left = (
+                chapter_margin(extraction, page, config) + config["block_quote_indent_points"]
+                if plant["type"] == "block_quote"
+                else margin
             )
             block = plant_block(extraction, max(on_page), plant["text"], left, config)
             assert line_inventory_valid(block), f"planted line inventory broken on page {page}"
@@ -679,6 +705,11 @@ def score_copy(plants: list[Plant], fresh: list[dict], library_ids, match) -> tu
                 # Where the finding sends the instructor, against the page the
                 # copied text is on.
                 "anchor_offsets": sorted({plant.page - a for a in anchors if a is not None}),
+                # Findings naming the donor's record but showing another
+                # passage of it: explained, but the evidence is not the copy.
+                "other_passage_findings": [
+                    i for i, source, found in sourced if source and not found
+                ],
                 "levels": sorted({str(fresh[i]["detail"].get("kind")) for i in hits + backed}),
                 **plant.extra,
             }
@@ -953,26 +984,58 @@ def compared_pages(extraction, settings) -> set[int]:
 
 
 def _excluded_pages(extraction, settings) -> set[int]:
-    """Pages where a plant would not be compared at all: pages the integrity
-    stage leaves unread, and pages inside the reference list or an indented
-    quotation as the product tags them."""
-    from app.checks.reuse.embed import compute_passage_embeddings
+    """Pages a plant must not go on: pages the integrity stage leaves unread,
+    and pages holding text the product tags as reference list or indented
+    quotation. Taken from the product's own selection rules, not from passage
+    tags, so a thesis whose passage inventory is refused today still has its
+    bibliography and appendix kept free of plants."""
+    from app.ingest.blockquotes import block_quote_block_ids
+    from app.ingest.patterns import load_patterns
+    from app.ingest.references import non_reference_blocks
 
-    unread = set(source_scope(extraction, settings) or [])
-    return unread | {
-        p.page
-        for p in compute_passage_embeddings(extraction, settings)
-        if p.page is not None and (p.is_reference_list or p.is_block_quote)
+    patterns = load_patterns(settings.ingest_patterns_file)
+    body = {id(b) for b in non_reference_blocks(extraction, patterns, ambiguous_entries_ok=True)}
+    quotes = block_quote_block_ids(extraction, settings)
+    tagged = {
+        b.page
+        for b in extraction.blocks
+        if not b.is_furniture
+        and b.page is not None
+        and b.text.strip()
+        and (id(b) not in body or id(b) in quotes)
     }
+    return set(source_scope(extraction, settings) or []) | tagged
 
 
-def _landing(plant: Plant, extraction, settings, donor_passages, match: dict) -> dict:
-    """The passage the plant was chunked into and its best similarity to any
-    passage of the donor's Library record: why a plant was or was not found."""
-    from app.checks.reuse.embed import compute_passage_embeddings
+def chapter_margin(extraction, page: int, config: dict) -> float:
+    """The body margin the product's indentation rule measures for the
+    chapter holding `page`: the most common left edge in that chapter
+    (`app/ingest/blockquotes.py`), or the document's when there are no
+    chapters."""
+    from app.ingest.blockquotes import _chapter_spans
+
+    for start, end in _chapter_spans(extraction):
+        if start is not None and start <= page and (end is None or page < end):
+            lefts = [
+                round(b.bbox[0])
+                for b in extraction.blocks
+                if not b.is_furniture
+                and b.bbox is not None
+                and b.page is not None
+                and start <= b.page
+                and (end is None or b.page < end)
+            ]
+            if lefts:
+                return float(Counter(lefts).most_common(1)[0][0])
+    return _body_margin(extraction, config)
+
+
+def _landing(plant: Plant, passages: list, donor_passages, match: dict) -> dict:
+    """The passage the plant was chunked into, how the product tagged it, and
+    its best similarity to any passage of the donor's Library record: why a
+    plant was or was not found, and whether it was compared at all."""
     from app.ml.embeddings import cosine_similarity
 
-    passages = [p for p in compute_passage_embeddings(extraction, settings) if p.page is not None]
     near = [
         p
         for p in passages
@@ -981,6 +1044,8 @@ def _landing(plant: Plant, extraction, settings, donor_passages, match: dict) ->
     if not near:
         return {}
     best = max(near, key=lambda p: overlap(plant.text, p.text, match["shingle"]))
+    if overlap(plant.text, best.text, match["shingle"]) < match["containment_min"]:
+        return {}
     landing = {
         "passage_words": len(best.text.split()),
         "plant_share_of_passage": round(
@@ -1057,9 +1122,21 @@ async def _measure(ctx: Context, config: dict, url: str, settings) -> dict:
             )
             for host in checked
         }
+
+        def source_has_passages(plant: Plant) -> bool:
+            """Whether the text the plant came from is searchable passage by
+            passage. Copies and quotations need their donor's passages, shared
+            text the carrier's; text outside the Library or removed from it
+            has none by design, which is what those controls test."""
+            if plant.type in ("not_in_library", "removed_from_library"):
+                return True
+            name = config["boilerplate_carrier"] if plant.type == "boilerplate" else plant.donor
+            return bool(library.passages.get(name))
+
         sealed = config.get("holdout_sealed", True)
         twin_flags = [flag for twin in twins.values() for flag in twin["flags"]]
         records, findings, fresh_total, explained_total, unexplained = [], [], 0, 0, Counter()
+        other_passage, hosts_run = 0, set()
         audited, banned = 0, []
         not_run = [c for c in copies if sealed and c["split"] == "holdout"]
         first_run = next((c for c in copies if not (sealed and c["split"] == "holdout")), None)
@@ -1069,28 +1146,46 @@ async def _measure(ctx: Context, config: dict, url: str, settings) -> dict:
             unread = scopes[case["host"]]
             extraction = prepare(extractions[case["host"]], unread)
             plants = place_plants(extraction, case, config)
+            # Where each plant landed under this version, and whether the
+            # product compares that passage at all (it never matches text it
+            # tags as reference list or indented quotation).
+            landed_in = [
+                p for p in compute_passage_embeddings(extraction, settings) if p.page is not None
+            ]
+            landings = [
+                _landing(plant, landed_in, library.passages.get(plant.donor, []), config["match"])
+                for plant in plants
+            ]
             _, flags = await library.check(case["host"], extraction, unread)
             twin_keys = {flag_key(f) for f in twins[case["host"]]["flags"]}
             fresh = [f for f in flags if flag_key(f) not in twin_keys]
             outcomes, explained = score_copy(plants, fresh, library.ids, config["match"])
-            for plant, outcome in zip(plants, outcomes, strict=True):
+            hosts_run.add(case["host"])
+            other_passage += len({i for o in outcomes for i in o.pop("other_passage_findings")})
+            for plant, outcome, landing in zip(plants, outcomes, landings, strict=True):
                 if plant.type in RECALL_TYPES and not outcome["detected"]:
-                    outcome["landing"] = _landing(
-                        plant,
-                        extraction,
-                        settings,
-                        library.passages.get(plant.donor, []),
-                        config["match"],
-                    )
+                    outcome["landing"] = landing
+                # The product tags a passage it does not match. A block quote
+                # is meant to be tagged; any other plant so tagged was not
+                # compared, whatever the version does with it.
+                tagged_quote = bool(landing.get("passage_is_block_quote"))
+                tagged_reference = bool(landing.get("passage_is_reference_list"))
                 records.append(
                     {
                         **outcome,
                         "host": case["host"],
                         "split": case["split"],
-                        # Both sides have passages, so a miss is a real miss and
-                        # not the missing-inventory hole (BUG-622).
+                        "landed": bool(landing),
+                        "tagged_quote": tagged_quote,
+                        "tagged_reference": tagged_reference,
+                        # Both sides have passages and the plant's passage is
+                        # one the product compares, so a miss is a real miss
+                        # and not a coverage hole (BUG-622 and the tags).
                         "comparable": inventory[case["host"]]
-                        and bool(library.passages.get(plant.donor)),
+                        and source_has_passages(plant)
+                        and bool(landing)
+                        and not tagged_reference
+                        and (plant.type == "block_quote" or not tagged_quote),
                     }
                 )
             # Every new finding, with how much of each plant it quotes, so a
@@ -1176,12 +1271,23 @@ async def _measure(ctx: Context, config: dict, url: str, settings) -> dict:
             "library_ids": library.ids,
             "fresh_total": fresh_total,
             "explained_total": explained_total,
+            "explained_other_passage": other_passage,
+            "hosts_run": len(hosts_run),
             "unexplained": dict(unexplained),
             "audited": audited,
             "banned": banned,
             "not_run": not_run,
             "requests": requests,
             "cases_built_this_run": built,
+            "cases_sha256": hashlib.sha256(
+                (ctx.golden / LANE / config["cases_file"]).read_bytes()
+            ).hexdigest(),
+            "heavy_missing": sum(
+                1
+                for c in copies
+                for pl in c["plants"]
+                if pl["type"] == "heavy_paraphrase" and not pl.get("text")
+            ),
         }
     finally:
         await library.engine.dispose()
@@ -1312,6 +1418,7 @@ def metric_rows(measured: dict, config: dict) -> list[MetricRow]:
                 sum(any(abs(o) <= window for o in r["anchor_offsets"]) for r in found),
                 len(found),
                 split=split,
+                clusters=len({r["host"] for r in found}),
                 note=(
                     "The page a passage finding names is its first block's page, which can come "
                     "before the copied text. Offsets seen (plant page minus anchor page): "
@@ -1327,27 +1434,52 @@ def metric_rows(measured: dict, config: dict) -> list[MetricRow]:
         )
         for plant_type in SILENT_TYPES:
             # A control this version does not read cannot show silence.
-            group = [r for r in mine if r["type"] == plant_type and not r.get("not_placed")]
-            alarms = sum(r["any_flag"] for r in group)
-            rows.append(
-                rate_row(
-                    LANE,
-                    f"silent {plant_type}",
-                    "control plant",
-                    len(group) - alarms,
-                    len(group),
-                    split=split,
-                    clusters=len({r["host"] for r in group}),
-                    note=SILENT_NOTES.get(
-                        plant_type,
-                        "Any passage finding on the plant, or a whole-document or chapter finding "
-                        "whose supporting passage is the plant, is a false alarm.",
-                    ),
-                    extra={
-                        "alarms_by_host": dict(Counter(r["host"] for r in group if r["any_flag"]))
-                    },
-                )
+            placed = [r for r in mine if r["type"] == plant_type and not r.get("not_placed")]
+            untagged = 0
+            if plant_type == "block_quote":
+                # The control tests the product's indentation rule; a plant the
+                # rule did not tag is reported, not counted as a pass.
+                untagged = sum(not r["tagged_quote"] for r in placed)
+                placed = [r for r in placed if r["tagged_quote"]]
+            note = SILENT_NOTES.get(
+                plant_type,
+                "Any passage finding on the plant, or a whole-document or chapter finding "
+                "whose supporting passage is the plant, is a false alarm.",
             )
+            if untagged:
+                note += f" {untagged} placed block quotes the product did not tag are left out."
+            for scope, group in (
+                ("", placed),
+                (" (comparable)", [r for r in placed if r.get("comparable")]),
+            ):
+                alarms = sum(r["any_flag"] for r in group)
+                rows.append(
+                    rate_row(
+                        LANE,
+                        f"silent {plant_type}{scope}",
+                        "control plant",
+                        len(group) - alarms,
+                        len(group),
+                        split=split,
+                        clusters=len({r["host"] for r in group}),
+                        note=note
+                        + (
+                            " Only controls the check could have matched: host and source have "
+                            "passages and the plant's passage is compared."
+                            if scope
+                            else ""
+                        ),
+                        extra={
+                            "alarms_by_host": dict(
+                                Counter(r["host"] for r in group if r["any_flag"])
+                            ),
+                            "distinct_texts": len({r["cluster"] for r in group}),
+                            "not_placed": sum(
+                                1 for r in mine if r["type"] == plant_type and r.get("not_placed")
+                            ),
+                        },
+                    )
+                )
     rows.append(
         rate_row(
             LANE,
@@ -1356,9 +1488,12 @@ def metric_rows(measured: dict, config: dict) -> list[MetricRow]:
             measured["explained_total"],
             measured["fresh_total"],
             split="dev" if len(splits) == 1 else "all",
+            clusters=measured["hosts_run"],
             note=(
                 "New findings that name a recall plant's donor, over every finding the plants "
-                f"caused. Unexplained: {measured['unexplained']}."
+                f"caused. Unexplained: {measured['unexplained']}. Of the explained, "
+                f"{measured['explained_other_passage']} name the right record but show a "
+                "different passage of it."
             ),
         )
     )
@@ -1370,12 +1505,14 @@ def metric_rows(measured: dict, config: dict) -> list[MetricRow]:
             "body page",
             sum(c["body_pages"] - c["not_compared"] for c in coverage.values()),
             sum(c["body_pages"] for c in coverage.values()),
+            clusters=len(coverage),
             note=(
                 "A page is compared when passage matching can reach it: not left unread by the "
                 "integrity stage (a host with too many unread pages is not compared at all and "
                 "gets no plants), the thesis has a passage inventory, and a body block on it is "
-                "outside the reference-list and indented-quotation tags. Plants were put only on "
-                "pages compared when the set was frozen, so recall does not see this gap. "
+                "outside the reference-list and indented-quotation tags. Plants on pages a "
+                "version does not compare count as misses in the recall rows and are left out "
+                "of the comparable rows. "
                 "Not compared, by host: "
                 + ", ".join(
                     f"{h} {c['not_compared']}/{c['body_pages']}" for h, c in coverage.items()
@@ -1450,15 +1587,19 @@ def run(ctx: Context) -> tuple[list[MetricRow], dict]:
             f"The case set was built in this run and frozen in {config['cases_file']}; later "
             "runs measure the same plants."
         )
+    warnings.append(
+        f"Case set {config['cases_file']} sha256 {measured['cases_sha256'][:12]}; lane seed "
+        f"{config['seed']} (the seed in the header is the harness default, not the lane's)."
+    )
     unplaced = sum(1 for r in measured["records"] if r.get("not_placed"))
     if unplaced:
         warnings.append(
             f"{unplaced} plants were not placed: their frozen page is not read in this version "
-            "(counted as missed or, for controls, as silent)."
+            "(recall plants count as missed; controls are left out of the silent rows)."
         )
     if measured["requests"]:
         warnings.append(
-            f"{len(measured['requests'])} heavy paraphrases are still to be written "
+            f"{measured['heavy_missing']} heavy-paraphrase plants still lack their text "
             "(heavy_requests.json); those plants were left out."
         )
     if measured["banned"]:

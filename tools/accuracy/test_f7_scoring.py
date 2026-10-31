@@ -165,8 +165,8 @@ def test_an_excerpt_is_a_contiguous_run_of_the_donor_cut_at_sentence_ends():
         "A third sentence closes the paragraph here.",
     ]
     blocks = [SimpleNamespace(page=5, is_furniture=False, text=t) for t in lines]
-    extraction = SimpleNamespace(blocks=blocks)
-    config = {"excerpt": {"slack_words": 20, "attempts": 50}}
+    extraction = SimpleNamespace(blocks=blocks, section_tree=None)
+    config = {"excerpt": {"slack_words": 20, "attempts": 50, "start_words": 4}}
     excerpt = make_excerpt("doc", extraction, {5}, 10, 30, random.Random(1), config)
     whole = " ".join(tokens(" ".join(lines)))
     assert " ".join(tokens(excerpt.text)) in whole, "a run of the donor, short lines included"
@@ -194,17 +194,143 @@ def test_sealed_holdout_records_never_reach_the_rows():
         "right_source": True,
         "anchor_offsets": [0],
         "comparable": True,
+        "tagged_quote": False,
+        "tagged_reference": False,
     }
     measured = {
         "records": [{**record, "split": "dev"}, {**record, "split": "holdout", "host": "ksa"}],
-        "explained_total": 0,
-        "fresh_total": 0,
-        "unexplained": {},
-        "audited": 0,
-        "banned": [],
-        "coverage": {"mit": {"body_pages": 1, "not_compared": 0, "refused": False}},
+        **_MEASURED,
     }
-    config = {"holdout_sealed": True, "match": {"page_window": 1}, "banned_terms": []}
-    rows = metric_rows(measured, config)
+    rows = metric_rows(measured, _CONFIG)
     assert {row.split for row in rows} <= {"dev", "all"}
     assert all(row.numerator <= 1 for row in rows if row.metric.startswith("recall verbatim"))
+
+
+_MEASURED = {
+    "explained_total": 0,
+    "fresh_total": 0,
+    "unexplained": {},
+    "audited": 0,
+    "banned": [],
+    "explained_other_passage": 0,
+    "hosts_run": 1,
+    "coverage": {"mit": {"body_pages": 1, "not_compared": 0, "refused": False}},
+}
+_CONFIG = {"holdout_sealed": True, "match": {"page_window": 1}, "banned_terms": []}
+
+
+def _control(kind, **extra):
+    return {
+        "type": kind,
+        "host": "mit",
+        "cluster": kind,
+        "split": "dev",
+        "detected": False,
+        "any_flag": False,
+        "right_source": False,
+        "anchor_offsets": [],
+        "comparable": True,
+        "tagged_quote": kind == "block_quote",
+        "tagged_reference": False,
+        **extra,
+    }
+
+
+def _row(rows, metric):
+    return next(r for r in rows if r.metric == metric)
+
+
+def test_an_unplaced_control_is_left_out_of_the_silent_rows():
+    from tools.accuracy.lanes.f7 import metric_rows
+
+    records = [_control("boilerplate"), _control("boilerplate", not_placed=True)]
+    row = _row(metric_rows({"records": records, **_MEASURED}, _CONFIG), "silent boilerplate")
+    assert (row.numerator, row.denominator) == (1, 1)
+
+
+def test_a_block_quote_the_product_did_not_tag_is_not_a_pass():
+    from tools.accuracy.lanes.f7 import metric_rows
+
+    records = [_control("block_quote"), _control("block_quote", tagged_quote=False)]
+    row = _row(metric_rows({"records": records, **_MEASURED}, _CONFIG), "silent block_quote")
+    assert row.denominator == 1 and "did not tag" in row.note
+
+
+def test_a_recall_plant_never_raises_a_coarse_alarm():
+    chapter = _flag(None, "templated sentence", 9, kind="reuse_high_similarity_chapter")
+    chapter["detail"]["supporting_passage"] = {"own_text": TEXT}
+    records, explained = score_copy([_plant()], [chapter], {"mit": 5}, MATCH)
+    assert not records[0]["any_flag"] and not records[0]["coarse_alarm"]
+    assert explained == set(), "a chapter finding naming another record is not explained"
+
+
+def test_shared_wording_needs_only_one_of_its_two_tests():
+    from tools.accuracy.lanes.f7 import shared_wording
+
+    config = {
+        "match": {"shingle": 5},
+        "verify": {"containment_confirmed": 0.5, "longest_run_confirmed": 12},
+    }
+    # Letter-only words: the tokenizer drops digits.
+    letters = "abcdefghijklmnopqrstuvwxyz"
+    words = [f"w{a}{b}" for a in letters for b in letters][:40]
+    filler = [f"x{a}{b}" for a in letters for b in letters][:200]
+    other = " ".join(words[:13] + filler)
+    result = shared_wording(" ".join(words), other, config)
+    assert result["containment"] < 0.5 and result["longest_run"] >= 12
+    assert result["confirmed"]
+
+
+def test_an_excerpt_never_starts_on_a_heading_or_runs_past_one():
+    from types import SimpleNamespace
+
+    from tools.accuracy.lanes.f7 import make_excerpt
+
+    lines = [
+        "Chapter 3 Methods.",
+        "The team interviewed twelve clerks about how records were kept on paper.",
+        "Each interview took about half an hour and was recorded with consent.",
+        "Chapter 4 Results.",
+        "The prototype cut the time to find a record from minutes to seconds overall.",
+    ]
+    tree = SimpleNamespace(
+        nodes=[
+            SimpleNamespace(title=lines[0], children=[]),
+            SimpleNamespace(title=lines[3], children=[]),
+        ]
+    )
+    extraction = SimpleNamespace(
+        blocks=[SimpleNamespace(page=7, is_furniture=False, text=t) for t in lines],
+        section_tree=tree,
+    )
+    config = {"excerpt": {"slack_words": 20, "attempts": 50, "start_words": 4}}
+    for seed in range(5):
+        excerpt = make_excerpt("doc", extraction, {7}, 10, 30, random.Random(seed), config)
+        assert "Chapter" not in excerpt.text
+
+
+def test_two_plants_on_a_copy_never_share_donor_text():
+    a = "one two three four five six seven eight nine ten"
+    assert overlap(a, "zero " + a, 5) > 0
+    assert overlap(a, "eleven twelve thirteen fourteen fifteen sixteen", 5) == 0
+
+
+def test_a_frozen_heavy_paraphrase_is_filled_by_its_own_key(tmp_path):
+    import json
+
+    from tools.accuracy.core import Context
+    from tools.accuracy.lanes.f7 import frozen_cases
+
+    (tmp_path / "f7").mkdir()
+    plants = [
+        {"type": "heavy_paraphrase", "key": "heavy:a", "text": None, "source_text": "x y"},
+        {"type": "heavy_paraphrase", "key": "heavy:b", "text": None, "source_text": "p q"},
+    ]
+    case = {"copy": 0, "host": "mit", "split": "dev", "seed": 1, "plants": plants}
+    (tmp_path / "f7" / "cases.json").write_text(json.dumps([case]), encoding="utf-8")
+    (tmp_path / "f7" / "heavy.json").write_text(json.dumps({"heavy:b": "B"}), encoding="utf-8")
+    ctx = Context(golden=tmp_path, output=tmp_path, seed=1, code_commit="x")
+    config = {"cases_file": "cases.json", "files": {"heavy": "heavy.json"}}
+    copies, requests, built = frozen_cases(ctx, config, lambda: [])
+    assert [pl["text"] for pl in copies[0]["plants"]] == [None, "B"]
+    assert set(requests) == {"heavy:a"} and not built
