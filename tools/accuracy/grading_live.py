@@ -20,6 +20,7 @@ from pathlib import Path
 
 from tools.accuracy.core import rate_row
 from tools.accuracy.lanes.grading import (
+    DECIDED,
     IMAGE_PAGE,
     LABEL,
     LANE,
@@ -157,7 +158,7 @@ def analyse(
     first = [d for d in decisions if d["run"] in primary]
     rerun_rows = _rerun_agreement(decisions, runs, first_run)
     first_quotes = [q for q in quotes if q["run"] in {d["run"] for d in first}]
-    automatic = [d for d in first if d["outcome"] == "passed"]
+    automatic = [d for d in first if d["outcome"] in DECIDED]
     supported = [d for d in automatic if d["support"] == "supported"]
     both_votes = [d for d in first if _both_voted(d["votes"])]
     checkable = [q for q in first_quotes if q["where"] in (ON_ANCHOR_PAGE, OTHER_PAGE, NOT_FOUND)]

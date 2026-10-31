@@ -10,7 +10,9 @@ from tools.accuracy.lanes.grading import (
     Grade,
     classify_quote,
     page_number,
+    pair_confusion,
     quote_fragments,
+    specific_agreement,
     stability,
 )
 
@@ -175,3 +177,106 @@ def test_repeat_scores_skip_stopped_runs_and_use_the_grader_level(tmp_path):
     grounded = by_metric["quotes found on the cited page (repeats)"]
     assert (grounded.numerator, grounded.denominator) == (2, 2)
     assert details["stopped"] == ["repeats/r2/stopped/other.json"]
+    # Tone went from decided to escalated: a change for the instructor, but
+    # the grader proposed the same level both times.
+    strict = by_metric["every repeat gave the same result (an escalation flip counts as a change)"]
+    assert (strict.numerator, strict.denominator) == (1, 2)
+    proposed = by_metric["every repeat proposed the same level (kept or escalated)"]
+    assert (proposed.numerator, proposed.denominator) == (2, 2)
+    # One thesis is one cluster, so nothing here can be more than indicative.
+    assert stable.extra["clusters"] == 1 and stable.indicative
+    by_strategy = by_metric["automatic grades whose support check passed: single passage"]
+    assert (by_strategy.numerator, by_strategy.denominator) == (2, 3)
+
+
+def test_strict_stability_counts_a_steady_escalation_as_the_same_result():
+    rows = grades("A", [None] * 3, [False] * 3) + grades(
+        "B", ["Proficient", None, "Proficient"], [True, False, True]
+    )
+    summary = stability(rows, SCALE, repeats=3)
+    assert (summary.strict_all_equal, summary.strict_units) == (1, 2)
+
+
+def test_an_off_scale_level_is_listed_and_counts_as_a_change():
+    summary = stability(grades("A", ["Proficient", "passed", "Proficient"]), SCALE, repeats=3)
+    assert summary.off_scale_units == ["A"]
+    assert summary.units == 0
+    assert (summary.strict_all_equal, summary.strict_units) == (0, 1)
+
+
+def test_proposed_levels_are_compared_even_when_a_repeat_escalated():
+    rows = [
+        Grade("A", 0, "Proficient", True, "Proficient"),
+        Grade("A", 1, None, False, "Proficient"),
+        Grade("A", 2, "Proficient", True, "Proficient"),
+    ]
+    summary = stability(rows, SCALE, repeats=3)
+    assert (summary.proposed_all_equal, summary.proposed_units) == (1, 1)
+
+
+def test_pair_confusion_is_symmetric_and_shows_a_single_level_grader():
+    table = pair_confusion([["Proficient"] * 3, ["Proficient", "Exemplary", "Proficient"]], SCALE)
+    assert table["Proficient"]["Proficient"] == 2 * (3 + 1)
+    assert table["Proficient"]["Exemplary"] == table["Exemplary"]["Proficient"] == 2
+    assert sum(sum(row.values()) for row in table.values()) == 2 * 6
+
+
+def test_specific_agreement_by_hand():
+    # Unit 1: three Proficient. Unit 2: two Proficient, one Exemplary.
+    # Proficient: (3*2 + 2*1) / (3*2 + 2*2) = 8/10. Exemplary: 0 / (1*2) = 0.
+    result = specific_agreement(
+        [["Proficient"] * 3, ["Proficient", "Exemplary", "Proficient"]], SCALE
+    )
+    assert result["Proficient"] == pytest.approx(0.8)
+    assert result["Exemplary"] == 0
+    assert result["Beginner"] is None
+
+
+@pytest.mark.parametrize(
+    ("detail", "basis"),
+    [
+        ({"votes": ["Proficient", "Proficient"]}, "passes agreed"),
+        ({"votes": ["Proficient", "Exemplary", "Proficient"]}, "tie-break majority"),
+        ({"votes": ["A", "B"], "decision_basis": "single_verified_pass"}, "single_verified_pass"),
+        ({}, "unrecorded"),
+    ],
+)
+def test_decision_basis_comes_from_the_votes_when_none_is_recorded(detail, basis):
+    from tools.accuracy.grading_repeat_scores import decision_basis
+
+    assert decision_basis(detail) == basis
+
+
+def test_strategy_uses_the_products_own_evidence_rules():
+    from tools.accuracy.grading_repeat_scores import (
+        LOCATABLE,
+        SINGLE_PASSAGE,
+        WHOLE_DOCUMENT,
+        strategy,
+    )
+
+    levels = [
+        {"name": "Acceptable", "level": 2, "points": 2, "descriptor": "States the topic only."},
+        {
+            "name": "Proficient",
+            "level": 3,
+            "points": 3,
+            "descriptor": "States the topic and previews the structure of the paper.",
+        },
+    ]
+    intro = {"text": "Introduction", "levels": levels}
+    assert strategy(intro, {"verdict": "Proficient"}) == LOCATABLE
+    assert strategy(intro, {"proposed_verdict": "Proficient"}) == LOCATABLE
+    assert strategy(intro, {"verdict": "Acceptable"}) == SINGLE_PASSAGE
+    guarded = {"verdict": "Acceptable", "support_check": {"scope_guard": "x"}}
+    assert strategy(intro, guarded) == WHOLE_DOCUMENT
+
+
+def test_mixed_level_scales_are_refused_before_any_repeat():
+    from tools.accuracy.grading_repeat_scores import common_scale
+
+    four = [{"name": n, "points": p} for p, n in enumerate(SCALE, start=1)]
+    three = four[:3]
+    assert common_scale([{"levels": four}, {"levels": four}, {"levels": None}]) == tuple(SCALE)
+    with pytest.raises(ValueError, match="2 level scales"):
+        common_scale([{"levels": four}, {"levels": three}])

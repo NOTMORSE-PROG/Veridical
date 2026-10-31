@@ -26,6 +26,11 @@ from app.checks.accuracy_stats import fleiss_kappa, gwet_ac1_multi
 LANE = "grading"
 LABEL = "internal proxy, NOT accuracy (no instructor labels)"
 
+# A level was decided automatically only on these outcomes (the lowest level
+# of a scale can come out as "failed"); anything else went to the instructor
+# or did not apply.
+DECIDED = {"passed", "failed"}
+
 # --- quote grounding ---------------------------------------------------------
 
 ON_ANCHOR_PAGE = "on_anchor_page"
@@ -126,6 +131,10 @@ class Grade:
     repeat: int
     level: str | None
     decided: bool
+    # The level the grader put forward whether or not it was kept: an
+    # escalated grade keeps it as `proposed_level`. None when no level was
+    # proposed at all (the grading was unavailable).
+    proposed: str | None = None
 
 
 @dataclass
@@ -137,9 +146,22 @@ class StabilitySummary:
     pairs_within_one: int
     decided_flips: list[Hashable] = field(default_factory=list)
     incomplete_units: list[Hashable] = field(default_factory=list)
+    # Decided in every repeat, but with a level outside the scale (a verdict
+    # word, a renamed level): listed, never silently left out.
+    off_scale_units: list[Hashable] = field(default_factory=list)
     fleiss_kappa: float | None = None
     ac1: float | None = None
     prevalence: dict[str, float] = field(default_factory=dict)
+    # Over every unit seen in all repeats: a flip or an off-scale level counts
+    # as disagreement here, so instability cannot leave the denominator.
+    strict_units: int = 0
+    strict_all_equal: int = 0
+    # The grader's proposals, kept or not, over units with one in every repeat.
+    proposed_units: int = 0
+    proposed_all_equal: int = 0
+    # Ordered pairs of repeats of the same unit, by level (row, column).
+    confusion: dict[str, dict[str, int]] = field(default_factory=dict)
+    specific_agreement: dict[str, float | None] = field(default_factory=dict)
 
 
 def stability(grades: Iterable[Grade], scale: Sequence[str], repeats: int) -> StabilitySummary:
@@ -163,7 +185,25 @@ def stability(grades: Iterable[Grade], scale: Sequence[str], repeats: int) -> St
         if len(decided) > 1:
             summary.decided_flips.append(unit)
         levels = [seen[r].level for r in sorted(seen)]
-        if not all(grade.decided and grade.level in order for grade in seen.values()):
+        proposed = [seen[r].proposed for r in sorted(seen)]
+        if all(level in order for level in proposed):
+            summary.proposed_units += 1
+            summary.proposed_all_equal += len(set(proposed)) == 1
+        all_decided = all(grade.decided for grade in seen.values())
+        on_scale = all(level in order for level in levels)
+        if any(grade.decided and grade.level not in order for grade in seen.values()):
+            summary.off_scale_units.append(unit)
+        # The result an instructor would see: the level, or "escalated". An
+        # off-scale level is marked per repeat, so it never matches anything.
+        results = [
+            (seen[r].level if seen[r].level in order else f"off-scale in r{r}")
+            if seen[r].decided
+            else "escalated"
+            for r in sorted(seen)
+        ]
+        summary.strict_units += 1
+        summary.strict_all_equal += len(set(results)) == 1
+        if not (all_decided and on_scale):
             continue
         summary.units += 1
         summary.all_equal += len(set(levels)) == 1
@@ -178,7 +218,40 @@ def stability(grades: Iterable[Grade], scale: Sequence[str], repeats: int) -> St
         shares = Counter(level for unit in complete for level in unit)
         total = sum(shares.values())
         summary.prevalence = {level: shares[level] / total for level in scale}
+        summary.confusion = pair_confusion(complete, scale)
+        summary.specific_agreement = specific_agreement(complete, scale)
     return summary
+
+
+def pair_confusion(units: Sequence[Sequence[str]], scale: Sequence[str]) -> dict:
+    """Counts of (level in one repeat, level in another) over every ordered
+    pair of repeats of a unit, so the table is symmetric. An "always the same
+    level" grader shows up as one heavy cell."""
+    table = {row: dict.fromkeys(scale, 0) for row in scale}
+    for levels in units:
+        for left, right in combinations(levels, 2):
+            table[left][right] += 1
+            table[right][left] += 1
+    return table
+
+
+def specific_agreement(units: Sequence[Sequence[str]], scale: Sequence[str]) -> dict:
+    """Per-level specific agreement: given one repeat chose this level, the
+    chance another repeat of the same unit chose it too. It is the
+    repeat-against-repeat analogue of per-level recall; with no instructor
+    labels there is no true level to recall against.
+
+    For level j: sum over units of n_j(n_j - 1) / sum of n_j(m - 1), where
+    n_j repeats of a unit chose j out of m. None when no repeat chose j."""
+    result: dict[str, float | None] = {}
+    for level in scale:
+        agree = possible = 0
+        for levels in units:
+            n = sum(item == level for item in levels)
+            agree += n * (n - 1)
+            possible += n * (len(levels) - 1)
+        result[level] = agree / possible if possible else None
+    return result
 
 
 # --- lane entry point -------------------------------------------------------
