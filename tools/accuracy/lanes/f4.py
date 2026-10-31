@@ -43,7 +43,14 @@ from tools.accuracy.core import (
     rate_row,
     real_precision_rows,
 )
-from tools.accuracy.f4_cases import KIND_RECALL, KIND_RESTATE, PROBE_KINDS, apply_case
+from tools.accuracy.f4_cases import (
+    KIND_RECALL,
+    KIND_RESTATE,
+    PROBE_KINDS,
+    apply_case,
+    states_objective,
+    vocabulary,
+)
 
 from app.checks.agreement import pair
 from app.checks.agreement.cues import load_cues
@@ -81,6 +88,12 @@ LIMITATIONS = (
     "limitations; whether those are right is for two raters, not this lane.",
     "Each plant is judged in a copy holding only that plant; batches mix copies, and the "
     "reading-order source gate is not applied.",
+    "Objectives outside the thesis's own objectives (literature review, methodology, "
+    "results and other chapters by role; BUG-625) are set aside before pairing. The 9 dev "
+    "plants on AugmentedRL objective 15, an aim from the research proposal appended after "
+    "the thesis, are counted as misses ('objective set aside'). A plant whose objective is "
+    "a restatement set aside this way counts as reached when the result is paired with the "
+    "thesis's original statement of the same objective.",
 )
 # Shorter pieces of a planted context frame are heading words, not content.
 CONTEXT_SENTENCE_MIN = 25
@@ -182,11 +195,27 @@ def reach(copies: list[dict], hosts: dict[str, Path], settings: Settings, cues) 
         planted_text = {
             _norm(b["text"])[:60]: p["plant_id"] for p in copy["plants"] for b in p["blocks"]
         }
+        objectives_set_aside = {
+            _norm(item["text"]) for item in (prepared.objective_sections or {}).get("set_aside", [])
+        }
         wanted = []
         for plant in copy["plants"]:
             result = next(b for b in plant["blocks"] if b["role"] == "result")
             key = _norm(result["text"])[:60]
             mine = [c for c in candidates if _norm(c.intent.text) == _norm(plant["intent_text"])]
+            own_set_aside = _norm(plant["intent_text"]) in objectives_set_aside
+            if own_set_aside:
+                # The plant's objective was a restatement outside the objectives
+                # chapter (a discussion chapter's "The third objective was ...").
+                # The product compares the result with the original statement
+                # instead, which tests the same objective.
+                vocab = vocabulary(planted)
+                mine = [
+                    c
+                    for c in candidates
+                    if _norm(c.intent.text) not in objectives_set_aside
+                    and states_objective(c.intent.text, plant["intent_text"], vocab)
+                ]
             hit = next((c for c in mine if key in _norm(c.outcome.text)), None)
             # Losing the pairing to another plant in the same copy is an artefact of
             # planting three cases together; losing it to the thesis's own sentence
@@ -198,7 +227,9 @@ def reach(copies: list[dict], hosts: dict[str, Path], settings: Settings, cues) 
             reason = None
             if not hit:
                 reason = (
-                    "result set aside as outside the results sections"
+                    "objective set aside as outside the objectives sections"
+                    if own_set_aside and not mine
+                    else "result set aside as outside the results sections"
                     if any(key in text or text in key for text in set_aside)
                     else "objective not extracted"
                     if not any(_norm(s.text) == _norm(plant["intent_text"]) for s in found.intents)
@@ -218,6 +249,9 @@ def reach(copies: list[dict], hosts: dict[str, Path], settings: Settings, cues) 
                 "not_reached_because": reason,
                 "similarity": round(hit.similarity, 3) if hit else None,
                 "forced_pair": hit.forced if hit else None,
+                "reached_via_restated_objective": (
+                    hit.intent.anchor if hit and own_set_aside else None
+                ),
             }
             records.append(record)
             if hit:

@@ -435,11 +435,36 @@ def _tokens(text: str) -> set[str]:
     return {w.lower() for w in _WORD.findall(text) if len(w) > 3}
 
 
+# Two objective cores sharing at least this share of their words state the
+# same objective (a restatement).
+RESTATEMENT_OVERLAP = 0.5
+# A restatement's core words found at least this often in another objective
+# sentence mean that sentence states it. Stricter than the core-to-core rule
+# because a whole sentence has more words to match by chance.
+RESTATEMENT_CONTAINED = 0.8
+
+
+def vocabulary(extraction: ExtractionResult) -> Counter:
+    return Counter(w.lower() for b in extraction.blocks for w in _WORD.findall(b.text))
+
+
+def states_objective(sentence: str, restatement: str, vocab: Counter) -> bool:
+    """Whether `sentence` states the objective `restatement` restates: nearly all
+    the words of the restatement's core appear in it. The other sentence's own
+    core is not used, because extraction can attach a neighbouring sentence's
+    phrase to it."""
+    core = objective_core(restatement, vocab)
+    if core is None:
+        return False
+    words = _tokens(core)
+    return bool(words) and len(words & _tokens(sentence)) / len(words) >= RESTATEMENT_CONTAINED
+
+
 def select_objectives(name: str, extraction: ExtractionResult, settings) -> tuple[list, list]:
     """Real objectives among the statements F4 extracts, and the ones skipped
     with the reason."""
     intents = extract_statements(extraction, settings=settings).intents
-    vocab = Counter(w.lower() for b in extraction.blocks for w in _WORD.findall(b.text))
+    vocab = vocabulary(extraction)
     usable, skipped, kept_tokens = [], [], []
     for index, statement in enumerate(intents):
         record = {
@@ -478,7 +503,7 @@ def select_objectives(name: str, extraction: ExtractionResult, settings) -> tupl
                     (
                         k
                         for k, other in enumerate(kept_tokens)
-                        if len(tokens & other) / max(1, len(tokens | other)) >= 0.5
+                        if len(tokens & other) / max(1, len(tokens | other)) >= RESTATEMENT_OVERLAP
                     ),
                     None,
                 )
