@@ -407,6 +407,22 @@ def order_native_tables(
     for sid, keys in spanning.items():
         if any(owned[key] != [sid] for key in keys):
             raise TableOrderUnresolved("native_table_character_flow_interleaved")
+    # A cell spanning rows is read once, at its top-left slot. If its text
+    # runs into a second row, it may be one entry per row (a remarks column
+    # whose inner lines were not drawn), and reading it as one block would put
+    # one row's text in another. Leave the page unread rather than decide.
+    for ti, grid in enumerate(grids):
+        row_lines = sorted({cell.bbox[1] for cell in grid.cells})
+        for cell in grid.cells:
+            inner = [y for y in row_lines if cell.bbox[1] + eps < y < cell.bbox[3] - eps]
+            if not inner:
+                continue
+            rows_used = {
+                sum(1 for y in inner if by_id[sid].bbox[1] >= y - eps)
+                for sid in owned[ti, cell.row, cell.column]
+            }
+            if len(rows_used) > 1:
+                raise TableOrderUnresolved("native_table_merged_cell_text_across_rows")
     output, witnesses = [], []
     for ti, grid in enumerate(grids):
         output.extend(order_subset(outside[ti]) if outside[ti] else [])

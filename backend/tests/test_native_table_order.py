@@ -269,6 +269,70 @@ def test_a_merged_cell_on_exact_grid_lines_is_read_once_at_its_top_left_slot():
     assert saved_table_witness_valid(result, record)
 
 
+def _three_column_table(page, *, split_from, split_to, texts):
+    """Header row plus two body rows; the line between the body rows runs
+    only from `split_from` to `split_to`, so one column's body is merged."""
+    for x in (60, 160, 260, 360):
+        page.draw_line((x, 80), (x, 170))
+    for y in (80, 110, 170):
+        page.draw_line((60, y), (360, y))
+    page.draw_line((split_from, 140), (split_to, 140))
+    for (x, y), text in texts:
+        page.insert_text((x, y), text, fontsize=10)
+
+
+def test_a_merged_cell_with_one_entry_per_row_is_left_unread():
+    """A remarks column whose inner line was not drawn: "done" belongs to W1
+    and "late" to W2. Read as one block it would put W2's remark in W1's
+    row, so the page stays unread."""
+    with pymupdf.open() as doc:
+        page = doc.new_page()
+        _three_column_table(
+            page,
+            split_from=60,
+            split_to=260,
+            texts=[
+                ((65, 100), "Week"),
+                ((165, 100), "Task"),
+                ((265, 100), "Remarks"),
+                ((65, 130), "W1"),
+                ((165, 130), "Plan"),
+                ((265, 130), "done"),
+                ((65, 160), "W2"),
+                ((165, 160), "Build"),
+                ((265, 160), "late"),
+            ],
+        )
+        result = extract(doc)
+    record = result.reading_order[0]
+    assert record.status == "unresolved"
+    assert record.reason == "native_table_merged_cell_text_across_rows"
+
+
+def test_a_row_span_label_in_its_first_row_is_still_read():
+    with pymupdf.open() as doc:
+        page = doc.new_page()
+        _three_column_table(
+            page,
+            split_from=160,
+            split_to=360,
+            texts=[
+                ((65, 100), "Group"),
+                ((165, 100), "Task"),
+                ((265, 100), "Score"),
+                ((65, 130), "Alpha"),
+                ((165, 130), "Plan"),
+                ((265, 130), "90"),
+                ((165, 160), "Build"),
+                ((265, 160), "85"),
+            ],
+        )
+        result = extract(doc)
+    record = result.reading_order[0]
+    assert record.status == "ordered", record.reason
+    assert saved_table_witness_valid(result, record)
+
+
 def _grid(*cells, rows=2, columns=2, bbox=(0.0, 0.0, 100.0, 100.0)):
     return NativeGrid(bbox, rows, columns, [NativeCell(r, c, rect, "") for r, c, rect in cells])
 
