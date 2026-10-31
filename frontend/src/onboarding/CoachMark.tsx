@@ -131,6 +131,48 @@ function CoachMarkCard({
     };
   }, [anchorEl]);
 
+  // BUG-581: focus belongs in the tour while it is open. Something else can
+  // still move it out (the page focusing its own heading after sign-in, for
+  // one), and as the page is inert focus then ends on the page body. Bring it
+  // back whenever it lands outside the card.
+  useEffect(() => {
+    if (!ready) return;
+    const card = cardRef.current;
+    if (!card) return;
+    const bringBack = () => {
+      if (card.isConnected && !card.contains(document.activeElement)) (getFocusable(card)[0] ?? card).focus();
+    };
+    function onFocusIn(event: FocusEvent) {
+      if (event.target instanceof Node && !card!.contains(event.target)) bringBack();
+    }
+    function onFocusOut(event: FocusEvent) {
+      if (event.relatedTarget === null) requestAnimationFrame(bringBack);
+    }
+    document.addEventListener("focusin", onFocusIn, true);
+    card.addEventListener("focusout", onFocusOut);
+    const frame = requestAnimationFrame(bringBack);
+    return () => {
+      cancelAnimationFrame(frame);
+      document.removeEventListener("focusin", onFocusIn, true);
+      card.removeEventListener("focusout", onFocusOut);
+    };
+  }, [ready]);
+
+  // BUG-581: the scrim lets the pointer through to the page, which is inert
+  // while the tour is open, so a press there used to move focus to the page
+  // body. Focus stays in the tour instead.
+  useEffect(() => {
+    if (!ready) return;
+    function onMouseDown(event: MouseEvent) {
+      const card = cardRef.current;
+      if (!card || (event.target instanceof Node && card.contains(event.target))) return;
+      event.preventDefault();
+      if (!card.contains(document.activeElement)) (getFocusable(card)[0] ?? card).focus();
+    }
+    document.addEventListener("mousedown", onMouseDown, true);
+    return () => document.removeEventListener("mousedown", onMouseDown, true);
+  }, [ready]);
+
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {

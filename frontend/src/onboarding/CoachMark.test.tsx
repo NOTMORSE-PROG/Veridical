@@ -1,4 +1,4 @@
-import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, createEvent, fireEvent, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { useLocation } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -449,6 +449,89 @@ describe("CoachMark", () => {
     fireEvent.click(screen.getByRole("button", { name: "Replay" }));
 
     await waitFor(() => expect(screen.getByRole("dialog")).toHaveTextContent("Format comes first"));
+  });
+
+  it("BUG-581: a tour not yet open stays closed once the instructor starts using the page, and Replay still opens it", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({
+      "/auth/me": ME_NOT_DISMISSED,
+      "/auth/onboarding/replay": ME_NOT_DISMISSED,
+    }));
+    // The Review Desk's controls arrive with its data, after the session.
+    function LateDesk() {
+      const [loaded, setLoaded] = useState(false);
+      return <>
+        <button type="button" onClick={() => setLoaded(true)}>Open my groups</button>
+        {loaded && <button data-tour="upload-format-cta">Upload required format</button>}
+      </>;
+    }
+    renderWithProviders(
+      <TourProvider>
+        <SessionReadyFixture />
+        <LateDesk />
+        <ReplayButtonFixture />
+        <CoachMark />
+      </TourProvider>,
+      { route: "/dashboard" },
+    );
+    await waitFor(() => expect(screen.getByTestId("guide-session-ready")).toHaveTextContent("1"));
+    const ownClick = screen.getByRole("button", { name: "Open my groups" });
+    fireEvent.pointerDown(ownClick);
+    fireEvent.click(ownClick);
+    mountFixtureRects();
+    // The desk's controls are there, but the instructor is already using it.
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Upload required format" })).toBeInTheDocument();
+
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Replay" }));
+    fireEvent.click(screen.getByRole("button", { name: "Replay" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog).toHaveTextContent("Format comes first");
+    // Using the opened tour does not close it.
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Next" }));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("BUG-581: focus moved out of the open tour by the page comes back to it", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/auth/me": ME_NOT_DISMISSED }));
+    renderWithProviders(
+      <TourProvider>
+        <h1 tabIndex={-1}>Review Desk</h1>
+        <DashboardFixture />
+        <CoachMark />
+      </TourProvider>,
+      { route: "/dashboard" },
+    );
+    mountFixtureRects();
+    const dialog = await screen.findByRole("dialog");
+    await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true));
+    // As the page does after sign-in: it focuses its own heading.
+    act(() => screen.getByRole("heading", { name: "Review Desk" }).focus());
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    // Focus dropped to the page body (its control became inert) also returns.
+    act(() => (document.activeElement as HTMLElement).blur());
+    await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true));
+  });
+
+  it("BUG-581: a press outside the open tour keeps focus in it", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/auth/me": ME_NOT_DISMISSED }));
+    renderWithProviders(
+      <TourProvider>
+        <DashboardFixture />
+        <CoachMark />
+      </TourProvider>,
+      { route: "/dashboard" },
+    );
+    mountFixtureRects();
+    const dialog = await screen.findByRole("dialog");
+    await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true));
+    const outside = createEvent.mouseDown(document.body);
+    fireEvent(document.body, outside);
+    expect(outside.defaultPrevented).toBe(true);
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    const inside = createEvent.mouseDown(screen.getByRole("button", { name: "Next" }));
+    fireEvent(screen.getByRole("button", { name: "Next" }), inside);
+    expect(inside.defaultPrevented).toBe(false);
   });
 
   // BUG-063 item 2: "Back" used to be enabled and do nothing. Confirmed

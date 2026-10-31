@@ -10,7 +10,7 @@
 // ask for mid-tour step position to survive a full reload, and a tour
 // that always restarts at step 1 on Replay matches both of the owner's
 // own reference screenshots.
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { useDismissOnboarding, useMe, useReplayOnboarding } from "../auth/useAuth";
 import { useTaskModalActive } from "../components/modalActivity";
@@ -41,8 +41,18 @@ export function useTour() {
   const [polls, setPolls] = useState({ key: "", count: 0 });
   const pendingEntry = useRef<HTMLElement | null>(null);
   const paused = useTaskModalActive();
+  // BUG-581: the tour opens by itself only before the instructor starts
+  // using the page. Its first step waits for the Review Desk's data, so it
+  // could appear a second after load, under a click already on its way,
+  // and take it. Once the instructor has clicked or typed, an unopened tour
+  // stays closed until Replay introduction or the next visit. Replay is
+  // asked for, so it always opens.
+  const [interrupted, setInterrupted] = useState(false);
+  const [shown, setShown] = useState(false);
+  const [asked, setAsked] = useState(false);
 
   const active = Boolean(me) && !me?.onboarding_dismissed_at && !dismissedLocally;
+  const held = interrupted && !shown && !asked;
 
   // BUG-091: every step renders, in order. The old resolver skipped any
   // step whose control was not on the current screen, so a day-one
@@ -51,7 +61,7 @@ export function useTour() {
   // whose control lives elsewhere -- or never mounted -- renders
   // unanchored with its whereHint. Still never a pointer aimed at nothing
   // (V-057 AC5): an unanchored card has no spotlight.
-  const step = active && !paused ? (TOUR_STEPS[stepIndex] ?? null) : null;
+  const step = active && !paused && !held ? (TOUR_STEPS[stepIndex] ?? null) : null;
   const discoveryKey = `${stepIndex}|${location.pathname}|${active}|${paused}`;
   const pollCount = polls.key === discoveryKey ? polls.count : 0;
   const anchor = step ? findTourAnchor(step, location.pathname) : null;
@@ -59,6 +69,23 @@ export function useTour() {
   const waitingForAnchor = routeOwnsStep && anchor === null && pollCount < MAX_POLLS;
   const resolved: ResolvedTourStep | null =
     step && !waitingForAnchor ? { step, index: stepIndex, el: anchor } : null;
+
+  // Before paint, so a click on the opened tour never counts as using the page.
+  const opened = resolved !== null;
+  useLayoutEffect(() => {
+    if (opened && !shown) setShown(true);
+  }, [opened, shown]);
+
+  useEffect(() => {
+    if (!active || shown || asked || interrupted) return;
+    function onUse() { setInterrupted(true); }
+    document.addEventListener("pointerdown", onUse, true);
+    document.addEventListener("keydown", onUse, true);
+    return () => {
+      document.removeEventListener("pointerdown", onUse, true);
+      document.removeEventListener("keydown", onUse, true);
+    };
+  }, [active, shown, asked, interrupted]);
 
   useEffect(() => {
     if (active || !pendingEntry.current) return;
@@ -100,6 +127,7 @@ export function useTour() {
 
   function replayTour() {
     setDismissedLocally(false);
+    setAsked(true);
     setStepIndex(0);
     replay.mutate();
     // BUG-303: start now, on the screen that holds the introduction's
