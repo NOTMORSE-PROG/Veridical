@@ -153,6 +153,7 @@ interface LevelReview {
   onPageShown: (page: number) => void;
   onSave: () => void;
   noteRefused: ReadonlySet<number>;
+  openAgain: ReadonlySet<number>;
 }
 
 const EDIT_FIELD_LABEL = { text: "criterion text", type: "type", evidence: "evidence expected", weight: "relative weight" } as const;
@@ -206,7 +207,7 @@ function CriterionCard({
   const levels = (review.levels.length || review.issues.length) ? <CriterionLevels criterionKey={row.key} criterionName={review.name}
     levels={review.levels} issues={review.issues} pending={review.pending} readOnly={readOnly}
     onKeep={review.onKeep} onUndoKeep={review.onUndoKeep} onPageShown={review.onPageShown} nextAfter={review.nextAfter} onGo={review.onGo}
-    onSave={review.onSave} noteRefused={review.noteRefused}
+    onSave={review.onSave} noteRefused={review.noteRefused} openAgain={review.openAgain}
     summaryDescribedBy={serverErrors?.levels ? `criterion-levels-server-${row.key}` : undefined} forceOpen={Boolean(serverErrors?.levels)} /> : null;
   const textError = showErrors && row.text.trim() === "";
   const weightError = showErrors && invalidWeight(row.weight);
@@ -338,6 +339,10 @@ function CriteriaEditor({ id }: { id: number }) {
   const [blocked, setBlocked] = useState<{ kind: "activate" | "save"; unknown: number; reopened: number[]; edits: string[] } | null>(null);
   // Kept items the server refused to keep without a note.
   const [noteRefused, setNoteRefused] = useState<ReadonlySet<number>>(() => new Set());
+  // Kept items a refused save of an active format would open again. They are
+  // shown open here, so the instructor can check them again and save the
+  // change with them in one go instead of having to undo it.
+  const [openAgain, setOpenAgain] = useState<ReadonlySet<number>>(() => new Set());
   const [discardReason, setDiscardReason] = useState<"conflict" | "refused">("conflict");
   const saveRef = useRef<HTMLButtonElement>(null);
   const activeStatusRef = useRef<HTMLDivElement>(null);
@@ -479,7 +484,11 @@ function CriteriaEditor({ id }: { id: number }) {
   }
 
   const currentRows = rows;
-  const details = rubric.parse_issue_details ?? null;
+  const details = rubric.parse_issue_details
+    ? rubric.parse_issue_details.map((issue) => openAgain.has(issue.id) && issue.status === "acknowledged"
+      ? { ...issue, status: "open" as const, resolution: null } : issue)
+    : null;
+  const openedAgain = details ? details.filter((issue) => openAgain.has(issue.id) && issue.status === "open") : [];
   // Issues on a criterion removed on this page are settled by the next save.
   const pageIssues = details
     ? orderedIssues(details, currentRows.map((row) => row.id))
@@ -597,7 +606,7 @@ function CriteriaEditor({ id }: { id: number }) {
 
   const levelReview = (row: CriterionRow, index: number): LevelReview => ({
     name: criterionName(row, index), levels: freshLevels(row), issues: issuesFor(row), pending, nextAfter, onGo: goToIssue,
-    onKeep: keepIssues, onUndoKeep: undoKeep, onSave: goToSave, noteRefused,
+    onKeep: keepIssues, onUndoKeep: undoKeep, onSave: goToSave, noteRefused, openAgain,
     onPageShown: (page) => announce(`Page ${page} shown in the original format.`),
   });
 
@@ -613,10 +622,12 @@ function CriteriaEditor({ id }: { id: number }) {
       // kept item the edit would reopen, or one that would newly fail.
       const listed = new Set(openItems.map((issue) => issue.id));
       const refused = ids.filter((id): id is number => typeof id === "number" && !listed.has(id));
-      const reopened = refused.filter((id) => pending.has(id)
-        || pageIssues.some((issue) => issue.id === id && issue.status === "acknowledged"));
-      setBlocked({ kind: "save", unknown: refused.length - reopened.length, reopened, edits: describeEdits(submitted, savedRows ?? []) });
-      announce("Nothing was saved. Check these items first.");
+      // Kept and saved items open here, to be checked again in the same save.
+      const kept = refused.filter((id) => pageIssues.some((issue) => issue.id === id && issue.status === "acknowledged"));
+      const reopened = refused.filter((id) => pending.has(id));
+      if (kept.length) setOpenAgain((current) => new Set([...current, ...kept]));
+      setBlocked({ kind: "save", unknown: refused.length - kept.length - reopened.length, reopened, edits: describeEdits(submitted, savedRows ?? []) });
+      announce(kept.length ? "Nothing was saved. Check the items this change opens again, then save." : "Nothing was saved. Check these items first.");
       return;
     }
     setSavedRows(submitted);
@@ -678,6 +689,7 @@ function CriteriaEditor({ id }: { id: number }) {
       if (!result.isSuccess) return;
       setPending(new Map());
       setNoteRefused(new Set());
+      setOpenAgain(new Set());
       setRemovedStack([]);
       setBlocked(null);
       setAttempted(undefined);
@@ -752,6 +764,7 @@ function CriteriaEditor({ id }: { id: number }) {
           setRemovedStack([]);
           setPending(new Map());
           setNoteRefused(new Set());
+          setOpenAgain(new Set());
           setLoadedRevision(out.revision ?? null);
           if (confirm) focusActiveAfterSave.current = true;
           announce(savedAnnouncement(out, confirm));
@@ -867,6 +880,10 @@ function CriteriaEditor({ id }: { id: number }) {
           <div ref={blockedRef} tabIndex={-1} role="alert" className="signal-error-summary signal-criteria-errors">
             <h2>{blocked.kind === "save" ? "Check these items before saving changes to this active format" : "Check these items before activating"}</h2>
             {blocked.kind === "save" && <p>Nothing was saved. Your edits are still on this page.</p>}
+            {blocked.kind === "save" && openedAgain.length > 0 && <p>
+              Your change would open {openedAgain.length === 1 ? "an item" : `${openedAgain.length} items`} you checked before
+              again, because what {openedAgain.length === 1 ? "it was" : "they were"} checked against would change.
+              Check {openedAgain.length === 1 ? "it" : "them"} again below, then save, or discard your changes.</p>}
             {openItems.length > 0 && <ul>{openItems.map((issue) => <li key={issue.id}><button type="button" onClick={() => goToIssue(issue)}>
               {issuePlace(issue).label}: {itemCopy(issue)}</button></li>)}</ul>}
             {reopenedItems.length > 0 && <>
@@ -897,7 +914,7 @@ function CriteriaEditor({ id }: { id: number }) {
           <h3 id="format-issues-heading">Items about the whole format</h3>
           <CriterionLevels criterionKey="format" criterionName="The whole format" levels={[]} issues={formatIssues} pending={pending}
             readOnly={readOnly} onKeep={keepIssues} onUndoKeep={undoKeep} onPageShown={(page) => announce(`Page ${page} shown in the original format.`)}
-            nextAfter={nextAfter} onGo={goToIssue} onSave={goToSave} noteRefused={noteRefused}
+            nextAfter={nextAfter} onGo={goToIssue} onSave={goToSave} noteRefused={noteRefused} openAgain={openAgain}
             rowHeading="From reading the format" wholeFormat formatPage={rubric.source_summary?.copy_pages[0] ?? null} />
         </section>}
         {problems.length > 0 && (

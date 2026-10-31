@@ -18,7 +18,11 @@ from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
-from app.errors import AcknowledgementNoteRequiredError, NotFoundError
+from app.errors import (
+    AcknowledgementNoteRequiredError,
+    AcknowledgementReasonMismatchError,
+    NotFoundError,
+)
 from app.models.audit import AuditLog
 from app.models.enums import RubricParseStatus
 from app.models.instructor import Instructor
@@ -88,11 +92,58 @@ def _fingerprint(wording: str | None) -> str | None:
     return hashlib.sha256(wording.encode("utf-8")).hexdigest() if wording is not None else None
 
 
+# The key a whole-format item's note rule is looked up under, whatever its
+# code (the review screen uses the same key).
+WHOLE_FORMAT_KEY = "whole_format"
+
+
+def _note_key(detail: dict) -> str:
+    return WHOLE_FORMAT_KEY if detail["criterion_id"] is None else detail["code"]
+
+
+def _criteria_checked(rows: list[Criterion]) -> dict[str, str | None]:
+    """Each criterion's id with a fingerprint of its text and level
+    descriptors: what a whole-format item was checked against."""
+    by_row = {row.id: row for row in rows}
+    return {str(row_id): _fingerprint(_wording(by_row, row_id, None)) for row_id in sorted(by_row)}
+
+
+def reopen_whole_format(rubric: Rubric, rows: list[Criterion]) -> None:
+    """A kept whole-format item was checked against the criteria as they
+    were then. Once one of those criteria is removed or reworded, that check
+    no longer holds (the criteria may now miss part of the format), so the
+    item opens again. Adding a criterion cannot cover less of the format and
+    leaves it kept. An item kept before the criteria were recorded with it
+    takes the criteria as they are now: what it was checked against is not
+    known, and reopening it on every save would leave an active format
+    impossible to save."""
+    now = _criteria_checked(rows)
+    details = copy.deepcopy(rubric.parse_issue_details or [])
+    changed = False
+    for detail in details:
+        if detail["criterion_id"] is not None or detail["status"] != "acknowledged":
+            continue
+        resolution = detail.get("resolution") or {}
+        checked = resolution.get("criteria")
+        if checked is None:
+            resolution["criteria"] = now
+            detail["resolution"] = resolution
+        elif all(now.get(row_id) == fingerprint for row_id, fingerprint in checked.items()):
+            continue
+        else:
+            detail["status"], detail["resolution"] = "open", None
+        changed = True
+    if changed:
+        _store(rubric, details)
+
+
 def recheck(rubric: Rubric, rows: list[Criterion], settings: Settings) -> None:
     """Recompute every level's source and every criterion issue against the
     stored source, after an edit. The instructor's wording is kept as saved;
     only where it was found, and whether an issue still holds, change.
-    Whole-format notes are not about a level and stay as they are."""
+    Whole-format notes are not about a level; they open again only when a
+    criterion they were checked against is removed or reworded."""
+    reopen_whole_format(rubric, rows)
     source = DecompositionSource.from_snapshot(rubric.source_snapshot or {})
     if source is None:
         return  # read before BUG-566: nothing stored to check against
@@ -189,13 +240,40 @@ def acknowledge(
         if ack.note is None
         and (detail := by_id.get(ack.issue_id)) is not None
         and detail["status"] == "open"
-        and detail["code"] in needs_note
+        and _note_key(detail) in needs_note
     ]
     if unexplained:
+        whole_format_only = all(by_id[issue_id]["criterion_id"] is None for issue_id in unexplained)
         raise AcknowledgementNoteRequiredError(
-            "Add a note saying why each of these level descriptions is kept as written.",
+            "Add a note saying what you compared with the original for each of these items."
+            if whole_format_only
+            else "Add a note saying why each of these level descriptions is kept as written.",
             unexplained,
         )
+    # A reason must fit its item: one saying the whole original was compared
+    # would record the wrong reason on a level's wording, and the other way
+    # round.
+    whole_format_reasons = set(settings.rubric_whole_format_keep_reasons)
+    whole_format_only = set(settings.rubric_whole_format_only_keep_reasons)
+    mismatched = [
+        ack.issue_id
+        for ack in acknowledgements
+        if (detail := by_id.get(ack.issue_id)) is not None
+        and detail["status"] == "open"
+        and (
+            ack.reason_code not in whole_format_reasons
+            if detail["criterion_id"] is None
+            else ack.reason_code in whole_format_only
+        )
+    ]
+    if mismatched:
+        raise AcknowledgementReasonMismatchError(
+            "Choose a reason that fits each item: a whole-format item is checked "
+            "against the whole original, and a level's wording is kept for a reason "
+            "about that wording.",
+            mismatched,
+        )
+    checked_against = _criteria_checked(rows)
     for ack in acknowledgements:
         detail = by_id.get(ack.issue_id)
         if detail is None:
@@ -213,6 +291,10 @@ def acknowledge(
             "at": _now(),
             "subject": _fingerprint(wording),
         }
+        if detail["criterion_id"] is None:
+            # What this check was made against, so removing or rewording one
+            # reopens it.
+            detail["resolution"]["criteria"] = checked_against
         session.add(
             AuditLog(
                 event_type="rubric_issue_acknowledged",
@@ -225,6 +307,8 @@ def acknowledge(
                     "reason_code": ack.reason_code,
                     "note": ack.note,
                     "wording": wording,
+                    # For a whole-format item: the criteria it was checked against.
+                    "criterion_ids": sorted(by_row) if detail["criterion_id"] is None else None,
                     "instructor_id": instructor.id,
                 },
             )

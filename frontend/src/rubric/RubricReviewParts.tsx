@@ -238,9 +238,11 @@ function KeepWordingForm({ headingId, place, codes, consequence, wholeFormat = f
   </form>;
 }
 
-function IssueResolution({ status, readOnly, undoLabel, onUndo, pending, copyFor, wholeFormat = false }: {
+function IssueResolution({ status, readOnly, undoLabel, onUndo, pending, copyFor, wholeFormat = false, openAgain }: {
   status: LevelStatus;
   wholeFormat?: boolean;
+  // Items a refused save would open again, shown open until saved.
+  openAgain?: ReadonlySet<number>;
   readOnly: boolean;
   undoLabel: string;
   onUndo: () => void;
@@ -254,7 +256,13 @@ function IssueResolution({ status, readOnly, undoLabel, onUndo, pending, copyFor
   const raised = <ul className={`signal-level-row__issues${status.kind === "check" ? "" : " is-settled"}`}>
     {status.issues.map((issue) => <li key={issue.id}>{copyFor(issue)}</li>)}
   </ul>;
-  if (status.kind === "check") return raised;
+  if (status.kind === "check") {
+    if (!status.issues.some((issue) => openAgain?.has(issue.id))) return raised;
+    return <>{raised}<p className="signal-level-row__note">
+      You {wholeFormat ? "checked" : "kept"} this before. The change you are saving would open it again, so
+      {wholeFormat ? " check it again" : " decide again"} before saving.
+    </p></>;
+  }
   const first = status.issues[0];
   if (status.kind === "kept_pending") {
     const kept = pending.get(first.id);
@@ -277,7 +285,7 @@ function IssueResolution({ status, readOnly, undoLabel, onUndo, pending, copyFor
  * because they are about how the levels fit together. */
 export function CriterionLevels({
   criterionKey, criterionName, levels, issues, pending, readOnly, onKeep, onUndoKeep, onPageShown, nextAfter, onGo, onSave,
-  noteRefused, summaryDescribedBy, forceOpen = false, rowHeading, wholeFormat = false, formatPage = null,
+  noteRefused, openAgain, summaryDescribedBy, forceOpen = false, rowHeading, wholeFormat = false, formatPage = null,
 }: {
   criterionKey: string;
   criterionName: string;
@@ -294,6 +302,8 @@ export function CriterionLevels({
   onSave: () => void;
   // Issues whose keep the server refused for want of a note.
   noteRefused: ReadonlySet<number>;
+  // Kept items a refused save would open again.
+  openAgain?: ReadonlySet<number>;
   summaryDescribedBy?: string;
   forceOpen?: boolean;
   rowHeading?: string;
@@ -397,7 +407,7 @@ export function CriterionLevels({
       <h4 id={rowHeadingId} tabIndex={-1}><span className="sr-only">{criterionName}:</span> {rowHeading ?? (levels.length ? "How these levels fit the table" : "About this criterion")}</h4>
       <LevelStatusTag kind={rowStatus.kind} wholeFormat={wholeFormat} />
     </div>
-    <IssueResolution status={rowStatus} readOnly={readOnly} pending={pending} wholeFormat={wholeFormat}
+    <IssueResolution status={rowStatus} readOnly={readOnly} pending={pending} wholeFormat={wholeFormat} openAgain={openAgain}
       undoLabel={`Undo ${wholeFormat ? "marking as checked" : "keeping"}, ${criterionName}`} copyFor={copyFor(undefined)}
       onUndo={() => { onUndoKeep(rowIssues); focusLater(`${rowHeadingId}-keep`); }} />
     {row.text && levels.length > 0 && <p className="signal-level-row__location"><span>{row.text}</span>{showPageButton(row.page, "whole row", { location: row.text, text: null, kind: "row" })}</p>}
@@ -440,7 +450,7 @@ export function CriterionLevels({
           <LevelStatusTag kind={status.kind} />
         </div>
         <p className="signal-level-row__descriptor">{level.descriptor}</p>
-        <IssueResolution status={status} readOnly={readOnly} pending={pending} undoLabel={`Undo keeping, ${criterionName}, ${level.name}`}
+        <IssueResolution status={status} readOnly={readOnly} pending={pending} openAgain={openAgain} undoLabel={`Undo keeping, ${criterionName}, ${level.name}`}
           copyFor={copyFor(level)} onUndo={() => { onUndoKeep(levelIssues); focusLater(`${headingId}-keep`); }} />
         {location?.text && target && <p className="signal-level-row__location">
           <span>{location.text}</span>{showPageButton(location.page, level.name, target)}

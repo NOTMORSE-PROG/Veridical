@@ -454,7 +454,7 @@ describe("rubric review before activation (BUG-566)", () => {
     let current = rubric({ parse_issue_details: [note] });
     const fetchMock = serve(() => current, (_url, init) => {
       if (init?.method !== "PUT") return undefined;
-      current = rubric({ revision: 5, is_active: true, parse_issue_details: [{ ...note, status: "acknowledged", resolution: { ...KEPT_BY, reason_code: "document_wording", note: checked } }] });
+      current = rubric({ revision: 5, is_active: true, parse_issue_details: [{ ...note, status: "acknowledged", resolution: { ...KEPT_BY, reason_code: "compared_whole_format", note: checked } }] });
       return new Response(JSON.stringify(current), { status: 200 });
     });
     renderPage();
@@ -477,7 +477,7 @@ describe("rubric review before activation (BUG-566)", () => {
     expect(within(section).getAllByText("Marked as checked").length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole("button", { name: "Confirm and activate format" }));
     await waitFor(() => expect(puts(fetchMock)).toHaveLength(1));
-    expect(puts(fetchMock)[0]).toMatchObject({ confirm: true, acknowledgements: [{ issue_id: 12, reason_code: "document_wording", note: checked }] });
+    expect(puts(fetchMock)[0]).toMatchObject({ confirm: true, acknowledgements: [{ issue_id: 12, reason_code: "compared_whole_format", note: checked }] });
     expect(await within(section).findByText(/Checked by Ana Reyes/)).toBeInTheDocument();
   });
 
@@ -571,10 +571,13 @@ describe("rubric review before activation (BUG-566)", () => {
 
     await waitFor(() => expect(puts(fetchMock)).toHaveLength(1));
     const summary = await screen.findByRole("alert");
-    expect(summary).toHaveTextContent("Saving would reopen this item you kept");
+    expect(summary).toHaveTextContent("Your change would open an item you checked before again");
     expect(summary).toHaveTextContent("Introduction: criterion text changed");
     expect(summary).not.toHaveTextContent("no longer matches the document");
     expect(status()).not.toHaveTextContent("all items checked");
+    // The kept item is open on the page again, to be decided in the same save.
+    expect(within(levelRow("Proficient")).getByText("Check this")).toBeInTheDocument();
+    expect(within(levelRow("Proficient")).getByText(/You kept this before\. The change you are saving would open it again/)).toBeInTheDocument();
 
     fireEvent.click(within(summary).getByRole("button", { name: /Purpose · Proficient/ }));
     expect(level("Proficient")).toHaveFocus();
@@ -584,6 +587,42 @@ describe("rubric review before activation (BUG-566)", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Discard changes" }));
     await waitFor(() => expect(screen.getByLabelText("Criterion text, criterion 1")).toHaveValue("Introduction"));
     expect(screen.queryByText("Check these items before saving changes to this active format")).not.toBeInTheDocument();
+  });
+
+  it("lets the instructor check a reopened item again and save the change with it", async () => {
+    const formatNote: RubricIssueDetail = {
+      id: 12, criterion_id: null, level: null, code: "other", message: "the criteria reflect too little of the format",
+      status: "acknowledged", resolution: { ...KEPT_BY, reason_code: "compared_whole_format", note: NOTE },
+    };
+    let current = rubric({ is_active: true, parse_issue_details: [formatNote] });
+    const fetchMock = serve(() => current, (_url, init) => {
+      if (init?.method !== "PUT") return undefined;
+      const body = JSON.parse(String(init.body)) as { acknowledgements?: unknown[] };
+      if (!body.acknowledgements) {
+        return new Response(JSON.stringify({ error: { code: "unresolved_rubric_issues", message: "Open", details: { open_issue_ids: [12], revision: 4 } } }), { status: 409 });
+      }
+      current = rubric({ revision: 5, is_active: true, criteria: current.criteria.slice(1), parse_issue_details: [{ ...formatNote, resolution: { ...KEPT_BY, reason_code: "compared_whole_format", note: "Compared again without Introduction" } }] });
+      return new Response(JSON.stringify(current), { status: 200 });
+    });
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Remove criterion 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(puts(fetchMock)).toHaveLength(1));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Your change would open an item you checked before again");
+    const section = screen.getByRole("heading", { name: "Items about the whole format" }).closest("section")!;
+    expect(within(section).getByText(/You checked this before\. The change you are saving would open it again/)).toBeInTheDocument();
+    fireEvent.click(within(section).getByRole("button", { name: "Mark as checked, The whole format" }));
+    fireEvent.click(within(section).getByRole("radio", { name: "I compared the criteria with the original, and nothing in it is missing" }));
+    fireEvent.change(within(section).getByLabelText("Note (required)"), { target: { value: "Compared again without Introduction" } });
+    fireEvent.click(within(section).getByRole("button", { name: /^Mark as checked,/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(puts(fetchMock)).toHaveLength(2));
+    expect(puts(fetchMock)[1]).toMatchObject({
+      criteria: [expect.objectContaining({ id: 2 })],
+      acknowledgements: [{ issue_id: 12, reason_code: "compared_whole_format", note: "Compared again without Introduction" }],
+    });
+    expect(await within(section).findByText(/Checked by Ana Reyes/)).toBeInTheDocument();
+    expect(within(section).queryByText(/would open it again/)).not.toBeInTheDocument();
   });
 
   it("brings the instructor back from the leave dialog to say the format changed elsewhere", async () => {

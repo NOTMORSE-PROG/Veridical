@@ -51,7 +51,8 @@ export type RubricIssueCode =
   | "not_in_source" | "joins_cells" | "partial_cell" | "not_one_row"
   | "wrong_row" | "shared_cell" | "level_left_out" | "other";
 
-export type RubricAcknowledgementReason = "document_wording" | "outside_table" | "other";
+// "compared_whole_format" is only for an item about the whole format.
+export type RubricAcknowledgementReason = "document_wording" | "outside_table" | "compared_whole_format" | "other";
 
 export interface RubricIssueDetail {
   id: number;

@@ -111,6 +111,17 @@ class AcknowledgementNoteRequiredError(VeridicalError):
         self.details = {"issue_ids": issue_ids}
 
 
+class AcknowledgementReasonMismatchError(VeridicalError):
+    """A keep reason that does not fit the item it was given for, such as
+    "compared_whole_format" on a level; `details.issue_ids` names them."""
+
+    code = "acknowledgement_reason_mismatch"
+
+    def __init__(self, message: str, issue_ids: list[int]) -> None:
+        super().__init__(message)
+        self.details = {"issue_ids": issue_ids}
+
+
 class GoneError(VeridicalError):
     """A known resource that once existed is no longer available, such as
     a revoked/expired share link or a purged/missing stored source. Distinct
@@ -211,6 +222,7 @@ HTTP_STATUS: dict[str, int] = {
     "rubric_changed": 409,
     "unresolved_rubric_issues": 409,
     "acknowledgement_note_required": 422,
+    "acknowledgement_reason_mismatch": 422,
     "saved_group_changed": 409,
     "group_assignment_changed": 409,
     "gone": 410,
