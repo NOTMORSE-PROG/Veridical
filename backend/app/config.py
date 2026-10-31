@@ -751,6 +751,51 @@ class Settings(BaseSettings):
     # (V-028's own pending action item) for a higher ceiling, no code change.
     semantic_scholar_api_key: str | None = None
     semantic_scholar_rps: float = 1.0
+    # OpenAlex (BUG-610, checked live 2026-10-31): keyless use shares a $0.10
+    # daily budget per network address, about 100 title searches; a free key
+    # from openalex.org/settings/api gives $1 a day. Documented ceiling is 10
+    # requests a second without a key; this paces well below it.
+    openalex_api_key: str | None = None
+    openalex_base_url: str = "https://api.openalex.org"
+    openalex_rps: float = Field(default=2.0, gt=0, allow_inf_nan=False)
+    # Reference title search (BUG-610). Registries are asked in this order
+    # until one returns a candidate whose title, first author and year agree
+    # with the reference. Semantic Scholar is left out by default: its
+    # keyless pool answered every search with 429 on 2026-10-31. Add "s2"
+    # once a key is set.
+    citation_title_search_providers: list[Literal["crossref", "openalex", "s2"]] = Field(
+        default=["crossref", "openalex"], min_length=1
+    )
+    # Candidates read from each registry's answer. A thesis's exact work is
+    # often not the first hit (peer-review records and related papers rank
+    # above it), so several are checked.
+    citation_title_search_candidates: int = Field(default=5, ge=1, le=20)
+    # Years a search candidate may differ from the cited year when its whole
+    # title, and first author, agree: online-first and print years differ.
+    citation_title_search_year_tolerance: int = Field(default=1, ge=0, le=2)
+    # A cited title equal to a candidate's main title, cut at one of these,
+    # counts as the same title when the year is exact and the first author
+    # agrees. A cited subtitle the candidate lacks never does. Em and en dashes
+    # are written as code points: they are input to match, not text shown.
+    citation_title_search_subtitle_separators: list[str] = [
+        ":",
+        "?",
+        chr(0x2014),
+        chr(0x2013),
+        " - ",
+    ]
+    # Symbols that still count when titles are compared without punctuation,
+    # so "C++" and "C#" are not read as "C".
+    citation_title_search_significant_symbols: list[str] = ["+", "#"]
+    # Registries whose 429 means the daily budget is spent: after one, they
+    # are not asked again for the rest of that check run. Elsewhere (Crossref)
+    # a 429 is a brief throttle and counts as an ordinary failure.
+    citation_title_search_budget_providers: list[Literal["crossref", "openalex", "s2"]] = [
+        "openalex"
+    ]
+    # Other failures, usually brief, only cost the reference being looked up,
+    # unless this many happen in a row for one registry.
+    citation_title_search_failures_before_skip: int = Field(default=3, ge=1, le=20)
     # Open Library: configured ceiling, with conservative unidentified use
     # unless an operator opts in with a nonplaceholder contact address.
     openlibrary_rps: float = Field(default=3.0, gt=0, allow_inf_nan=False)

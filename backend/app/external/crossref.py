@@ -120,9 +120,12 @@ async def lookup_doi(client, doi: str, *, settings: Settings) -> VerificationRes
     return _parse_work(data["message"])
 
 
-async def search_by_title(client, title: str, *, settings: Settings) -> VerificationResult:
-    """Metadata search fallback when no DOI is available (ticket
-    responsibilities: "else metadata search CrossRef→S2")."""
+async def search_title_candidates(
+    client, query: str, *, settings: Settings, rows: int
+) -> list[VerificationResult]:
+    """Metadata search when no DOI is available: up to `rows` candidates,
+    best first. The first hit is often a peer-review record or a related
+    paper, so the caller checks each candidate's identity."""
     _, governor = _governors(settings)
     data = await get_json(
         client,
@@ -132,13 +135,13 @@ async def search_by_title(client, title: str, *, settings: Settings) -> Verifica
         max_retries=settings.external_max_retries,
         retry_base_seconds=settings.external_retry_base_seconds,
         params={
-            "query.bibliographic": title,
-            "rows": "1",
+            "query.bibliographic": query,
+            "rows": str(rows),
             "mailto": settings.external_contact_email,
         },
         headers=_headers(settings),
     )
-    items = ((data or {}).get("message") or {}).get("items") or []
-    if not items:
-        return VerificationResult(found=False, provider="crossref")
-    return _parse_work(items[0])
+    items = ((data or {}).get("message") or {}).get("items")
+    if not isinstance(items, list):
+        return []
+    return [_parse_work(item) for item in items[:rows] if isinstance(item, dict)]

@@ -18,9 +18,13 @@ from app.models.citation_cache import CitationCache
 from app.models.manuscript import Manuscript
 from app.models.run import CheckResult, CheckRun, Flag
 
+_RESULT_FIELDS = frozenset(VerificationResult.__dataclass_fields__)
+
 
 def _to_result(row: CitationCache) -> VerificationResult:
-    return VerificationResult(**row.result)
+    # Fields a newer version stored are ignored, so reading an older or newer
+    # row never fails.
+    return VerificationResult(**{k: v for k, v in row.result.items() if k in _RESULT_FIELDS})
 
 
 async def get_cached(
@@ -149,6 +153,7 @@ async def store_result(
         "raw": result.raw,
         "abstract": result.abstract,
         "attempted_providers": result.attempted_providers,
+        "query_key": result.query_key,
     }
     stmt = (
         pg_insert(CitationCache)
