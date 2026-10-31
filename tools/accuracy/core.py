@@ -61,6 +61,29 @@ def rate_row(lane, metric, unit, numerator, denominator, *, split="all", note=""
     )
 
 
+def cluster_bootstrap(
+    outcomes: list[tuple[object, bool]], *, seed: int, resamples: int = 2000, level: float = 0.95
+) -> tuple[float, float] | None:
+    """A percentile interval for a rate whose cases come in clusters (several
+    plants built on one objective), resampling whole clusters so the interval
+    reflects how many independent clusters there are, not how many cases."""
+    clusters: dict[object, list[bool]] = {}
+    for key, success in outcomes:
+        clusters.setdefault(key, []).append(success)
+    groups = list(clusters.values())
+    if not groups:
+        return None
+    rng = random.Random(seed)
+    rates = []
+    for _ in range(resamples):
+        picked = [groups[rng.randrange(len(groups))] for _ in groups]
+        total = sum(len(g) for g in picked)
+        rates.append(sum(sum(g) for g in picked) / total)
+    rates.sort()
+    tail = (1 - level) / 2
+    return rates[int(tail * (resamples - 1))], rates[int((1 - tail) * (resamples - 1))]
+
+
 def real_precision_rows(golden: Path, lane: str) -> list[MetricRow]:
     """Precision on findings the module raised on real production reports,
     judged against the PDF by two raters with a human tie-break.

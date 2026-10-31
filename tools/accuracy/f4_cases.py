@@ -1,15 +1,18 @@
 """Known-answer case sets for F4 internal agreement: objectives paired with
 planted results statements.
 
-Two halves, built from the stored extractions of the permitted theses:
+Built from the stored extractions of the permitted theses:
 
 * recall: a results statement that plainly reports a real objective as not
   achieved, with nothing around it that explains the gap. Label
   `contradictory`.
-* precision: text that reads like a negative result but has reconciling
-  context placed where theses put it (scope or phase, an acknowledged
-  limitation, a revised objective, a different population or measure), plus
-  restatement controls. Label `not_contradictory`.
+* specificity: the objective restated as achieved. Label `not_contradictory`.
+  These are the false-alarm controls.
+* context-blind probe: a negative result with reconciling context placed
+  where theses put it (a stated scope or phase, an acknowledged limitation).
+  The judge is given only the objective and one result sentence, never the
+  context, so these measure how often a reconciled gap is still flagged.
+  They are reported on their own and never pooled with specificity.
 
 Plants go into the stored extraction, not the PDF, so pairing and the
 judgement step see them in place. Every copy carries at most three plants and
@@ -55,8 +58,8 @@ HONESTY = (
 PLANTS_PER_COPY = 3
 PAGE_GAP = 5
 RECALL_TARGET = 120
-PRECISION_PER_KIND = 36
-RESTATEMENT_TARGET = 27
+PROBE_PER_KIND = 36
+RESTATEMENT_TARGET = 60
 MIN_HOST_WORDS = 8
 MIN_CORE_WORDS = 5
 MAX_CORE_WORDS = 16
@@ -71,12 +74,6 @@ REGIONS = {
     "scope_result": (0.50, 0.90),
     "limitation_result": (0.50, 0.78),
     "limitation_context": (0.80, 1.00),
-    "method_context": (0.10, 0.50),
-    "revised_result": (0.50, 0.90),
-    "population_context": (0.10, 0.50),
-    "population_result": (0.50, 0.90),
-    "measure_context": (0.10, 0.50),
-    "measure_result": (0.50, 0.90),
     "restatement_result": (0.85, 1.00),
 }
 
@@ -103,24 +100,49 @@ MANUAL_SKIPS = (
         "My aim is to establish",
         "chapter-level aim of the literature review, not a testable objective",
     ),
+    (
+        "mit",
+        "To engineer and characterize a versatile",
+        (
+            "the same CollarID objective as the chapter-five statement, and its quoted phrase "
+            "came from a different sentence"
+        ),
+    ),
+    (
+        "mit",
+        "The overarching goal is to demonstrate",
+        "overall thesis goal cut mid-clause, not a testable objective",
+    ),
+    (
+        "mit",
+        "A second objective was to deploy these units",
+        "the quoted phrase ends mid-noun-phrase ('to collect a unique')",
+    ),
+    (
+        "bimby",
+        "To develop a module that provides complete information",
+        "the quoted phrase is cut inside its own list of features",
+    ),
 )
 
 KIND_RECALL = "objective_not_achieved"
 KIND_SCOPE = "scope_or_phase"
 KIND_LIMITATION = "acknowledged_limitation"
-KIND_REVISED = "revised_objective"
-KIND_OTHER = "different_population_or_measure"
 KIND_RESTATE = "restatement_control"
-PRECISION_KINDS = (KIND_SCOPE, KIND_LIMITATION, KIND_REVISED, KIND_OTHER)
+PROBE_KINDS = (KIND_SCOPE, KIND_LIMITATION)
 LABELS = ("contradictory", "not_contradictory")
 KIND_CODE = {
     KIND_RECALL: "recall",
     KIND_SCOPE: "scope",
     KIND_LIMITATION: "limit",
-    KIND_REVISED: "revised",
-    KIND_OTHER: "other",
     KIND_RESTATE: "restate",
 }
+# Two kinds from the first draft were dropped after the template review, not
+# tuned: a revised objective reused the recall sentences, so the judge, which
+# never sees the revision, could only score it as one minus recall; and the
+# population/measure results shared almost no words with their objective, so
+# they mostly measured pairing, and several named groups or measures that did
+# not fit the host.
 
 # --- templates ---------------------------------------------------------------
 # {x} is the objective's own substance (verb phrase), {S} the subject, {was} the
@@ -148,35 +170,20 @@ SCOPE_CONTEXT = {
         "Scope and Delimitation. This study covers only {scope}. Later phases of the project were "
         "outside the evaluation reported here."
     ),
-    "C2": (
-        "The evaluation in this paper is limited to {scope}; the remaining parts of the system were"
-        " not tested for this report."
-    ),
     "C3": (
         "For the purposes of this capstone, testing was delimited to {scope}, and the full system "
         "is expected to be evaluated in a separate phase."
-    ),
-    "C4": (
-        "Delimitation of the Study. Only {scope} was tested, so the findings apply to that portion "
-        "of the system."
     ),
     "C5": (
         "Data gathering was restricted to {scope} because the complete system was still under "
         "development."
     ),
-    "C6": "Because of time and resource limits, the study was delimited to {scope}.",
 }
 SCOPE_RESULT = {
     "R1": "Results showed that {S} {was} not yet able to {x} in {scope}.",
     "R2": (
         "The study found that {S} did not yet {x} in {scope}, so the objective was not met there."
     ),
-    "R3": (
-        "Results showed that, in {scope}, {S} had not managed to {x}; the objective was not "
-        "achieved at that stage."
-    ),
-    "R4": "Based on the findings from {scope}, the work to {x} was not completed.",
-    "R5": "Results indicated that {scope} fell short of the objective to {x}.",
 }
 SCOPES = (
     "the pilot deployment with one class section",
@@ -207,7 +214,6 @@ LIMITATION_CONTEXT = {
     ),
 }
 LIMITATION_RESULT = {
-    "R1": "Results showed that {S} {was} not able to complete {part} of the work to {x}.",
     "R2": (
         "The study found that {part} was left unfinished, so the objective to {x} was only partly "
         "carried out."
@@ -234,97 +240,6 @@ REASONS = (
     "the small number of available respondents",
     "device compatibility problems",
     "scheduling conflicts with the partner office",
-)
-
-REVISED_CONTEXT = {
-    "M1": (
-        "After the proposal defense, the objective to {x} was revised and narrowed to {narrow}, as "
-        "agreed with the adviser."
-    ),
-    "M2": (
-        "Following the panel's comments, the original objective to {x} was reduced so that it now "
-        "covers {narrow}."
-    ),
-    "M3": (
-        "The research plan was updated after the proposal stage: instead of the original objective "
-        "to {x}, the study addresses {narrow}."
-    ),
-    "M4": (
-        "As recorded in the revised research plan, the objective to {x} was limited to {narrow} "
-        "after the proposal stage."
-    ),
-}
-# The result sentences are the recall set's own, so only the context sentence
-# separates this kind from a plain unmet objective.
-REVISED_RESULT = RECALL_FRAMES
-NARROWS = (
-    "the core features of the first release",
-    "a single partner site",
-    "the first two modules",
-    "one user group",
-    "the prototype stage",
-    "the data-gathering and analysis steps",
-)
-
-POPULATION_CONTEXT = {
-    "P1": (
-        "The objective to {x} concerns the {popA} only; the {popB} took part as a separate group "
-        "for comparison."
-    ),
-    "P2": (
-        "In the methodology, the {popA} were the intended users for the objective to {x}, while the"
-        " {popB} were surveyed separately about the existing process."
-    ),
-    "P3": (
-        "Respondents were divided into two groups: the {popA}, who relate to the objective to {x}, "
-        "and the {popB}, who were asked general questions unrelated to it."
-    ),
-}
-POPULATION_RESULT = {
-    "PR1": "Results showed that the {popB} did not rate the prototype favorably.",
-    "PR2": "The study found that the {popB} were not satisfied with the current version.",
-    "PR4": (
-        "Results revealed that the {popB} reported that the application did not meet their "
-        "expectations."
-    ),
-    "PR5": (
-        "Based on the findings, the {popB} were not able to finish the assigned tasks within the "
-        "allotted time."
-    ),
-}
-POPULATIONS = (
-    ("student respondents", "faculty respondents"),
-    ("customer respondents", "restaurant staff respondents"),
-    ("traveler respondents", "tourism office staff"),
-    ("end users", "system administrators"),
-    ("first-year respondents", "fourth-year respondents"),
-    ("urban respondents", "rural respondents"),
-)
-
-MEASURE_CONTEXT = {
-    "Q1": (
-        "The objective to {x} was judged on {measA}; {measB} was recorded only as supplementary "
-        "information and is not part of that objective."
-    ),
-    "Q2": (
-        "For the objective to {x}, the measure of interest is {measA}. {measB_c} was logged "
-        "separately for reference."
-    ),
-    "Q3": "Success on the objective to {x} was defined in terms of {measA} and not {measB}.",
-}
-MEASURE_RESULT = {
-    "QR1": "Results showed that the {measB} was not satisfactory in the trial runs.",
-    "QR2": "The study found that the {measB} did not reach an acceptable level during testing.",
-    "QR3": "It was found that the {measB} fell short of what the testers expected.",
-    "QR4": "Results indicated that the {measB} was poor in the second round of testing.",
-    "QR5": "Based on the findings, the {measB} did not improve after the changes.",
-}
-MEASURES = (
-    ("accuracy", "response time"),
-    ("usability ratings", "installation size"),
-    ("task completion rate", "battery consumption"),
-    ("classification quality", "memory usage"),
-    ("recommendation relevance", "loading speed"),
 )
 
 RESTATE_FRAMES = {
@@ -369,14 +284,23 @@ VERB_SWAPS = {
 
 # Fixed before any model run so the rule cannot follow the results.
 SCORING_RULE = (
-    "Recall: a contradictory plant counts as found only when the model reports a "
-    "contradiction for its objective. Precision: a not_contradictory plant counts as correct "
-    "when the model reports no contradiction; 'partially_addressed' is reported on its own "
-    "line and is NOT counted as correct, because it still puts a flag in front of the "
-    "instructor. The revised_objective kind is reported separately and left out of the pooled "
-    "precision figure (in_pooled_precision=false): a panel could fairly call an unrevised "
-    "Chapter 1 an inconsistency. No single pooled accuracy figure is given; recall and the "
-    "per-kind true-negative rate are reported separately."
+    "F4 answers each judged pair with consistent, contradictory, partial or cannot_determine. "
+    "A plant is 'reached' only when the local pairing step gives its objective the planted "
+    "sentence; otherwise the judge never sees it. "
+    "Recall (primary): reached and judged contradictory, the high-severity flag. Recall "
+    "(secondary): reached and given any flag (contradictory, partial or cannot_determine). "
+    "A plant that was not reached is a recall miss, and pairing reach is reported on its own. "
+    "Specificity, on restatement controls only (primary): reached and NOT judged "
+    "contradictory, since a high-severity contradiction against a correct result is the false "
+    "accusation that matters most. Specificity (secondary): reached and judged consistent, "
+    "with no flag of any kind. Controls not reached are counted, not scored. "
+    "Context-blind probe (scope_or_phase, acknowledged_limitation): the same two rates per "
+    "kind, never pooled with specificity. Expected in advance: the judge sees only the "
+    "objective and the negative result sentence, never the reconciling context, so most of "
+    "these are expected to draw partial or contradictory; the probe measures that cost. "
+    "No pooled accuracy is given; the rate of always giving one label is stated beside every "
+    "figure. Each rate has a Wilson interval and a bootstrap interval clustered by objective. "
+    "Nothing is tuned between the dev and holdout halves in this baseline."
 )
 
 # What a reader might call a contradiction, kept as data so templates.md and the
@@ -386,28 +310,17 @@ BORDERLINE = {
         "A reader can say the objective is still unmet inside the pilot, so the result is "
         "negative about the objective even with the scope sentence. The label rests on reading "
         "the objective as covering the whole system and the result as a statement about a "
-        "stated subset. Frames R1 and R2 (not yet) are the clearest; R4 and R5 are the weakest. "
-        "Expect disagreement on this kind."
+        "stated subset. Only the 'not yet' frames R1 and R2 are kept, each with a context that "
+        "defers the rest to a later phase (C1, C3, C5). Expect disagreement on this kind; it "
+        "is a probe, not a specificity figure."
     ),
     KIND_LIMITATION: (
         "The result reports part of the objective as not done, which is true, and the "
         "limitations sentence agrees with it. Whether that counts as a contradiction is a "
-        "matter of framing: the objective is partly unmet, and the document says so. Frames R2 "
-        "('only partly carried out') are the clearest. Treat partially_addressed as a plausible "
-        "correct answer here and decide in advance whether it counts as not contradictory."
-    ),
-    KIND_REVISED: (
-        "Chapter 1 still lists the original objective while the methodology says it was "
-        "narrowed. A reader may fairly call the unrevised objectives list an inconsistency in "
-        "the document, even though the result and the methodology agree. The label assumes the "
-        "revision is the reconciling context."
-    ),
-    KIND_OTHER: (
-        "The population variants name groups the objective never mentions, so the result is "
-        "unrelated to the objective only because the context sentence says so. The measure "
-        "variants share almost no wording with the objective and are the cleanest. The generic "
-        "group and measure names do not match every host (a bee-monitoring dissertation has no "
-        "faculty respondents), which a reader may notice."
+        "matter of framing: the objective is partly unmet, and the document says so. Frame R2 "
+        "('only partly carried out') is the clearest. 'partial' is the answer the judge's own "
+        "instructions ask for here, so the primary rate (not judged contradictory) is the one to "
+        "read for this kind."
     ),
     KIND_RESTATE: (
         "Clean control: the objective restated as achieved. The only risk is that it is "
@@ -723,38 +636,35 @@ def _all_specs(ctx: Context, rng: random.Random, hosts: dict) -> tuple[list, lis
         (KIND_RECALL, None, RECALL_FRAMES),
         (KIND_SCOPE, SCOPE_CONTEXT, SCOPE_RESULT),
         (KIND_LIMITATION, LIMITATION_CONTEXT, LIMITATION_RESULT),
-        (KIND_REVISED, REVISED_CONTEXT, REVISED_RESULT),
         (KIND_RESTATE, None, RESTATE_FRAMES),
     ):
         decks[(kind, "res")] = _Deck(rng, res_table)
         if ctx_table:
             decks[(kind, "ctx")] = _Deck(rng, ctx_table)
-    decks[(KIND_OTHER + ":population", "ctx")] = _Deck(rng, POPULATION_CONTEXT)
-    decks[(KIND_OTHER + ":population", "res")] = _Deck(rng, POPULATION_RESULT)
-    decks[(KIND_OTHER + ":measure", "ctx")] = _Deck(rng, MEASURE_CONTEXT)
-    decks[(KIND_OTHER + ":measure", "res")] = _Deck(rng, MEASURE_RESULT)
-
-    def base_slots(host, obj, rng_case, swap):
-        voice = VOICE[HOST_VOICE.get(host, "plural")]
-        core = swap_verbs(obj["core"]) if swap else obj["core"]
-        return {"S": rng_case.choice(voice["subjects"]), "was": voice["was"], "x": core}
 
     def pieces(kind, host, obj, index):
         rng_case = random.Random(f"{ctx.seed}-{kind}-{host}-{obj['index']}-{index}")
-        slots = base_slots(host, obj, rng_case, swap=kind in (KIND_RECALL, KIND_RESTATE))
+        voice = VOICE[HOST_VOICE.get(host, "plural")]
+        # Every kind gets the same verb swaps, so a recall/specificity gap
+        # cannot come from one side copying the objective's wording more closely.
+        slots = {
+            "S": rng_case.choice(voice["subjects"]),
+            "was": voice["was"],
+            "x": swap_verbs(obj["core"]),
+        }
         slots["Sc"] = slots["S"][0].upper() + slots["S"][1:]
         return rng_case, slots
 
     specs, dropped = [], []
     cursor = [0]
 
-    def add(kind, label, n_target, family=None):
+    def add(kind, label, n_target):
         count, tries = 0, 0
         while count < n_target and tries < n_target * 6:
             host, obj = pool[(cursor[0] + tries) % len(pool)]
             tries += 1
             rng_case, slots = pieces(kind, host, obj, tries)
-            deck_kind, ctx_table, res_table = kind, None, None
+            ctx_table, res_table = None, None
             if kind == KIND_RECALL:
                 res_table = RECALL_FRAMES
             elif kind == KIND_RESTATE:
@@ -765,19 +675,8 @@ def _all_specs(ctx: Context, rng: random.Random, hosts: dict) -> tuple[list, lis
             elif kind == KIND_LIMITATION:
                 ctx_table, res_table = LIMITATION_CONTEXT, LIMITATION_RESULT
                 slots["part"], slots["reason"] = rng_case.choice(PARTS), rng_case.choice(REASONS)
-            elif kind == KIND_REVISED:
-                ctx_table, res_table = REVISED_CONTEXT, REVISED_RESULT
-                slots["narrow"] = rng_case.choice(NARROWS)
-            elif family == "population":
-                deck_kind = KIND_OTHER + ":population"
-                ctx_table, res_table = POPULATION_CONTEXT, POPULATION_RESULT
-                slots["popA"], slots["popB"] = rng_case.choice(POPULATIONS)
-            else:
-                deck_kind = KIND_OTHER + ":measure"
-                ctx_table, res_table = MEASURE_CONTEXT, MEASURE_RESULT
-                slots["measA"], slots["measB"] = rng_case.choice(MEASURES)
             built = _spec(
-                deck_kind,
+                kind,
                 label,
                 host,
                 obj,
@@ -793,15 +692,14 @@ def _all_specs(ctx: Context, rng: random.Random, hosts: dict) -> tuple[list, lis
                 dropped.append({"host": host, "objective": obj["index"], "kind": kind})
                 continue
             blocks, ctx_id, res_id = built
-            code = KIND_CODE[kind] + (f"-{family}" if family else "")
+            code = KIND_CODE[kind]
             template_id = f"{code}:{ctx_id}+{res_id}" if ctx_id else f"{code}:{res_id}"
             region_prefix = {
                 KIND_RECALL: "recall",
                 KIND_SCOPE: "scope",
                 KIND_LIMITATION: "limitation",
-                KIND_REVISED: "revised",
                 KIND_RESTATE: "restatement",
-            }.get(kind, family)
+            }[kind]
             specs.append(
                 {
                     "host": host,
@@ -814,7 +712,7 @@ def _all_specs(ctx: Context, rng: random.Random, hosts: dict) -> tuple[list, lis
                             "role": role,
                             "frame_id": frame_id,
                             "text": text,
-                            "region": _region_key(kind, role, region_prefix),
+                            "region": f"{region_prefix}_{role}",
                         }
                         for role, frame_id, text in blocks
                     ],
@@ -825,17 +723,10 @@ def _all_specs(ctx: Context, rng: random.Random, hosts: dict) -> tuple[list, lis
         return count
 
     add(KIND_RECALL, "contradictory", RECALL_TARGET)
-    for kind in (KIND_SCOPE, KIND_LIMITATION, KIND_REVISED):
-        add(kind, "not_contradictory", PRECISION_PER_KIND)
-    half = PRECISION_PER_KIND // 2
-    add(KIND_OTHER, "not_contradictory", half + PRECISION_PER_KIND % 2, family="population")
-    add(KIND_OTHER, "not_contradictory", half, family="measure")
+    for kind in PROBE_KINDS:
+        add(kind, "not_contradictory", PROBE_PER_KIND)
     add(KIND_RESTATE, "not_contradictory", RESTATEMENT_TARGET)
     return specs, dropped
-
-
-def _region_key(kind: str, role: str, prefix: str) -> str:
-    return f"method_{role}" if (kind == KIND_REVISED and role == "context") else f"{prefix}_{role}"
 
 
 def _region_pages(pages: list[int], region: str) -> list[int]:
@@ -920,7 +811,13 @@ def build_cases(ctx: Context) -> list[dict]:
                         "kind": spec["kind"],
                         "label": spec["label"],
                         "split": None,
-                        "in_pooled_precision": spec["kind"] != KIND_REVISED,
+                        "scored_as": (
+                            "recall"
+                            if spec["kind"] == KIND_RECALL
+                            else "probe"
+                            if spec["kind"] in PROBE_KINDS
+                            else "specificity"
+                        ),
                         "objective_index": spec["objective"]["index"],
                         "intent_text": spec["objective"]["text"],
                         "intent_anchor": spec["objective"]["anchor"],
@@ -1035,13 +932,7 @@ def build_manifest(ctx: Context, copies: list[dict], pickup: dict | None) -> dic
             h: dict(Counter(p["split"] for p in plants if p["host"] == h))
             for h in sorted({p["host"] for p in plants})
         },
-        "pooled_precision_by_kind": dict(
-            Counter(
-                p["kind"]
-                for p in plants
-                if p["in_pooled_precision"] and p["label"] != "contradictory"
-            )
-        ),
+        "by_role": dict(Counter(p["scored_as"] for p in plants)),
         "objectives_by_split": {
             sp: len({(p["host"], p["objective_index"]) for p in plants if p["split"] == sp})
             for sp in ("dev", "holdout")
@@ -1052,18 +943,20 @@ def build_manifest(ctx: Context, copies: list[dict], pickup: dict | None) -> dic
     }
     # An answer that never varies must not look accurate: the set has to hold both
     # labels in a real share, and the manifest states what always answering the
-    # commoner label would score, so no figure is read without that floor.
-    labels = [p["label"] for p in plants]
+    # commoner label would score, so no figure is read without that floor. The
+    # probe kinds are reported on their own, so they are not part of this mix.
+    scored = [p for p in plants if p["scored_as"] != "probe"]
+    labels = [p["label"] for p in scored]
     counts["label_balance"] = {
         "problems": balance_problems(labels, list(LABELS)),
         "always_one_label_accuracy": baseline_accuracy(labels),
         "by_split": {
             sp: {
                 "problems": balance_problems(
-                    [p["label"] for p in plants if p["split"] == sp], list(LABELS)
+                    [p["label"] for p in scored if p["split"] == sp], list(LABELS)
                 ),
                 "always_one_label_accuracy": baseline_accuracy(
-                    [p["label"] for p in plants if p["split"] == sp]
+                    [p["label"] for p in scored if p["split"] == sp]
                 ),
             }
             for sp in ("dev", "holdout")
@@ -1072,11 +965,7 @@ def build_manifest(ctx: Context, copies: list[dict], pickup: dict | None) -> dic
     frames = defaultdict(Counter)
     for plant in plants:
         for block in plant["blocks"]:
-            frames[plant["kind"]][
-                block["frame_id"]
-                if plant["kind"] != KIND_OTHER
-                else plant["template_id"].split(":")[0] + "/" + block["frame_id"]
-            ] += 1
+            frames[plant["kind"]][block["frame_id"]] += 1
     gaps = []
     for copy in copies:
         pages = sorted(b["page"] for p in copy["plants"] for b in p["blocks"])
@@ -1091,7 +980,7 @@ def build_manifest(ctx: Context, copies: list[dict], pickup: dict | None) -> dic
             "plants_per_copy": PLANTS_PER_COPY,
             "page_gap": PAGE_GAP,
             "recall_target": RECALL_TARGET,
-            "precision_per_kind": PRECISION_PER_KIND,
+            "probe_per_kind": PROBE_PER_KIND,
             "restatement_target": RESTATEMENT_TARGET,
             "regions": REGIONS,
         },
@@ -1144,26 +1033,25 @@ def build_manifest(ctx: Context, copies: list[dict], pickup: dict | None) -> dic
                 "detector could in principle learn."
             ),
             (
-                "Only about 30 real objectives from four theses, and most plants come from one "
-                "non-capstone host. The split is by objective, but the effective sample is the "
-                "number of objectives, not the number of cases."
+                "About 27 real objectives from four theses, and most plants come from one "
+                "non-capstone host (a public doctoral dissertation). The split is by objective, "
+                "but the effective sample is the number of objectives, not the number of cases, "
+                "which is why intervals are also bootstrapped by objective."
             ),
             (
-                "Planted sentences reuse the objective's own verb phrase (lead-verb swaps only), so"
-                " lexical overlap with the objective is high. Pairing finds them more easily than "
-                "it would a real contradiction."
+                "Planted sentences reuse the objective's own verb phrase (lead-verb swaps only, "
+                "the same for every kind), so lexical overlap with the objective is high. Pairing "
+                "finds them more easily than it would a real contradiction."
             ),
             (
-                "All plants are templated single sentences with one context sentence; real "
-                "reconciling context is longer, more indirect and may sit far from the result."
+                "The judge sees only the objective and one result sentence, never surrounding "
+                "context. The scope and limitation kinds therefore cannot be passed by reading "
+                "context; they are a pre-declared probe of that cost, not a specificity figure."
             ),
             (
-                "Chapter 1 still lists the original objective in every plant; only the inserted "
-                "context explains the gap."
-            ),
-            (
-                "Group and measure names in the population/measure kind are generic and do not fit "
-                "every host."
+                "Dev and holdout share the same templates, so a prompt tuned on dev would carry "
+                "into holdout. Nothing is tuned in this baseline; a later tuning round needs "
+                "frames held out of dev."
             ),
             (
                 "Plants enter the stored extraction, not the PDF, so this tests F4, not PDF "
@@ -1202,21 +1090,6 @@ def render_templates(copies: list[dict]) -> str:
             KIND_LIMITATION,
             "not_contradictory",
             [("limit", "context", LIMITATION_CONTEXT), ("limit", "result", LIMITATION_RESULT)],
-        ),
-        (
-            KIND_REVISED,
-            "not_contradictory",
-            [("revised", "context", REVISED_CONTEXT), ("revised", "result", REVISED_RESULT)],
-        ),
-        (
-            KIND_OTHER,
-            "not_contradictory",
-            [
-                ("other-population", "context", POPULATION_CONTEXT),
-                ("other-population", "result", POPULATION_RESULT),
-                ("other-measure", "context", MEASURE_CONTEXT),
-                ("other-measure", "result", MEASURE_RESULT),
-            ],
         ),
         (KIND_RESTATE, "not_contradictory", [("restate", "result", RESTATE_FRAMES)]),
     ]
