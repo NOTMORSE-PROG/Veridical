@@ -531,7 +531,8 @@ def test_table_formatting_is_not_applicable_when_images_exist_but_were_never_con
     criterion = FakeCriterion(text="Tables must be properly formatted with captions")
     outcome = spec.run(criterion, _ctx(tables=[], vision_status=vision_status, has_images=True))
     assert outcome.outcome == ResultOutcome.not_applicable
-    assert "not confirmed read" in outcome.detail["reason"]
+    assert "were not read for tables" in outcome.detail["reason"]
+    assert "no recognised table caption" in outcome.detail["reason"]
 
 
 def test_table_formatting_still_fails_for_docx_even_with_images_and_unresolved_vision():

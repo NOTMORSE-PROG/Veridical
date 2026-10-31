@@ -77,11 +77,15 @@ export function validateIngestReceipt(value: unknown): IngestSummary {
 
 // Counts that do not add up are dropped, not trusted; the upload itself is
 // still confirmed, and the screen then says nothing about image reading.
+const REASONS = ["no_cue", "too_small", "unsupported", "over_limit", "unavailable", "not_requested"] as const;
+
 function imageReading(value: unknown, images: number): IngestSummary["image_reading"] {
-  if (!object(value) || ![value.checked, value.with_content, value.not_checked, value.no_cue].every(natural)) return undefined;
-  const { checked, with_content, not_checked, no_cue } = value as Record<string, number>;
-  if (with_content > checked || no_cue > not_checked || checked + not_checked !== images) return undefined;
-  return { checked, with_content, not_checked, no_cue };
+  const keys = ["checked", "with_content", "unclear", "not_checked", ...REASONS] as const;
+  if (!object(value) || !keys.every((key) => natural(value[key]))) return undefined;
+  const v = value as Record<(typeof keys)[number], number>;
+  if (v.with_content > v.checked || v.checked + v.unclear + v.not_checked !== images
+    || REASONS.reduce((sum, key) => sum + v[key], 0) !== v.not_checked) return undefined;
+  return Object.fromEntries(keys.map((key) => [key, v[key]])) as unknown as IngestSummary["image_reading"];
 }
 
 export function validateRubricReceipt(value: unknown, familyId?: string): Rubric {

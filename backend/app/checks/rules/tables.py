@@ -67,9 +67,10 @@ def _run(criterion, ctx: RuleContext) -> RuleOutcome:
                 detail={
                     "reason": (
                         "This manuscript contains embedded images that were not "
-                        "confirmed read for tables (AI quota, connectivity, or "
-                        "selection limits), so whether it contains tables embedded "
-                        "as images could not be fully verified."
+                        "read for tables (no recognised table caption beside them, "
+                        "AI capacity, connectivity, or the reading limit), so whether "
+                        "it contains "
+                        "tables embedded as images could not be fully verified."
                     )
                 },
             )

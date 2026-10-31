@@ -301,14 +301,23 @@ export interface GroupCollisionOut {
   existing_group_name: string | null;
 }
 
+// checked + unclear + not_checked is the number of images; the reasons from
+// no_cue on add up to not_checked.
 export interface ImageReadingSummary {
-  /** Images checked for a table or equation, one model call each. */
+  /** Readings that completed, one model call each. */
   checked: number;
-  /** Of those, how many gave a table or an equation. */
+  /** Of those, how many held a table or an equation read with confidence. */
   with_content: number;
+  /** Read, but the answer could not be validated or was too uncertain. */
+  unclear: number;
   not_checked: number;
-  /** Of the images not checked, how many had no table or equation cue. */
   no_cue: number;
+  too_small: number;
+  /** No page position to read from; every image in a Word file. */
+  unsupported: number;
+  over_limit: number;
+  unavailable: number;
+  not_requested: number;
 }
 
 export interface IngestSummary {

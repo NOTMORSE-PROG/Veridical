@@ -40,6 +40,7 @@ def cued_indices(
         if block.page is not None and block.bbox is not None and not block.is_furniture:
             blocks_by_page[block.page].append(block)
     gap, slack = patterns.vision_caption_gap_pts, patterns.vision_column_slack_pts
+    overlap = patterns.vision_caption_overlap_pts
     cued = set()
     for index in sized_indices(result, settings):
         image = result.images[index]
@@ -48,8 +49,11 @@ def cued_indices(
             bx0, by0, bx1, by1 = block.bbox
             text = block.text.strip()
             same_column = bx1 >= x0 - slack and bx0 <= x1 + slack
-            above = 0 <= y0 - by1 <= gap
-            below = 0 <= by0 - y1 <= gap
+            # A tight caption may touch or overlap the image edge; its middle
+            # must still be outside the image.
+            middle = (by0 + by1) / 2
+            above = middle < y0 and -overlap <= y0 - by1 <= gap
+            below = middle > y1 and -overlap <= by0 - y1 <= gap
             if same_column and (above or below) and patterns.vision_table_caption.match(text):
                 cued.add(index)
                 break
@@ -61,9 +65,13 @@ def cued_indices(
 
 
 def _selected_indices(
-    result: ExtractionResult, patterns: HeadingPatterns, settings: Settings
+    result: ExtractionResult,
+    patterns: HeadingPatterns,
+    settings: Settings,
+    cued: set[int] | None = None,
 ) -> list[int]:
-    cued = cued_indices(result, patterns, settings)
+    if cued is None:
+        cued = cued_indices(result, patterns, settings)
     sized = [index for index in sized_indices(result, settings) if index in cued]
     priority_pages = _priority_page_ranges(result.section_tree.nodes, patterns)
 

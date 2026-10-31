@@ -148,8 +148,8 @@ def prepare_image_readings(
     *,
     enabled: bool = True,
 ) -> list[int]:
-    selected = _selected_indices(result, patterns, settings) if enabled else []
     cued = cued_indices(result, patterns, settings) if enabled else set()
+    selected = _selected_indices(result, patterns, settings, cued) if enabled else []
     result.image_reading_version = "v1"
     result.image_readings = []
     for index, image in enumerate(result.images):
@@ -169,17 +169,34 @@ def prepare_image_readings(
     return selected
 
 
+_NOT_CHECKED_BUCKET = {
+    "no_table_cue": "no_cue",
+    "size_filter": "too_small",
+    "unsupported_source": "unsupported",
+    "selection_limit": "over_limit",
+    "vision_disabled": "not_requested",
+}
+
+
 def summarize_image_readings(result: ExtractionResult) -> ImageReadingSummary | None:
     readings = result.image_readings
     if readings is None:
         return None
-    checked = [reading for reading in readings if reading.attempted]
-    return ImageReadingSummary(
-        checked=len(checked),
-        with_content=sum(1 for reading in checked if reading.status == "transcribed"),
-        not_checked=len(readings) - len(checked),
-        no_cue=sum(1 for reading in readings if reading.reason == "no_table_cue"),
-    )
+    counts = dict.fromkeys(ImageReadingSummary.model_fields, 0)
+    for reading in readings:
+        if reading.status == "classified_only" or (
+            reading.status == "transcribed" and reading.reason is None
+        ):
+            counts["checked"] += 1
+            counts["with_content"] += reading.status == "transcribed"
+        elif reading.status in {"transcribed", "invalid_response"}:
+            counts["unclear"] += 1
+        else:
+            # Never read: no cue, too small, over the limit, or the reader
+            # (or the crop) was unavailable, including a call that failed.
+            counts["not_checked"] += 1
+            counts[_NOT_CHECKED_BUCKET.get(reading.reason or "", "unavailable")] += 1
+    return ImageReadingSummary(**counts)
 
 
 def mark_pending_unavailable(result: ExtractionResult, reason: str) -> None:
