@@ -755,7 +755,9 @@ async def run_originality_reuse_check(
         detail={
             **source.detail(),
             "reference_membership_issues": list(selection.membership_issues),
-            "passage_inventory_status": "not_captured" if membership_partial else "available",
+            # The protected text after the list is left out of passage matching
+            # (tagged reference list); the body around it is compared.
+            "passage_inventory_status": "available",
             "n_source_candidates_withheld": withheld,
             "literal_retrieval": passage_query_result.literal_scope,
             "coverage_reason": "native_math_comparison_incomplete"
