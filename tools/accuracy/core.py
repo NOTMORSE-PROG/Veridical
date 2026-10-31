@@ -95,14 +95,22 @@ def cluster_bootstrap(
     return rates[int(tail * (resamples - 1))], rates[int((1 - tail) * (resamples - 1))]
 
 
+# Who judged the real-manuscript findings so far. It changes only when the
+# judgments file itself names a human sign-off.
+MODEL_RATERS = "model raters + PM tie-break, not human-judged"
+
+
 def real_precision_rows(golden: Path, lane: str) -> list[MetricRow]:
     """Precision on findings the module raised on real production reports,
-    judged against the PDF by two raters with a human tie-break.
+    judged against the PDF by two raters, ties broken by a third reader.
 
     Reads `<golden>/<lane>/real_judgments.json`: a list of
     {"finding": ..., "rater_a": "correct"|"incorrect", "rater_b": ...,
-    "tiebreak": "correct"|"incorrect"|null}. Planted cases measure the check
-    logic; this is the real-manuscript side, reported beside it, not pooled.
+    "tiebreak": "correct"|"incorrect"|null, "raters": optional label}. Planted
+    cases measure the check logic; this is the real-manuscript side, reported
+    beside it, not pooled. The row says who judged: the label every judgment
+    shares, or `MODEL_RATERS` when they do not all name one, so a figure is
+    never printed as human-judged unless the data says so.
     """
     path = golden / lane / "real_judgments.json"
     metric = "real-manuscript precision"
@@ -120,6 +128,8 @@ def real_precision_rows(golden: Path, lane: str) -> list[MetricRow]:
         "fn": sum(j["rater_a"] == "incorrect" and j["rater_b"] == "correct" for j in both),
     }
     kappa = cohens_kappa(ConfusionMatrix(**counts)) if both else None
+    labels = {j.get("raters") for j in judged}
+    raters = labels.pop() if len(labels) == 1 and None not in labels else MODEL_RATERS
     return [
         rate_row(
             lane,
@@ -128,11 +138,12 @@ def real_precision_rows(golden: Path, lane: str) -> list[MetricRow]:
             sum(label == "correct" for label in decided),
             len(decided),
             note=(
-                f"Two raters against the PDF: agreed on {len(agree)}/{len(both)}, "
+                f"Two raters against the PDF ({raters}): agreed on "
+                f"{len(agree)}/{len(both)}, "
                 f"Cohen's kappa {kappa if kappa is None else round(kappa, 2)}; "
-                f"{len(both) - len(agree)} settled by the human tie-break."
+                f"{len(both) - len(agree)} settled by the tie-break."
             ),
-            extra={"kappa": kappa, "unresolved": len(both) - len(decided)},
+            extra={"kappa": kappa, "unresolved": len(both) - len(decided), "raters": raters},
         )
     ]
 
