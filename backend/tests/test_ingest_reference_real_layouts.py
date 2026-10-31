@@ -679,3 +679,28 @@ def test_flush_left_line_continuing_an_unfinished_line_is_not_a_contradiction():
     selection = select_references(extraction, load_patterns())
     assert "ambiguous_reference_entry_boundaries" not in selection.issues
     assert len(extract_references(extraction, load_patterns())) == 5
+
+
+def test_numbered_list_with_period_closed_authors_reads_every_field():
+    # The shape of a biblatex numeric list: labels, a period after the
+    # authors, a quoted title, an empty issue "()" and an access address.
+    lines = [(1, 84.0, "References", True)]
+    entries = [
+        "[1] R. Cruz and G. Reyes. “An adaptive model of thermal comfort.” Example "
+        "Journal, 104(), 1998, pp. 145–167. url: https://example.org/CorpusID:1.",
+        "[2] J. F. Santos, M. A. Lim, and P. de la Paz. “Comfort standards for "
+        "buildings.” Energy and Examples, 34(), 2002, pp. 563–572.",
+        "[3] S. Tan et al. “Sensing rooms in the wild.” Journal of Examples, 200(), "
+        "2025, p. 103510. doi: 10.5555/je.2025.103510.",
+    ]
+    lines += [(1, 84.0, text, False) for text in entries]
+    drafts = extract_references(_extraction(lines), load_patterns())
+    assert [d.parse_status for d in drafts] == [CitationParseStatus.parsed] * 3
+    assert [d.authors for d in drafts] == [
+        ["Cruz, R.", "Reyes, G."],
+        ["Santos, J. F.", "Lim, M. A.", "de la Paz, P."],
+        ["Tan, S."],
+    ]
+    assert [d.year for d in drafts] == [1998, 2002, 2025]
+    assert drafts[0].title.startswith("An adaptive model of thermal comfort")
+    assert drafts[2].doi == "10.5555/je.2025.103510"
