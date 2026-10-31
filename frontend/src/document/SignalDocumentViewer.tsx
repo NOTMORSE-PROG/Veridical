@@ -179,7 +179,9 @@ function ReviewQueue({ findings, regions, sourceAvailability, report, collection
       {findings.length > 0 && (
         <div className="signal-document-review-filters" role="group" aria-label="Filter review findings">
           {(["open", "resolved", "all"] as const).map((value) => {
-            const count = value === "open" ? open.length : value === "resolved" ? resolved.length : findings.length;
+            // The counts are findings; a source-age note is listed but not counted.
+            const counted = (list: ReviewFinding[]) => list.filter((finding) => !finding.isSourceAgeNote).length;
+            const count = counted(value === "open" ? open : value === "resolved" ? resolved : findings);
             const label = value[0].toUpperCase() + value.slice(1);
             return <button key={value} type="button" aria-pressed={filter === value} onClick={() => onFilter(value)}>{collection.state !== "success" ? "Last loaded: " : ""}{label} {count}</button>;
           })}
@@ -1143,7 +1145,7 @@ export function SignalDocumentViewerPage() {
     && selectedRecord.llm_mode !== "real" && (!isCitationMetadataFinding(selectedRecord) || selectedRecord.llm_mode === "fake") ? selectedRecord : null;
   const reviewContext = ["Review.", reportQuery.data && `${reportQuery.data.pending_review_count} ${reportQuery.data.pending_review_count === 1 ? "criterion" : "criteria"} awaiting judgment.`,
     optional.snapshot && `${optional.lastLoaded ? "Last loaded: " : ""}${optional.snapshot.total} optional comparison leads.`,
-    flags && otherFindings.length > 0 && `${optional.state !== "success" ? "Last loaded: " : ""}${otherFindings.filter((finding) => !finding.isResolved).length} other open findings.`]
+    flags && otherFindings.length > 0 && `${optional.state !== "success" ? "Last loaded: " : ""}${otherFindings.filter((finding) => !finding.isResolved && !finding.isSourceAgeNote).length} other open findings.`]
     .filter(Boolean).join(" ");
 
   return (
