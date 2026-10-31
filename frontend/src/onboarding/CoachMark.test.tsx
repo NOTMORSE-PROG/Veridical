@@ -492,6 +492,27 @@ describe("CoachMark", () => {
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 
+  it("BUG-581: focus moved out of the open tour by the page comes back to it", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({ "/auth/me": ME_NOT_DISMISSED }));
+    renderWithProviders(
+      <TourProvider>
+        <h1 tabIndex={-1}>Review Desk</h1>
+        <DashboardFixture />
+        <CoachMark />
+      </TourProvider>,
+      { route: "/dashboard" },
+    );
+    mountFixtureRects();
+    const dialog = await screen.findByRole("dialog");
+    await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true));
+    // As the page does after sign-in: it focuses its own heading.
+    act(() => screen.getByRole("heading", { name: "Review Desk" }).focus());
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    // Focus dropped to the page body (its control became inert) also returns.
+    act(() => (document.activeElement as HTMLElement).blur());
+    await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true));
+  });
+
   it("BUG-581: a press outside the open tour keeps focus in it", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/auth/me": ME_NOT_DISMISSED }));
     renderWithProviders(
