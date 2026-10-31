@@ -453,6 +453,50 @@ class Settings(BaseSettings):
         r"\u2713\u2714\ue000-\uf8ff]|\d{1,2}[.)](?!\d))(?:\s|$)"
     )
 
+    # --- What the rubric decomposer reads (BUG-566) ---------------------------
+    # A table the extractor recovered is shown to the model cell by cell when
+    # it has at least this many non-empty rows and columns. Flattened reading
+    # order interleaves short cells from neighbouring rows, which shifted
+    # level descriptors between criteria.
+    rubric_grid_min_rows: int = Field(default=2, ge=2)
+    rubric_grid_min_columns: int = Field(default=2, ge=2)
+    # A later table is a repeated copy of an earlier one (the same grid
+    # printed once per student) when it has the same shape and at least this
+    # share of its non-empty cells is identical. Cells that differ between
+    # copies are filled-in values and are withheld from the model.
+    rubric_copy_min_identical_cell_ratio: float = Field(default=0.9, gt=0.0, le=1.0)
+    # A later page is a repeated copy when every table on it repeats one on an
+    # earlier page and its other text matches that page's at least this
+    # closely (difflib ratio over its text). The table condition is the strong
+    # signal; this only stops a page that merely shares a letterhead.
+    rubric_copy_min_line_ratio: float = Field(default=0.6, gt=0.0, le=1.0)
+    # Words shorter than this are ignored when checking that a criterion names
+    # its own table row ("of", "a"), so the label comparison rests on content.
+    rubric_label_word_min_chars: int = Field(default=3, ge=1)
+    # A level whose name resembles another column's header at least this
+    # closely (difflib ratio), and its own header less, sits in the wrong
+    # column. Tolerates headers the extractor split ("BEGIN ER" for BEGINNER).
+    rubric_level_header_min_similarity: float = Field(default=0.8, gt=0.0, le=1.0)
+    # Longest note an instructor may give when keeping a flagged wording.
+    rubric_acknowledgement_note_max_chars: int = Field(default=1000, ge=1)
+    # Keeping a wording VERIDICAL could not trace to the document needs a
+    # note saying why, for these issue codes (the review screen asks for the
+    # same list; see frontend config/ui.ts RUBRIC_KEEP_NOTE_REQUIRED_CODES).
+    rubric_keep_note_required_codes: list[str] = Field(
+        default_factory=lambda: [
+            "not_in_source",
+            "joins_cells",
+            "partial_cell",
+            "wrong_column",
+            "wrong_row",
+            "shared_cell",
+        ]
+    )
+    # Shown to the model in place of a value withheld for the reason above.
+    rubric_withheld_value_marker: str = Field(
+        default="[differs between copies, not shown]", min_length=1
+    )
+
     # --- Aggregation & scoring (V-019, F8.1, ENGINEERING §5) -----------------
     # Three-way status thresholds — VISIBLE in the report payload, never a
     # black box (ticket AC). Defaults per ENGINEERING.md §5.

@@ -1,0 +1,246 @@
+"""Parse issues after the upload (F2.3, BUG-566): rechecking edited levels
+against the stored source, the instructor keeping a flagged wording, and the
+activation gate.
+
+An issue is open until the instructor acknowledges it or an edit makes it no
+longer reproduce. A format whose issues are open cannot be activated: VERIDICAL
+escalates a level it could not trace to the document instead of grading with
+it (ground rule 1). Rechecking needs no model call: it reads the cells stored
+with the rubric at upload.
+"""
+
+import copy
+import hashlib
+from datetime import UTC, datetime
+from typing import Any
+
+from pydantic import ValidationError
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.config import Settings
+from app.errors import AcknowledgementNoteRequiredError, NotFoundError
+from app.models.audit import AuditLog
+from app.models.enums import RubricParseStatus
+from app.models.instructor import Instructor
+from app.models.rubric import Criterion, Rubric
+from app.rubric.schemas import IssueAcknowledgement, ParsedCriterion, ParsedLevel
+from app.rubric.source import DecompositionSource
+from app.rubric.verbatim import verify_against_source
+
+
+def initial_details(outcome_details: list[dict], rows: list[Criterion]) -> list[dict] | None:
+    """The decomposition's issues with draft positions replaced by the ids of
+    the stored criteria."""
+    details = [
+        {
+            "id": detail["id"],
+            "code": detail["code"],
+            "criterion_id": rows[detail["criterion"]].id
+            if detail["criterion"] is not None
+            else None,
+            "level": detail["level"],
+            "message": detail["message"],
+            "status": detail.get("status", "open"),
+            "resolution": detail.get("resolution"),
+        }
+        for detail in outcome_details
+    ]
+    return details or None
+
+
+def _now() -> str:
+    return datetime.now(UTC).isoformat()
+
+
+def parsed_criterion(row: Criterion) -> ParsedCriterion:
+    """A stored criterion in the decomposition's shape. Levels saved by hand
+    that are not a scale the decomposer could produce (a single level, say)
+    are left out of the check rather than failing the save."""
+    base = {
+        "text": row.text,
+        "type": row.type.value,
+        "evidence_needed": row.evidence,
+        "weight": float(row.weight),
+    }
+    try:
+        levels = [ParsedLevel.model_validate(level) for level in row.levels or []]
+        return ParsedCriterion(**base, levels=levels or None)
+    except ValidationError:
+        return ParsedCriterion(**base)
+
+
+def _wording(rows: dict[int, Criterion], criterion_id: int | None, level: int | None) -> str | None:
+    """The text an issue is about: one level's descriptor, or for a row-level
+    issue the criterion and all its descriptors. None for whole-format notes
+    or a criterion since removed."""
+    row = rows.get(criterion_id) if criterion_id is not None else None
+    if row is None:
+        return None
+    levels = row.levels or []
+    if level is not None:
+        return next(
+            (str(lv.get("descriptor", "")) for lv in levels if lv.get("level") == level), ""
+        )
+    return "\n".join([row.text, *(str(lv.get("descriptor", "")) for lv in levels)])
+
+
+def _fingerprint(wording: str | None) -> str | None:
+    return hashlib.sha256(wording.encode("utf-8")).hexdigest() if wording is not None else None
+
+
+def recheck(rubric: Rubric, rows: list[Criterion], settings: Settings) -> None:
+    """Recompute every level's source and every criterion issue against the
+    stored source, after an edit. The instructor's wording is kept as saved;
+    only where it was found, and whether an issue still holds, change.
+    Whole-format notes are not about a level and stay as they are."""
+    source = DecompositionSource.from_snapshot(rubric.source_snapshot or {})
+    if source is None:
+        return  # read before BUG-566: nothing stored to check against
+    ordered = sorted(rows, key=lambda row: row.position)
+    verified, issues = verify_against_source(
+        [parsed_criterion(r) for r in ordered], source, settings
+    )
+    for row, criterion in zip(ordered, verified, strict=True):
+        if row.levels and criterion.levels:
+            row.levels = [
+                {**stored, "source": level.source.model_dump() if level.source else None}
+                for stored, level in zip(row.levels, criterion.levels, strict=True)
+            ]
+    found = {
+        (issue.code, ordered[issue.criterion].id, issue.level): issue.message for issue in issues
+    }
+    live = {row.id for row in ordered}
+    by_id = {row.id: row for row in ordered}
+    details = copy.deepcopy(rubric.parse_issue_details or [])
+    seen: set[tuple[Any, ...]] = set()
+    for detail in details:
+        if detail["criterion_id"] is None:
+            continue
+        key = (detail["code"], detail["criterion_id"], detail["level"])
+        if key in found:
+            seen.add(key)
+            detail["message"] = found[key]
+            resolution = detail.get("resolution") or {}
+            if detail["status"] == "resolved" and resolution.get("kind") == "rechecked":
+                detail["status"], detail["resolution"] = "open", None  # it came back
+            elif detail["status"] == "acknowledged" and resolution.get("subject") != _fingerprint(
+                _wording(by_id, detail["criterion_id"], detail["level"])
+            ):
+                # What was kept has since been reworded: the new wording has
+                # not been reviewed, so the issue is open again.
+                detail["status"], detail["resolution"] = "open", None
+            continue
+        if detail["status"] != "open":
+            continue
+        kind = "rechecked" if detail["criterion_id"] in live else "criterion_removed"
+        detail["status"] = "resolved"
+        detail["resolution"] = {"kind": kind, "at": _now()}
+    next_id = max((detail["id"] for detail in details), default=0) + 1
+    for key, message in found.items():
+        if key in seen:
+            continue
+        code, criterion_id, level = key
+        details.append(
+            {
+                "id": next_id,
+                "code": code,
+                "criterion_id": criterion_id,
+                "level": level,
+                "message": message,
+                "status": "open",
+                "resolution": None,
+            }
+        )
+        next_id += 1
+    _store(rubric, details)
+
+
+def _store(rubric: Rubric, details: list[dict]) -> None:
+    rubric.parse_issue_details = details or None
+    if details:
+        # parse_issues keeps every message ever raised, in the same order:
+        # the parser's history is not rewritten by a later fix (BUG-052).
+        rubric.parse_issues = [detail["message"] for detail in details]
+        rubric.parse_status = RubricParseStatus.needs_review
+
+
+def acknowledge(
+    session: AsyncSession,
+    rubric: Rubric,
+    acknowledgements: list[IssueAcknowledgement],
+    instructor: Instructor,
+    rows: list[Criterion],
+    settings: Settings,
+) -> None:
+    """Record the instructor keeping flagged wordings as written, with who,
+    when and why, in the rubric and in the audit log. The wording kept is
+    recorded too, so a later rewording reopens the issue. Keeping a wording
+    that could not be traced to the document needs a note saying why: the
+    audit then shows the instructor's reason, not only that it was kept."""
+    if not acknowledgements:
+        return
+    by_row = {row.id: row for row in rows}
+    details = copy.deepcopy(rubric.parse_issue_details or [])
+    by_id = {detail["id"]: detail for detail in details}
+    needs_note = set(settings.rubric_keep_note_required_codes)
+    unexplained = [
+        ack.issue_id
+        for ack in acknowledgements
+        if ack.note is None
+        and (detail := by_id.get(ack.issue_id)) is not None
+        and detail["status"] == "open"
+        and detail["code"] in needs_note
+    ]
+    if unexplained:
+        raise AcknowledgementNoteRequiredError(
+            "Add a note saying why each of these level descriptions is kept as written.",
+            unexplained,
+        )
+    for ack in acknowledgements:
+        detail = by_id.get(ack.issue_id)
+        if detail is None:
+            raise NotFoundError(f"No parse issue {ack.issue_id} on this format.")
+        if detail["status"] != "open":
+            continue
+        wording = _wording(by_row, detail["criterion_id"], detail["level"])
+        detail["status"] = "acknowledged"
+        detail["resolution"] = {
+            "kind": "acknowledged",
+            "reason_code": ack.reason_code,
+            "note": ack.note,
+            "by_instructor_id": instructor.id,
+            "by_name": instructor.display_name,
+            "at": _now(),
+            "subject": _fingerprint(wording),
+        }
+        session.add(
+            AuditLog(
+                event_type="rubric_issue_acknowledged",
+                payload={
+                    "rubric_id": rubric.id,
+                    "issue_id": ack.issue_id,
+                    "code": detail["code"],
+                    "criterion_id": detail["criterion_id"],
+                    "level": detail["level"],
+                    "reason_code": ack.reason_code,
+                    "note": ack.note,
+                    "wording": wording,
+                    "instructor_id": instructor.id,
+                },
+            )
+        )
+    _store(rubric, details)
+
+
+def open_issue_ids(rubric: Rubric) -> list[int]:
+    return [d["id"] for d in rubric.parse_issue_details or [] if d["status"] == "open"]
+
+
+def source_summary(rubric: Rubric) -> dict | None:
+    snapshot = rubric.source_snapshot
+    if not isinstance(snapshot, dict):
+        return None
+    return {
+        "copy_pages": list(snapshot.get("copy_pages", [])),
+        "withheld_count": int(snapshot.get("withheld_count", 0)),
+    }

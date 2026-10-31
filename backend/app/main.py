@@ -330,10 +330,11 @@ async def request_validation_error_handler(
 async def veridical_error_handler(request: Request, exc: VeridicalError) -> JSONResponse:
     """The ONE place taxonomy exceptions become HTTP (CODING.md §2/§4):
     consistent envelope, never a bare 500 for a user-fixable state."""
-    return JSONResponse(
-        status_code=HTTP_STATUS.get(exc.code, 500),
-        content={"error": {"code": exc.code, "message": str(exc)}},
-    )
+    error: dict = {"code": exc.code, "message": str(exc)}
+    details = getattr(exc, "details", None)
+    if details:
+        error["details"] = details
+    return JSONResponse(status_code=HTTP_STATUS.get(exc.code, 500), content={"error": error})
 
 
 # The last database check: (monotonic time, ok, detail).

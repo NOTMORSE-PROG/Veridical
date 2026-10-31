@@ -541,3 +541,254 @@ async def test_update_criteria_rejects_a_criterion_id_from_another_rubric(
                 ),
                 instructor_id,
             )
+
+
+def _grid_docx(tmp_path):
+    import docx
+
+    document = docx.Document()
+    document.add_paragraph("Rating sheet for the written paper")
+    rows = [
+        ["Criterion", "Weak 1", "Strong 2"],
+        ["Thesis", "The thesis is unclear.", "The thesis is stated in one sentence."],
+        ["Evidence", "Claims lack support.", "Every claim is supported by data."],
+    ]
+    table = document.add_table(rows=len(rows), cols=len(rows[0]))
+    for r, row in enumerate(rows):
+        for c, text in enumerate(row):
+            table.rows[r].cells[c].text = text
+    path = tmp_path / "grid.docx"
+    document.save(path)
+    return path
+
+
+def _levelled(text: str, weak: str, strong: str) -> dict[str, Any]:
+    return {
+        "text": text,
+        "type": "semantic",
+        "weight": 1,
+        "levels": [
+            {"level": 1, "name": "Weak", "descriptor": weak, "points": 1},
+            {"level": 2, "name": "Strong", "descriptor": strong, "points": 2},
+        ],
+    }
+
+
+async def test_a_grid_upload_stores_cell_provenance_and_structured_issues(
+    session_factory, tmp_path, monkeypatch
+):
+    """BUG-566 end to end: a DOCX table reaches the decomposer as cells, a
+    matched level stores where it came from, and an invented one leaves the
+    rubric for review with an issue naming its criterion and level."""
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+    get_settings.cache_clear()
+    settings = get_settings()
+    response = {
+        "criteria": [
+            _levelled("Thesis", "the thesis is unclear", "The thesis is stated in one sentence."),
+            _levelled("Evidence", "Claims lack support.", "The evidence is convincing."),
+        ]
+    }
+    spy = SpyLLM(response)
+
+    from app.rubric.schemas import RubricOut
+    from app.rubric.service import create_rubric_from_upload, get_rubric
+
+    instructor_id = await _seed_instructor(session_factory)
+    async with session_factory() as session:
+        rubric = await create_rubric_from_upload(
+            session,
+            _chunks(_grid_docx(tmp_path)),
+            "grid.docx",
+            "Grid",
+            spy,
+            settings,
+            instructor_id=instructor_id,
+        )
+        out = RubricOut.model_validate(await get_rubric(session, rubric.id, instructor_id))
+
+    assert spy.calls == settings.rubric_parse_max_retries + 1
+    assert out.parse_status == "needs_review"
+    thesis, evidence = out.criteria
+    first = thesis.levels[0]
+    assert first.descriptor == "The thesis is unclear."  # the cell's text, not the retyping
+    assert first.source.match == "exact"
+    assert (first.source.page, first.source.table, first.source.row, first.source.col) == (
+        None,
+        1,
+        2,
+        2,
+    )
+    assert evidence.levels[1].source.match == "unmatched"
+    assert [d.message for d in out.parse_issue_details] == out.parse_issues
+    invented = next(d for d in out.parse_issue_details if d.code == "not_in_source")
+    assert (invented.criterion_id, invented.level) == (evidence.id, 2)
+    assert out.source_summary.model_dump() == {"copy_pages": [], "withheld_count": 0}
+
+    # Saving the level with the document's own wording resolves the issue on
+    # recheck, with no model call, and the format can then be activated.
+    from app.errors import UnresolvedRubricIssuesError
+    from app.rubric.schemas import CriterionIn, UpdateCriteriaRequest
+    from app.rubric.service import activate_rubric, update_criteria
+
+    def body(strong: str, **extra) -> UpdateCriteriaRequest:
+        rows = []
+        for criterion in out.criteria:
+            levels = [level.model_copy() for level in criterion.levels]
+            if criterion.id == evidence.id:
+                levels[1] = levels[1].model_copy(update={"descriptor": strong})
+            rows.append(
+                CriterionIn(
+                    id=criterion.id,
+                    type=criterion.type,
+                    text=criterion.text,
+                    evidence=criterion.evidence,
+                    weight=criterion.weight,
+                    levels=levels,
+                )
+            )
+        return UpdateCriteriaRequest(criteria=rows, **extra)
+
+    async with session_factory() as session:
+        with pytest.raises(UnresolvedRubricIssuesError):
+            await activate_rubric(session, rubric.id, instructor_id)
+    async with session_factory() as session:
+        saved = RubricOut.model_validate(
+            await update_criteria(
+                session, rubric.id, body("Every claim is supported by data."), instructor_id
+            )
+        )
+    fixed = next(d for d in saved.parse_issue_details if d.id == invented.id)
+    assert (fixed.status, fixed.resolution.kind) == ("resolved", "rechecked")
+    assert saved.criteria[1].levels[1].source.match == "exact"
+    assert spy.calls == settings.rubric_parse_max_retries + 1
+    async with session_factory() as session:
+        active = RubricOut.model_validate(await activate_rubric(session, rubric.id, instructor_id))
+    assert active.is_active
+
+    # On the active version, rewording it away from the document again is
+    # refused and nothing is saved: an active format never holds an open issue.
+    async with session_factory() as session:
+        with pytest.raises(UnresolvedRubricIssuesError) as refused:
+            await update_criteria(session, rubric.id, body("Strong evidence."), instructor_id)
+    assert refused.value.details == {"open_issue_ids": [invented.id], "revision": active.revision}
+    async with session_factory() as session:
+        unchanged = RubricOut.model_validate(await get_rubric(session, rubric.id, instructor_id))
+    assert unchanged.revision == active.revision
+    assert unchanged.criteria[1].levels[1].descriptor == "Every claim is supported by data."
+    assert next(d for d in unchanged.parse_issue_details if d.id == invented.id).status == (
+        "resolved"
+    )
+
+    # Keeping wording that is not the document's needs a reason in a note:
+    # without one the save is refused, naming the issue.
+    from app.errors import AcknowledgementNoteRequiredError
+    from app.rubric.schemas import IssueAcknowledgement
+
+    bare = IssueAcknowledgement(issue_id=invented.id, reason_code="document_wording", note="  ")
+    async with session_factory() as session:
+        with pytest.raises(AcknowledgementNoteRequiredError) as unexplained:
+            await update_criteria(
+                session, rubric.id, body("Strong evidence.", acknowledgements=[bare]), instructor_id
+            )
+    assert unexplained.value.details == {"issue_ids": [invented.id]}
+
+    # Kept as written, with a note, in the same save: the change goes through.
+    keep = IssueAcknowledgement(issue_id=invented.id, reason_code="other", note="Panel wording.")
+    async with session_factory() as session:
+        kept = RubricOut.model_validate(
+            await update_criteria(
+                session, rubric.id, body("Strong evidence.", acknowledgements=[keep]), instructor_id
+            )
+        )
+    assert kept.is_active
+    assert next(d for d in kept.parse_issue_details if d.id == invented.id).status == (
+        "acknowledged"
+    )
+
+    # Keeping a wording does not cover a different one written later.
+    async with session_factory() as session:
+        with pytest.raises(UnresolvedRubricIssuesError) as reworded:
+            await update_criteria(
+                session, rubric.id, body("Stronger evidence than before."), instructor_id
+            )
+    assert reworded.value.details["open_issue_ids"] == [invented.id]
+    assert reworded.value.details["revision"] == kept.revision
+
+
+async def test_a_locked_version_is_annotated_without_touching_its_criteria(
+    session_factory, tmp_path, monkeypatch
+):
+    """The production repair (BUG-566): a version stored with the shifted
+    levels, pinned by a check, gets parse issues for exactly the affected
+    criteria; its criteria and levels stay byte-for-byte as they were."""
+    from app.models.enums import CriterionType
+    from app.rubric.annotate import annotate_rubric
+    from tests.rubric_grid_pdf import ROWS, grid_pdf
+
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+    get_settings.cache_clear()
+    settings = get_settings()
+    rows = [row[:5] for row in ROWS]
+    names = ["Beginner", "Acceptable", "Proficient", "Exemplary"]
+    stored = []
+    for label, *cells in rows:
+        levels = list(cells)
+        if label == "Thesis":  # the shape production stored for its Purpose row
+            levels = [f"{cells[0]} {rows[1][1].split('. ')[0]}.", cells[2], "Invented.", cells[3]]
+        stored.append((label, levels))
+
+    instructor_id = await _seed_instructor(session_factory)
+    async with session_factory() as session:
+        rubric = Rubric(instructor_id=instructor_id, title="Shifted", source_file="")
+        session.add(rubric)
+        await session.flush()
+        dest = settings.data_dir / settings.rubric_upload_subdir / f"{rubric.id}.pdf"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        grid_pdf(dest)
+        rubric.source_file = str(dest)
+        for position, (label, levels) in enumerate(stored):
+            session.add(
+                Criterion(
+                    rubric_id=rubric.id,
+                    type=CriterionType.semantic,
+                    text=label,
+                    weight=1,
+                    position=position,
+                    levels=[
+                        {"level": i, "name": n, "descriptor": d, "points": float(i)}
+                        for i, (n, d) in enumerate(zip(names, levels, strict=True), start=1)
+                    ],
+                )
+            )
+        await session.commit()
+        rubric_id = rubric.id
+
+    async def criteria_now():
+        async with session_factory() as session:
+            found = await session.scalars(
+                select(Criterion).where(Criterion.rubric_id == rubric_id).order_by(Criterion.id)
+            )
+            return [(c.id, c.text, c.levels) for c in found]
+
+    before = await criteria_now()
+    async with session_factory() as session:
+        preview = await annotate_rubric(session, settings, rubric_id, apply=False)
+    assert not preview.applied and preview.issues
+    assert {i["criterion_id"] for i in preview.issues} == {before[0][0]}
+    assert preview.copy_pages == [1, 2, 3] and preview.withheld_count > 0
+    async with session_factory() as session:
+        assert (await session.get(Rubric, rubric_id)).parse_issue_details is None
+
+    async with session_factory() as session:
+        applied = await annotate_rubric(session, settings, rubric_id, apply=True)
+    assert applied.applied
+    async with session_factory() as session:
+        persisted = await session.get(Rubric, rubric_id)
+        assert persisted.parse_status == "needs_review"
+        codes = {(d["code"], d["level"]) for d in persisted.parse_issue_details}
+        assert ("joins_cells", 1) in codes and ("not_in_source", 3) in codes
+    assert await criteria_now() == before
+    async with session_factory() as session:
+        again = await annotate_rubric(session, settings, rubric_id, apply=True)
+    assert again.already_annotated and not again.applied

@@ -230,11 +230,7 @@ def test_put_criteria_edit_and_confirm_round_trips_through_http(client, tmp_path
         {**c, "weight": 60.0, "type": "semantic" if c["type"] == "structural" else "structural"}
         for c in uploaded["criteria"]
     ]
-    resp = client.put(
-        f"/rubrics/{uploaded['id']}/criteria", json={"criteria": edited, "confirm": True}
-    )
-    assert resp.status_code == 200, resp.text
-    body = resp.json()
+    body = _confirm(client, uploaded["id"], edited)
     assert body["is_active"] is True
 
     reloaded = client.get(f"/rubrics/{uploaded['id']}").json()
@@ -265,8 +261,20 @@ def test_put_replaced_criteria_returns_persisted_membership_and_reusable_ids(
         {**survivor, "text": "Retained requirement after edit", "weight": 2},
     ]
     route = f"/rubrics/{uploaded['id']}/criteria"
-    saved = client.put(route, json={"criteria": replacement, "confirm": confirm})
+    saved = client.put(route, json={"criteria": replacement})
     assert saved.status_code == 200, saved.text
+    if confirm:
+        # Hand-written levels are not the document's words: they are kept
+        # only once the instructor says so (BUG-566).
+        saved = client.put(
+            route,
+            json={
+                "criteria": saved.json()["criteria"],
+                "confirm": True,
+                "acknowledgements": _acks(saved.json()),
+            },
+        )
+        assert saved.status_code == 200, saved.text
     body = saved.json()
     assert body["is_active"] is confirm
     assert len(body["criteria"]) == len(replacement)
@@ -276,13 +284,17 @@ def test_put_replaced_criteria_returns_persisted_membership_and_reusable_ids(
     assert [row["position"] for row in body["criteria"]] == [0, 1]
     assert body["criteria"][0]["evidence"] == replacement[0]["evidence"]
     assert body["criteria"][0]["weight"] == 7
-    assert body["criteria"][0]["levels"] == levels
+    assert [
+        {k: v for k, v in level.items() if k != "source"} for level in body["criteria"][0]["levels"]
+    ] == levels
+    assert {level["source"]["match"] for level in body["criteria"][0]["levels"]} == {"unmatched"}
     fresh = client.get(f"/rubrics/{uploaded['id']}")
     assert fresh.status_code == 200
     assert body == fresh.json()
     again = client.put(route, json={"criteria": body["criteria"], "confirm": confirm})
     assert again.status_code == 200, again.text
-    assert again.json() == body
+    assert again.json()["revision"] == body["revision"] + 1
+    assert {**again.json(), "revision": None} == {**body, "revision": None}
 
 
 def test_put_criteria_rejects_an_empty_list(client, tmp_path):
@@ -324,12 +336,142 @@ def test_put_criteria_rejects_a_zero_or_negative_weight_at_the_api(client, tmp_p
     assert reloaded["is_active"] is False
 
 
+def _acks(rubric):
+    """Keep every open parse issue as written (the fake model's drafts of
+    these fixtures always leave one)."""
+    return [
+        {"issue_id": d["id"], "reason_code": "other", "note": "Checked in the test."}
+        for d in rubric.get("parse_issue_details") or []
+        if d["status"] == "open"
+    ]
+
+
 def _confirm(client, rubric_id, criteria):
+    rubric = client.get(f"/rubrics/{rubric_id}").json()
     resp = client.put(
-        f"/rubrics/{rubric_id}/criteria", json={"criteria": criteria, "confirm": True}
+        f"/rubrics/{rubric_id}/criteria",
+        json={"criteria": criteria, "confirm": True, "acknowledgements": _acks(rubric)},
     )
     assert resp.status_code == 200, resp.text
     return resp.json()
+
+
+def test_confirm_waits_for_open_issues_but_keeps_the_save(client, tmp_path):
+    """BUG-566: confirming with an open parse issue is refused; the edit made
+    in the same request is still saved."""
+    uploaded = _upload(client, tmp_path)
+    assert uploaded["parse_status"] == "needs_review"
+    open_ids = [d["id"] for d in uploaded["parse_issue_details"] if d["status"] == "open"]
+    edited = [{**c, "weight": 3.0} for c in uploaded["criteria"]]
+    route = f"/rubrics/{uploaded['id']}/criteria"
+    resp = client.put(route, json={"criteria": edited, "confirm": True})
+    assert resp.status_code == 409, resp.text
+    details = resp.json()["error"]["details"]
+    assert details["open_issue_ids"] == open_ids
+    after = client.get(f"/rubrics/{uploaded['id']}").json()
+    assert after["is_active"] is False
+    assert {c["weight"] for c in after["criteria"]} == {after["criteria"][0]["weight"]}
+    assert after["revision"] == uploaded["revision"] + 1
+    # The refusal carries the saved revision, so the next save can be checked
+    # against it without reloading.
+    assert details["revision"] == after["revision"]
+    again = client.put(
+        route,
+        json={
+            "criteria": after["criteria"],
+            "confirm": True,
+            "acknowledgements": _acks(after),
+            "expected_revision": details["revision"],
+        },
+    )
+    assert again.status_code == 200, again.text
+    assert again.json()["is_active"] is True
+
+
+def test_keeping_a_flagged_wording_records_who_when_and_why(client, tmp_path):
+    uploaded = _upload(client, tmp_path)
+    issue = uploaded["parse_issue_details"][0]
+    route = f"/rubrics/{uploaded['id']}/criteria"
+    ack = {"issue_id": issue["id"], "reason_code": "document_wording", "note": " As printed. "}
+    resp = client.put(route, json={"criteria": uploaded["criteria"], "acknowledgements": [ack]})
+    assert resp.status_code == 200, resp.text
+    kept = next(d for d in resp.json()["parse_issue_details"] if d["id"] == issue["id"])
+    assert kept["status"] == "acknowledged"
+    resolution = kept["resolution"]
+    assert resolution["kind"] == "acknowledged"
+    assert resolution["reason_code"] == "document_wording"
+    assert resolution["note"] == "As printed."
+    assert resolution["by_name"] and resolution["by_instructor_id"] and resolution["at"]
+    unknown = {"issue_id": 999, "reason_code": "other", "note": None}
+    missing = client.put(
+        route, json={"criteria": uploaded["criteria"], "acknowledgements": [unknown]}
+    )
+    assert missing.status_code == 404
+
+
+def test_a_hand_saved_single_level_does_not_break_the_recheck(client, tmp_path):
+    uploaded = _upload(client, tmp_path)
+    one_level = {
+        "type": "semantic",
+        "text": "Overall impression",
+        "weight": 1,
+        "levels": [{"level": 1, "name": "Met", "descriptor": "Meets it.", "points": 1}],
+    }
+    resp = client.put(
+        f"/rubrics/{uploaded['id']}/criteria",
+        json={"criteria": [*uploaded["criteria"], one_level]},
+    )
+    assert resp.status_code == 200, resp.text
+
+
+def test_a_whole_format_note_can_be_kept_without_a_reason(client, tmp_path):
+    """Only wording that could not be traced to the document needs a note;
+    a whole-format note ("other") is kept with none."""
+    uploaded = _upload(client, tmp_path)
+    issue = uploaded["parse_issue_details"][0]
+    assert issue["code"] == "other"
+    ack = {"issue_id": issue["id"], "reason_code": "other", "note": None}
+    resp = client.put(
+        f"/rubrics/{uploaded['id']}/criteria",
+        json={"criteria": uploaded["criteria"], "acknowledgements": [ack]},
+    )
+    assert resp.status_code == 200, resp.text
+    kept = next(d for d in resp.json()["parse_issue_details"] if d["id"] == issue["id"])
+    assert kept["status"] == "acknowledged" and kept["resolution"]["note"] is None
+
+
+def test_a_missing_keep_note_is_refused_in_the_standard_envelope():
+    import asyncio
+    import json
+
+    from app.errors import AcknowledgementNoteRequiredError
+    from app.main import veridical_error_handler
+
+    resp = asyncio.run(
+        veridical_error_handler(None, AcknowledgementNoteRequiredError("Add a note.", [4, 7]))
+    )
+    assert resp.status_code == 422
+    assert json.loads(resp.body) == {
+        "error": {
+            "code": "acknowledgement_note_required",
+            "message": "Add a note.",
+            "details": {"issue_ids": [4, 7]},
+        }
+    }
+
+
+def test_a_save_on_an_older_revision_is_refused(client, tmp_path):
+    uploaded = _upload(client, tmp_path)
+    route = f"/rubrics/{uploaded['id']}/criteria"
+    first = client.put(
+        route, json={"criteria": uploaded["criteria"], "expected_revision": uploaded["revision"]}
+    )
+    assert first.status_code == 200, first.text
+    stale = client.put(
+        route, json={"criteria": uploaded["criteria"], "expected_revision": uploaded["revision"]}
+    )
+    assert stale.status_code == 409
+    assert stale.json()["error"]["code"] == "rubric_changed"
 
 
 def test_reupload_with_family_id_creates_v2_over_http(client, tmp_path):
@@ -411,6 +553,23 @@ def test_activate_switches_which_version_is_active(client, tmp_path):
             params={"title": "V2", "family_id": v1["rubric_family_id"]},
             files={"file": ("rubric.pdf", fh, "application/pdf")},
         ).json()
+
+    # BUG-566: a version with open parse issues waits for the instructor.
+    blocked = client.post(f"/rubrics/{v2['id']}/activate")
+    assert blocked.status_code == 409, blocked.text
+    error = blocked.json()["error"]
+    assert error["code"] == "unresolved_rubric_issues"
+    assert error["details"]["open_issue_ids"] == [d["id"] for d in v2["parse_issue_details"]]
+    kept = client.put(
+        f"/rubrics/{v2['id']}/criteria",
+        json={
+            "criteria": v2["criteria"],
+            "acknowledgements": _acks(v2),
+            "expected_revision": v2["revision"],
+        },
+    )
+    assert kept.status_code == 200, kept.text
+    assert {d["status"] for d in kept.json()["parse_issue_details"]} == {"acknowledged"}
 
     resp = client.post(f"/rubrics/{v2['id']}/activate")
     assert resp.status_code == 200, resp.text

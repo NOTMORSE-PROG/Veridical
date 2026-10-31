@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+from app.config import get_settings
 from app.ingest.schemas import TextBlock
 from app.llm.base import LLMClient
 from app.llm.fake import FakeLLMClient
@@ -71,8 +72,11 @@ async def test_row_fidelity_prompt_has_separate_cache_identity_and_preserves_sou
     client = SpyLLM({"criteria": [{"text": "Source requirement", "type": "semantic", "weight": 1}]})
     source = "Independent row A: quality.\nIndependent row B: count."
     await decompose_rubric(source, client)
-    assert client.versions == ["v5"]
+    assert client.versions == ["v6"]
     assert client.prompts[0].endswith(source + "\n")
+    # The withheld-value marker is configuration, substituted into the prompt.
+    assert "{withheld_marker}" not in client.prompts[0]
+    assert get_settings().rubric_withheld_value_marker in client.prompts[0]
 
 
 async def test_decompose_rubric_raises_on_bad_type_enum():

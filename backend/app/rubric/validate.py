@@ -11,7 +11,7 @@ partial criteria set) for the review screen (V-012), per charter rule 1
 
 import re
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,6 +22,8 @@ from app.llm.base import LLMClient
 from app.models.audit import AuditLog
 from app.rubric.decompose import RubricParseError, decompose_rubric
 from app.rubric.schemas import ParsedCriterion
+from app.rubric.source import DecompositionSource
+from app.rubric.verbatim import SourceIssue, verify_against_source
 
 # BUG-160: worded as a fact about the document, never an accusation against
 # whoever uploaded it (ground rule 3) -- the same language could describe a
@@ -48,6 +50,23 @@ RETRY_CHANGED_DRAFT_REASON = (
     "An earlier draft of these criteria did not pass VERIDICAL's checks ({issues}). "
     "A later draft did, but it may have added or removed something to do so. "
     "Compare the criteria with the original document before activating them."
+)
+
+# BUG-566: text that exists only on a repeated copy is not read (so names
+# filled in on each copy never reach the model); a line there could still be
+# a requirement the first copy lacks.
+UNREAD_COPY_TEXT_REASON = (
+    "{count} line(s) of text appear only on a repeated copy of this format and "
+    "were not read; compare the criteria with the original document"
+)
+
+# BUG-566: without a recovered table, a descriptor can be checked as the
+# document's own words but not for which row and column it came from (a
+# shifted or swapped level still reads as a passage of the flattened text).
+NO_TABLE_LEVELS_REASON = (
+    "No table structure could be read from this format, so VERIDICAL checked "
+    "each level description's wording but not which row and level it belongs "
+    "to; compare the levels with the original document"
 )
 
 # Significant words only (skip 1-3 letter function words: "the", "and",
@@ -210,12 +229,48 @@ def run_gate(
     return GateResult(ok=not reasons, coverage_ratio=ratio, reasons=reasons)
 
 
+def _unplaced_levels_note(
+    criteria: list[ParsedCriterion], source: DecompositionSource
+) -> list[str]:
+    """A rubric graded on scales but read without any table: the instructor
+    is told what the check could not establish."""
+    levelled = sum(1 for criterion in criteria if criterion.levels)
+    return [NO_TABLE_LEVELS_REASON] if levelled >= 2 and not source.cells else []
+
+
 @dataclass
 class DecompositionOutcome:
     criteria: list[ParsedCriterion]
     needs_review: bool
     issues: list[str]
     attempts: int
+    # One entry per `issues` item, same order: {"id", "code", "criterion"
+    # (draft position or None), "level" (ordinal or None), "message"}.
+    issue_details: list[dict] = field(default_factory=list)
+
+
+def _details(messages: list[str], source_issues: list[SourceIssue]) -> list[dict]:
+    """Structured form of `messages` for the review screen. Source issues
+    carry the criterion and level they are about; every other message is
+    about the draft as a whole ("other", shown as written). Every issue
+    starts open: only the instructor acknowledges one, and only a recheck of
+    edited criteria resolves one."""
+    by_message = {issue.message: issue for issue in source_issues}
+    details = []
+    for number, message in enumerate(messages, start=1):
+        issue = by_message.get(message)
+        details.append(
+            {
+                "id": number,
+                "code": issue.code if issue else "other",
+                "criterion": issue.criterion if issue else None,
+                "level": issue.level if issue else None,
+                "message": message,
+                "status": "open",
+                "resolution": None,
+            }
+        )
+    return details
 
 
 async def attempt_decomposition(
@@ -225,19 +280,29 @@ async def attempt_decomposition(
     raw_text: str,
     llm: LLMClient,
     settings: Settings,
+    *,
+    source: DecompositionSource | None = None,
 ) -> DecompositionOutcome:
     """Up to `rubric_parse_max_retries + 1` total attempts. Only a
     validation failure (`RubricParseError`, or the gate) triggers a
     retry — quota/API-down errors are infra failures, not content
     problems, and propagate immediately rather than burning retries
-    against the daily meter for nothing (ticket edge case)."""
+    against the daily meter for nothing (ticket edge case).
+
+    `source` is what the upload path builds from the extraction (tables
+    cell by cell, repeated copies read once). Without it, `raw_text` is the
+    whole source. Either way every level descriptor is checked against it
+    (BUG-566): one that is not the document's own words is a gate issue,
+    retried with that feedback and, if it persists, left for the
+    instructor to review rather than stored as if it were parsed."""
+    source = source or DecompositionSource.from_text(blocks, raw_text)
     total_attempts = settings.rubric_parse_max_retries + 1
     feedback: str | None = None
     # The schema-valid attempt with the fewest gate issues (then the most
     # criteria) is what the review screen gets when no attempt passes: the
     # last one could be the worst (backend review, 2026-10-10: 9 criteria
     # then 4, and the 4 were shown).
-    best: tuple[list[ParsedCriterion], list[str]] | None = None
+    best: tuple[list[ParsedCriterion], list[str], list[SourceIssue]] | None = None
     last_issues: list[str] = ["no attempt produced a schema-valid response"]
     # Every gate issue an earlier draft raised: a later draft that passes
     # may have changed the rubric only to pass (invented a missing level,
@@ -249,11 +314,19 @@ async def attempt_decomposition(
     # case — it's the same input every time. A suspected match doesn't
     # change what the gate checks; it's an independent concern that must
     # survive even a clean gate pass (see below).
-    injection = detect_injection_signal(raw_text)
+    injection = detect_injection_signal(source.prompt_text)
+    # Neither of these changes between attempts, so neither is retried.
+    standing: list[str] = []
+    if source.unread_copy_lines:
+        standing.append(UNREAD_COPY_TEXT_REASON.format(count=source.unread_copy_lines))
+    if injection.suspected:
+        standing.append(RUBRIC_INJECTION_SUSPECTED_REASON)
 
     for attempt in range(1, total_attempts + 1):
         try:
-            criteria = await decompose_rubric(raw_text, llm, feedback=feedback)
+            criteria = await decompose_rubric(
+                source.prompt_text, llm, feedback=feedback, settings=settings
+            )
         except RubricParseError as exc:
             last_issues = [str(exc)]
             await _log_attempt(
@@ -268,7 +341,11 @@ async def attempt_decomposition(
             feedback = last_issues[0]
             continue
 
-        gate = run_gate(blocks, criteria, settings, raw_text)
+        criteria, source_issues = verify_against_source(criteria, source, settings)
+        gate = run_gate(source.gate_blocks, criteria, settings, source.checklist_text)
+        draft_issue_count = len(gate.reasons)
+        gate.reasons[:0] = [issue.message for issue in source_issues]
+        gate.ok = gate.ok and not source_issues
         await _log_attempt(
             session,
             rubric_id,
@@ -284,13 +361,26 @@ async def attempt_decomposition(
                 if earlier_gate_issues
                 else []
             )
-            if injection.suspected:
-                issues.append(RUBRIC_INJECTION_SUSPECTED_REASON)
+            issues.extend(standing)
+            issues.extend(_unplaced_levels_note(criteria, source))
             return DecompositionOutcome(
-                criteria=criteria, needs_review=bool(issues), issues=issues, attempts=attempt
+                criteria=criteria,
+                needs_review=bool(issues),
+                issues=issues,
+                attempts=attempt,
+                issue_details=_details(issues, []),
             )
-        if best is None or (len(gate.reasons), -len(criteria)) < (len(best[1]), -len(best[0])):
-            best = (criteria, gate.reasons)  # best-so-far partial — never discarded
+        # A draft is ranked by its whole-draft issues, then by how much of the
+        # rubric it kept, and only then by its descriptor issues: each bad
+        # descriptor is its own issue, and counting them first would prefer a
+        # draft that dropped most rows (backend review, BUG-566).
+        rank = (draft_issue_count, -len(criteria), len(source_issues))
+        if best is None or rank < (
+            len(best[1]) - len(best[2]),
+            -len(best[0]),
+            len(best[2]),
+        ):
+            best = (criteria, gate.reasons, source_issues)  # best-so-far partial
         earlier_gate_issues.extend(
             r
             for r in gate.reasons
@@ -299,11 +389,16 @@ async def attempt_decomposition(
         last_issues = gate.reasons
         feedback = "; ".join(gate.reasons)
 
-    best_criteria, best_issues = best if best is not None else ([], last_issues)
-    if injection.suspected and RUBRIC_INJECTION_SUSPECTED_REASON not in best_issues:
-        best_issues = [*best_issues, RUBRIC_INJECTION_SUSPECTED_REASON]
+    best_criteria, best_issues, best_source = best if best is not None else ([], last_issues, [])
+    best_issues = list(
+        dict.fromkeys([*best_issues, *standing, *_unplaced_levels_note(best_criteria, source)])
+    )
     return DecompositionOutcome(
-        criteria=best_criteria, needs_review=True, issues=best_issues, attempts=total_attempts
+        criteria=best_criteria,
+        needs_review=True,
+        issues=best_issues,
+        attempts=total_attempts,
+        issue_details=_details(best_issues, best_source),
     )
 
 

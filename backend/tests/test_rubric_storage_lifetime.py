@@ -12,6 +12,7 @@ import pytest
 from app.config import Settings
 from app.ingest.admission import PreparationAdmission
 from app.rubric import service
+from app.rubric.source import DecompositionSource
 
 
 class Session:
@@ -35,6 +36,9 @@ class Session:
             raise OSError("Controlled commit failure")
 
     async def refresh(self, *args, **kwargs):
+        pass
+
+    async def flush(self):
         pass
 
     async def rollback(self):
@@ -85,11 +89,30 @@ def runtime(tmp_path, monkeypatch):
     monkeypatch.setattr(service, "preparation_scope", scope)
     monkeypatch.setattr(service, "get_storage", lambda _: Store())
     monkeypatch.setattr(service, "select_extractor", lambda _: extract)
-    monkeypatch.setattr(service, "raw_text_for_decomposition", lambda _: "Control source")
+    monkeypatch.setattr(
+        service,
+        "build_decomposition_source",
+        lambda _result, _settings: DecompositionSource.from_text([], "Control source"),
+    )
     monkeypatch.setattr(
         service,
         "attempt_decomposition",
-        AsyncMock(return_value=SimpleNamespace(criteria=[], needs_review=True, issues=["control"])),
+        AsyncMock(
+            return_value=SimpleNamespace(
+                criteria=[],
+                needs_review=True,
+                issues=["control"],
+                issue_details=[
+                    {
+                        "id": 1,
+                        "code": "draft_check",
+                        "criterion": None,
+                        "level": None,
+                        "message": "control",
+                    }
+                ],
+            )
+        ),
     )
 
     async def chunks():
@@ -135,3 +158,15 @@ async def test_cancelled_format_waits_for_publication_and_keeps_recoverable_draf
         await task
     assert not session.deleted and session.row.source_file
     assert objects and state.closed == 1 and admission.active_owners == 0
+
+
+@pytest.mark.asyncio
+async def test_upload_decomposes_from_the_table_aware_source(runtime):
+    """BUG-566: the upload hands the decomposer the source built from the
+    extraction (tables cell by cell), so the descriptor check has the cells."""
+    *_, create = runtime
+    await create(Session())
+    call = service.attempt_decomposition.await_args
+    source = call.kwargs["source"]
+    assert isinstance(source, DecompositionSource)
+    assert call.args[3] == source.prompt_text == "Control source"
