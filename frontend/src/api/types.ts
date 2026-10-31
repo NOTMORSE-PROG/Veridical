@@ -138,6 +138,8 @@ export interface CitationRecencySummaryOut {
   n_year_not_readable: number;
   year_not_readable_reasons?: Record<string, number>;
   year_not_readable_reference_numbers?: number[];
+  // Why only part of the list was dated ("reference_membership_partial").
+  scope_limit_reason?: string | null;
 }
 
 export interface Rubric {

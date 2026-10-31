@@ -2,6 +2,7 @@
 
 import html
 import re
+import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
@@ -11,6 +12,7 @@ from pydantic import HttpUrl, TypeAdapter, ValidationError
 
 from app.checks.citations.title_policy import TitlePolicy, compare_titles, load_title_policy
 from app.config import Settings
+from app.ingest.reference_metadata_patterns import load_reference_metadata_patterns
 
 _ASCII_FOLD = str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")
 
@@ -101,6 +103,48 @@ def registry_plain_title(title):
     return " ".join(html.unescape(_REGISTRY_TAG.sub("", title)).split())
 
 
+@dataclass(frozen=True)
+class _RegistryName:
+    raw: str  # the first creator exactly as the registry returned it
+    stripped: str  # the same with footnote markers dropped
+    first: str  # the first name in it, when it packs several
+    single: bool  # one clean name: a mismatch with it can be trusted
+
+
+# Characters a clean personal or corporate name is made of. Anything else
+# (separators, superscripts, symbols) means the registry string is not one
+# plain name, and a disagreement with it proves nothing.
+_NAME_PUNCTUATION = frozenset(" .'\u2019-\u2010\u2011")
+_NAME_LETTERS = frozenset({"Lu", "Ll", "Lt", "Lo"})
+
+
+def _clean_single_name(name):
+    return bool(name.strip()) and all(
+        ch in _NAME_PUNCTUATION or unicodedata.category(ch) in _NAME_LETTERS for ch in name
+    )
+
+
+def _registry_first_author(name, settings):
+    """Read the registry's first creator string.
+
+    Some records hold every author in one creator string with footnote
+    markers ("Mbonigaba Celestin*, S. Sujatha** & M. Vasuki****"). Markers
+    are dropped and a packed string is cut at its separators, keeping its
+    first name without claiming which word of it is the surname."""
+    patterns = load_reference_metadata_patterns(
+        settings.reference_metadata_patterns_file if settings else None
+    )
+    stripped = " ".join(patterns.registry_author_marker.sub("", name).split())
+    pieces = [p.strip() for p in patterns.registry_author_list.split(stripped) if p.strip()]
+    return _RegistryName(
+        raw=name,
+        stripped=stripped,
+        first=pieces[0] if pieces else stripped,
+        # "Cruz et al." splits into one piece, but it is not one plain name.
+        single=pieces == [stripped] and _clean_single_name(name),
+    )
+
+
 def compare_metadata(
     citation, result, *, policy: TitlePolicy | None = None, settings: Settings | None = None
 ):
@@ -127,9 +171,16 @@ def compare_metadata(
     if citation.year is not None and type(year) is int and citation.year != year:
         differences.append("year")
     author_status, author_reason = "not_recorded", None
+    registered_first = None
     if citation.authors and authors and isinstance(authors[0], str) and authors[0]:
+        name = _registry_first_author(authors[0], settings)
         cited = citation.authors[0].split(",", 1)[0]
-        if _words(cited) != _words(authors[0]):
+        registered_first = name.raw
+        if _words(cited) == _words(name.raw):
+            author_status = "agrees"
+        elif _words(cited) == _words(name.stripped):
+            author_status, registered_first = "agrees", name.stripped
+        else:
             from app.checks.citations.extract import (
                 _is_corporate_author_name,
                 source_supported_corporate_names,
@@ -145,11 +196,21 @@ def compare_metadata(
                     author_status = "source_supported_sequence"
                 else:
                     author_status, author_reason = "unassessed", "author_boundaries_unassessed"
-            else:
+            elif name.single:
                 differences.append("first author")
                 author_status = "differs"
-        else:
-            author_status = "agrees"
+            else:
+                # BUG-601: a packed or marked-up creator string does not say
+                # which word is the surname, so it can confirm the cited
+                # name but never establish a mismatch.
+                registered_first = name.first
+                if _words(cited) and set(_words(cited)) <= set(_words(name.first)):
+                    author_status = "agrees"
+                else:
+                    author_status = "unassessed"
+                    author_reason = "registry_author_name_not_separated"
+    elif authors and isinstance(authors[0], str) and authors[0]:
+        registered_first = authors[0]
     return MetadataComparison(
         tuple(differences),
         title_status,
@@ -167,7 +228,7 @@ def compare_metadata(
                 "doi": returned_doi(result) if isinstance(returned_doi(result), str) else None,
                 "title": result.title if isinstance(result.title, str) else None,
                 "year": year if type(year) is int else None,
-                "first_author": authors[0] if authors and isinstance(authors[0], str) else None,
+                "first_author": registered_first,
             }
         ),
         policy.version,

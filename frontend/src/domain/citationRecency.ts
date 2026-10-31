@@ -38,6 +38,13 @@ export const CITATION_RECENCY_COPY = {
     no_text: ["no entry text", "with no entry text"],
   } as Record<string, [string, string]>,
   unreadableOther: ["year not readable", "with a year that could not be read"] as [string, string],
+  // Why only part of the list was dated. [one entry, several entries]
+  scopeLimit: {
+    reference_membership_partial: [
+      "Dates were read only from the 1 entry kept as part of the reference list. Material after the list, such as an appendix, could not be told apart from it and was left out.",
+      "Dates were read only from the {count} entries kept as part of the reference list. Material after the list, such as an appendix, could not be told apart from it and was left out.",
+    ],
+  } as Record<string, [string, string]>,
 } as const;
 
 // Reference numbers listed before the rest are summed up.
@@ -95,6 +102,8 @@ export function citationRecencyNote(recency: CitationRecencySummaryOut | null | 
   if (recency.reference_year != null && oldest != null) {
     details.push(`The ${window}-year window counts back from ${referenceYearPhrase(recency)}: sources published in ${oldest} or later are inside it, and sources published before ${oldest} are noted.`);
   }
+  const scope = recency.scope_limit_reason ? CITATION_RECENCY_COPY.scopeLimit[recency.scope_limit_reason] : undefined;
+  if (scope) summary.push(recency.n_references === 1 ? scope[0] : scope[1].replace("{count}", String(recency.n_references)));
   if (recency.n_year_not_readable > 0) {
     const numbers = recency.year_not_readable_reference_numbers ?? [];
     const reasons = Object.entries(recency.year_not_readable_reasons ?? {})

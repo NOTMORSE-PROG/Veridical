@@ -62,6 +62,19 @@ describe("the citation recency note", () => {
     expect(all({ ...ASSESSED, year_not_readable_reasons: { something_new: 1 } })).toContain("(reference 7: year not readable)");
   });
 
+  it("says when only the entries read as complete were dated and later material was left out", () => {
+    const note = citationRecencyNote({ ...ASSESSED, scope_limit_reason: "reference_membership_partial" })!;
+    expect(note.summary).toEqual([
+      "These notes do not count toward readiness.",
+      "Dates were read only from the 21 entries kept as part of the reference list. Material after the list, such as an appendix, could not be told apart from it and was left out.",
+      "1 source has no readable year and is not judged (reference 7: marked n.d. or in press).",
+    ]);
+    expect(citationRecencyNote({ ...ASSESSED, n_references: 1, scope_limit_reason: "reference_membership_partial" })!.summary)
+      .toContain("Dates were read only from the 1 entry kept as part of the reference list. Material after the list, such as an appendix, could not be told apart from it and was left out.");
+    expect(all(ASSESSED)).not.toContain("left out");
+    expect(all({ ...ASSESSED, scope_limit_reason: "something_new" })).not.toContain("something_new");
+  });
+
   it("says why the list was not read, and whether the format turned the note off", () => {
     expect(citationRecencyNote({ ...ASSESSED, status: "unassessed", unassessed_reason: "reference_list_not_bound" })).toEqual({
       title: "Citation recency: not assessed", summary: ["Source dates were not read because the reference list could not be told apart from the text around it."], details: [] });

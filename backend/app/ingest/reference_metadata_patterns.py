@@ -33,6 +33,11 @@ class ReferenceMetadataPatterns:
     markup_redirect: re.Pattern[str]
     # Shown link text that is already an address or identifier.
     markup_shown_locator: re.Pattern[str]
+    # Registries sometimes return all authors as one creator string with
+    # footnote markers ("Mbonigaba Celestin*, S. Sujatha** & ..."): the
+    # markers to drop and the separators between packed names.
+    registry_author_marker: re.Pattern[str]
+    registry_author_list: re.Pattern[str]
     version: str
     sha256: str
 
@@ -130,6 +135,18 @@ def load_reference_metadata_patterns(path: Path | None = None) -> ReferenceMetad
         isinstance(host, str) and re.fullmatch(r"[a-zA-Z0-9.-]+", host) for host in hosts
     ):
         raise ValueError("DOI resolver hosts must be a list of plain host names")
+    marker = _nonempty_pattern(effective["registry_author_marker_pattern"])
+    author_list = _nonempty_pattern(effective["registry_author_list_pattern"])
+    # Known answers: a plain name passes through untouched, a footnote star
+    # is dropped, and two comma-separated names come apart. A pattern that
+    # fails these would turn every registry author comparison into noise.
+    if (
+        marker.sub("", "Maria Dela Cruz") != "Maria Dela Cruz"
+        or marker.sub("", "Santos*") != "Santos"
+        or [p for p in author_list.split("Maria Dela Cruz") if p] != ["Maria Dela Cruz"]
+        or len([p for p in author_list.split("Maria Santos, Jose Cruz") if p]) != 2
+    ):
+        raise ValueError("Registry author patterns fail their known-answer check")
     return ReferenceMetadataPatterns(
         access_note=_compile(
             rf"\b(?:{access})\s*(?::|on\b|from\b|(?=(?:{months})\.?\s+\d|\d))",
@@ -160,6 +177,8 @@ def load_reference_metadata_patterns(path: Path | None = None) -> ReferenceMetad
         markup_emphasis=_markup_pattern(effective["markup_emphasis_pattern"], ("shown",)),
         markup_redirect=_compile(effective["markup_redirect_pattern"]),
         markup_shown_locator=_compile(effective["markup_shown_locator_pattern"]),
+        registry_author_marker=marker,
+        registry_author_list=author_list,
         version=effective["version"],
         sha256=hashlib.sha256(
             json.dumps(effective, sort_keys=True, ensure_ascii=False).encode("utf-8")
@@ -180,6 +199,15 @@ def _markup_pattern(pattern, groups):
     compiled = _compile(pattern)
     if not set(groups) <= set(compiled.groupindex):
         raise ValueError(f"Reference markup pattern must name the groups {', '.join(groups)}")
+    return compiled
+
+
+def _nonempty_pattern(pattern):
+    # A pattern that can match the empty string would split or strip a
+    # name at every position.
+    compiled = _compile(pattern)
+    if compiled.fullmatch(""):
+        raise ValueError("Reference metadata pattern must not match empty text")
     return compiled
 
 

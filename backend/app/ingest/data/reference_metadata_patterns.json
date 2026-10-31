@@ -1,6 +1,6 @@
 {
   "_comment": "Conservative reference metadata grammar. These conventions may be overridden; ambiguous names, dates and quoted boundaries remain unassessed.",
-  "version": "reference-metadata-v4-export-markup",
+  "version": "reference-metadata-v5-registry-authors",
   "quoted_title_pairs": [
     [
       "\"",
@@ -101,6 +101,8 @@
     "kolehiyo",
     "unibersidad"
   ],
+  "registry_author_marker_pattern": "[*\u2020\u2021\u00a7\u00b6#\u00b9\u00b2\u00b3\u2070-\u209f\u1d2c-\u1d6a]+|(?<=[^\\W\\d_])\\d+",
+  "registry_author_list_pattern": "(?i)\\s*(?:;|&|,|\\band\\b|\\bet\\s+al\\b\\.?)\\s*",
   "markup_shown_locator_pattern": "(?i)\\s*(?:https?://|doi:\\s*|10\\.\\d{4,9}/)",
   "corporate_author_words": [
     "university",

@@ -74,6 +74,11 @@ DEFAULTS = {
     "handle_not_found_code": 100,
     "handle_found_code": 1,
     "host_for_entries": "destamp",
+    # Valid-DOI controls added by hand: real works cited correctly whose
+    # registry record has a shape the random Crossref sample never draws
+    # (e.g. a DataCite record with every author packed into one creator).
+    # Each item: {"doi", "entry", "registry", "why"}.
+    "extra_valid_doi_controls": [],
     "notice_title_pattern": r"notice of|retraction|withdrawn|expression of concern",
     "accusation_words": r"fake|fabricat|fraud|forg|plagiar|dishonest|false",
 }
@@ -958,8 +963,12 @@ async def _part_b(ctx, config, patterns, settings, client, cache_stats):
         )
     drafts_by_type = {}
     outcomes = []
+    extras = [
+        {**item, "checked_on": item.get("checked_on", today), "extra_control": True}
+        for item in config["extra_valid_doi_controls"]
+    ]
     for plant_type, items in candidates.items():
-        items = items[: config["per_type"]]
+        items = items[: config["per_type"]] + (extras if plant_type == "valid_doi" else [])
         for start in range(0, len(items), config["plants_per_copy"]):
             chunk = items[start : start + config["plants_per_copy"]]
             host = load_extraction(ctx.extractions / f"{config['host_for_entries']}.json")
@@ -984,6 +993,8 @@ async def _part_b(ctx, config, patterns, settings, client, cache_stats):
                         "handle_response_code": item.get("handle_response_code"),
                         "retraction_relations": item.get("relations"),
                         "entry": item["entry"],
+                        "registry": item.get("registry"),
+                        "extra_control": bool(item.get("extra_control")),
                         "parsed_with_doi_intact": intact,
                         "verdict": verdict.kind.value,
                         "flag_kind": flag.detail.get("kind") if flag else None,
@@ -1004,8 +1015,11 @@ def _part_b_rows(outcomes):
         "nonexistent_doi": ("not_found", "unverifiable_not_found"),
         "retracted_doi": ("retracted", "retracted_source"),
     }
+    # A hand-picked control was chosen because a fix was built against it, so
+    # it is kept out of the dev and holdout rows and reported on its own.
+    sampled = [o for o in outcomes if not o.get("extra_control")]
     for split in ("dev", "holdout"):
-        mine = [o for o in outcomes if o["split"] == split]
+        mine = [o for o in sampled if o["split"] == split]
         for plant_type in EXISTENCE_TYPES:
             group = [o for o in mine if o["type"] == plant_type and o["parsed_with_doi_intact"]]
             verdict, kind = expected[plant_type]
@@ -1024,6 +1038,20 @@ def _part_b_rows(outcomes):
                 len(controls),
                 split=split,
                 note="A real registered work cited correctly; any finding is a false alarm.",
+            )
+        )
+    extra = [o for o in outcomes if o.get("extra_control") and o["parsed_with_doi_intact"]]
+    if extra:
+        rows.append(
+            rate_row(
+                LANE,
+                "hand-picked valid DOIs kept silent",
+                "control entry",
+                sum(o["flag_kind"] is None for o in extra),
+                len(extra),
+                note="Registry shapes the random sample misses ("
+                + ", ".join(sorted({o["registry"] or "unknown" for o in extra}))
+                + "); reported only here, not in the dev or holdout rows.",
             )
         )
     for plant_type in EXISTENCE_TYPES:

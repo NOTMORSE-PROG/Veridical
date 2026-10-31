@@ -67,6 +67,9 @@ def recency_summary(detail: dict[str, Any] | None) -> CitationRecencySummaryOut 
                 and type(row.get("reference_order_index")) is int
                 and row["reference_order_index"] >= 0
             ],
+            scope_limit_reason=_text(saved.get("scope_limit_reason"))
+            if saved["status"] == "assessed"
+            else None,
         )
     except ValidationError:
         # A malformed saved record is not shown rather than shown wrong.
@@ -83,6 +86,15 @@ _FALLBACK_NOTES = {
     ),
     "manuscript_year_precedes_cited_source": (
         "The manuscript cites work published after its title page year, so the check date was used."
+    ),
+}
+
+
+_SCOPE_NOTES = {
+    "reference_membership_partial": (
+        "Dates were read only from the {count} {entries} kept as part of the reference list. "
+        "Material after the list, such as an appendix, could not be told apart from it and was "
+        "left out."
     ),
 }
 
@@ -137,6 +149,12 @@ def recency_sentences(summary: CitationRecencySummaryOut | None) -> list[str]:
     fallback = _FALLBACK_NOTES.get(summary.reference_year_fallback_reason or "")
     if fallback:
         sentences.append(fallback)
+    scope = _SCOPE_NOTES.get(summary.scope_limit_reason or "")
+    if scope:
+        one = summary.n_references == 1
+        sentences.append(
+            scope.format(count=summary.n_references, entries="entry" if one else "entries")
+        )
     if summary.n_year_not_readable:
         count = summary.n_year_not_readable
         sentences.append(
