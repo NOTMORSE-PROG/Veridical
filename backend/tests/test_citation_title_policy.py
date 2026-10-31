@@ -250,3 +250,47 @@ async def test_exact_verdict_keeps_policy_and_comparison_snapshot(monkeypatch, t
     assert draft.detail["differing_fields"] == ["title"]
     assert len(before["policy_sha256"]) == 64
     assert before["cited"]["title"] == "A source"
+
+
+@pytest.mark.parametrize(
+    ("registered", "cited"),
+    [
+        (
+            "Phytochemical screening of rhizome of <i>Drynaria quercifolia</i>",
+            "Phytochemical screening of rhizome of Drynaria quercifolia",
+        ),
+        ("Uptake of CO<sub>2</sub> in soils", "Uptake of CO2 in soils"),
+        ("<scp>Sensing</scp> comfort &amp; health", "Sensing comfort & health"),
+        (
+            'Growth of <mml:math><mml:mi>x</mml:mi></mml:math> in <i class="a">vitro</i>',
+            "Growth of x in vitro",
+        ),
+    ],
+)
+def test_registry_title_markup_is_not_a_title_difference(registered, cited):
+    c = citation(cited, 2020)
+    r = VerificationResult(
+        found=True,
+        provider="crossref",
+        title=registered,
+        raw={"DOI": DOI, "published": {"date-parts": [[2020]]}},
+    )
+    comparison = compare_metadata(c, r)
+    assert comparison.title_status == "agrees"
+    assert "title" not in comparison.differing_fields
+
+
+def test_registry_markup_removal_keeps_real_differences_and_plain_angle_text():
+    from app.checks.citations.metadata import registry_plain_title
+
+    assert registry_plain_title("Results for a <5 year horizon") == (
+        "Results for a <5 year horizon"
+    )
+    c = citation("A different title", 2020)
+    r = VerificationResult(
+        found=True,
+        provider="crossref",
+        title="Phytochemical screening of <i>Drynaria quercifolia</i>",
+        raw={"DOI": DOI, "published": {"date-parts": [[2020]]}},
+    )
+    assert compare_metadata(c, r).differing_fields == ("title",)
