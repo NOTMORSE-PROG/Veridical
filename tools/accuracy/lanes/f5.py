@@ -31,6 +31,7 @@ from tools.accuracy.core import (
     MetricRow,
     load_extraction,
     rate_row,
+    real_precision_rows,
     split_for,
 )
 
@@ -89,11 +90,16 @@ LIMITATIONS = (
     "Retracted plants are drawn from works whose Crossref record already carries a "
     "Retraction Watch relation, the field the check reads, so retraction recall measures "
     "reading that field, not finding retractions recorded elsewhere.",
-    "Linkage depends on the host: DESTAMP (author-year) parses, MIT's 144 numbered entries "
-    "do not (BUG-534), and the other three hosts' reference lists are refused, so pooled "
-    "linkage figures mostly reflect which host a plant landed on.",
-    "The shipped check withholds every linkage finding on both usable hosts (BUG-590), so "
-    "'intact entries kept silent [check output]' is silent by construction there.",
+    "Linkage depends on the host: plants land only on DESTAMP (author-year) and MIT "
+    "(numbered, where most citation marks have weak context and stay unassessed); the other "
+    "hosts' lists are refused or partial, so pooled linkage figures mostly reflect which host "
+    "a plant landed on.",
+    "Check-output linkage rows lift the reading-order refusal (every host has unread table "
+    "or figure pages, which withhold all linkage as shipped; BUG-599), so they measure the "
+    "linkage rules, not what an instructor sees on these theses today.",
+    "Real-manuscript precision covers the linkage findings raised on DESTAMP with the "
+    "reading-order refusal lifted; LensMatch, AugmentedRL and MIT raised none under the "
+    "same conditions.",
     "The existence case set is frozen in f5/existence_cases.json on first build; registry "
     "answers come from the cache, with the fetch dates listed in the details.",
 )
@@ -1136,6 +1142,7 @@ def run(ctx: Context) -> tuple[list[MetricRow], dict]:
     else:
         details["linkage_coverage"] = part_a
     rows += _part_b_rows(outcomes)
+    rows += real_precision_rows(ctx.golden, LANE)
     details.update(
         {
             "existence_plants": outcomes,
