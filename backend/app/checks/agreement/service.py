@@ -50,6 +50,7 @@ def _agreement_thresholds(settings: Settings) -> dict[str, float | int]:
         "quote_min_chars": settings.agreement_quote_min_chars,
         "context_locate_chars": settings.agreement_context_locate_chars,
         "scope_min_word_chars": settings.agreement_scope_min_word_chars,
+        "min_result_words": settings.agreement_min_result_words,
     }
 
 
@@ -178,6 +179,10 @@ async def run_internal_agreement_check(
             "verdict_counts": pairing.verdict_counts,
             "contradictions_withheld": pairing.downgrades,
             "explained_in_context": pairing.explained_in_context,
+            # Results set aside as not the thesis's own (literature review,
+            # needs survey, ...), or the note that no results section could be
+            # identified and every section was used.
+            "results_sections": pairing.results_sections,
         },
     )
     session.add(result)

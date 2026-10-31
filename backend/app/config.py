@@ -870,6 +870,10 @@ class Settings(BaseSettings):
     # Override the packaged cue lexicon without a code change; empty = packaged
     # default (same convention as forensics_keywords_file).
     agreement_cues_file: Path | None = None
+    # Override the packaged section-role titles (introduction, literature,
+    # results, ...) shared by checks that must take evidence from the right part
+    # of a thesis; empty = packaged default.
+    section_roles_file: Path | None = None
     # A heading-like line (short, title-case/upper-case/numbered) longer than
     # this many words is treated as ordinary prose instead — real headings in
     # the owner's own proposal top out at 6 words ("General Objective of the
@@ -930,6 +934,10 @@ class Settings(BaseSettings):
     # first re-ask disagrees. Turned on only if, on the sealed holdout,
     # specificity stays at 100% and recall rises by more than the noise.
     agreement_contradiction_majority_of_three: bool = False
+    # A candidate result shorter than this many words ("implemented
+    # features.", a fragment left by a sentence split) cannot show whether an
+    # objective was met, and only produced vague "partial" findings.
+    agreement_min_result_words: int = Field(default=5, ge=1)
     # How much of a statement (characters) is compared when finding it among
     # the manuscript's sentences; list items can be longer than one sentence.
     agreement_context_locate_chars: int = Field(default=80, ge=20)

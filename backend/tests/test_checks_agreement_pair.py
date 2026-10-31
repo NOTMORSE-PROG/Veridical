@@ -220,23 +220,24 @@ async def test_a_contradiction_without_a_named_reason_is_withheld():
     assert result.downgrades == {"reason_not_named": 1}
 
 
-async def test_a_contradiction_between_two_different_named_systems_is_withheld():
-    """BUG-593: a CollarID objective is not contradicted by a sentence about AirSpecs."""
+async def test_a_result_about_another_named_system_is_never_paired():
+    """BUG-593: a CollarID objective is not compared with a sentence about
+    AirSpecs at all, so it can neither be contradicted nor judged by it."""
     intent = _intent("To engineer and characterize a low-power animal-borne platform (CollarID).")
     outcome = _outcome(
         "AirSpecs did not engineer and characterize a low-power animal-borne platform."
     )
-    answer = _contradiction("engineer and characterize a low-power", "did not engineer")
+    llm = ScriptedLLM([])
     result = await run_agreement_pairing(
-        ScriptedLLM([answer]),
+        llm,
         [intent],
         [outcome],
         check_run_id=1,
         settings=get_settings(),
         allow_absence_leads=False,
     )
-    assert result.flags == []
-    assert result.downgrades == {"different_named_system": 1}
+    assert llm.calls == []
+    assert result.flags == [] and result.n_compared == 0
 
 
 async def test_a_gap_the_manuscript_explains_is_silent_and_recorded():
@@ -586,3 +587,19 @@ async def test_an_explicit_unmet_objective_sentence_is_always_judged():
     )
     assert explicit in llm.calls[0]
     assert result.n_compared == 2
+
+
+async def test_a_result_fragment_is_not_paired_and_is_counted():
+    """A two-word fragment left by a sentence split cannot show whether an
+    objective was met."""
+    llm = ScriptedLLM([])
+    result = await run_agreement_pairing(
+        llm,
+        [_intent("To build an itinerary map for travellers.")],
+        [_outcome("implemented features.")],
+        check_run_id=1,
+        settings=get_settings(),
+        allow_absence_leads=False,
+    )
+    assert llm.calls == [] and result.n_compared == 0
+    assert result.results_sections["n_results_too_short"] == 1

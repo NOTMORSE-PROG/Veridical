@@ -47,6 +47,8 @@ from tools.accuracy.levels import balance_problems, baseline_accuracy  # noqa: E
 
 from app.checks.agreement.cues import load_cues  # noqa: E402
 from app.checks.agreement.extract import extract_statements  # noqa: E402
+from app.checks.agreement.sections import NOT_OWN_RESULTS  # noqa: E402
+from app.checks.section_roles import SectionMap, load_section_roles  # noqa: E402
 from app.config import get_settings  # noqa: E402
 from app.ingest.schemas import ExtractionResult, TextBlock  # noqa: E402
 
@@ -560,15 +562,34 @@ def apply_case(extraction: ExtractionResult, copy: dict) -> ExtractionResult:
 _host_cache: dict[Path, dict] = {}
 
 
+def results_pages(extraction: ExtractionResult, pages: list[int]) -> list[int]:
+    """Pages where the thesis reports its own results, by the product's own
+    section rule: results chapters when the document has them, otherwise any
+    page outside a non-results chapter. A planted result placed in a
+    literature review would test where it was put, not the check."""
+    settings = get_settings()
+    sections = SectionMap(
+        extraction,
+        load_section_roles(settings.section_roles_file),
+        heading_max_words=settings.agreement_heading_max_words,
+        locate_chars=settings.agreement_context_locate_chars,
+    )
+    roles = sections.page_roles(pages)
+    results = [p for p in pages if roles.get(p) == "results"]
+    return results or [p for p in pages if roles.get(p) not in NOT_OWN_RESULTS]
+
+
 def _host_data(path: Path) -> dict:
     if path not in _host_cache:
         extraction = load_extraction(path)
         usable, skipped = select_objectives(path.stem, extraction, get_settings())
+        pages = eligible_pages(extraction)
         _host_cache[path] = {
             "extraction": extraction,
             "usable": usable,
             "skipped": skipped,
-            "pages": eligible_pages(extraction),
+            "pages": pages,
+            "result_pages": results_pages(extraction, pages),
         }
     return _host_cache[path]
 
@@ -735,18 +756,18 @@ def _region_pages(pages: list[int], region: str) -> list[int]:
     return pages[start : max(int(len(pages) * high), start + 1)]
 
 
-def _assign_pages(rng, spec, taken, pages) -> list[int] | None:
-    """Pages for a plant's blocks: five or more from everything already in the
-    copy, context before the result except limitations, which come after."""
+def _assign_pages(rng, spec, taken, pages, result_pages) -> list[int] | None:
+    """Pages for a plant's blocks: the result on one of the thesis's own results
+    pages, five or more pages from everything already in the copy, context
+    before the result except limitations, which come after."""
     blocks = spec["blocks"]
-    result = next(b for b in blocks if b["role"] == "result")
     context = next((b for b in blocks if b["role"] == "context"), None)
 
     def free(candidates, others):
         return [p for p in candidates if all(abs(p - t) >= PAGE_GAP for t in (*taken, *others))]
 
     for _ in range(PAGE_ATTEMPTS):
-        options = free(_region_pages(pages, result["region"]), ())
+        options = free(result_pages, ())
         if not options:
             return None
         result_page = rng.choice(options)
@@ -787,7 +808,7 @@ def build_cases(ctx: Context) -> list[dict]:
                     break
                 if spec["objective"]["index"] in used_objectives:
                     continue
-                assigned = _assign_pages(rng, spec, taken, pages)
+                assigned = _assign_pages(rng, spec, taken, pages, hosts[host]["result_pages"])
                 if assigned is None:
                     continue
                 placed.append((spec, assigned))

@@ -36,7 +36,9 @@ from pydantic import BaseModel, Field
 from app.checks.agreement.context import DocumentContext, PairContext
 from app.checks.agreement.cues import AgreementCues, load_cues
 from app.checks.agreement.extract import Statement
+from app.checks.agreement.sections import gate_results
 from app.checks.injection import InjectionSignal, detect_injection_signal
+from app.checks.section_roles import SectionMap, load_section_roles
 from app.config import Settings
 from app.errors import ApiDownError, QuotaExhaustedError, VeridicalError
 from app.ingest.schemas import ExtractionResult
@@ -146,6 +148,9 @@ class PairingResult:
     verdict_counts: dict[str, int] = field(default_factory=dict)
     downgrades: dict[str, int] = field(default_factory=dict)
     explained_in_context: list[dict] = field(default_factory=list)
+    # Which results were kept as the thesis's own, which were set aside and
+    # why, or the note that no results section could be identified.
+    results_sections: dict | None = None
 
     @property
     def n_skipped_total(self) -> int:
@@ -169,6 +174,8 @@ def generate_candidates(
     max_candidates_per_intent: int,
     settings: Settings | None = None,
     status_patterns: tuple[str, ...] = (),
+    cues: AgreementCues | None = None,
+    subjects: tuple[list[str], list[str]] | None = None,
 ) -> tuple[list[Candidate], list[Statement], set[int]]:
     """Returns (candidates, unmatched_intents, matched_outcome_indexes).
 
@@ -176,7 +183,9 @@ def generate_candidates(
     configured number. A result that says outright that an objective was
     not met (`status_patterns`) is also paired with the objective it is most
     similar to even when it is not among that objective's top matches, so
-    the plainest statement of a gap is never left unjudged."""
+    the plainest statement of a gap is never left unjudged. With `cues`, a
+    result about a differently named system is never paired with the
+    objective at all."""
     if not intents or not outcomes:
         return [], list(intents), set()
 
@@ -190,11 +199,26 @@ def generate_candidates(
     candidates: list[Candidate] = []
     unmatched_intents: list[Statement] = []
     matched_outcome_indexes: set[int] = set()
+    # A result about another named system is about a different thing however
+    # similar the wording; such pairs are never formed.
+    intent_subjects, outcome_subjects = subjects or (
+        [s.text for s in intents],
+        [o.text for o in outcomes],
+    )
+    conflicts: set[tuple[int, int]] = {
+        (i, j)
+        for i in range(len(intents))
+        for j in range(len(outcomes))
+        if cues is not None
+        and different_named_systems(intent_subjects[i], outcome_subjects[j], cues)
+    }
     taken: set[tuple[int, int]] = set()
 
     for i, intent in enumerate(intents):
         ranked = sorted(((scores[i][j], j) for j in range(len(outcomes))), reverse=True)
-        above_floor = [(sim, j) for sim, j in ranked if sim >= similarity_floor]
+        above_floor = [
+            (sim, j) for sim, j in ranked if sim >= similarity_floor and (i, j) not in conflicts
+        ]
         if not above_floor:
             unmatched_intents.append(intent)
             continue
@@ -207,7 +231,10 @@ def generate_candidates(
     for j, outcome in enumerate(outcomes):
         if not any(p.search(outcome.text.lower()) for p in compiled):
             continue
-        sim, i = max((scores[i][j], i) for i in range(len(intents)))
+        allowed = [(scores[i][j], i) for i in range(len(intents)) if (i, j) not in conflicts]
+        if not allowed:
+            continue
+        sim, i = max(allowed)
         if sim < similarity_floor or (i, j) in taken:
             continue
         candidates.append(
@@ -221,14 +248,88 @@ def generate_candidates(
     return candidates, unmatched_intents, matched_outcome_indexes
 
 
-def with_context(
-    candidates: list[Candidate], extraction: ExtractionResult | None, cues, settings
-) -> list[Candidate]:
+@dataclass(frozen=True)
+class PreparedPairs:
+    candidates: list[Candidate]
+    unmatched_intents: list[Statement]
+    matched_outcome_indexes: set[int]
+    n_results: int
+    results_sections: dict | None = None
+
+
+def prepare_pairs(
+    intents: list[Statement],
+    outcomes: list[Statement],
+    *,
+    extraction: ExtractionResult | None,
+    cues: AgreementCues,
+    settings: Settings,
+) -> PreparedPairs:
+    """The local tier on its own, no model call: keep the results that come
+    from the thesis's own results sections, pair them with objectives, and
+    attach each pair's context."""
+    roles = load_section_roles(settings.section_roles_file)
+    document = (
+        DocumentContext.build(extraction, cues, settings, roles.chapter_patterns)
+        if extraction
+        else None
+    )
+    sections = (
+        SectionMap(
+            extraction,
+            roles,
+            sentences=document.sentences,
+            heading_max_words=settings.agreement_heading_max_words,
+            locate_chars=settings.agreement_context_locate_chars,
+        )
+        if document is not None
+        else None
+    )
+    long_enough = [
+        o for o in outcomes if len(o.text.split()) >= settings.agreement_min_result_words
+    ]
+    too_short = len(outcomes) - len(long_enough)
+    gate = gate_results(long_enough, sections) if sections is not None else None
+    results = gate.kept if gate is not None else long_enough
+    # Each side is read with its chapter title, so an objective introduced in
+    # the "4 SoundSHROOM & BuzzCam" chapter is not paired with a result from
+    # the "3 AirSpecs" chapter.
+    subjects = None
+    if gate is not None and sections.identified:
+        subjects = (
+            [
+                f"{s.text} {sections.locate(s.text, s.anchor, s.page).chapter or ''}"
+                for s in intents
+            ],
+            [f"{o.text} {c or ''}" for o, c in zip(gate.kept, gate.kept_chapters, strict=True)],
+        )
+    candidates, unmatched, matched = generate_candidates(
+        intents,
+        results,
+        similarity_floor=settings.agreement_pairing_similarity_floor,
+        max_candidates_per_intent=settings.agreement_pairing_max_candidates_per_intent,
+        settings=settings,
+        status_patterns=cues.objective_status_patterns,
+        cues=cues,
+        subjects=subjects,
+    )
+    return PreparedPairs(
+        candidates=with_context(candidates, document),
+        unmatched_intents=unmatched,
+        matched_outcome_indexes=matched,
+        n_results=len(results),
+        results_sections={
+            **(gate.detail() if gate is not None else {}),
+            "n_results_too_short": too_short,
+        },
+    )
+
+
+def with_context(candidates: list[Candidate], document: DocumentContext | None) -> list[Candidate]:
     """Attach each pair's surrounding text and the manuscript's own scope
-    statements. Without an extraction the pairs go as they are."""
-    if extraction is None or not candidates:
+    statements. Without a document the pairs go as they are."""
+    if document is None or not candidates:
         return candidates
-    document = DocumentContext.build(extraction, cues, settings)
     return [
         Candidate(
             intent=c.intent,
@@ -372,6 +473,19 @@ def _named_systems(text: str, cues: AgreementCues) -> set[str]:
     }
 
 
+def different_named_systems(objective: str, finding: str, cues: AgreementCues) -> bool:
+    """True when the objective names a system (a "CollarID"), the finding names
+    another ("AirSpecs"), and the finding never mentions the objective's."""
+    objective_names = _named_systems(objective, cues)
+    finding_names = _named_systems(finding, cues)
+    return bool(
+        objective_names
+        and finding_names
+        and not objective_names & finding_names
+        and not any(name in finding for name in objective_names)
+    )
+
+
 FINDING_QUOTE_SOURCES = ("finding", "text_before", "text_after")
 
 
@@ -407,15 +521,8 @@ def check_contradiction(
     # Two different named systems (a "CollarID" objective against an
     # "AirSpecs" result) are two different things, whatever the wording. The
     # finding side is read from the sentence the quote came from as well.
-    objective_names = _named_systems(candidate.intent.text, cues)
     finding_text = " ".join({candidate.outcome.text, finding_side[finding[0]]})
-    finding_names = _named_systems(finding_text, cues)
-    if (
-        objective_names
-        and finding_names
-        and not objective_names & finding_names
-        and not any(name in finding_text for name in objective_names)
-    ):
+    if different_named_systems(candidate.intent.text, finding_text, cues):
         return "different_named_system", None
     return None, VerifiedQuotes(objective[1], finding[1], FINDING_QUOTE_SOURCES[finding[0]])
 
@@ -684,25 +791,20 @@ async def run_agreement_pairing(
     a degraded run still finishes honestly)."""
     cues = cues or load_cues(settings.agreement_cues_file)
     # BUG-152: off the event loop — local embedding work with no I/O.
-    (
-        candidates,
-        unmatched_intents,
-        matched_outcome_indexes,
-    ) = await asyncio.get_running_loop().run_in_executor(
+    prepared = await asyncio.get_running_loop().run_in_executor(
         None,
         functools.partial(
-            generate_candidates,
+            prepare_pairs,
             intents,
             outcomes,
-            similarity_floor=settings.agreement_pairing_similarity_floor,
-            max_candidates_per_intent=settings.agreement_pairing_max_candidates_per_intent,
+            extraction=extraction,
+            cues=cues,
             settings=settings,
-            status_patterns=cues.objective_status_patterns,
         ),
     )
-    candidates = await asyncio.get_running_loop().run_in_executor(
-        None, functools.partial(with_context, candidates, extraction, cues, settings)
-    )
+    candidates = prepared.candidates
+    unmatched_intents = prepared.unmatched_intents
+    matched_outcome_indexes = prepared.matched_outcome_indexes
 
     flags = (
         [_unmatched_intent_flag(intent) for intent in unmatched_intents]
@@ -736,7 +838,8 @@ async def run_agreement_pairing(
 
     return PairingResult(
         flags=flags,
-        n_unmatched_outcomes=len(outcomes) - len(matched_outcome_indexes),
+        n_unmatched_outcomes=prepared.n_results - len(matched_outcome_indexes),
+        results_sections=prepared.results_sections,
         n_skipped_quota=counters["quota"],
         n_skipped_api_down=counters["api_down"],
         n_skipped_parse_failure=counters["parse_failure"],

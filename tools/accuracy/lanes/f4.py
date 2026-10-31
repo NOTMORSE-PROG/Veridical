@@ -169,14 +169,16 @@ def reach(copies: list[dict], hosts: dict[str, Path], settings: Settings, cues) 
     for copy in singles:
         planted = apply_case(load_extraction(hosts[copy["host"]]), copy)
         found = extract_statements(planted, settings=settings, cues=cues)
-        candidates, _, _ = pair.generate_candidates(
-            found.intents,
-            found.outcomes,
-            similarity_floor=settings.agreement_pairing_similarity_floor,
-            max_candidates_per_intent=settings.agreement_pairing_max_candidates_per_intent,
-            settings=settings,
-            status_patterns=cues.objective_status_patterns,
+        # The product's own local tier: the results-section gate, pairing with
+        # the subject check, and each pair's context.
+        prepared = pair.prepare_pairs(
+            found.intents, found.outcomes, extraction=planted, cues=cues, settings=settings
         )
+        candidates = prepared.candidates
+        set_aside = {
+            _norm(item["text"])[:60]
+            for item in (prepared.results_sections or {}).get("set_aside", [])
+        }
         planted_text = {
             _norm(b["text"])[:60]: p["plant_id"] for p in copy["plants"] for b in p["blocks"]
         }
@@ -196,7 +198,9 @@ def reach(copies: list[dict], hosts: dict[str, Path], settings: Settings, cues) 
             reason = None
             if not hit:
                 reason = (
-                    "objective not extracted"
+                    "result set aside as outside the results sections"
+                    if any(key in text or text in key for text in set_aside)
+                    else "objective not extracted"
                     if not any(_norm(s.text) == _norm(plant["intent_text"]) for s in found.intents)
                     else "no pair above the similarity floor"
                     if not mine
@@ -218,9 +222,8 @@ def reach(copies: list[dict], hosts: dict[str, Path], settings: Settings, cues) 
             records.append(record)
             if hit:
                 wanted.append((record, hit))
-        with_context = pair.with_context([c for _, c in wanted], planted, cues, settings)
         plants = {p["plant_id"]: p for p in copy["plants"]}
-        for (record, _), candidate in zip(wanted, with_context, strict=True):
+        for record, candidate in wanted:
             record["_candidate"] = candidate
             # Did the judge see the context this plant was built with? A frame can
             # open with a heading word ("Limitations."), so any substantial
@@ -356,6 +359,9 @@ def run(ctx: Context) -> tuple[list[MetricRow], dict]:
     cues = load_cues(settings.agreement_cues_file)
 
     records = reach(cases["copies"], ctx.hosts(), settings, cues)
+    # A development round can judge one half only, leaving the other unread.
+    splits = set(config.get("judge_splits", ("dev", "holdout")))
+    records = [r for r in records if r["split"] in splits]
     reached = [r for r in records if r["reached"]]
     random.Random(f"{ctx.seed}-batches").shuffle(reached)
     batches = math.ceil(len(reached) / max(1, settings.agreement_pairing_max_pairs_per_call))
