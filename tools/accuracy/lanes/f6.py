@@ -19,6 +19,7 @@ from tools.accuracy.core import (
     body_pages,
     load_extraction,
     rate_row,
+    real_precision_rows,
     spaced_pages,
     split_for,
 )
@@ -264,6 +265,7 @@ def run(ctx: Context) -> tuple[list[MetricRow], dict]:
             note="New findings that name an error plant, over all findings the plants caused.",
         )
     )
+    rows += real_precision_rows(ctx.golden, LANE)
     return rows, {
         "plants": records,
         "unmatched_new_findings_by_kind": dict(unmatched),

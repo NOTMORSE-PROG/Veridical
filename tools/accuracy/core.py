@@ -16,7 +16,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-from app.checks.accuracy_stats import wilson_interval
+from app.checks.accuracy_stats import ConfusionMatrix, cohens_kappa, wilson_interval
 from app.ingest.schemas import ExtractionResult
 
 # D-016: below this many units a rate is indicative only, never a baseline.
@@ -59,6 +59,48 @@ def rate_row(lane, metric, unit, numerator, denominator, *, split="all", note=""
         note=note,
         extra=extra or {},
     )
+
+
+def real_precision_rows(golden: Path, lane: str) -> list[MetricRow]:
+    """Precision on findings the module raised on real production reports,
+    judged against the PDF by two raters with a human tie-break.
+
+    Reads `<golden>/<lane>/real_judgments.json`: a list of
+    {"finding": ..., "rater_a": "correct"|"incorrect", "rater_b": ...,
+    "tiebreak": "correct"|"incorrect"|null}. Planted cases measure the check
+    logic; this is the real-manuscript side, reported beside it, not pooled.
+    """
+    path = golden / lane / "real_judgments.json"
+    metric = "real-manuscript precision"
+    if not path.exists():
+        return [rate_row(lane, metric, "real finding", 0, 0, note="Not yet judged.")]
+    judged = json.loads(path.read_text(encoding="utf-8"))
+    both = [j for j in judged if j.get("rater_a") and j.get("rater_b")]
+    agree = [j for j in both if j["rater_a"] == j["rater_b"]]
+    final = [j["rater_a"] if j["rater_a"] == j["rater_b"] else j.get("tiebreak") for j in both]
+    decided = [label for label in final if label]
+    counts = {
+        "tp": sum(j["rater_a"] == j["rater_b"] == "correct" for j in both),
+        "tn": sum(j["rater_a"] == j["rater_b"] == "incorrect" for j in both),
+        "fp": sum(j["rater_a"] == "correct" and j["rater_b"] == "incorrect" for j in both),
+        "fn": sum(j["rater_a"] == "incorrect" and j["rater_b"] == "correct" for j in both),
+    }
+    kappa = cohens_kappa(ConfusionMatrix(**counts)) if both else None
+    return [
+        rate_row(
+            lane,
+            metric,
+            "real finding",
+            sum(label == "correct" for label in decided),
+            len(decided),
+            note=(
+                f"Two raters against the PDF: agreed on {len(agree)}/{len(both)}, "
+                f"Cohen's kappa {kappa if kappa is None else round(kappa, 2)}; "
+                f"{len(both) - len(agree)} settled by the human tie-break."
+            ),
+            extra={"kappa": kappa, "unresolved": len(both) - len(decided)},
+        )
+    ]
 
 
 @dataclass
