@@ -22,6 +22,11 @@ class AgreementCues:
     outcome_prose_enabled: bool = False
     outcome_prose_patterns: tuple[str, ...] = ()
     outcome_heading_exclusion_patterns: tuple[str, ...] = ()
+    scope_heading_synonyms: frozenset[str] = frozenset()
+    scope_statement_patterns: tuple[str, ...] = ()
+    objective_status_patterns: tuple[str, ...] = ()
+    named_system_pattern: str | None = None
+    named_system_ignore: frozenset[str] = frozenset()
 
 
 def load_cues(path: Path | None = None) -> AgreementCues:
@@ -37,4 +42,9 @@ def load_cues(path: Path | None = None) -> AgreementCues:
         outcome_prose_enabled=raw.get("outcome_prose_enabled", False) is True,
         outcome_prose_patterns=tuple(raw.get("outcome_prose_patterns", ())),
         outcome_heading_exclusion_patterns=tuple(raw.get("outcome_heading_exclusion_patterns", ())),
+        scope_heading_synonyms=frozenset(raw.get("scope_heading_synonyms", ())),
+        scope_statement_patterns=tuple(raw.get("scope_statement_patterns", ())),
+        objective_status_patterns=tuple(raw.get("objective_status_patterns", ())),
+        named_system_pattern=raw.get("named_system_pattern"),
+        named_system_ignore=frozenset(raw.get("named_system_ignore", ())),
     )

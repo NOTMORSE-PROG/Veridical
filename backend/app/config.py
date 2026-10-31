@@ -894,10 +894,35 @@ class Settings(BaseSettings):
     # matches produced 46 of the 99 "cannot determine" notes and no
     # informative verdict (0 of 125 pairs). The best matches produced only 1
     # in 85, so the data cannot show the weaker matches never matter.
-    agreement_pairing_max_candidates_per_intent: int = Field(default=1, ge=1)
+    # Raised to two with the context-aware judge: on planted cases one match
+    # reached the planted result only 63-72% of the time, losing to a closer
+    # but unrelated sentence. A weaker match the judge finds unrelated is now
+    # silent instead of a "cannot determine" note, so the extra pair costs a
+    # little quota, not instructor noise.
+    agreement_pairing_max_candidates_per_intent: int = Field(default=2, ge=1)
     # Batched into as few Gemini calls as possible per manuscript, same
     # discipline as V-030's claim-support batching.
     agreement_pairing_max_pairs_per_call: int = 20
+    # Context sent with each pair. A finding is judged with the sentences
+    # around it (about a paragraph, as document-level consistency checkers
+    # do) and with the manuscript's own scope and limitation statements that
+    # are most similar to the pair, so a stated delimitation is seen before
+    # a gap is called a contradiction.
+    agreement_context_sentences_before: int = Field(default=2, ge=0)
+    agreement_context_sentences_after: int = Field(default=2, ge=0)
+    agreement_context_max_chars: int = Field(default=900, ge=0)
+    agreement_scope_statements_per_pair: int = Field(default=3, ge=0)
+    agreement_scope_statement_max_chars: int = Field(default=400, ge=0)
+    # A high-severity contradiction is asked about again in a separate call
+    # this many times; any answer that is not a contradiction turns it into
+    # a "could not determine" note. The same pair has been answered both
+    # ways on two runs of one manuscript, so one answer is not enough to
+    # accuse.
+    agreement_contradiction_confirmations: int = Field(default=1, ge=0)
+    # A contradiction must quote both sides; a quote shorter than this many
+    # letters and digits ("not", "the system") proves nothing about where it
+    # came from, so it does not count as a quote.
+    agreement_quote_min_chars: int = Field(default=12, ge=1)
 
     # --- Originality/reuse: embedding pipeline (V-036, F7.1) ------------------
     # Chunk size (words) for chunk-and-average on long text (ticket edge

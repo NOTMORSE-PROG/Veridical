@@ -1,0 +1,8 @@
+{
+  "_source": "2026-10-31 (V-094). The reasons a contradiction may be named for. Each is a description of what the two texts say, never of the authors. The label is shown to the instructor with both quotes.",
+  "reasons": {
+    "objective_reported_not_done": "the result says what the objective set out to do was not done or not achieved",
+    "opposite_result": "the result reports the opposite of what the objective aimed for",
+    "stated_target_missed": "the objective names a target, and the result reports a value that misses it"
+  }
+}
