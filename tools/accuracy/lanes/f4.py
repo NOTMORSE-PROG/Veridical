@@ -94,6 +94,10 @@ LIMITATIONS = (
     "the thesis, are counted as misses ('objective set aside'). A plant whose objective is "
     "a restatement set aside this way counts as reached when the result is paired with the "
     "thesis's original statement of the same objective.",
+    "A pair's verdict can change with which other pairs share its model call (BUG-635): "
+    "when a code change alters the set of reached pairs, the batches regroup, and on the dev "
+    "half 30 of 97 identical pairs got a different verdict. A difference between two runs "
+    "is only attributable to a change where the change decides it without the model.",
 )
 # Shorter pieces of a planted context frame are heading words, not content.
 CONTEXT_SENTENCE_MIN = 25
