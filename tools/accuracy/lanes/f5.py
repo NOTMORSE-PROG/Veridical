@@ -40,6 +40,11 @@ from app.checks.citations.cross_match import _reference_surnames, cross_match
 from app.checks.citations.extract import extract_in_text_citations
 from app.checks.citations.linkage_guard import guarded_absence_candidates
 from app.checks.citations.numbered import analyze_numbered_citations, reference_anchor
+from app.checks.source_quality import (
+    readable_pages_copy,
+    source_limitation_detail,
+    without_unread_pages,
+)
 from app.config import Settings
 from app.ingest.patterns import load_patterns
 from app.ingest.references import extract_references, non_reference_blocks, select_references
@@ -99,12 +104,15 @@ LIMITATIONS = (
     "(numbered, where most citation marks have weak context and stay unassessed); the other "
     "hosts' lists are refused or partial, so pooled linkage figures mostly reflect which host "
     "a plant landed on.",
-    "Check-output linkage rows lift the reading-order refusal (every host has unread table "
-    "or figure pages, which withhold all linkage as shipped; BUG-599), so they measure the "
-    "linkage rules, not what an instructor sees on these theses today.",
-    "Real-manuscript precision covers the linkage findings raised on DESTAMP with the "
-    "reading-order refusal lifted; LensMatch, AugmentedRL and MIT raised none under the "
-    "same conditions.",
+    "Check-output linkage rows run the check on the copy production gives it: the pages "
+    "with unresolved reading order are left out by the same function the pipeline calls "
+    "(BUG-507, BUG-616). Every linkage host has such pages, and the check then withholds "
+    "every uncited-reference claim, so check-output uncited recall is 0 by design on these "
+    "theses; the linkage-engine rows show what the rules would find with that text read.",
+    "Real-manuscript precision covers 11 DESTAMP findings judged when the reading-order "
+    "refusal was lifted: the 9 missing-reference flags production raises today, and 2 "
+    "uncited-reference flags it now withholds because pages were left out. LensMatch, "
+    "AugmentedRL and MIT raised none.",
     "The existence case set is frozen in f5/existence_cases.json on first build; registry "
     "answers come from the cache, with the fetch dates listed in the details.",
 )
@@ -301,10 +309,10 @@ def _flag_findings(flags):
     return found
 
 
-async def _shipped(extraction, patterns, settings, *, gate: bool):
-    """The real check on a stored extraction. Registry lookups answer "confirmed" so only
-    linkage is exercised. With `gate` off the reading-order refusal is lifted, because
-    that refusal covers the whole document on both hosts and would hide the linkage."""
+async def _shipped(extraction, patterns, settings):
+    """The real check on what production gives it: the readable-pages copy (see
+    `_readable`). Registry lookups answer "confirmed" so only linkage is exercised;
+    nothing else is patched."""
     st = _state(extraction, patterns, settings)
     session = MemorySession()
     confirmed = verify.CitationVerdict(verify.VerdictKind.existence_confirmed)
@@ -313,8 +321,6 @@ async def _shipped(extraction, patterns, settings, *, gate: bool):
         patch.object(verify, "write_audit_event", AsyncMock()),
         patch("app.checks.source_quality.write_audit_event", AsyncMock()),
     ]
-    if not gate:
-        stack.append(patch.object(verify, "source_limitation_detail", lambda _extraction: None))
     for item in stack:
         item.start()
     try:
@@ -328,14 +334,25 @@ async def _shipped(extraction, patterns, settings, *, gate: bool):
     return result, _flag_findings(flags), st
 
 
-def _load(path):
-    """A host extraction with its reading-order ledger cleared. The ledger records the
-    exact source lines of the original PDF, so any edit would trip its provenance check
-    for a reason unrelated to linkage. It is cleared on the twin as well as the copy;
-    the real reading-order refusal is reported separately as coverage."""
+def _readable(path, settings):
+    """The unplanted host as the pipeline hands it to the integrity checks: the
+    production function leaves out the pages whose reading order is unresolved (BUG-507).
+    Returns that copy, the pages left out, and whether production refuses the whole
+    document anyway (an unread share it cannot confine)."""
+    readable, unread = readable_pages_copy(
+        load_extraction(path), settings.analysis_unread_pages_max_ratio
+    )
+    return readable, unread, source_limitation_detail(readable) is not None
+
+
+def _load(path, unread):
+    """A copy to plant into: the same readable pages as the twin, with its
+    reading-order ledger cleared. The ledger records the exact source lines of the
+    original PDF, so any edit would trip its provenance check for a reason unrelated to
+    linkage; the pages left out are the twin's, so both are checked on the same text."""
     extraction = load_extraction(path)
     extraction.reading_order = None
-    return extraction
+    return without_unread_pages(extraction, unread) if unread else extraction
 
 
 def _cut(extraction, edits):
@@ -581,11 +598,14 @@ async def _part_a(ctx, config, patterns, settings):
     hosts = ctx.hosts()
     pools, twins, coverage, twin_states = {}, {}, {}, {}
     usable = []
+    unread_by_host, refused_hosts = {}, set()
     for name, path in hosts.items():
-        extraction = load_extraction(path)
+        extraction, unread, refused = _readable(path, settings)
+        unread_by_host[name] = unread
+        if refused:
+            refused_hosts.add(name)
         pool, st = _host_pool(extraction, patterns, settings, config)
-        gated, _, _ = await _shipped(extraction, patterns, settings, gate=True)
-        result, relaxed, _ = await _shipped(_load(path), patterns, settings, gate=False)
+        result, shipped, _ = await _shipped(extraction, patterns, settings)
         coverage[name] = {
             "style": pool["style"],
             "refused": pool["reason"],
@@ -593,17 +613,15 @@ async def _part_a(ctx, config, patterns, settings):
             "n_parse_failed": sum(
                 c.parse_status != CitationParseStatus.parsed for c in st["citations"]
             ),
+            "unread_pages_left_out": unread,
             "twin_check_as_shipped": {
-                "outcome": str(gated.outcome),
-                "coverage_reason": gated.detail.get("coverage_reason"),
-                "n_flags": gated.detail.get("n_flags"),
-            },
-            "twin_check_reading_order_gate_lifted": {
                 "outcome": str(result.outcome),
                 "coverage_reason": result.detail.get("coverage_reason"),
                 "n_linkage_unassessed": result.detail.get("n_linkage_unassessed"),
                 "citation_parse_issues": result.detail.get("citation_parse_issues"),
                 "n_flags": result.detail.get("n_flags"),
+                "linkage_findings": sorted(str(f) for f in shipped),
+                "whole_document_refused": refused,
             },
             "numeric_marks": dict(
                 Counter(
@@ -620,7 +638,7 @@ async def _part_a(ctx, config, patterns, settings):
             twin_states[name] = st
             twins[name] = {
                 "engine": _engine_findings(st, settings),
-                "shipped": relaxed,
+                "shipped": shipped,
                 "style": pool["style"],
             }
     tally = {
@@ -634,7 +652,7 @@ async def _part_a(ctx, config, patterns, settings):
     for case in build_cases(ctx, config, usable):
         name = case["host"]
         path = hosts[name]
-        extraction = _load(path)
+        extraction = _load(path, unread_by_host[name])
         plants = _plant_linkage(extraction, patterns, pools[name], case, twin_states[name])
         for plant in plants:
             if (
@@ -643,7 +661,13 @@ async def _part_a(ctx, config, patterns, settings):
                 and _residual_mention(extraction, patterns, plant["pick"])
             ):
                 plant["invalid"] = "a mention of the entry remains in the body"
-        _, shipped_set, st_copy = await _shipped(extraction, patterns, settings, gate=False)
+        if name in refused_hosts:
+            # Production refuses this document outright, so it shows no linkage
+            # finding whatever was planted; the copy's cleared ledger must not hide that.
+            st_copy = _state(extraction, patterns, settings)
+            shipped_set = set()
+        else:
+            _, shipped_set, st_copy = await _shipped(extraction, patterns, settings)
         found = {"shipped": shipped_set, "engine": _engine_findings(st_copy, settings)}
         style = twins[name]["style"]
         for level, level_found in found.items():
