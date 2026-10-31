@@ -32,6 +32,17 @@ def candidate(**patch):
     return replace(base, **patch)
 
 
+def every_registry(value):
+    """A cached search for this reference that asked every configured
+    registry is complete."""
+    providers = Settings(_env_file=None).citation_title_search_providers
+    return replace(
+        value,
+        attempted_providers=list(providers),
+        query_key="a domain independent study|smith|2021",
+    )
+
+
 @pytest.mark.parametrize("cached", [False, True])
 @pytest.mark.parametrize(
     "wrong", ["title", "author", "year", "missingauthor", "missingyear", "retracted", "corrected"]
@@ -58,18 +69,23 @@ async def test_unbound_first_hit_never_confirms_or_transfers_flags(monkeypatch, 
             retracted=wrong == "retracted",
             is_correction=wrong == "corrected",
         )
+    if cached:
+        value = every_registry(value)
     monkeypatch.setattr(
         verify.cache, "get_cached", AsyncMock(return_value=value if cached else None)
     )
     store = AsyncMock()
     monkeypatch.setattr(verify.cache, "store_result", store)
-    fetch = AsyncMock(return_value=value)
-    monkeypatch.setattr(verify.crossref_client, "search_by_title", fetch)
+    fetch = AsyncMock(return_value=[value])
+    monkeypatch.setattr(verify.crossref_client, "search_title_candidates", fetch)
+    monkeypatch.setattr(
+        verify.openalex_client, "search_title_candidates", AsyncMock(return_value=[])
+    )
     row = citation()
     out = await verify.verify_citation(None, None, row, settings=Settings(_env_file=None))
     assert out.kind == VerdictKind.unassessed
     assert out.unassessed_reason == "title_search_identity_unconfirmed"
-    assert out.metadata_comparison and out.result == value
+    assert out.metadata_comparison and out.result.title == value.title
     assert verify._verdict_flag_draft(row, out) is None
     assert fetch.await_count == (0 if cached else 1)
 
@@ -114,7 +130,7 @@ async def test_cached_google_title_fallback_requires_returned_requested_isbn(mon
 
 async def test_title_policy_missing_withholds_before_any_lookup(monkeypatch, tmp_path):
     fetch = AsyncMock()
-    monkeypatch.setattr(verify.crossref_client, "search_by_title", fetch)
+    monkeypatch.setattr(verify.crossref_client, "search_title_candidates", fetch)
     out = await verify.verify_citation(
         None,
         None,
@@ -129,7 +145,9 @@ async def test_title_policy_missing_withholds_before_any_lookup(monkeypatch, tmp
 
 async def test_title_only_s2_record_without_author_year_identity_stays_unassessed(monkeypatch):
     monkeypatch.setattr(
-        verify.cache, "get_cached", AsyncMock(return_value=candidate(provider="s2", raw={}))
+        verify.cache,
+        "get_cached",
+        AsyncMock(return_value=every_registry(candidate(provider="s2", raw={}))),
     )
     out = await verify.verify_citation(None, None, citation(), settings=Settings(_env_file=None))
     assert out.kind == VerdictKind.unassessed

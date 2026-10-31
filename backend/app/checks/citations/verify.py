@@ -14,7 +14,7 @@ those are, by themselves, evidence of anything wrong with the manuscript.
 import logging
 import re
 from contextlib import AbstractContextManager, nullcontext
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
 from enum import StrEnum
 from zoneinfo import ZoneInfoNotFoundError
@@ -61,6 +61,7 @@ from app.checks.citations.recency import (
     resolve_policy,
     unassessed_summary,
 )
+from app.checks.citations.search_identity import SearchIdentity, search_identity
 from app.checks.citations.source_locator import with_reference_locator
 from app.checks.citations.support import (
     ClaimSupportInput,
@@ -75,6 +76,7 @@ from app.external import cache
 from app.external import crossref as crossref_client
 from app.external import datacite as datacite_client
 from app.external import gbooks as gbooks_client
+from app.external import openalex as openalex_client
 from app.external import openlibrary as openlibrary_client
 from app.external import s2 as s2_client
 from app.external.schemas import VerificationResult
@@ -134,6 +136,9 @@ class CitationVerdict:
     key_value: str | None = None
     metadata_comparison: MetadataComparison | None = None
     unassessed_reason: str | None = None
+    # How a title-search candidate matched the reference (BUG-610); None for
+    # DOI and ISBN lookups and for candidates that did not match.
+    search_identity: SearchIdentity | None = None
 
 
 RETRACTED_WORDING = (
@@ -194,10 +199,16 @@ async def verify_citation(
     settings: Settings,
     instructor_id: int | None = None,
     title_policy: TitlePolicy | None = None,
+    title_search_run: "TitleSearchRun | None" = None,
 ) -> CitationVerdict:
     """Existence: DOI → CrossRef; books (ISBN) → Open Library→Google Books;
-    else (no DOI/ISBN) → metadata search CrossRef→Semantic Scholar (ticket
-    responsibilities). A DOI that fails to resolve is reported unverifiable
+    else (no DOI/ISBN) → title search across the configured registries, which
+    confirms only a candidate whose title, first author and year agree
+    (`search_identity`). `title_search_run` is shared across one check run so
+    a registry that is rate limited or keeps failing is not asked again in
+    that run: an exhausted daily budget costs one failed request, not one per
+    reference.
+    A DOI that fails to resolve is reported unverifiable
     directly, NOT retried via title search — falling back could match a
     fabricated/mismatched citation to an unrelated real paper by title
     alone, which would be a false reassurance (worse than a false flag,
@@ -307,15 +318,6 @@ async def verify_citation(
         return verdict
 
     if citation.title:
-
-        async def _title_search() -> VerificationResult:
-            result = await crossref_client.search_by_title(
-                client, citation.title, settings=settings
-            )
-            if not result.found:
-                result = await s2_client.search_by_title(client, citation.title, settings=settings)
-            return result
-
         try:
             title_policy = title_policy or load_title_policy(
                 settings.citation_metadata_title_policy_file
@@ -324,37 +326,57 @@ async def verify_citation(
             return CitationVerdict(
                 VerdictKind.unassessed, unassessed_reason="metadata_comparison_policy_unavailable"
             )
+
+        def identify(result: VerificationResult):
+            comparison = compare_metadata(citation, result, policy=title_policy, settings=settings)
+            return comparison, search_identity(citation, result, comparison, settings)
+
+        query_key = _title_query_key(citation)
+        providers = set(settings.citation_title_search_providers)
+
+        def cache_complete(result: VerificationResult) -> bool:
+            # The cache is keyed by title alone. A cached candidate that
+            # confirms this reference is reused. A miss is reused only if it
+            # was stored for this same reference and every configured
+            # registry answered; otherwise the registries are asked again.
+            if result.found and identify(result)[1] is not None:
+                return True
+            return result.query_key == query_key and providers.issubset(result.attempted_providers)
+
         verdict = await _verify_keyed(
             session,
             "title",
             citation.title.casefold(),
             settings=settings,
-            fetch=_title_search,
+            fetch=lambda: _search_title_registries(
+                client,
+                citation,
+                settings,
+                lambda result: identify(result)[1],
+                title_search_run if title_search_run is not None else TitleSearchRun(),
+                query_key,
+            ),
             instructor_id=instructor_id,
             reference_text=citation.raw_text,
+            cache_complete=cache_complete,
         )
         if verdict.result is not None and verdict.result.found:
-            comparison = compare_metadata(
-                citation, verdict.result, policy=title_policy, settings=settings
-            )
+            comparison, identity = identify(verdict.result)
             # Search returns candidates, including cached candidates. An unrelated
-            # first hit cannot confirm this reference or transfer a retraction.
-            bound = (
-                comparison.title_status == "agrees"
-                and not comparison.differing_fields
-                and comparison.author_status in {"agrees", "source_supported_sequence"}
-                and type(citation.year) is int
-                and type(comparison.registered.get("year")) is int
-                and comparison.registered["year"] == citation.year
-            )
-            if not bound:
+            # candidate cannot confirm this reference or transfer a retraction.
+            if identity is None:
+                # Not every registry answered: say so, rather than suggest
+                # that all of them were searched without a match.
+                complete = providers.issubset(verdict.result.attempted_providers)
                 return replace(
                     verdict,
                     kind=VerdictKind.unassessed,
                     metadata_comparison=comparison,
-                    unassessed_reason="title_search_identity_unconfirmed",
+                    unassessed_reason="title_search_identity_unconfirmed"
+                    if complete
+                    else "title_search_registry_unavailable",
                 )
-            return replace(verdict, metadata_comparison=comparison)
+            return replace(verdict, metadata_comparison=comparison, search_identity=identity)
         return verdict
 
     # No DOI/ISBN/title to key a lookup on (e.g. a parse_failed entry) —
@@ -382,6 +404,111 @@ async def _lookup_doi_chain(client, doi, settings):
         found=False,
         provider=attempted[-1] if attempted else "unassessed",
         attempted_providers=attempted,
+    )
+
+
+@dataclass
+class TitleSearchRun:
+    """Registry health across one check run's title searches. A registry
+    with a daily budget is skipped for the rest of the run after a 429, which
+    there means the budget is spent. Any registry is skipped after several
+    failures in a row. A single brief failure, or Crossref throttling for a
+    moment, only affects the reference being looked up."""
+
+    skipped: set[str] = field(default_factory=set)
+    failures_in_a_row: dict[str, int] = field(default_factory=dict)
+
+    def failed(self, provider: str, error: Exception, settings: Settings) -> None:
+        count = self.failures_in_a_row.get(provider, 0) + 1
+        self.failures_in_a_row[provider] = count
+        budget_spent = provider in settings.citation_title_search_budget_providers
+        if (budget_spent and _rate_limited(error)) or (
+            count >= settings.citation_title_search_failures_before_skip
+        ):
+            self.skipped.add(provider)
+
+    def answered(self, provider: str) -> None:
+        self.failures_in_a_row[provider] = 0
+
+
+def _rate_limited(error: BaseException | None) -> bool:
+    seen = set()
+    while error is not None and id(error) not in seen:
+        seen.add(id(error))
+        if isinstance(error, httpx.HTTPStatusError) and error.response.status_code == 429:
+            return True
+        error = error.__cause__ or error.__context__
+    return False
+
+
+def _title_query_key(citation: Citation) -> str:
+    surname = citation.authors[0].split(",", 1)[0].strip() if citation.authors else ""
+    return "|".join((citation.title.casefold(), surname.casefold(), str(citation.year or "")))
+
+
+async def _search_title_registries(client, citation, settings, identify, run, query_key):
+    """Ask each configured registry in turn and return the closest candidate
+    that confirms the reference: a preprint cited with its own year beats the
+    journal version a year later. Without one, return the registry's first
+    candidate so the evidence shows what was found; it stays unconfirmed."""
+    searches = {
+        "crossref": crossref_client.search_title_candidates,
+        "openalex": openalex_client.search_title_candidates,
+        "s2": s2_client.search_title_candidates,
+    }
+    # Crossref's bibliographic query is built for whole citations: adding the
+    # first surname and year ranked the cited work first far more often on
+    # the measured theses. The other registries search titles only.
+    surname = citation.authors[0].split(",", 1)[0].strip() if citation.authors else ""
+    queries = {
+        "crossref": " ".join(
+            part for part in (citation.title, surname, str(citation.year or "")) if part
+        )
+    }
+    attempted, best, incomplete = [], None, False
+    for provider in settings.citation_title_search_providers:
+        if provider in run.skipped:
+            incomplete = True
+            continue
+        try:
+            candidates = await searches[provider](
+                client,
+                queries.get(provider, citation.title),
+                settings=settings,
+                rows=settings.citation_title_search_candidates,
+            )
+        except (
+            ApiDownError,
+            httpx.HTTPError,
+            ValueError,
+            KeyError,
+            TypeError,
+            AttributeError,
+        ) as error:
+            run.failed(provider, error, settings)
+            incomplete = True
+            continue
+        run.answered(provider)
+        attempted.append(provider)
+        matches = [
+            (identity.allowances, rank, candidate)
+            for rank, candidate in enumerate(candidates)
+            if (identity := identify(candidate)) is not None
+        ]
+        if matches:
+            closest = min(matches, key=lambda match: match[:2])[2]
+            return replace(closest, attempted_providers=list(attempted), query_key=query_key)
+        if best is None and candidates:
+            best = candidates[0]
+    if best is not None:
+        return replace(best, attempted_providers=attempted, query_key=query_key)
+    if incomplete:
+        raise ApiDownError("At least one title registry could not be checked.")
+    return VerificationResult(
+        found=False,
+        provider=attempted[-1] if attempted else "unassessed",
+        attempted_providers=attempted,
+        query_key=query_key,
     )
 
 
@@ -416,6 +543,7 @@ async def _verify_keyed(
     required_providers=(),
     instructor_id=None,
     reference_text=None,
+    cache_complete=None,
 ) -> CitationVerdict:
     cached = await cache.get_cached(
         session,
@@ -423,7 +551,10 @@ async def _verify_keyed(
         key_value=key_value,
         stale_days=settings.citation_cache_stale_days,
     )
-    if (
+    if cached is not None and cache_complete is not None:
+        if not cache_complete(cached):
+            cached = None
+    elif (
         cached is not None
         and not cached.found
         and not set(required_providers).issubset(cached.attempted_providers)
@@ -1001,6 +1132,8 @@ async def _run_citation_integrity_check(
             title_policy = load_title_policy(settings.citation_metadata_title_policy_file)
         except (OSError, ValueError, UnicodeError):
             policy_unavailable = True
+    # A registry rate limited or failing repeatedly in this run is skipped for its rest.
+    title_search_run = TitleSearchRun()
     for citation in citations:
         parsed = citation.parse_status == CitationParseStatus.parsed
         identifier_unassessed = bool(
@@ -1061,11 +1194,19 @@ async def _run_citation_integrity_check(
                 settings=settings,
                 instructor_id=instructor_id,
                 title_policy=title_policy,
+                title_search_run=title_search_run,
             )
         )
         if verdict.kind == VerdictKind.unassessed:
             metadata_unassessed.add(citation.order_index)
-        if verdict.metadata_comparison and verdict.metadata_comparison.title_status == "unassessed":
+        # A search candidate confirmed by `search_identity` has had its title
+        # matched there; the title policy's caution about case or hyphens is
+        # about reporting a mismatch, which a confirmed match cannot raise.
+        if (
+            verdict.metadata_comparison
+            and verdict.metadata_comparison.title_status == "unassessed"
+            and verdict.search_identity is None
+        ):
             comparison_unassessed = True
             metadata_unassessed.add(citation.order_index)
         metadata_api_down += verdict.kind == VerdictKind.api_down
@@ -1081,6 +1222,9 @@ async def _run_citation_integrity_check(
                 if verdict.metadata_comparison
                 else None,
                 "lookup_kind": "doi" if citation.doi else "isbn" if citation.isbn else "title",
+                "search_identity": verdict.search_identity.evidence()
+                if verdict.search_identity
+                else None,
                 "metadata_complete": metadata_complete,
                 **(
                     {"source_projection": source_projections[citation.order_index]}
@@ -1209,7 +1353,11 @@ async def _run_citation_integrity_check(
         else "reference_search_identity_unconfirmed"
         if any(
             record.get("reason")
-            in {"title_search_identity_unconfirmed", "book_search_identity_unconfirmed"}
+            in {
+                "title_search_identity_unconfirmed",
+                "title_search_registry_unavailable",
+                "book_search_identity_unconfirmed",
+            }
             for record in verification_records
         )
         else "reference_metadata_insufficient"
@@ -1348,13 +1496,20 @@ async def _run_citation_integrity_check(
             "unread_citation_sites": unread_sites_detail(gap_sites),
             "n_metadata_api_down": metadata_api_down,
             "n_metadata_not_found": metadata_not_found,
+            # References left unconfirmed because a title registry could not
+            # be asked, kept apart from those every registry searched.
+            "n_title_search_registry_unavailable": sum(
+                record.get("reason") == "title_search_registry_unavailable"
+                for record in verification_records
+            ),
+            "title_search_registries_skipped": sorted(title_search_run.skipped),
             "n_claim_support_unassessed": len(content_unassessed),
             "n_numeric_candidate_links": len(numeric.linked),
             "n_numeric_assessed_links": sum(m.strong_citation_context for m, _ in numeric.linked),
             "numeric_link_evidence": _numeric_link_evidence(numeric),
             "identifier_linkage_leads": identifier_leads,
             "reference_metadata_coverage": verification_records,
-            "search_identity_policy_version": "title-author-year-isbn-v1",
+            "search_identity_policy_version": "title-author-year-isbn-v2",
             "reference_list_page": reference_section_page(extraction, patterns),
             "reference_selection_issues": list(selection.issues),
             "citation_parse_issues": sorted(gaps),

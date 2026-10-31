@@ -282,25 +282,28 @@ async def test_retraction_under_updated_by_with_no_title_prefix_is_not_missed():
     assert "Retraction" in result.retraction_detail
 
 
-async def test_search_by_title_uses_first_result():
+async def test_title_candidates_are_returned_in_registry_order():
+    second = {**_CLEAN_WORK["message"], "title": ["A second paper"]}
+
     def handler(request):
         assert "query.bibliographic" in str(request.url)
-        return httpx.Response(200, json={"message": {"items": [_CLEAN_WORK["message"]]}})
+        assert request.url.params["rows"] == "5"
+        return httpx.Response(200, json={"message": {"items": [_CLEAN_WORK["message"], second]}})
 
     async with _client(handler) as client:
-        result = await crossref.search_by_title(
-            client, "An uncontroversial paper", settings=get_settings()
+        results = await crossref.search_title_candidates(
+            client, "An uncontroversial paper", settings=get_settings(), rows=5
         )
-    assert result.found
-    assert result.title == "An uncontroversial paper"
+    assert [result.title for result in results] == ["An uncontroversial paper", "A second paper"]
+    assert all(result.found and result.provider == "crossref" for result in results)
 
 
-async def test_search_by_title_no_results():
+async def test_title_candidates_empty_when_no_results():
     def handler(request):
         return httpx.Response(200, json={"message": {"items": []}})
 
     async with _client(handler) as client:
-        result = await crossref.search_by_title(
-            client, "nothing matches this", settings=get_settings()
+        results = await crossref.search_title_candidates(
+            client, "nothing matches this", settings=get_settings(), rows=5
         )
-    assert not result.found
+    assert results == []

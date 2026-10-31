@@ -29,6 +29,10 @@ class VerificationResult:
     abstract: str | None = None
     raw: dict[str, Any] = field(default_factory=dict)
     attempted_providers: list[str] = field(default_factory=list)
+    # What a title search asked for (title, first surname, year). Searches
+    # are cached by title alone, so a stored miss is reused only for the
+    # same reference, never for another one that shares the title.
+    query_key: str | None = None
 
 
 # Alias for external work record

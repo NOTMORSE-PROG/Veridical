@@ -41,7 +41,15 @@ def returned_doi(result):
         return _obj(_obj(raw.get("data")).get("attributes")).get("doi")
     if result.provider == "s2":
         return _obj(raw.get("externalIds")).get("DOI")
+    if result.provider == "openalex":
+        doi = raw.get("doi")
+        if isinstance(doi, str):
+            return re.sub(r"^https?://(?:dx\.)?doi\.org/", "", doi, flags=re.IGNORECASE)
     return None
+
+
+# Registries whose author records are whole display names, not surnames.
+_FULL_NAME_PROVIDERS = frozenset({"openalex", "s2"})
 
 
 def _words(value):
@@ -168,11 +176,38 @@ def compare_metadata(
         attributes = _obj(_obj(raw.get("data")).get("attributes"))
         year = attributes.get("publicationYear")
         authors = [_obj(item).get("familyName") for item in _rows(attributes.get("creators"))]
+    elif result.provider == "openalex":
+        year = raw.get("publication_year")
+        authors = [
+            _obj(_obj(item).get("author")).get("display_name")
+            for item in _rows(raw.get("authorships"))
+        ]
+    elif result.provider == "s2":
+        year = raw.get("year")
+        authors = [_obj(item).get("name") for item in _rows(raw.get("authors"))]
     if citation.year is not None and type(year) is int and citation.year != year:
         differences.append("year")
     author_status, author_reason = "not_recorded", None
     registered_first = None
-    if citation.authors and authors and isinstance(authors[0], str) and authors[0]:
+    if (
+        result.provider in _FULL_NAME_PROVIDERS
+        and citation.authors
+        and authors
+        and isinstance(authors[0], str)
+        and authors[0]
+    ):
+        # These registries give whole names ("John A. Stern") with no surname
+        # field, so a cited surname can be found in one but never shown to
+        # differ from it.
+        from app.checks.citations.search_identity import name_particles, same_surname
+
+        registered_first = authors[0]
+        cited = citation.authors[0].split(",", 1)[0]
+        if same_surname(cited, authors[0], name_particles(settings)):
+            author_status = "agrees"
+        else:
+            author_status, author_reason = "unassessed", "registry_author_full_name"
+    elif citation.authors and authors and isinstance(authors[0], str) and authors[0]:
         name = _registry_first_author(authors[0], settings)
         cited = citation.authors[0].split(",", 1)[0]
         registered_first = name.raw

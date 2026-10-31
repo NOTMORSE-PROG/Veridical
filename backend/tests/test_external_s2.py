@@ -53,22 +53,28 @@ async def test_no_key_sends_no_api_key_header():
     assert "x-api-key" not in seen["headers"]
 
 
-async def test_search_by_title_wraps_data_list():
+async def test_title_candidates_ask_for_year_and_authors():
+    seen = {}
+
     def handler(request):
+        seen["params"] = dict(request.url.params)
         return httpx.Response(200, json={"total": 1, "offset": 0, "data": [_REAL_PAPER]})
 
     async with _client(handler) as client:
-        result = await s2.search_by_title(
-            client, "Nanometer scale thermometry", settings=get_settings()
+        results = await s2.search_title_candidates(
+            client, "Nanometer scale thermometry", settings=get_settings(), rows=3
         )
-    assert result.found
-    assert result.title == _REAL_PAPER["title"]
+    assert [result.title for result in results] == [_REAL_PAPER["title"]]
+    assert seen["params"]["limit"] == "3"
+    assert {"year", "authors"} <= set(seen["params"]["fields"].split(","))
 
 
-async def test_search_by_title_empty():
+async def test_title_candidates_empty():
     def handler(request):
         return httpx.Response(200, json={"total": 0, "offset": 0, "data": []})
 
     async with _client(handler) as client:
-        result = await s2.search_by_title(client, "nothing matches", settings=get_settings())
-    assert not result.found
+        results = await s2.search_title_candidates(
+            client, "nothing matches", settings=get_settings(), rows=3
+        )
+    assert results == []

@@ -67,7 +67,11 @@ async def lookup_doi(client, doi: str, *, settings: Settings) -> VerificationRes
     return _parse_paper(data)
 
 
-async def search_by_title(client, title: str, *, settings: Settings) -> VerificationResult:
+async def search_title_candidates(
+    client, title: str, *, settings: Settings, rows: int
+) -> list[VerificationResult]:
+    """Up to `rows` candidates, best first. Year and authors are requested
+    so a candidate's identity can be checked against the reference."""
     governor = _get_governor(settings)
     data = await get_json(
         client,
@@ -76,10 +80,10 @@ async def search_by_title(client, title: str, *, settings: Settings) -> Verifica
         governor=governor,
         max_retries=settings.external_max_retries,
         retry_base_seconds=settings.external_retry_base_seconds,
-        params={"query": title, "limit": "1", "fields": _FIELDS},
+        params={"query": title, "limit": str(rows), "fields": f"{_FIELDS},year,authors"},
         headers=_headers(settings),
     )
-    papers = (data or {}).get("data") or []
-    if not papers:
-        return VerificationResult(found=False, provider="s2")
-    return _parse_paper(papers[0])
+    papers = (data or {}).get("data")
+    if not isinstance(papers, list):
+        return []
+    return [_parse_paper(paper) for paper in papers[:rows] if isinstance(paper, dict)]
