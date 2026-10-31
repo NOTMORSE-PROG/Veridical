@@ -12,7 +12,7 @@ import { UploadRubricModal } from "./UploadRubricModal";
 import { FormatReviewWorkbench } from "./FormatReviewWorkbench";
 import { CriterionLevels, ReviewItemNavigator, RubricReviewStatus, SourceReadingSummary } from "./RubricReviewParts";
 import {
-  formatReviewState, levelAnchorId, levelIssueCopy, openIssues, orderedIssues, tidy, type PendingAcknowledgement,
+  formatReviewState, levelAnchorId, levelIssueCopy, openIssues, orderedIssues, tidy, type OpenedAgain, type PendingAcknowledgement,
 } from "./rubricReview";
 
 interface CriterionRow {
@@ -153,7 +153,7 @@ interface LevelReview {
   onPageShown: (page: number) => void;
   onSave: () => void;
   noteRefused: ReadonlySet<number>;
-  openAgain: ReadonlySet<number>;
+  openAgain: ReadonlyMap<number, OpenedAgain>;
 }
 
 const EDIT_FIELD_LABEL = { text: "criterion text", type: "type", evidence: "evidence expected", weight: "relative weight" } as const;
@@ -339,10 +339,11 @@ function CriteriaEditor({ id }: { id: number }) {
   const [blocked, setBlocked] = useState<{ kind: "activate" | "save"; unknown: number; reopened: number[]; edits: string[] } | null>(null);
   // Kept items the server refused to keep without a note.
   const [noteRefused, setNoteRefused] = useState<ReadonlySet<number>>(() => new Set());
-  // Kept items a refused save of an active format would open again. They are
-  // shown open here, so the instructor can check them again and save the
-  // change with them in one go instead of having to undo it.
-  const [openAgain, setOpenAgain] = useState<ReadonlySet<number>>(() => new Set());
+  // Kept items an edit opens again. Those a refused save of an active format
+  // would open are shown open here, so the instructor can check them again
+  // and save the change with them in one go instead of having to undo it.
+  const [openAgain, setOpenAgain] = useState<ReadonlyMap<number, OpenedAgain>>(() => new Map());
+  const focusHeadingAfterReload = useRef(false);
   const [discardReason, setDiscardReason] = useState<"conflict" | "refused">("conflict");
   const saveRef = useRef<HTMLButtonElement>(null);
   const activeStatusRef = useRef<HTMLDivElement>(null);
@@ -368,6 +369,8 @@ function CriteriaEditor({ id }: { id: number }) {
     announcementSeq.current += 1;
     setAnnouncement({ id: announcementSeq.current, text });
   }
+  const announceRef = useRef(announce);
+  announceRef.current = announce;
 
   useEffect(() => {
     const target = pendingFocusRef.current;
@@ -401,6 +404,29 @@ function CriteriaEditor({ id }: { id: number }) {
   const dirty = !readOnly && rows !== undefined && savedRows !== undefined && (rowsChanged || pending.size > 0);
   // The leave dialog names what would be lost.
   const onlyKeepsUnsaved = !rowsChanged && pending.size > 0;
+
+  // Every change undone: the items it would have opened again stay checked
+  // as they were, and a new check made for them is not needed. Say so,
+  // rather than let a later save drop it without a word.
+  useEffect(() => {
+    if (rowsChanged || ![...openAgain.values()].some((item) => item.kind === "unsaved")) return;
+    const ids = [...openAgain.entries()].filter(([, item]) => item.kind === "unsaved").map(([issueId]) => issueId);
+    setOpenAgain((current) => new Map([...current].filter(([, item]) => item.kind !== "unsaved")));
+    setPending((current) => {
+      if (!ids.some((issueId) => current.has(issueId))) return current;
+      const next = new Map(current);
+      for (const issueId of ids) next.delete(issueId);
+      return next;
+    });
+    setBlocked((current) => current?.kind === "save" ? null : current);
+    announceRef.current(`Your changes are undone, so ${ids.length === 1 ? "the item you checked stays" : `the ${ids.length} items you checked stay`} checked as before.`);
+  }, [rowsChanged, openAgain]);
+
+  useEffect(() => {
+    if (!focusHeadingAfterReload.current || rows === undefined) return;
+    focusHeadingAfterReload.current = false;
+    headingRef.current?.focus();
+  }, [rows]);
   const blocker = useBlocker(({ currentLocation, nextLocation }) =>
     dirty && currentLocation.pathname !== nextLocation.pathname,
   );
@@ -485,10 +511,10 @@ function CriteriaEditor({ id }: { id: number }) {
 
   const currentRows = rows;
   const details = rubric.parse_issue_details
-    ? rubric.parse_issue_details.map((issue) => openAgain.has(issue.id) && issue.status === "acknowledged"
+    ? rubric.parse_issue_details.map((issue) => openAgain.get(issue.id)?.kind === "unsaved" && issue.status === "acknowledged"
       ? { ...issue, status: "open" as const, resolution: null } : issue)
     : null;
-  const openedAgain = details ? details.filter((issue) => openAgain.has(issue.id) && issue.status === "open") : [];
+  const openedAgain = details ? details.filter((issue) => openAgain.get(issue.id)?.kind === "unsaved" && issue.status === "open") : [];
   // Issues on a criterion removed on this page are settled by the next save.
   const pageIssues = details
     ? orderedIssues(details, currentRows.map((row) => row.id))
@@ -625,8 +651,9 @@ function CriteriaEditor({ id }: { id: number }) {
       // Kept and saved items open here, to be checked again in the same save.
       const kept = refused.filter((id) => pageIssues.some((issue) => issue.id === id && issue.status === "acknowledged"));
       const reopened = refused.filter((id) => pending.has(id));
-      if (kept.length) setOpenAgain((current) => new Set([...current, ...kept]));
-      setBlocked({ kind: "save", unknown: refused.length - kept.length - reopened.length, reopened, edits: describeEdits(submitted, savedRows ?? []) });
+      const edits = describeEdits(submitted, savedRows ?? []);
+      if (kept.length) setOpenAgain((current) => new Map([...current, ...kept.map((id) => [id, { kind: "unsaved" as const, changes: edits }] as const)]));
+      setBlocked({ kind: "save", unknown: refused.length - kept.length - reopened.length, reopened, edits });
       announce(kept.length ? "Nothing was saved. Check the items this change opens again, then save." : "Nothing was saved. Check these items first.");
       return;
     }
@@ -662,13 +689,21 @@ function CriteriaEditor({ id }: { id: number }) {
     };
   }
 
-  function savedAnnouncement(out: { parse_issue_details?: RubricIssueDetail[] | null }, confirm: boolean) {
-    if (confirm) return "Format confirmed and activated.";
+  function savedAnnouncement(out: { parse_issue_details?: RubricIssueDetail[] | null }, confirm: boolean, reopened: number, unrecorded: number) {
+    const notRecorded = unrecorded
+      ? ` ${unrecorded === 1 ? "One item" : `${unrecorded} items`} you checked again stayed checked as before, because nothing ${unrecorded === 1 ? "it was" : "they were"} checked against changed, so the new note was not recorded.`
+      : "";
+    if (confirm) return `Format confirmed and activated.${notRecorded}`;
     // An active format's changes are live as soon as they are saved.
-    if (rubric!.is_active) return "Saved. New checks use this version.";
+    if (rubric!.is_active) return `Saved. New checks use this version.${notRecorded}`;
     if (!out.parse_issue_details) return "Draft saved.";
     const left = out.parse_issue_details.filter((issue) => issue.status === "open").length;
-    return left ? `Draft saved. ${left} ${left === 1 ? "item" : "items"} to check remain.` : "Draft saved.";
+    const opened = reopened
+      ? ` Your change opened ${reopened === 1 ? "an item" : `${reopened} items`} you checked before again; check ${reopened === 1 ? "it" : "them"} again below.`
+      : "";
+    return left
+      ? `Draft saved.${opened} ${left} ${left === 1 ? "item" : "items"} to check ${left === 1 ? "remains" : "remain"}.${notRecorded}`
+      : `Draft saved.${notRecorded}`;
   }
 
   // 422 acknowledgement_note_required: nothing was saved. Each listed keep
@@ -689,12 +724,15 @@ function CriteriaEditor({ id }: { id: number }) {
       if (!result.isSuccess) return;
       setPending(new Map());
       setNoteRefused(new Set());
-      setOpenAgain(new Set());
+      setOpenAgain(new Map());
       setRemovedStack([]);
       setBlocked(null);
       setAttempted(undefined);
+      // The control that asked for this is gone; start again from the top.
+      focusHeadingAfterReload.current = true;
       setRows(undefined);
       setSavedRows(undefined);
+      announce("Your changes were discarded. The page shows the saved version.");
     });
   }
 
@@ -756,18 +794,29 @@ function CriteriaEditor({ id }: { id: number }) {
     const submitted = currentRows;
     submittedKeys.current = submitted.map((row) => row.key);
     setEditedSinceRefusal(new Set());
+    const body = bodyFor(submitted, confirm);
+    const checkedBefore = new Set(rubric!.parse_issue_details?.filter((issue) => issue.status === "acknowledged").map((issue) => issue.id) ?? []);
+    const edits = describeEdits(submitted, savedRows ?? []);
     save.mutate(
-      bodyFor(submitted, confirm),
+      body,
       {
         onSuccess: (out) => {
+          const after = out.parse_issue_details ?? [];
+          // Items this saved change opened again, said on the item itself.
+          const reopened = after.filter((issue) => issue.status === "open" && checkedBefore.has(issue.id));
+          // A check sent for an item the server found unchanged is not recorded.
+          const unrecorded = (body.acknowledgements ?? []).filter((ack) => {
+            const issue = after.find((item) => item.id === ack.issue_id);
+            return issue?.status === "acknowledged" && issue.resolution?.note !== ack.note;
+          }).length;
           setSavedRows(submitted);
           setRemovedStack([]);
           setPending(new Map());
           setNoteRefused(new Set());
-          setOpenAgain(new Set());
+          setOpenAgain(new Map(reopened.map((issue) => [issue.id, { kind: "saved" as const, changes: edits }])));
           setLoadedRevision(out.revision ?? null);
           if (confirm) focusActiveAfterSave.current = true;
-          announce(savedAnnouncement(out, confirm));
+          announce(savedAnnouncement(out, confirm, reopened.length, unrecorded));
         },
         onError: (error) => {
           if (!(error instanceof ApiError)) return;
@@ -883,7 +932,7 @@ function CriteriaEditor({ id }: { id: number }) {
             {blocked.kind === "save" && openedAgain.length > 0 && <p>
               Your change would open {openedAgain.length === 1 ? "an item" : `${openedAgain.length} items`} you checked before
               again, because what {openedAgain.length === 1 ? "it was" : "they were"} checked against would change.
-              Check {openedAgain.length === 1 ? "it" : "them"} again below, then save, or discard your changes.</p>}
+              Check {openedAgain.length === 1 ? "it" : "them"} again below, then save.</p>}
             {openItems.length > 0 && <ul>{openItems.map((issue) => <li key={issue.id}><button type="button" onClick={() => goToIssue(issue)}>
               {issuePlace(issue).label}: {itemCopy(issue)}</button></li>)}</ul>}
             {reopenedItems.length > 0 && <>
@@ -897,7 +946,9 @@ function CriteriaEditor({ id }: { id: number }) {
               <ul className="signal-refused-edits">{blocked.edits.map((edit) => <li key={edit}>{edit}</li>)}</ul>
             </>}
             {blocked.kind === "save" && <div className="signal-control-cluster">
-              <p>Change these back and save again, or discard your changes.</p>
+              <p>{openedAgain.length > 0
+                ? "Or discard your changes and keep the saved version."
+                : "Change these back and save again, or discard your changes."}</p>
               <Button variant="secondary" onClick={() => { setDiscardReason("refused"); setDiscardOpen(true); }}>Discard my changes</Button>
             </div>}
           </div>

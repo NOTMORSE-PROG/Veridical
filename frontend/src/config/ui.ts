@@ -46,6 +46,10 @@ export const RUBRIC_KEEP_REASONS: readonly RubricKeepReasonOption[] = [
 // the format, such as criteria covering too little of it. There is no wording
 // to keep, so they are offered and recorded under this key, not their code.
 export const RUBRIC_WHOLE_FORMAT_ISSUE_KEY = "whole_format";
+// The same reason, worded for checking a whole-format item again after the
+// criteria changed, so agreeing with it means comparing the changed set.
+export const RUBRIC_WHOLE_FORMAT_RECHECK_LABEL =
+  "I compared the criteria, with these changes, against the original, and nothing in it is missing";
 export const RUBRIC_KEEP_REASONS_BY_CODE: Readonly<Record<string, readonly RubricKeepReasonOption[]>> = {
   [RUBRIC_WHOLE_FORMAT_ISSUE_KEY]: [
     { value: "compared_whole_format", label: "I compared the criteria with the original, and nothing in it is missing" },
