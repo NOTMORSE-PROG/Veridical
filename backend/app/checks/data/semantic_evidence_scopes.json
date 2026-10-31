@@ -16,5 +16,14 @@
     "\\b(?:most|primarily|throughout|comprehensive(?:ly)?|completeness)\\b|\\bmajority\\b(?![\\s\\u002d\\u2010-\\u2015\\u2212]*vote\\b)|\\bfew\\b(?![\\s\\u002d\\u2010-\\u2015\\u2212]*shot\\b)",
     "\\bcomplete\\s+(?:documentation|coverage|inventory|assessment)\\b",
     "\\b(?:all|every|each)\\s+(?:one\\s+)?(?:of\\s+)?(?:(?:the|these|those|our)\\s+)?(?:references?|sources?|citations?|entr(?:y|ies)|items?|sections?|figures?|tables?|requirements?|components?|devices?|participants?|records?)\\b"
+  ],
+  "locatable_subclaim": [
+    "\\bpreview(?:s|ing|ed)?\\s+(?:the\\s+)?(?:overall\\s+)?(?:structure|organi[sz]ation)\\s+of\\s+the\\s+(?:paper|thesis|study|manuscript|document|report|dissertation)\\b",
+    "\\b(?:structure|organi[sz]ation)\\s+of\\s+the\\s+(?:paper|thesis|study|manuscript|document|report|dissertation)\\b[^.;:]{0,30}\\bpreview(?:s|ed)?\\b",
+    "\\b(?:purpose|thesis\\s+statement|objective|aim|argument)\\b[^.;:]{0,60}\\b(?:in|as)\\s+(?:a\\s+)?(?:single|one)\\s+sentence\\b",
+    "\\b(?:single|one)[\\s-]sentence\\s+(?:purpose|thesis\\s+statement|objective|aim|argument)\\b"
+  ],
+  "locatable_subclaim_negation": [
+    "\\b(?:not|no|never|neither|nor|without|lacks?|fails?\\s+to|missing)\\b"
   ]
 }

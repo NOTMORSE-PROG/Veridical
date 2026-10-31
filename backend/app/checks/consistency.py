@@ -47,6 +47,7 @@ from app.checks.support import (
     apply_support,
     check_support_available,
     context_limitation,
+    locatable_subclaim,
 )
 from app.config import Settings, get_settings
 from app.errors import ApiDownError
@@ -610,6 +611,9 @@ async def vote_batch(
                 support[v.criterion.id],
                 decide=decide,
                 adverse=adverse_rating(v.criterion, v.outcome, v.detail),
+                strict=locatable_subclaim(
+                    v.criterion, v.detail, getattr(batch, "scope_patterns_file", None)
+                ),
             ),
         )
         if v.criterion.id in support
