@@ -188,7 +188,8 @@ def light_paraphrase(text: str, table: dict[str, str], share: float, rng: random
 def shared_wording(own: str, other: str, config: dict) -> dict:
     """Word 5-gram containment and the longest common run between two
     passages, and whether either reaches the confirmation thresholds."""
-    share = containment(own, other, config["match"]["shingle"])
+    # Over the shorter passage, the product's own measure (BUG-620).
+    share = overlap(own, other, config["match"]["shingle"])
     run = longest_common_run(own, other)
     verify = config["verify"]
     return {
@@ -1319,7 +1320,7 @@ def twin_rows(twins: dict, library_ids: dict, verify: dict, size: int) -> tuple[
                 flag["evidence_excerpt"],
                 flag["detail"].get("matched_text", ""),
             )
-            share, run = containment(own, other, size), longest_common_run(own, other)
+            share, run = overlap(own, other, size), longest_common_run(own, other)
             judged.append(
                 {
                     "host": host,
