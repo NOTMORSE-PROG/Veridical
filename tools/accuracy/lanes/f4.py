@@ -49,9 +49,13 @@ from app.checks.agreement import pair
 from app.checks.agreement.cues import load_cues
 from app.checks.agreement.extract import extract_statements
 from app.config import Settings
-from app.errors import QuotaExhaustedError
+from app.errors import ApiDownError, QuotaExhaustedError
 from app.llm.base import LLMClient
-from app.llm.queue import TransportDailyQuotaExhausted, TransportRateLimited
+from app.llm.queue import (
+    TransportDailyQuotaExhausted,
+    TransportRateLimited,
+    TransportServerError,
+)
 
 LANE = "f4"
 SCOPE = (
@@ -109,7 +113,7 @@ class BudgetedModel(LLMClient):
         self._transport, self._budget = transport, budget
         self._model, self._temperature, self._cache = model, temperature, cache
         self._cache.mkdir(parents=True, exist_ok=True)
-        self.attempts = self.cache_hits = 0
+        self.attempts = self.cache_hits = self.failed_calls = 0
         self.stop_reason: str | None = None
 
     async def complete(self, prompt_type, prompt, *, prompt_version="unversioned", **context):
@@ -137,6 +141,12 @@ class BudgetedModel(LLMClient):
         except (TransportRateLimited, TransportDailyQuotaExhausted) as exc:
             self.stop_reason = f"429 from the provider ({type(exc).__name__})"
             raise QuotaExhaustedError(self.stop_reason) from exc
+        except TransportServerError as exc:
+            # A failed or malformed reply is an outage for that batch, as the
+            # product's queue reports it after its retries; the run goes on and
+            # the batch is counted as not judged.
+            self.failed_calls += 1
+            raise ApiDownError(str(exc)) from exc
         path.write_text(
             json.dumps({"model": self._model, "payload": result.payload}), encoding="utf-8"
         )
@@ -440,6 +450,7 @@ def run(ctx: Context) -> tuple[list[MetricRow], dict]:
         "batches": batches,
         "attempts_sent": client.attempts if client else 0,
         "cache_hits": client.cache_hits if client else 0,
+        "failed_calls": client.failed_calls if client else 0,
         "stop_reason": client.stop_reason if client else None,
         "notes": notes,
         "always_one_label_rate": always_one,
