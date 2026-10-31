@@ -40,6 +40,8 @@ from app.ingest.schemas import ExtractionResult
 from app.ml.embeddings import cosine_similarity, embed_texts
 
 _WORD = re.compile(r"[a-z0-9]+")
+# A chapter heading of this many words or fewer ("Chapter 2") carries no title.
+_BARE_CHAPTER_WORDS = 2
 
 
 def _grams(text: str, min_word: int) -> set[str]:
@@ -53,6 +55,9 @@ class Sentence:
     text: str
     anchor: str
     heading: str | None
+    # The last chapter-like heading above it ("Chapter 2 Review of Related
+    # Literature"), for documents whose section tree has no chapters.
+    chapter: str | None = None
 
 
 @dataclass(frozen=True)
@@ -68,16 +73,25 @@ class PairContext:
         return " ".join([self.before, self.after, *(s.text for s in self.scope)])
 
 
-def document_sentences(extraction: ExtractionResult, *, heading_max_words: int) -> list[Sentence]:
-    """Prose sentences in reading order, each with the heading above it."""
+def document_sentences(
+    extraction: ExtractionResult,
+    *,
+    heading_max_words: int,
+    chapter_patterns: tuple[str, ...] = (),
+) -> list[Sentence]:
+    """Prose sentences in reading order, each with the heading above it and
+    the last chapter-like heading before it."""
     from app.ingest.analytical_source import analytical_source
 
+    chapter_res = [re.compile(p) for p in chapter_patterns]
     sentences: list[Sentence] = []
     for scope in analytical_source(extraction).scopes:
         heading: str | None = None
+        chapter: str | None = None
+        bare_chapter = False
         run: list = []
 
-        def flush(run=run, heading_now=None) -> None:
+        def flush(run=run, heading_now=None, chapter_now=None) -> None:
             # PDF blocks are often single lines, so the prose under one heading
             # is joined before it is split, or a sentence would be cut at every
             # line break.
@@ -86,18 +100,25 @@ def document_sentences(extraction: ExtractionResult, *, heading_max_words: int) 
                 text = _normalize(joined[start:end])
                 block = _block_at(start, ranges)
                 if text and block is not None:
-                    sentences.append(Sentence(text, _anchor_for(block), heading_now))
+                    sentences.append(Sentence(text, _anchor_for(block), heading_now, chapter_now))
             run.clear()
 
         for block in scope:
             if block.is_furniture or not block.text.strip():
                 continue
             if _is_heading_like(block.text.strip(), max_words=heading_max_words):
-                flush(heading_now=heading)
-                heading = _strip_numbering(_normalize(block.text))
+                flush(heading_now=heading, chapter_now=chapter)
+                raw = _normalize(block.text)
+                heading = _strip_numbering(raw)
+                if any(pattern.search(raw.lower()) for pattern in chapter_res):
+                    chapter = raw
+                    bare_chapter = len(raw.split()) <= _BARE_CHAPTER_WORDS
+                elif bare_chapter:
+                    # "Chapter 2" printed alone, its title on the next line.
+                    chapter, bare_chapter = f"{chapter} {raw}", False
                 continue
             run.append(block)
-        flush(heading_now=heading)
+        flush(heading_now=heading, chapter_now=chapter)
     return sentences
 
 
@@ -135,10 +156,16 @@ class DocumentContext:
 
     @classmethod
     def build(
-        cls, extraction: ExtractionResult, cues: AgreementCues, settings: Settings
+        cls,
+        extraction: ExtractionResult,
+        cues: AgreementCues,
+        settings: Settings,
+        chapter_patterns: tuple[str, ...] = (),
     ) -> DocumentContext:
         sentences = document_sentences(
-            extraction, heading_max_words=settings.agreement_heading_max_words
+            extraction,
+            heading_max_words=settings.agreement_heading_max_words,
+            chapter_patterns=chapter_patterns,
         )
         patterns = [re.compile(p) for p in cues.scope_statement_patterns]
         phrases = (*cues.scope_negation_phrases, *cues.future_work_guard_phrases)

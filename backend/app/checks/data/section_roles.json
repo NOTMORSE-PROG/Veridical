@@ -1,0 +1,20 @@
+{
+  "_source": "2026-10-31 (V-094 follow-up, BUG-603; shared with BUG-606). What part of a thesis a chapter or heading is, from its title. Roles are tried in order and the first match wins: 'Chapter 3 Methodology Introduction' is methodology and 'Chapter 1 Introduction Background and Rationale' is introduction. Grounded in the chapter titles of the six local theses (LensMatch, AugmentedRL, Destamp, Bimby, MIT, KSA) and the conventional capstone outline. Extend by adding patterns, not code.",
+  "chapter_heading_patterns": [
+    "^(chapter|part)\\s+([0-9]+|[ivxl]+)\\b"
+  ],
+  "roles": [
+    {"role": "table_of_contents", "patterns": ["\\btable of contents\\b", "^contents$", "\\blist of (figures|tables|abbreviations|appendices|acronyms)\\b"]},
+    {"role": "front_matter", "patterns": ["\\backnowledg", "\\bdedication\\b", "\\bapproval sheet\\b", "\\btitle page\\b", "\\bthesis committee\\b", "\\bdefinition of terms\\b", "\\bcertification\\b", "\\bdeclaration\\b"]},
+    {"role": "abstract", "patterns": ["^abstract\\b", "\\bexecutive summary\\b"]},
+    {"role": "biography", "patterns": ["\\bbiograph", "\\bvitae\\b", "\\babout the authors?\\b"]},
+    {"role": "references", "patterns": ["\\breferences\\b", "\\bbibliography\\b", "\\bworks cited\\b"]},
+    {"role": "appendix", "patterns": ["\\bappendi(x|ces)\\b"]},
+    {"role": "results", "patterns": ["\\bresults?\\b", "\\bfindings?\\b", "\\bevaluation\\b", "\\btesting\\b", "\\bexperiments?\\b", "\\banalysis of (the )?(data|results)\\b", "\\bdiscussion\\b"]},
+    {"role": "conclusion", "patterns": ["\\bconclusions?\\b", "\\bsummary\\b", "\\brecommendations?\\b"]},
+    {"role": "methodology", "patterns": ["\\bmethodology\\b", "\\bresearch (design|methods?)\\b", "\\bneeds? (assessment|survey|analysis)\\b", "\\bmethods\\b"]},
+    {"role": "introduction", "patterns": ["\\bintroduction\\b"]},
+    {"role": "literature", "patterns": ["\\bliterature\\b", "\\brelated (works?|studies|systems|literature)\\b", "\\bbackground\\b"]},
+    {"role": "future_work", "patterns": ["\\bfuture (work|research|directions)\\b"]}
+  ]
+}
