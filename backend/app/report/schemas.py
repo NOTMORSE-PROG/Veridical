@@ -309,11 +309,29 @@ class OriginalityScopeOut(BaseModel):
     ) = None
 
 
+class UndeterminedPairOut(BaseModel):
+    intent_text: str
+    intent_anchor: str
+    outcome_text: str
+    outcome_anchor: str
+    reason: str | None = None
+
+
+class UndeterminedPairsOut(BaseModel):
+    """Objective/result pairs the agreement check compared but could not
+    decide. Coverage, not findings: shown once beside the findings."""
+
+    count: int
+    compared_count: int
+    pairs: list[UndeterminedPairOut]
+
+
 class IntegrityModuleOut(BaseModel):
     check_kind: Literal[
         "internal_agreement", "citation_integrity", "statistical_forensics", "originality_reuse"
     ]
     state: Literal["completed", "partial", "incomplete", "not_applicable", "not_recorded"]
+    undetermined: UndeterminedPairsOut | None = None
 
 
 class ReportOut(BaseModel):

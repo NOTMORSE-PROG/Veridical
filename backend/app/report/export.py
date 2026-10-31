@@ -163,6 +163,49 @@ def _is_optional_comparison_lead(flag: FlagSummaryOut) -> bool:
     return flag.check_kind == "originality_reuse" and flag.affects_readiness is False
 
 
+def _is_legacy_undecided(flag: FlagSummaryOut) -> bool:
+    return (
+        flag.check_kind == "internal_agreement"
+        and flag.problem_kind == "agreement_cannot_determine"
+    )
+
+
+def _undecided_pairs_flowables(
+    report, legacy: list[FlagSummaryOut], styles: dict[str, ParagraphStyle]
+) -> list:
+    """Objective/result pairs the agreement check compared but could not
+    decide, as one list after the module's findings rather than a page each."""
+    module = next(
+        (m for m in report.integrity_modules if m.check_kind == "internal_agreement"), None
+    )
+    saved = module.undetermined if module and module.undetermined else None
+    pairs = [
+        (pair.intent_text, pair.intent_anchor, pair.outcome_text, pair.outcome_anchor)
+        for pair in (saved.pairs if saved else [])
+    ] + [(flag.evidence_excerpt, flag.page_anchor, None, None) for flag in legacy]
+    if not pairs:
+        return []
+    compared = max(saved.compared_count if saved else 0, len(pairs))
+    items = [
+        Paragraph("Pairs to read yourself", styles["h3"]),
+        Paragraph(
+            escape(
+                f"VERIDICAL could not decide on {len(pairs)} of {compared} objective and "
+                "result pairs it compared. This is not a problem found in the manuscript. If "
+                "objective coverage matters for this defense, read the pairs and decide "
+                "yourself."
+            ),
+            styles["body"],
+        ),
+    ]
+    for number, (intent, intent_at, outcome, outcome_at) in enumerate(pairs, start=1):
+        text = f"{number}. Objective ({_display_anchor(intent_at)}): “{intent}”"
+        if outcome is not None:
+            text += f" Result ({_display_anchor(outcome_at)}): “{outcome}”"
+        items.append(Paragraph(escape(text), styles["body"]))
+    return items
+
+
 def _review_record_identities(flags: list[FlagSummaryOut]) -> dict[int, str]:
     leads = sorted(
         (flag for flag in flags if _is_optional_comparison_lead(flag)), key=lambda f: f.id
@@ -2022,8 +2065,13 @@ def _build_report_pdf(data: ReportExportData, image_path) -> bytes:
         flow.append(Paragraph(escape(labels["body"]), styles["body"]))
     source_details = flow
     flow = []
-    other_flag_count = sum(not _is_optional_comparison_lead(flag) for flag in data.flags)
-    lead_count = len(data.flags) - other_flag_count
+    # Saved "could not determine" agreement rows make no claim; they are listed
+    # once with the undecided pairs, not given a page each or counted.
+    undecided_legacy = [flag for flag in data.flags if _is_legacy_undecided(flag)]
+    listed_flags = [flag for flag in data.flags if not _is_legacy_undecided(flag)]
+    undecided_section = _undecided_pairs_flowables(report, undecided_legacy, styles)
+    other_flag_count = sum(not _is_optional_comparison_lead(flag) for flag in listed_flags)
+    lead_count = len(listed_flags) - other_flag_count
     flag_intro = [Paragraph("Integrity review", styles["h2"])]
     scope_label, scope_detail = statistical_scope_copy(report.statistical_check_scope)
     flag_intro.append(
@@ -2054,7 +2102,7 @@ def _build_report_pdf(data: ReportExportData, image_path) -> bytes:
     flag_intro.append(Spacer(1, 6))
     scope_emitted = False
     recency_emitted = False
-    if not data.flags:
+    if not listed_flags:
         flow.extend(flag_intro)
         flow.append(
             Paragraph(
@@ -2064,9 +2112,9 @@ def _build_report_pdf(data: ReportExportData, image_path) -> bytes:
             )
         )
     else:
-        identities = _review_record_identities(data.flags)
+        identities = _review_record_identities(listed_flags)
         by_kind: dict[tuple[str, bool], list[FlagSummaryOut]] = {}
-        for f in data.flags:
+        for f in listed_flags:
             by_kind.setdefault((f.check_kind, _is_optional_comparison_lead(f)), []).append(f)
         for kind, optional in sorted(
             by_kind, key=lambda key: (key[1], _CHECK_KIND_ORDER.get(key[0], len(_CHECK_KIND_ORDER)))
@@ -2634,6 +2682,8 @@ def _build_report_pdf(data: ReportExportData, image_path) -> bytes:
                 )
             ]
         )
+        if kind == "internal_agreement":
+            flow.extend(undecided_section)
     flow.extend(
         [
             PageBreak(),
