@@ -180,7 +180,8 @@ def test_post_rubrics_returns_persisted_criteria(client, tmp_path):
     assert body["is_active"] is False
     assert len(body["criteria"]) >= 1
     assert {c["type"] for c in body["criteria"]} <= {"structural", "semantic"}
-    assert sum(c["weight"] for c in body["criteria"]) == pytest.approx(100.0)
+    # BUG-580: weights stay readable relative numbers, never a computed split.
+    assert all(c["weight"] > 0 and c["weight"] == round(c["weight"], 2) for c in body["criteria"])
 
 
 def test_post_rubrics_accepts_a_pdf_whose_text_carries_nul(client, tmp_path):

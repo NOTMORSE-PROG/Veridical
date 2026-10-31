@@ -71,6 +71,36 @@ describe("SignalReviewCriteriaPage", () => {
     expect(screen.getByLabelText("Type, criterion 2")).toHaveAccessibleDescription(/Semantic for checks that require interpreting the content/);
   });
 
+  it("shows a stored equal split as plain relative weights, never as 11.111 (BUG-580)", async () => {
+    const split = { ...RUBRIC, criteria: Array.from({ length: 9 }, (_, index) => ({ ...RUBRIC.criteria[0], id: index + 1, position: index, text: `Criterion ${index + 1}`, weight: 11.111 })) };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(split), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage();
+    expect(await screen.findByLabelText("Relative weight, criterion 1")).toHaveValue("1");
+    expect(screen.queryByDisplayValue("11.111")).not.toBeInTheDocument();
+    expect(screen.queryByText(/11\.111/)).not.toBeInTheDocument();
+    // Loading the screen is not an edit: nothing to save until the instructor changes something.
+    fireEvent.click(screen.getByRole("link", { name: "Required format" }));
+    expect(screen.queryByRole("dialog", { name: "Leave without saving your changes?" })).not.toBeInTheDocument();
+  });
+
+  it("reads equal weights on a locked version as the same for every criterion (BUG-580)", async () => {
+    const locked = { ...RUBRIC, can_edit_criteria: false, criteria: RUBRIC.criteria.map((criterion) => ({ ...criterion, weight: 33.333 })) };
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(locked), { status: 200 })));
+    renderPage();
+    expect((await screen.findAllByText("the same for all 2 criteria")).length).toBe(2);
+    expect(screen.queryByText(/33\.333/)).not.toBeInTheDocument();
+  });
+
+  it("sets equal relative weights to 1 each (BUG-580)", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(RUBRIC), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Set equal relative weights" }));
+    expect(screen.getByLabelText("Relative weight, criterion 1")).toHaveValue("1");
+    expect(screen.getByLabelText("Relative weight, criterion 2")).toHaveValue("1");
+  });
+
   it("saves the complete edited set as a draft and preserves level data", async () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       if (init?.method === "PUT") return new Response(JSON.stringify(RUBRIC), { status: 200 });

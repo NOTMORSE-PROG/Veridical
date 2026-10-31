@@ -124,13 +124,26 @@ def _without_point_values(criterion: ParsedCriterion) -> ParsedCriterion:
     return criterion.model_copy(update=updates)
 
 
-def _normalize_weights(criteria: list[ParsedCriterion]) -> list[ParsedCriterion]:
-    """Weights become a percentage split (sum to 100) regardless of the
-    scale the source document or the model used; ENGINEERING §5's
-    composite score assumes weights are comparable across criteria."""
-    total = sum(c.weight for c in criteria)
-    for c in criteria:
-        c.weight = round(c.weight / total * 100, 3)
+def relative_weights(weights: list[float], max_decimals: int) -> list[float]:
+    """Weights as the instructor can read them. Scoring divides by the
+    weights' total, so only their ratios matter. Weights the format states
+    plainly (20, 30, 50; or 1, 1, 2) are kept as they are; any with more
+    decimals than `max_decimals` (an equal split written as 11.111) are
+    rescaled so the lightest is 1, which keeps their ratios."""
+
+    def plain(weight: float) -> bool:
+        return abs(weight - round(weight, max_decimals)) < 1e-9
+
+    if all(plain(weight) for weight in weights):
+        return list(weights)
+    lightest = min(weights)
+    return [round(weight / lightest, max_decimals) for weight in weights]
+
+
+def _relative_weights(criteria: list[ParsedCriterion], settings: Settings) -> list[ParsedCriterion]:
+    weights = relative_weights([c.weight for c in criteria], settings.rubric_weight_max_decimals)
+    for criterion, weight in zip(criteria, weights, strict=True):
+        criterion.weight = weight
     return criteria
 
 
@@ -169,4 +182,4 @@ async def decompose_rubric(
         decomposition = RubricDecomposition.model_validate(response)
     except ValidationError as exc:
         raise RubricParseError(f"Rubric decomposition response failed validation: {exc}") from exc
-    return _normalize_weights([_without_point_values(c) for c in decomposition.criteria])
+    return _relative_weights([_without_point_values(c) for c in decomposition.criteria], settings)

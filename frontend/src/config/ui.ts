@@ -8,6 +8,10 @@ export const WEIGHT_IMPORTANCE_PREVIEW = {
   lowMaxRatio: 0.5,
   highMinRatio: 1.5,
 } as const;
+// Weights are relative, so a weight with more decimals than this (an equal
+// split stored as 11.111) is shown rescaled so the lightest criterion is 1.
+// Mirrors the backend's RUBRIC_WEIGHT_MAX_DECIMALS (BUG-580).
+export const RUBRIC_WEIGHT_MAX_DECIMALS = 2;
 
 // Mirrors the backend's configurable default. Kept in the shared UI config so
 // every reasoned instructor action uses one disclosed validation rule.
