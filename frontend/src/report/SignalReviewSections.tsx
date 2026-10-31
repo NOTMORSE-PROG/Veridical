@@ -12,7 +12,7 @@ import { pendingAssessmentRow } from "./pendingAssessmentRow";
 import { clearPdfReading } from "../document/usePdfPageText";
 import { recoverableReadError } from "./reportReadState";
 import { reviewDeskDestination } from "../routing/reviewDeskReturn";
-import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router";
 import { CITATION_HISTORY_TITLE } from "../domain/citationHistory";
 import type {
@@ -76,6 +76,8 @@ import { BULK_REVIEW_COPY } from "../domain/bulkReviewCopy";
 import type { BulkAction } from "./useBulkResolve";
 import { OriginalityCoverageNotice } from "./OriginalityCoverageNotice";
 import { originalityCoverageNote } from "./originalityCoverage";
+import { CitationRecencySummary } from "./CitationRecencySummary";
+import { isRecencyNote, isUncountedRecencyNote, notCountedLabel, sourceAgeNotesLabel } from "../domain/findingSummary";
 
 interface FindingSelection {
   isSelected: (cluster: FlagFindingCluster) => boolean;
@@ -233,8 +235,30 @@ function viewedSummary(flags: FlagSummaryOut[], viewedIds: ReadonlySet<number>):
 // A finding is open for bulk review while it is neither dismissed nor
 // confirmed; resolved findings are changed one at a time.
 function isOpenForBulk(cluster: FlagFindingCluster) {
+  if (cluster.flags.every(isUncountedRecencyNote)) return false;
   return cluster.flags.some((flag) => !flag.overridden && !flag.finding_confirmed);
 }
+
+// V-092: source-age notes a format does not count, listed beside the
+// findings with the same cards but outside the findings' counts and bulk
+// actions.
+function SourceAgeNotes({ flags, viewedIds = EMPTY_VIEWED, showActions = true }: { flags: FlagSummaryOut[]; viewedIds?: ReadonlySet<number>; showActions?: boolean }) {
+  const clusters = clusterFlagFindings(flags);
+  const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
+  const headingId = useId();
+  return <section className="signal-source-age-notes" aria-labelledby={headingId}>
+    <h3 id={headingId}>{SOURCE_AGE_NOTES_HEADING} ({clusters.length})</h3>
+    <p className="signal-field-hint">{SOURCE_AGE_NOTES_HINT}</p>
+    <ul className="signal-flag-list">
+      {clusters.map((cluster) => <SignalFindingCard key={cluster.key} cluster={cluster} expanded={open.has(cluster.key)} showActions={showActions}
+        showResolutionSummary viewedIds={viewedIds}
+        onToggle={() => setOpen((current) => { const next = new Set(current); if (next.has(cluster.key)) next.delete(cluster.key); else next.add(cluster.key); return next; })} />)}
+    </ul>
+  </section>;
+}
+
+const SOURCE_AGE_NOTES_HEADING = "Source-age notes";
+const SOURCE_AGE_NOTES_HINT = "Notes on references older than this format's recency window. They do not count toward readiness and are not findings.";
 
 function SelectFinding({ cluster, selection }: { cluster: FlagFindingCluster; selection?: FindingSelection }) {
   if (!selection || !isOpenForBulk(cluster)) return null;
@@ -310,7 +334,7 @@ function SignalFindingCard({
       <li className={first.overridden ? "signal-flag-row signal-flag-row--resolved" : "signal-flag-row"}>
         <div className="signal-flag-row__summary">
           <SelectFinding cluster={cluster} selection={selection} />
-          <span className={`signal-severity signal-severity--${first.affects_readiness === false ? "low" : first.severity}`}>{first.affects_readiness === false ? "Review lead: not scored" : SEVERITY_LABEL[first.severity]}</span>
+          <span className={`signal-severity signal-severity--${first.affects_readiness === false ? "low" : first.severity}`}>{first.affects_readiness === false ? notCountedLabel(first) : SEVERITY_LABEL[first.severity]}</span>
           {!first.overridden && viewedIds.has(first.id) && (
             <span className="signal-viewed-state"><ViewedIcon />Opened</span>
           )}
@@ -349,7 +373,7 @@ function SignalFindingCard({
     <li className={allResolved ? "signal-flag-row signal-flag-row--resolved" : "signal-flag-row"}>
       <div className="signal-flag-row__summary">
         <SelectFinding cluster={cluster} selection={selection} />
-        <span className={`signal-severity signal-severity--${first.affects_readiness === false ? "low" : severity}`}>{first.affects_readiness === false ? "Review lead: not scored" : SEVERITY_LABEL[severity]}</span>
+        <span className={`signal-severity signal-severity--${first.affects_readiness === false ? "low" : severity}`}>{first.affects_readiness === false ? notCountedLabel(first) : SEVERITY_LABEL[severity]}</span>
         {viewedSummary(flags, viewedIds) && (
           <span className="signal-viewed-state"><ViewedIcon />{viewedSummary(flags, viewedIds)}</span>
         )}
@@ -372,7 +396,7 @@ function SignalFindingCard({
         ? isManuscriptQuote(first)
           ? <blockquote>“{systemFindingCopy(first.evidence_excerpt, first.problem_kind, "evidence")}”</blockquote>
           : <p className="signal-flag-finding-context">{systemFindingCopy(first.evidence_excerpt, first.problem_kind, "evidence")}</p>
-        : <p className="signal-flag-finding-context">{flags.length} manuscript locations point to this possible finding, each with its own excerpt. Review one location below, or open all {flags.length} to compare them.</p>}
+        : <p className="signal-flag-finding-context">{isRecencyNote(first) ? `${flags.length} references are older than the recency window. Each one is listed below with its year.` : `${flags.length} manuscript locations point to this possible finding, each with its own excerpt. Review one location below, or open all ${flags.length} to compare them.`}</p>}
       {first.first_upload_context && <p className="signal-field-hint">First-upload context: the comparison archive was limited when this signal was created.</p>}
       <div className="signal-flag-row__actions">
         {/* BUG-169: a multi-location cluster used to hide EVERY evidence
@@ -1095,14 +1119,18 @@ export function SignalFlagsPanel({
   const originalityNote = originalityCoverageNote(review?.assessment);
   const { data: me } = useMe();
   const viewedIds = useViewedFlagIds(me?.id);
-  const allOtherFlags = flags?.filter((flag) => !isOptionalComparisonLead(flag));
+  const allOtherFlags = flags?.filter((flag) => !isOptionalComparisonLead(flag) && !isUncountedRecencyNote(flag));
   const otherFlags = allOtherFlags?.filter(flag => flag.check_kind === selectedModule);
+  // V-092: source-age notes the format does not count are listed apart from
+  // findings, so no finding count, filter or selection includes them.
+  const sourceAgeNoteFlags = flags?.filter((flag) => flag.check_kind === selectedModule && isUncountedRecencyNote(flag)) ?? [];
   const optional = comparisonLeadCollection(checkRunId, flagsQuery);
   const flagsLastLoaded = flags !== undefined && (flagsQuery.fetchStatus !== "idle" || flagsQuery.isError);
   const usableFlags = flags !== undefined && (flags.length > 0 || optional.state === "success");
   const hasOptional = selectedModule === "originality_reuse" && Boolean(optional.snapshot?.total);
   const onlyOptional = optional.state === "success" && hasOptional && otherFlags?.length === 0;
   const openFindingCount = clusterFlagFindings(otherFlags?.filter(isOpenFinding) ?? []).length;
+  const openSourceAgeNotes = clusterFlagFindings(sourceAgeNoteFlags.filter(isOpenFinding)).length;
   // BUG-167: defaults the FILTER to the worst unresolved severity present,
   // not the declaration order -- see `defaultFlagView`'s own comment for
   // why this is a filter-default decision, not a reorder.
@@ -1137,13 +1165,13 @@ export function SignalFlagsPanel({
 
   return (
     <section id="integrity-signals" tabIndex={-1} className="signal-review-section" aria-labelledby="flags-heading">
-      <div className="signal-review-section__heading"><div><p className="signal-section-kicker">Integrity record</p><h2 id="flags-heading" tabIndex={-1}>Integrity signals</h2></div>{usableFlags && !onlyOptional && <span>{flagsLastLoaded ? "Last loaded: " : ""}{openFindingCount} {hasOptional ? "other open" : "open"} finding{openFindingCount === 1 ? "" : "s"}</span>}</div>
+      <div className="signal-review-section__heading"><div><p className="signal-section-kicker">Integrity record</p><h2 id="flags-heading" tabIndex={-1}>Integrity signals</h2></div>{usableFlags && !onlyOptional && <span>{flagsLastLoaded ? "Last loaded: " : ""}{openFindingCount} {hasOptional ? "other open" : "open"} finding{openFindingCount === 1 ? "" : "s"}{openSourceAgeNotes > 0 && ` · ${sourceAgeNotesLabel(openSourceAgeNotes)}`}</span>}</div>
       {!onlyOptional && <p className="signal-review-section__intro">These are possible inconsistencies, not accusations. Open a signal to inspect its excerpt, source anchor, and available instructor action.</p>}
       <div className="signal-integrity-review-body">
       <IntegrityModuleNavigation selected={selectedModule} controls={`signal-selected-module-${checkRunId}`}
         modules={review?.assessment?.integrity_modules}
         stateLabels={originalityNote ? { originality_reuse: originalityNote.tag } : undefined}
-        counts={new Map(["internal_agreement", "citation_integrity", "statistical_forensics", "originality_reuse"].map(kind => [kind, flags?.filter(flag => flag.check_kind === kind).length ?? 0]))}
+        counts={new Map(["internal_agreement", "citation_integrity", "statistical_forensics", "originality_reuse"].map(kind => [kind, flags?.filter(flag => flag.check_kind === kind && !isUncountedRecencyNote(flag)).length ?? 0]))}
         onSelect={kind => { const next = new URLSearchParams(moduleParams); next.set("module", kind); next.set("review_step", "findings"); [FLAG_VIEW_PARAM, CLUSTERS_OPEN_PARAM, VISIBLE_COUNT_PARAM].forEach(key => next.delete(key)); setModuleParams(next, { replace: true }); }} />
       <div id={`signal-selected-module-${checkRunId}`}>
 
@@ -1154,6 +1182,7 @@ export function SignalFlagsPanel({
         onClose={() => setBulkAction(null)}
         onDone={(message) => { setBulkAction(null); setSelectedIds(new Set()); setBulkDrafts({ confirm: "", dismiss: "" }); setBulkMessage(message); }} />}
       {selectedModule === "statistical_forensics" && <StatisticalCheckScope scope={statisticalScope} />}
+      {selectedModule === "citation_integrity" && <CitationRecencySummary recency={review?.assessment?.citation_recency} />}
       {selectedModule === "originality_reuse" && <OriginalityScope scope={originalityScope} showAddAction />}
       {selectedModule === "originality_reuse" && <OriginalityCoverageNotice report={review?.assessment} />}
       {review && active && <BulkSelectionBar slot="before" findings={selectedClusters.length} locations={selectedLocations} elsewhere={selectedElsewhere} decided={Boolean(review.decision)}
@@ -1173,6 +1202,7 @@ export function SignalFlagsPanel({
         : onlyOptional || (selectedModule === "originality_reuse" && originalityNote) ? null : optional.state === "success" ? <EmptyState className="signal-integrity-empty" id={`signal-module-empty-${checkRunId}`} title={emptyState.title}
           action={emptyState.limits ? <ActionLink to={`/report/${checkRunId}?section=limits`} variant="secondary">Open assessment limits</ActionLink> : undefined}><p>{emptyState.description}</p></EmptyState>
           : <p>{optional.state === "error" ? "Other findings could not be loaded." : optional.state === "paused" ? "Waiting to load other findings." : optional.state === "fetching" ? "Loading other findings." : "Other findings are not available."}</p>}
+      {sourceAgeNoteFlags.length > 0 && <SourceAgeNotes flags={sourceAgeNoteFlags} viewedIds={viewedIds} />}
       {selectedModule === "originality_reuse" && <ComparisonLeadList collection={optional} showActions viewedIds={viewedIds} onRetry={() => { void flagsQuery.refetch(); }} />}
       {review && active && <BulkSelectionBar slot="after" findings={selectedClusters.length} locations={selectedLocations} elsewhere={selectedElsewhere} decided={Boolean(review.decision)}
         onAction={(action) => { setBulkMessage(""); setBulkAction(action); }}
@@ -1199,22 +1229,25 @@ export function SignalPublicFlags({
   selectedModule?: IntegrityKind;
   selectedRecordId?: number;
 }) {
-  const otherFlags = flags.filter((flag) => !isOptionalComparisonLead(flag));
+  const otherFlags = flags.filter((flag) => !isOptionalComparisonLead(flag) && !isUncountedRecencyNote(flag));
+  const sharedNoteFlags = flags.filter(isUncountedRecencyNote);
   const optional = comparisonLeadCollection(checkRunId, { data: flags, fetchStatus: "idle", isSuccess: true, isError: false });
   const findingCount = clusterFlagFindings(otherFlags).length;
+  const sourceAgeNotes = clusterFlagFindings(sharedNoteFlags).length;
   const visibleOtherFlags = selectedRecordId === undefined ? otherFlags : otherFlags.filter(flag => flag.id === selectedRecordId);
   const selectedOptional = selectedRecordId === undefined || optional.snapshot?.ordinalById.has(selectedRecordId);
   const hasOptional = Boolean(optional.snapshot?.total);
   const onlyOptional = hasOptional && otherFlags.length === 0;
   return (
     <section id="integrity-signals" tabIndex={-1} className="signal-review-section" aria-labelledby="flags-heading">
-      <div className="signal-review-section__heading"><div><p className="signal-section-kicker">Integrity record</p><h2 id="flags-heading">Possible inconsistencies</h2></div>{!onlyOptional && <span>{findingCount} {hasOptional ? "other " : ""}finding{findingCount === 1 ? "" : "s"}</span>}</div>
+      <div className="signal-review-section__heading"><div><p className="signal-section-kicker">Integrity record</p><h2 id="flags-heading">Possible inconsistencies</h2></div>{!onlyOptional && <span>{findingCount} {hasOptional ? "other " : ""}finding{findingCount === 1 ? "" : "s"}{sourceAgeNotes > 0 && ` · ${sourceAgeNotesLabel(sourceAgeNotes)}`}</span>}</div>
       {!onlyOptional && <p className="signal-review-section__intro">These are possible inconsistencies, not accusations. This shared view shows the bounded evidence the instructor chose to share; it does not expose the private Audit trail.</p>}
       {(!selectedModule || selectedModule === "statistical_forensics") && <StatisticalCheckScope scope={statisticalScope} />}
       {(!selectedModule || selectedModule === "originality_reuse") && <OriginalityScope scope={originalityScope} />}
       {visibleOtherFlags.length
         ? <SignalFlagList flags={visibleOtherFlags} showActions={false} initialView="all" />
         : onlyOptional || selectedRecordId !== undefined ? null : <p>{selectedModule ? "No shared integrity signals are shown in this module." : "This run produced no shared integrity signals."}</p>}
+      {(!selectedModule || selectedModule === "citation_integrity") && selectedRecordId === undefined && sharedNoteFlags.length > 0 && <SourceAgeNotes flags={sharedNoteFlags} showActions={false} />}
       {(!selectedModule || selectedModule === "originality_reuse") && selectedOptional && <ComparisonLeadList collection={optional} showActions={false} selectedRecordId={selectedRecordId} />}
     </section>
   );

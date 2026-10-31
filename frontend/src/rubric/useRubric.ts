@@ -2,7 +2,7 @@
 // save/confirm mutation, and versioning (screens 4c/4d/4m).
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, api } from "../api/client";
-import type { CriterionType, Rubric, RubricListItem, RubricLevel } from "../api/types";
+import type { CitationRecencySettingsIn, CitationRecencySettingsOut, CriterionType, Rubric, RubricListItem, RubricLevel } from "../api/types";
 import { verifyUploadFailure, type UploadAttemptScope } from "../auth/useUploadScope";
 import { StaleUploadContextError, UnconfirmedUploadError, validateRubricReceipt } from "../api/uploadOutcome";
 
@@ -150,5 +150,17 @@ export function useSetRubricFamilyProgram() {
     mutationFn: ({ familyId, programId }: { familyId: string; programId: number | null }) =>
       api.put<RubricListItem[]>(`/rubric-families/${familyId}/program`, { program_id: programId }),
     onSuccess: invalidate,
+  });
+}
+
+// V-092: the citation recency note's setting for the WHOLE family. An empty
+// body clears it back to the configured defaults. Existing reports keep the
+// values their check recorded.
+export function useSetCitationRecency() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ familyId, body }: { familyId: string; body: CitationRecencySettingsIn }) =>
+      api.put<CitationRecencySettingsOut>(`/rubric-families/${familyId}/citation-recency`, body),
+    onSuccess: () => { void client.invalidateQueries({ queryKey: ["rubric"] }); },
   });
 }

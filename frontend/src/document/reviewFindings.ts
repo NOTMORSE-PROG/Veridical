@@ -1,6 +1,7 @@
 import type { FlagRegionOut, FlagSummaryOut } from "../api/types";
 import { isOptionalComparisonLead } from "../domain/comparisonLeadIdentity";
 import { findingIdentity as reportFindingIdentity } from "../report/flagClusters";
+import { isUncountedRecencyNote } from "../domain/findingSummary";
 
 export interface ReviewFinding {
   key: string;
@@ -12,6 +13,16 @@ export interface ReviewFinding {
   isSourceConfirmed: boolean;
   // Instructor agreed it is a real issue; it still counts for readiness.
   isConfirmed: boolean;
+  // V-092: a source-age note the format does not count. It is listed but has
+  // no finding number and is left out of finding counts and navigation.
+  isSourceAgeNote: boolean;
+}
+
+export const SOURCE_AGE_NOTE_NAME = "Source-age note";
+
+// What the finding is called in a list, a header or a status line.
+export function findingName(finding: Pick<ReviewFinding, "number" | "isSourceAgeNote">): string {
+  return finding.isSourceAgeNote ? SOURCE_AGE_NOTE_NAME : `Finding ${finding.number}`;
 }
 
 const SEVERITY_RANK: Record<FlagSummaryOut["severity"], number> = {
@@ -84,9 +95,11 @@ export function buildReviewFindings(flags: FlagSummaryOut[]): ReviewFinding[] {
       (highest, flag) => SEVERITY_RANK[flag.severity] > SEVERITY_RANK[highest] ? flag.severity : highest,
       members[0].severity,
     );
+    const isSourceAgeNote = members.every(isUncountedRecencyNote);
     return {
       key,
-      number: isOptionalComparisonLead(representative) ? index + 1 : ++otherNumber,
+      number: isOptionalComparisonLead(representative) ? index + 1 : isSourceAgeNote ? 0 : ++otherNumber,
+      isSourceAgeNote,
       flags: members,
       representative,
       severity,

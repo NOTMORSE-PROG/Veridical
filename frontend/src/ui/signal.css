@@ -9143,4 +9143,21 @@
     font: inherit;
   }
   .signal-finding-confirm textarea[aria-invalid="true"] { border-color: var(--color-signal-not-ready-text); }
+  /* V-092: the citation recency note's setting on the format page. */
+  .signal-recency-setting { margin-block-start: var(--signal-space-4); }
+  .signal-recency-setting h3 { margin: 0; font-size: var(--signal-type-body); }
+  .signal-recency-setting__check { display: flex; gap: var(--signal-space-2); align-items: flex-start; color: var(--color-signal-ink); }
+  .signal-recency-setting__check input { margin-block-start: var(--signal-space-1); accent-color: var(--color-signal-link); }
+  .signal-recency-setting input[type="number"] {
+    min-height: var(--signal-control-height);
+    inline-size: var(--signal-form-width);
+    max-inline-size: 100%;
+    border: var(--signal-border-emphasis) solid var(--color-signal-border-strong);
+    border-radius: var(--signal-radius-control);
+    padding: var(--signal-space-2) var(--signal-space-3);
+    background: var(--color-signal-surface);
+    color: var(--color-signal-ink);
+    font: inherit;
+  }
+  .signal-recency-setting__actions { display: flex; flex-wrap: wrap; gap: var(--signal-space-2); }
 }

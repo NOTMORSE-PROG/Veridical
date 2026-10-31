@@ -84,6 +84,9 @@ export function findingVerificationPrompt(checkKind: string, problemKind: string
       ? "Check whether this statement is this study's objective. Read the results and surrounding text to see whether it was addressed; no paired result was recorded by the check."
       : "Check that both statements describe this study and refer to the same objective. Read the surrounding text before deciding whether the result addresses the objective.";
   }
+  if (problemKind === "outside_recency_window") {
+    return "Check the year in the reference entry, then decide whether an older source suits the claim it supports. This note describes the source's age, not whether the source is correct.";
+  }
   if (problemKind === "orphan_in_text_citation") {
     return "Check the manuscript's reference list for this author and year. Confirm whether the entry is missing or uses different spelling or a different year.";
   }

@@ -14,11 +14,39 @@ export function findingSubject(flag: FlagSummaryOut): string {
 const SEVERITY: Record<FlagSummaryOut["severity"], string> = { high: "High severity", med: "Medium severity", low: "Low severity" };
 
 // The same label the finding's card shows.
-export function severityLabel(flag: Pick<FlagSummaryOut, "severity" | "affects_readiness">): string {
-  if (flag.affects_readiness === false) return "Review lead: not scored";
+export const RECENCY_NOTE_LABEL = "Recency note: not counted";
+export const REVIEW_LEAD_LABEL = "Review lead: not scored";
+
+// A summary carries the kind as problem_kind; the full finding record as
+// ai_verdict_summary.
+type KindCarrier = { problem_kind?: string | null; ai_verdict_summary?: string | null };
+
+export function isRecencyNote(flag: KindCarrier): boolean {
+  return (flag.problem_kind ?? flag.ai_verdict_summary) === "outside_recency_window";
+}
+
+// What a finding that is not counted for readiness is called.
+export function notCountedLabel(flag: KindCarrier): string {
+  return isRecencyNote(flag) ? RECENCY_NOTE_LABEL : REVIEW_LEAD_LABEL;
+}
+
+export function severityLabel(flag: Pick<FlagSummaryOut, "severity" | "affects_readiness"> & Partial<Pick<FlagSummaryOut, "problem_kind">>): string {
+  if (flag.affects_readiness === false) return notCountedLabel({ problem_kind: flag.problem_kind ?? null });
   return SEVERITY[flag.severity] ?? "Severity not recorded";
 }
 
 export function findingTitle(flag: FlagSummaryOut): string {
   return problemLabel(flag.problem_kind) ?? flag.criterion_text ?? "Possible inconsistency";
+}
+
+// A recency note the format does not count toward readiness is a note about
+// source age, not a finding: it is listed, but never adds to a finding count.
+// One the format counts is part of the count, as the single finding the
+// score deducts for.
+export function isUncountedRecencyNote(flag: KindCarrier & Pick<FlagSummaryOut, "affects_readiness">): boolean {
+  return isRecencyNote(flag) && flag.affects_readiness === false;
+}
+
+export function sourceAgeNotesLabel(count: number): string {
+  return `${count} source-age ${count === 1 ? "note" : "notes"}`;
 }

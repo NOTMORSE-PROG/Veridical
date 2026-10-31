@@ -56,6 +56,15 @@ describe("clusterFlagFindings", () => {
     expect(clusters).toHaveLength(2);
   });
 
+  it("makes every recency note one finding, each old source a location", () => {
+    const clusters = clusterFlagFindings([
+      flag({ id: 3, check_kind: "citation_integrity", problem_kind: "outside_recency_window", evidence_excerpt: "Biggs, J. (1996). Enhancing teaching." }),
+      flag({ id: 5, check_kind: "citation_integrity", problem_kind: "orphan_in_text_citation", evidence_excerpt: "Cruz, 2020" }),
+      flag({ id: 4, check_kind: "citation_integrity", problem_kind: "outside_recency_window", evidence_excerpt: "Tang, C. (2011). Teaching for quality." }),
+    ]);
+    expect(clusters.map((cluster) => cluster.flags.map((member) => member.id))).toEqual([[3, 4], [5]]);
+  });
+
   it("never guesses an identity when problem kind or reuse reference is missing", () => {
     const clusters = clusterFlagFindings([
       flag({ id: 1, problem_kind: null, matched_ref: 34 }),

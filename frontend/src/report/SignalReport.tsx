@@ -36,6 +36,7 @@ import { reviewDeskDestination } from "../routing/reviewDeskReturn";
 import { EmptyState } from "../ui/EmptyState";
 import { uncountedHighLine } from "../domain/readinessExclusion";
 import { needsReviewReason } from "../domain/readinessHeadline";
+import { isUncountedRecencyNote } from "../domain/findingSummary";
 
 type RecordTab = "grades" | "findings" | "images" | "limits";
 const RECORD_TAB_PARAM = "section";
@@ -230,7 +231,7 @@ export function SignalReportPage() {
           <section className="signal-report-record" aria-label="Report record">
             <div role="tablist" aria-label="Report record sections" className="signal-record-tabs">
               {([["grades", `Criterion records (${report.results.length})`],
-                ["findings", `Integrity findings (${flagsQuery.data ? flagsQuery.data.filter(flag => !isOptionalComparisonLead(flag)).length : "…"})`],
+                ["findings", `Integrity findings (${flagsQuery.data ? flagsQuery.data.filter(flag => !isOptionalComparisonLead(flag) && !isUncountedRecencyNote(flag)).length : "…"})`],
                 ["images", `Image readings (${report.figure_readings?.length ?? 0})`],
                 ["limits", `Assessment limits (${limits.length})`]] as const).map(([value, label]) =>
                 <button key={value} type="button" role="tab" id={`record-tab-${value}`} aria-controls={`record-panel-${value}`} aria-selected={tab === value}
