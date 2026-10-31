@@ -654,6 +654,14 @@ async def test_an_older_run_that_left_the_body_out_does_not_read_as_no_text(sess
     current = {**legacy, "pages_not_compared": []}
     report = await scope(current, ["ambiguous_reference_end"])
     assert report.originality_scope.not_compared_reason == "no_text"
+    # Any other selection issue left the body out too in those runs.
+    report = await scope(legacy, ["unreadable_reference_number"])
+    assert report.originality_scope.not_compared_reason == "reference_list_unconfirmed"
+    # A list whose place is unknown is still refused today: it reads as the
+    # current refusal, never as a file with no text.
+    for issue in ("ambiguous_reference_heading", "invalid_source_line_inventory"):
+        report = await scope(legacy, [issue, "ambiguous_reference_end"])
+        assert report.originality_scope.not_compared_reason == "reference_boundary_unclear"
 
 
 async def test_deciding_an_already_decided_report_is_rejected(session_factory):

@@ -7,7 +7,7 @@ import { NATIVE_MATH_HISTORY_TITLE, NATIVE_MATH_HISTORY_LIMIT } from "../domain/
 import { CITATION_HISTORY_REPORT_LIMIT, CITATION_HISTORY_TITLE } from "../domain/citationHistory";
 import { descriptiveAssumptionLimit } from "./statisticalScopeCopy";
 import { originalityCoverageNote } from "./originalityCoverage";
-import { pageRanges } from "../domain/criterionSourceCoverage";
+import { pageRanges, unbrokenRange } from "../domain/criterionSourceCoverage";
 
 const INTEGRITY_LABEL: Record<IntegrityCheckStatusOut["check_kind"], string> = {
   internal_agreement: "Internal agreement",
@@ -50,24 +50,36 @@ function readablePages(status: IntegrityCheckStatusOut): number[] {
   return [...new Set((status.source_pages_unassessed ?? []).filter((page) => Number.isSafeInteger(page) && page > 0))].sort((a, b) => a - b);
 }
 
-function withUnreadPages(item: CoverageStatementItem, status: IntegrityCheckStatusOut): CoverageStatementItem {
+const shownRanges = (pages: number[]) => pageRanges(pages).split(", ").map(unbrokenRange).join(", ");
+
+function withUnreadPages(item: CoverageStatementItem, status: IntegrityCheckStatusOut, allUnread: number[],
+  scope?: ReportOut["originality_scope"]): CoverageStatementItem {
   const count = status.n_source_pages_unassessed;
   if (!count) return item;
   const pages = readablePages(status);
-  const line = pages.length
-    ? `${pages.length === 1 ? "Page" : "Pages"} ${pageRanges(pages)} could not be read reliably, so this check left ${pages.length === 1 ? "it" : "them"} out.`
-    : `${count} ${count === 1 ? "page" : "pages"} could not be read reliably. This record does not say which; check the manuscript yourself.`;
+  const noun = (n: number) => `${n} ${n === 1 ? "page" : "pages"}`;
+  const nothingCompared = status.check_kind === "originality_reuse"
+    && originalityCoverageNote({ integrity_check_status: [status], originality_scope: scope ?? null })?.none;
+  const line = nothingCompared
+    ? `No text was compared, so the ${noun(pages.length || count)} that could not be read reliably did not change this result.`
+    : !pages.length
+      ? `${noun(count)} could not be read reliably. This record does not say which; check the manuscript yourself.`
+      : pages.length === allUnread.length
+        ? `${noun(pages.length)} could not be read reliably, so this check left ${pages.length === 1 ? "it" : "them"} out. ${pages.length === 1 ? "It is" : "They are"} listed under ${UNREAD_PAGES_COPY.label}.`
+        : `${pages.length === 1 ? "Page" : "Pages"} ${shownRanges(pages)} could not be read reliably, so this check left ${pages.length === 1 ? "it" : "them"} out.`;
   return { ...item, subIssues: [...(item.subIssues ?? []), line] };
 }
 
 export const UNREAD_PAGES_COPY = {
   label: "Pages not read",
-  detail: (pages: number[]) => `${pages.length === 1 ? "Page" : "Pages"} ${pageRanges(pages)} could not be read in a reliable order, so the checks listed below left ${pages.length === 1 ? "it" : "them"} out. Open ${pages.length === 1 ? "it" : "each one"} in manuscript review to check ${pages.length === 1 ? "it" : "them"} yourself.`,
+  detail: (pages: number[]) => `${pages.length === 1 ? "Page" : "Pages"} ${shownRanges(pages)} could not be read in a reliable order, so the checks listed below left ${pages.length === 1 ? "it" : "them"} out. Open ${pages.length === 1 ? "it" : "each one"} in manuscript review to check ${pages.length === 1 ? "it" : "them"} yourself.`,
   detailsLabel: "links to the pages not read",
 };
 
+const allUnreadPages = (statuses: IntegrityCheckStatusOut[]) => [...new Set(statuses.flatMap(readablePages))].sort((a, b) => a - b);
+
 function unreadPagesItem(statuses: IntegrityCheckStatusOut[], checkRunId: number): CoverageStatementItem | null {
-  const pages = [...new Set(statuses.flatMap(readablePages))].sort((a, b) => a - b);
+  const pages = allUnreadPages(statuses);
   if (!pages.length) return null;
   return {
     key: "source_pages_unread",
@@ -75,14 +87,15 @@ function unreadPagesItem(statuses: IntegrityCheckStatusOut[], checkRunId: number
     detail: UNREAD_PAGES_COPY.detail(pages),
     detailsLabel: UNREAD_PAGES_COPY.detailsLabel,
     sources: pageRanges(pages).split(", ").map((range) => ({
-      label: `${range.includes("-") ? "Pages" : "Page"} ${range}`,
+      label: `${range.includes("-") ? "Pages" : "Page"} ${unbrokenRange(range)}`,
       to: `/report/${checkRunId}/document?anchor=${encodeURIComponent(`page ${range.split("-")[0]}`)}`,
     })),
   };
 }
 
-function integrityCoverageItem(status: IntegrityCheckStatusOut, manuscriptId: number, checkRunId: number, scope?: ReportOut["originality_scope"]): CoverageStatementItem {
-  return withUnreadPages(coverageItemBeforePages(status, manuscriptId, checkRunId, scope), status);
+function integrityCoverageItem(status: IntegrityCheckStatusOut, manuscriptId: number, checkRunId: number, scope: ReportOut["originality_scope"] | undefined,
+  allUnread: number[]): CoverageStatementItem {
+  return withUnreadPages(coverageItemBeforePages(status, manuscriptId, checkRunId, scope), status, allUnread, scope);
 }
 
 function coverageItemBeforePages(status: IntegrityCheckStatusOut, manuscriptId: number, checkRunId: number, scope?: ReportOut["originality_scope"]): CoverageStatementItem {
@@ -215,7 +228,7 @@ export function coverageItems(report: ReportOut): CoverageStatementItem[] {
   for (const status of [...(report.integrity_check_status ?? [])].sort((a, b) => order.indexOf(a.check_kind) - order.indexOf(b.check_kind))) {
     if (descriptiveLimit && status.check_kind === "statistical_forensics" && !status.coverage_reason
       && !status.n_skipped_api_down && !status.n_skipped_quota && !status.n_skipped_parse_failure) continue;
-    items.push(integrityCoverageItem(status, report.manuscript_id, report.check_run_id, report.originality_scope));
+    items.push(integrityCoverageItem(status, report.manuscript_id, report.check_run_id, report.originality_scope, allUnreadPages(report.integrity_check_status ?? [])));
   }
   return items;
 }

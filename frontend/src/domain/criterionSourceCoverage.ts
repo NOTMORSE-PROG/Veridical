@@ -40,10 +40,13 @@ export function criterionCoverageSuffix(value: CriterionSourceCoverage | null): 
   if (!value) return "";
   if (value.native_math_inventory_state === "not_recorded") return ": source coverage not recorded";
   if (value.native_math_inventory_state === "unavailable") return ": source coverage unavailable";
-  if (value.unread_pages?.length) return ": some pages not read";
-  if (value.images_not_assessed) return ": image content not assessed";
+  const gaps = [value.unread_pages?.length ? "some pages not read" : "", value.images_not_assessed ? "image content not assessed" : ""].filter(Boolean);
+  if (gaps.length) return `: ${gaps.join(", ")}`;
   return (value.n_native_equations_unassessed ?? 0) > 0 ? ": source content omitted" : "";
 }
+
+/** "45-47" -> "45‑47": a range read on screen must not wrap at its hyphen. */
+export const unbrokenRange = (range: string) => range.replace("-", "‑");
 
 /** [45, 46, 47, 53] -> "45-47, 53" */
 export function pageRanges(pages: number[]): string {

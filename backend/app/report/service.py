@@ -43,6 +43,7 @@ from app.config import Settings, get_settings
 from app.errors import ConflictError, GoneError, NotFoundError
 from app.findings.policy import exclusion_reason, reuse_excerpt
 from app.ingest.figures import saved_figure_readings
+from app.ingest.references import REFERENCE_LOCATION_UNKNOWN
 from app.ingest.regions import recover_region
 from app.ingest.schemas import SectionTree
 from app.ingest.service import (
@@ -419,30 +420,40 @@ def source_pages_unassessed(detail: dict) -> list[int] | None:
     return sorted({page for page in pages if type(page) is int and page >= 1}) or None
 
 
-def _legacy_reference_refusal(originality: dict, citation: dict | None) -> bool:
-    """An originality row saved before the body could be compared without a
-    confirmed reference list. Those runs left the whole body out when the
-    list's entries or end were ambiguous, and recorded it as a file with no
-    text. Rows written since always carry pages_not_compared, so they never
-    match."""
+def _legacy_reference_refusal(
+    originality: dict, citation: dict | None
+) -> Literal["reference_list_unconfirmed", "reference_boundary_unclear"] | None:
+    """Why an older originality row compared no text, when it was not an
+    empty file. Rows saved before the body could be compared without a
+    confirmed reference list left the whole body out whenever the list had
+    any selection issue, and recorded it as a file with no text. Rows written
+    since always carry pages_not_compared, so they never match. A list whose
+    place is unknown is still refused today, which the current reason for a
+    body that cannot be told apart from its references already says."""
     if originality.get("comparison_ran") is not False or "pages_not_compared" in originality:
-        return False
+        return None
     if originality.get("note") != NO_TEXT_NOTE or originality.get("not_compared_reason"):
-        return False
+        return None
     issues = (citation or {}).get("reference_selection_issues")
-    return isinstance(issues, list) and any(
-        isinstance(issue, str) and issue.startswith("ambiguous_") for issue in issues
+    codes = (
+        {issue for issue in issues if isinstance(issue, str)} if isinstance(issues, list) else set()
     )
+    if not codes:
+        return None
+    if codes & REFERENCE_LOCATION_UNKNOWN:
+        return "reference_boundary_unclear"
+    return "reference_list_unconfirmed"
 
 
 def _images_not_assessed(forensics_details: list[dict | None]) -> bool:
-    """Whether the statistical check recorded any image it did not read.
-    Criterion grading reads extracted text only, so those images never
-    reached a grade either."""
+    """Whether the manuscript has images. Criterion grading reads extracted
+    text only, so no image, including one the statistical check read,
+    reached a grade."""
     return any(
         isinstance(detail, dict)
         and bool(
-            detail.get("n_images_unassessed")
+            detail.get("n_image_occurrences")
+            or detail.get("n_images_unassessed")
             or detail.get("n_image_occurrences_omitted")
             or detail.get("image_coverage_items")
         )
@@ -453,13 +464,18 @@ def _images_not_assessed(forensics_details: list[dict | None]) -> bool:
 def _with_image_coverage(
     results: list[CriterionResultOut], images_not_assessed: bool
 ) -> list[CriterionResultOut]:
-    """Tell each graded criterion that the manuscript's images never reached
-    its grade. Only the disclosure changes; the grade itself is untouched."""
+    """Tell each criterion the grader assessed that the manuscript's images
+    never reached its grade. Rows left ungraded (source quality, structural
+    alignment) say nothing about images. Only the disclosure changes; the
+    grade itself is untouched."""
     if not images_not_assessed:
         return results
     return [
         row
-        if row.kind != "semantic" or row.resolution or row.source_coverage is None
+        if row.kind != "semantic"
+        or row.basis != "llm"
+        or row.resolution
+        or row.source_coverage is None
         else row.model_copy(
             update={
                 "source_coverage": row.source_coverage.model_copy(
@@ -992,11 +1008,10 @@ async def report_out_for_check_run(
                 )
                 else None
                 if ran
-                else "reference_list_unconfirmed"
-                if _legacy_reference_refusal(
+                else _legacy_reference_refusal(
                     originality_detail, citation_row.detail if citation_row is not None else None
                 )
-                else "no_text"
+                or "no_text"
             ),
         )
 

@@ -417,6 +417,8 @@ def test_export_says_why_an_older_originality_run_compared_nothing():
     assert "reference list" in text
     assert "no comparable content" not in text
     assert "same result" not in text
+    # The saved row cannot show whether a new run would compare the body.
+    assert "new check run" not in text
 
 
 def test_export_lists_the_unread_pages_behind_the_count():
@@ -433,10 +435,33 @@ def test_export_lists_the_unread_pages_behind_the_count():
             coverage_reason="source_reading_order_partial",
             n_source_pages_unassessed=5,
             source_pages_unassessed=[12, 13, 14, 40, 41],
-        )
+        ),
+        IntegrityCheckStatusOut(
+            check_kind="citation_integrity",
+            outcome="escalated",
+            n_skipped_quota=0,
+            n_skipped_api_down=0,
+            n_skipped_parse_failure=0,
+            coverage_reason="source_reading_order_partial",
+            n_source_pages_unassessed=5,
+            source_pages_unassessed=[41, 40, 14, 13, 12],
+        ),
+        IntegrityCheckStatusOut(
+            check_kind="statistical_forensics",
+            outcome="escalated",
+            n_skipped_quota=0,
+            n_skipped_api_down=0,
+            n_skipped_parse_failure=0,
+            coverage_reason="source_reading_order_partial",
+            n_source_pages_unassessed=6,
+            source_pages_unassessed=[12, 13],
+        ),
     ]
     text = " ".join(_text(build_report_pdf(data)).split())
+    assert text.count("12-14, 40-41") == 1
     assert "5 source pages unassessed (pages 12-14, 40-41)" in text
+    assert "5 source pages unassessed (the same pages as Internal agreement)" in text
+    assert "6 source pages unassessed; pages recorded (2): 12-13" in text
 
 
 def test_long_group_label_does_not_overlap_footer_or_running_header():

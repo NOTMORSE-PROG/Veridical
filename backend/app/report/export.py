@@ -66,6 +66,7 @@ from app.report.schemas import (
     CriterionResultOut,
     FlagExportDetailOut,
     FlagSummaryOut,
+    IntegrityCheckStatusOut,
     PageEvidenceImageOut,
     ReportExportData,
 )
@@ -805,6 +806,25 @@ def _page_ranges(pages: list[int]) -> str:
         else:
             runs.append([page])
     return ", ".join(f"{run[0]}-{run[-1]}" if len(run) > 1 else str(run[0]) for run in runs)
+
+
+def _unread_pages_line(
+    coverage: IntegrityCheckStatusOut, label: str, listed: dict[tuple[int, ...], str]
+) -> str:
+    """'N source pages unassessed', with the pages named the first time a list
+    appears. The count and the recorded pages come from different fields, so
+    a mismatch is printed as such rather than read as the same pages."""
+    count = coverage.n_source_pages_unassessed
+    pages = tuple(sorted(set(coverage.source_pages_unassessed or ())))
+    line = f"{count} source pages unassessed"
+    if not pages:
+        return line + " (which pages was not recorded)"
+    if pages in listed:
+        return line + f" (the same pages as {listed[pages]})"
+    listed[pages] = label
+    if len(pages) != count:
+        return line + f"; pages recorded ({len(pages)}): {_page_ranges(list(pages))}"
+    return line + f" (pages {_page_ranges(list(pages))})"
 
 
 def _criterion_source_flowables(row: CriterionResultOut, styles: dict[str, ParagraphStyle]) -> list:
@@ -1690,6 +1710,9 @@ def _build_report_pdf(data: ReportExportData, image_path) -> bytes:
             key=lambda value: _CHECK_KIND_ORDER.get(value.check_kind, len(_CHECK_KIND_ORDER)),
         )
         native_notes, native_references = group_native_source_notes(coverages)
+        # Checks usually share one unread-page list; print it once and point
+        # the later checks back to it.
+        listed_pages: dict[tuple[int, ...], str] = {}
         for coverage, native_reference in zip(coverages, native_references, strict=True):
             label = _CHECK_KIND_LABEL.get(coverage.check_kind, coverage.check_kind)
             reason = _coverage_labels().get(
@@ -1764,14 +1787,7 @@ def _build_report_pdf(data: ReportExportData, image_path) -> bytes:
                     "an external service"
                 )
             if coverage.n_source_pages_unassessed:
-                counts.append(
-                    f"{coverage.n_source_pages_unassessed} source pages unassessed"
-                    + (
-                        f" (pages {_page_ranges(coverage.source_pages_unassessed)})"
-                        if coverage.source_pages_unassessed
-                        else ""
-                    )
-                )
+                counts.append(_unread_pages_line(coverage, label, listed_pages))
             if coverage.pages_not_compared:
                 counts.append(f"Pages not compared: {_page_ranges(coverage.pages_not_compared)}")
             elif coverage.not_compared_from:

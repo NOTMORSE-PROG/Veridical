@@ -56,6 +56,7 @@ _URL = re.compile(r"https?://\S+")
 _REFERENCE_LOCATION_UNKNOWN = frozenset(
     {"ambiguous_reference_heading", "invalid_source_line_inventory"}
 )
+REFERENCE_LOCATION_UNKNOWN = _REFERENCE_LOCATION_UNKNOWN
 # Selection issues that leave the bibliography's end unknown. A later pass can
 # still shorten such a span, so text-only callers leave out everything from the
 # bibliography onward instead of trusting where the span stops.
