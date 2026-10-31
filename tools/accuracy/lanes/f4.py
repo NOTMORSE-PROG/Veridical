@@ -347,7 +347,12 @@ def run(ctx: Context) -> tuple[list[MetricRow], dict]:
         raise SystemExit(f"{config['key_variable']} is not set in {env_file}")
     if production_key and key == production_key:
         raise SystemExit("The configured key is the production key; use the local test key")
-    settings = Settings(_env_file=None, gemini_api_key=key)
+    settings = Settings(
+        _env_file=None,
+        gemini_api_key=key,
+        # The pre-registered secondary measurement (V-094) runs with this on.
+        agreement_contradiction_majority_of_three=bool(config.get("majority_of_three", False)),
+    )
     cues = load_cues(settings.agreement_cues_file)
 
     records = reach(cases["copies"], ctx.hosts(), settings, cues)
@@ -447,6 +452,7 @@ def run(ctx: Context) -> tuple[list[MetricRow], dict]:
         "warnings": warnings,
         "model": config["model"],
         "prompt_version": pair.PROMPT_VERSION,
+        "majority_of_three": settings.agreement_contradiction_majority_of_three,
         "batches": batches,
         "attempts_sent": client.attempts if client else 0,
         "cache_hits": client.cache_hits if client else 0,

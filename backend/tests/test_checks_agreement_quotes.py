@@ -217,3 +217,57 @@ def test_the_context_comes_from_the_finding_own_page_not_an_earlier_repeat():
     )
     assert context.finding_heading == "Results"
     assert context.after == "Only the pilot campus was evaluated in this phase."
+
+
+def _verdict_only(verdict):
+    return {"verdicts": [{"index": 0, "verdict": verdict, "reasoning": "r"}]}
+
+
+async def _majority_run(*answers, majority=True, confirmations=1):
+    settings = SETTINGS.model_copy(
+        update={
+            "agreement_contradiction_majority_of_three": majority,
+            "agreement_contradiction_confirmations": confirmations,
+        }
+    )
+    llm = ScriptedLLM([ANSWER, *answers])
+    result = await run_agreement_pairing(
+        llm,
+        [_statement("intent", LOGIN_INTENT, "p. 1")],
+        [_statement("outcome", LOGIN_OUTCOME)],
+        check_run_id=1,
+        settings=settings,
+    )
+    return result, llm
+
+
+async def test_majority_of_three_stops_once_two_readings_agree():
+    result, llm = await _majority_run(ANSWER)
+    assert len(llm.calls) == 2
+    assert [f.detail["kind"] for f in result.flags] == ["agreement_contradictory"]
+
+
+async def test_majority_of_three_lets_a_third_reading_settle_a_disagreement():
+    result, llm = await _majority_run(_verdict_only("consistent"), ANSWER)
+    assert len(llm.calls) == 3
+    assert llm.calls[1] != llm.calls[2], "every reading is a different request"
+    assert [f.detail["kind"] for f in result.flags] == ["agreement_contradictory"]
+
+
+async def test_majority_of_three_withholds_one_answer_out_of_three():
+    result, _ = await _majority_run(_verdict_only("consistent"), _verdict_only("partial"))
+    assert result.flags == []
+    assert result.downgrades == {"verdict_not_stable": 1}
+
+
+async def test_majority_of_three_is_off_by_default():
+    assert SETTINGS.agreement_contradiction_majority_of_three is False
+
+
+async def test_unanimity_over_several_readings_needs_every_one_to_agree():
+    result, llm = await _majority_run(
+        ANSWER, _verdict_only("consistent"), majority=False, confirmations=2
+    )
+    assert len(llm.calls) == 3 and llm.calls[1] != llm.calls[2]
+    assert result.flags == []
+    assert result.downgrades == {"verdict_not_stable": 1}

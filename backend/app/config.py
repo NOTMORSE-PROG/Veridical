@@ -919,6 +919,12 @@ class Settings(BaseSettings):
     # ways on two runs of one manuscript, so one answer is not enough to
     # accuse.
     agreement_contradiction_confirmations: int = Field(default=1, ge=1)
+    # Pre-registered alternative, off until measured (V-094): a contradiction
+    # stands when at least two of three readings say so, instead of every
+    # re-ask agreeing. It costs up to two further readings for a pair whose
+    # first re-ask disagrees. Turned on only if, on the sealed holdout,
+    # specificity stays at 100% and recall rises by more than the noise.
+    agreement_contradiction_majority_of_three: bool = False
     # How much of a statement (characters) is compared when finding it among
     # the manuscript's sentences; list items can be longer than one sentence.
     agreement_context_locate_chars: int = Field(default=80, ge=20)

@@ -86,6 +86,8 @@ Verdict = Literal[
 # Verdicts that are not findings: the judge saw no problem, or a problem the
 # manuscript itself explains, or two statements about different things.
 SILENT_VERDICTS = ("consistent", "consistent_in_context", "unrelated")
+# A majority of three is the first answer plus at most two further readings.
+MAJORITY_EXTRA_READINGS = 2
 _QUOTE_CHARS = str.maketrans({"‘": "'", "’": "'", "“": '"', "”": '"'})
 
 
@@ -257,8 +259,12 @@ SECOND_READING_NOTE = (
 )
 
 
-def _build_prompt(pairs: list[Candidate], *, second_reading: bool = False) -> str:
-    lines = [SECOND_READING_NOTE] if second_reading else []
+def _build_prompt(pairs: list[Candidate], *, reading: int = 0) -> str:
+    lines = []
+    if reading == 1:
+        lines.append(SECOND_READING_NOTE)
+    elif reading > 1:
+        lines.append(f"{SECOND_READING_NOTE} (reading {reading + 1})")
     for i, pair in enumerate(pairs):
         context = pair.context
         objective_where = pair.intent.anchor + (
@@ -291,9 +297,9 @@ async def _judge_batch(
     pairs: list[Candidate],
     *,
     check_run_id: int | None,
-    second_reading: bool = False,
+    reading: int = 0,
 ) -> dict[int, PairVerdict]:
-    prompt = _build_prompt(pairs, second_reading=second_reading)
+    prompt = _build_prompt(pairs, reading=reading)
     response = await llm.complete(
         PROMPT_TYPE, prompt, prompt_version=PROMPT_VERSION, check_run_id=check_run_id
     )
@@ -432,7 +438,7 @@ async def _judge_all(
     check_run_id: int | None,
     chunk_size: int,
     counters: dict[str, int],
-    second_reading: bool = False,
+    reading: int = 0,
 ) -> None:
     """Judge every pair in batches; fills `verdict`, counts skips by cause."""
     for start in range(0, len(judged), chunk_size):
@@ -442,7 +448,7 @@ async def _judge_all(
                 llm,
                 [j.candidate for j in chunk],
                 check_run_id=check_run_id,
-                second_reading=second_reading,
+                reading=reading,
             )
         except AIUnavailableError as exc:
             counters[exc.cause] += len(judged) - start
@@ -502,13 +508,21 @@ async def judge_pairs(
             if problem:
                 item.final, item.downgrade = "cannot_determine", problem
 
-    for _ in range(settings.agreement_contradiction_confirmations):
-        standing = [j for j in judged if j.final == "contradictory"]
+    majority = settings.agreement_contradiction_majority_of_three
+    readings = (
+        MAJORITY_EXTRA_READINGS if majority else settings.agreement_contradiction_confirmations
+    )
+    standing = [j for j in judged if j.final == "contradictory"]
+    for reading in range(1, readings + 1):
+        if majority:
+            # A majority of three: a pair whose first re-ask already agreed has
+            # two answers of three and needs no third.
+            standing = [j for j in standing if j.confirmations.count("contradictory") == 0]
         if not standing:
             break
-        # The second reading is a different request (its own header, pairs in
-        # reverse order), so it can never be answered from a cached copy of
-        # the first one.
+        # Each further reading is a different request (its own numbered header,
+        # pairs in reverse order), so it can never be answered from a cached
+        # copy of an earlier one.
         again = [Judged(j.candidate) for j in reversed(standing)]
         await _judge_all(
             llm,
@@ -516,21 +530,33 @@ async def judge_pairs(
             check_run_id=check_run_id,
             chunk_size=chunk_size,
             counters=counters,
-            second_reading=True,
+            reading=reading,
         )
         for original, repeat in zip(standing, reversed(again), strict=True):
             original.confirmations.append(repeat.verdict.verdict if repeat.verdict else "none")
-            # The first answer's reason and quotes were already checked against
-            # the sent text; the re-ask only has to reach the same verdict.
-            confirmed = repeat.verdict is not None and repeat.verdict.verdict == "contradictory"
-            if not confirmed:
-                # An answer that changes when asked again is a reason to send
-                # the pair to the instructor, not to accuse.
-                original.final = "cannot_determine"
-                original.downgrade = (
-                    "confirmation_not_answered" if repeat.verdict is None else "verdict_not_stable"
-                )
+        if not majority:
+            # Unanimity: the first answer's reason and quotes were already
+            # checked against the sent text, and every re-ask has to reach the
+            # same verdict. An answer that changes is a reason to send the pair
+            # to the instructor, not to accuse.
+            for original in standing:
+                if original.confirmations[-1] != "contradictory":
+                    _withhold(original)
+            standing = [j for j in standing if j.final == "contradictory"]
+    if majority:
+        for original in (j for j in judged if j.final == "contradictory"):
+            if 1 + original.confirmations.count("contradictory") < 2:
+                _withhold(original)
     return judged, counters
+
+
+def _withhold(item: Judged) -> None:
+    item.final = "cannot_determine"
+    item.downgrade = (
+        "confirmation_not_answered"
+        if all(answer == "none" for answer in item.confirmations)
+        else "verdict_not_stable"
+    )
 
 
 def _common_detail(candidate: Candidate, verdict: PairVerdict) -> dict:
