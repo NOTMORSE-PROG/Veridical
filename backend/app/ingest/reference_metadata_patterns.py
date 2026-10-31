@@ -22,6 +22,12 @@ class ReferenceMetadataPatterns:
     quoted_title_pairs: tuple[tuple[str, str], ...]
     quoted_title_separators: str
     quoted_title_terminal_delimiters: str
+    # Markup some document exports leave in printed reference text:
+    # "[shown](target)" links and "*shown*" emphasis. A link target that wraps
+    # another, URL-encoded address is a redirect, never the work's locator.
+    markup_link: re.Pattern[str]
+    markup_emphasis: re.Pattern[str]
+    markup_redirect: re.Pattern[str]
     version: str
     sha256: str
 
@@ -142,11 +148,21 @@ def load_reference_metadata_patterns(path: Path | None = None) -> ReferenceMetad
         quoted_title_pairs=tuple(tuple(pair) for pair in pairs),
         quoted_title_separators=effective["quoted_title_separators"],
         quoted_title_terminal_delimiters=effective["quoted_title_terminal_delimiters"],
+        markup_link=_markup_pattern(effective["markup_link_pattern"], ("shown", "target")),
+        markup_emphasis=_markup_pattern(effective["markup_emphasis_pattern"], ("shown",)),
+        markup_redirect=_compile(effective["markup_redirect_pattern"]),
         version=effective["version"],
         sha256=hashlib.sha256(
             json.dumps(effective, sort_keys=True, ensure_ascii=False).encode("utf-8")
         ).hexdigest(),
     )
+
+
+def _markup_pattern(pattern, groups):
+    compiled = _compile(pattern)
+    if not set(groups) <= set(compiled.groupindex):
+        raise ValueError(f"Reference markup pattern must name the groups {', '.join(groups)}")
+    return compiled
 
 
 def _compile(pattern, flags=0):

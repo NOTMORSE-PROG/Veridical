@@ -1,6 +1,6 @@
 {
   "_comment": "Conservative reference metadata grammar. These conventions may be overridden; ambiguous names, dates and quoted boundaries remain unassessed.",
-  "version": "reference-metadata-v3-corporate-boundaries",
+  "version": "reference-metadata-v4-export-markup",
   "quoted_title_pairs": [
     [
       "\"",
@@ -30,6 +30,9 @@
     "n.d.",
     "n. d."
   ],
+  "markup_link_pattern": "\\[(?P<shown>[^\\[\\]]+)\\]\\((?P<target>https?://(?:[^()\\s]|\\s+(?=[^\\s()])|\\([^()\\s]*\\))*)\\)",
+  "markup_emphasis_pattern": "(?<![\\w*])\\*(?P<shown>[^*\\s](?:[^*]*[^*\\s])?)\\*(?![\\w*])",
+  "markup_redirect_pattern": "(?i)[?&][^=\\s]+=https?%3A\\s*%2F\\s*%2F",
   "standard_identifier_pattern": "(?<![\\w/])(?P<series>[A-Z]{2,}(?:/[A-Z]{2,})*)\\s+(?P<number>\\d{3,6}(?:[.\\-]\\d+)*)(?::(?P<edition>\\d{4}))?(?![\\w.:\\-])",
   "months": [
     "January",

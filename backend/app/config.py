@@ -760,6 +760,12 @@ class Settings(BaseSettings):
     # Largest "N." or "N)" label read as a bibliography position. A wrapped
     # line can start with a year ("2023. URL ..."), which is not a list number.
     reference_list_label_max: int = Field(default=999, ge=1)
+    # A reference list that indents each entry's first line (later lines flush
+    # left) is read that way only when its first entry starts indented and at
+    # least this many author-and-date openings, and this share of all of them,
+    # sit at that indent. Otherwise the usual hanging-indent reading holds.
+    reference_first_line_indent_min_openings: int = Field(default=3, ge=2)
+    reference_first_line_indent_min_share: float = Field(default=0.8, gt=0.5, le=1.0)
     reference_metadata_patterns_file: Path | None = None
     # Longer unseparated natural names may contain merged authors. Retain raw
     # display text but do not assert an author count or complete metadata.

@@ -96,6 +96,21 @@ def reference_source_scope_issues(
             return ("reference_rich_content_unlocated",)
         before_end = end is None or position < end if coordinate == "paragraph" else position <= end
         inside = position >= start and before_end
+        if inside and coordinate == "page" and _below_closing(item, closing, end):
+            # The list's last page can also start the next section. An image
+            # set wholly below that section's heading, in its column, follows
+            # the list and cannot hold any of its entries.
+            inside = False
         if inside:
             return ("reference_rich_content_unassessed",)
     return ()
+
+
+def _below_closing(item, closing: TextBlock | None, end_page: int) -> bool:
+    box = getattr(item, "bbox", None)
+    if closing is None or closing.bbox is None or box is None or item.page != end_page:
+        return False
+    if closing.page != end_page:
+        return False
+    left, _top, right, bottom = closing.bbox
+    return box[1] >= bottom and box[0] < right and left < box[2]

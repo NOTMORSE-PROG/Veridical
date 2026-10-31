@@ -24,6 +24,8 @@ A failed parse NEVER drops the entry: raw text is preserved with
 """
 
 import re
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from statistics import median
 
@@ -88,6 +90,14 @@ _ENTRY_OPENING_QUOTES = "\"'`\u00b4\u201c\u2018\u00ab\u2039\u201e\u201a\ufffd \t
 # identify a list entry, never an author name to reconstruct or guess.
 _ENTRY_AUTHOR_REPEAT = re.compile(r"^[\u2014\u2015]+,?\s*")
 _TRAILING_PUNCT = ".,;:)"
+# Shown link text that is already an address or identifier.
+_SHOWN_LOCATOR = re.compile(r"\s*(?:https?://|doi:\s*|10\.\d{4,9}/)", re.IGNORECASE)
+# Rendering jitter between lines set at the same indent: far below any real
+# list indent (~0.25in = 18pt). A layout invariant, not a tuning knob.
+_INDENT_JITTER_PTS = 3.0
+# Set only while checking citation rows saved by the reader before reference
+# metadata v4, so a re-run compares like with like (see previous_reference_reader).
+_PREVIOUS_READER: ContextVar[bool] = ContextVar("previous_reference_reader", default=False)
 
 
 def possible_split_doi(raw_text: str, extracted_doi: str) -> bool:
@@ -195,16 +205,13 @@ def select_references(result: ExtractionResult, patterns: HeadingPatterns) -> Re
             marker = _REFERENCE_MARKER.match(line)
             if marker and _parse_reference_number(marker.group(1) or marker.group(2)) is None:
                 return ReferenceSelection([], span, (*issues, "unreadable_reference_number"))
-    groups = _segment_blocks(span, result.anchor_kind)
-    if any(_standalone_label(_merge([b.text for b in group])) for group in groups):
+    groups = _entry_groups(span, result.anchor_kind)
+    if groups is None:
         # An entry that is only its label means the labels were read apart
-        # from the entries (a labels column beside a text column). Rebuild
-        # the entries from line positions, or trust none of them.
-        paired = _pair_detached_labels(span)
-        if paired is None:
-            issues.append("detached_reference_labels")
-        else:
-            groups = paired
+        # from the entries (a labels column beside a text column) and could
+        # not be rebuilt from line positions, so none of them is trusted.
+        groups = _segment_blocks(span, result.anchor_kind)
+        issues.append("detached_reference_labels")
     # These are candidate markers, not proof that an ambiguous numbered line
     # is a reference rather than quoted title text. Do not silently merge it.
     if result.anchor_kind == "page":
@@ -239,6 +246,26 @@ def select_references(result: ExtractionResult, patterns: HeadingPatterns) -> Re
     )
 
 
+@contextmanager
+def previous_reference_reader():
+    """Read the reference list as the reader before reference metadata v4 did.
+
+    Citation rows are saved at upload. A manuscript uploaded before v4 keeps
+    the reading its rows were saved with when it is checked again, instead of
+    failing the row comparison because the reader improved. v4 added: export
+    markup read through, first-line-indent lists, list labels read before
+    their heading, complete-entry evidence before an unclassified appendix,
+    titles stopped at the printed locator or a comma after the date, and
+    authors closed by a period before a quoted title. New heading names are
+    data and are not undone; a list they newly find had no saved rows.
+    """
+    token = _PREVIOUS_READER.set(True)
+    try:
+        yield
+    finally:
+        _PREVIOUS_READER.reset(token)
+
+
 def extract_references(
     result: ExtractionResult, patterns: HeadingPatterns, *, _legacy_quoted_titles: bool = False
 ) -> list[CitationDraft]:
@@ -253,12 +280,11 @@ def extract_references(
         tolerance=patterns.reference_url_geometry_tolerance_pts,
     )
     settings = get_settings()
+    metadata_patterns = load_reference_metadata_patterns(settings.reference_metadata_patterns_file)
     recoveries = recover_reference_dois(
         result,
         groups,
-        resolver_hosts=load_reference_metadata_patterns(
-            settings.reference_metadata_patterns_file
-        ).doi_resolver_hosts,
+        resolver_hosts=metadata_patterns.doi_resolver_hosts,
         tolerance=patterns.reference_url_geometry_tolerance_pts,
         max_chars=settings.reference_metadata_max_chars,
         max_comparisons=settings.reference_doi_max_geometry_comparisons,
@@ -271,13 +297,21 @@ def extract_references(
             if recovery is not None
             else raw
         )
+        legacy = _PREVIOUS_READER.get()
+        shown = parser_view if legacy else _read_through_markup(parser_view, metadata_patterns)
         draft = parse_reference(
-            _join_lines(parser_view), index, _legacy_quoted_titles=_legacy_quoted_titles
+            _join_lines(shown), index, _legacy_quoted_titles=_legacy_quoted_titles
         )
         if recovery is not None:
             # The source/link contract establishes the complete identifier.
             # Generic reference punctuation stripping must not shorten it.
             draft.doi = recovery.doi
+        if not legacy and metadata_patterns.markup_link.search(parser_view):
+            # A link annotation behind printed link markup points at the
+            # target, which may be a search redirect. Only the address the
+            # entry shows is its locator.
+            url = text_url(shown)
+            urls[index] = _before_markup_link(url) if url else None
         draft.raw_text = _join_lines(raw)
         drafts.append(draft)
     for draft, url in zip(drafts, urls, strict=True):
@@ -346,10 +380,18 @@ def reference_reading_order_issues(
     first = min(selection.span, key=lambda block: (block.source_block_index, block.source_start))
     last = max(selection.span, key=lambda block: (block.source_block_index, block.source_end))
     start, end = first.source_block_index, last.source_block_index
+    heading = selection.heading
+    # Labels read before the heading on its own page: the heading, which
+    # follows them, is the list's opening boundary, not the text before them.
+    labels_first = (
+        isinstance(heading, SourceFragment)
+        and heading.source_block_index > start
+        and heading.page == first.page
+    )
     # A split proves a local boundary only when the excluded source contains
     # non-furniture text. Removing a page number or blank line proves nothing
     # about where the bibliography starts or finishes.
-    if not _has_body_text(result.blocks[start], 0, first.source_start):
+    if not labels_first and not _has_body_text(result.blocks[start], 0, first.source_start):
         start = next(
             (
                 index
@@ -606,12 +648,50 @@ def apa_quoted_title_span(raw: str) -> QuotedTitleSpan | None:
 def _parse_locators(draft: CitationDraft, raw: str) -> None:
     draft.doi, draft.isbn = None, None
     doi = _DOI.search(raw)
+    legacy = _PREVIOUS_READER.get()
     if doi:
-        draft.doi = doi.group(0).rstrip(_TRAILING_PUNCT)
+        value = doi.group(0) if legacy else _before_markup_link(doi.group(0))
+        draft.doi = value.rstrip(_TRAILING_PUNCT)
     isbn = _ISBN.search(raw)
     if isbn:
         draft.isbn = re.sub(r"[- ]", "", isbn.group(1)).upper()
-    draft.url = text_url(raw)
+    url = text_url(raw)
+    draft.url = _before_markup_link(url) if url and not legacy else url
+
+
+def _read_through_markup(text: str, patterns) -> str:
+    """The entry as its reader sees it, without the link and emphasis markup
+    some document exports print literally ("[shown](target)", "*Journal*").
+
+    Line breaks are kept, so an address wrapped across lines still reads as
+    wrapped and is never joined by guesswork. A link whose shown text is
+    already an address keeps only that text. Otherwise the target follows the
+    shown text, unless the target is a redirect that wraps another address.
+    """
+
+    def link(match: re.Match[str]) -> str:
+        shown, target = match.group("shown"), match.group("target")
+        if _SHOWN_LOCATOR.match(shown) or patterns.markup_redirect.search(target):
+            return shown
+        return f"{shown} {target}"
+
+    text = patterns.markup_link.sub(link, text)
+    return patterns.markup_emphasis.sub(lambda match: match.group("shown"), text)
+
+
+def _before_markup_link(identifier: str) -> str:
+    """An identifier read from link markup the reader could not pair ends at
+    "](": what follows is the link target, possibly a search redirect."""
+    return identifier.split("](", 1)[0]
+
+
+def _parse_group(texts: list[str], order_index: int = 0) -> CitationDraft:
+    """Parse an entry exactly as ingestion stores it, so a boundary decision
+    never rests on a reading that differs from the saved one."""
+    patterns = load_reference_metadata_patterns(get_settings().reference_metadata_patterns_file)
+    raw = "\n".join(texts)
+    view = _join_lines(raw if _PREVIOUS_READER.get() else _read_through_markup(raw, patterns))
+    return parse_reference(view, order_index)
 
 
 def _parse_into(draft: CitationDraft, raw: str, *, legacy_quoted_titles: bool = False) -> None:
@@ -657,6 +737,13 @@ def _parse_into(draft: CitationDraft, raw: str, *, legacy_quoted_titles: bool = 
         authors_raw = authors_raw.rstrip(".")
     if authors_raw:
         draft.authors = split_apa_authors(authors_raw)
+    if draft.authors and not _PREVIOUS_READER.get() and _title_before_date(draft.authors):
+        # APA moves the title of a work with no author in front of the date
+        # ("Title of the page. (n.d.). Site name."). What follows the date is
+        # then the site, not the title, so neither is read as one; the entry
+        # stays for the instructor to check.
+        draft.authors = None
+        return
 
     if not legacy_quoted_titles and (span := quoted_title_span(raw, year_m.end())):
         _parse_locators(draft, raw[: year_m.end()] + raw[span.after :])
@@ -667,7 +754,18 @@ def _parse_into(draft: CitationDraft, raw: str, *, legacy_quoted_titles: bool = 
             draft.parse_status = CitationParseStatus.parsed
         return
 
-    rest = raw[year_m.end() :].lstrip(". ").strip()
+    previous = _PREVIOUS_READER.get()
+    # "(2021), Title" puts a comma where APA prints a period.
+    rest = raw[year_m.end() :].lstrip(". " if previous else ".,; ").strip()
+    locator = min(
+        [*_URL.finditer(rest), *_DOI_TAIL.finditer(rest)],
+        key=lambda match: match.start(),
+        default=None,
+    )
+    if locator is not None and not previous:
+        # An APA entry prints its locator last. Text after it is the rest of an
+        # address wrapped across lines or a note, never the title or venue.
+        rest = rest[: locator.start()].strip()
     # The URL/DOI tail is locator, not venue text: "https://doi.org/10...",
     # "doi:10..." and a bare "10.xxxx/..." alike, plus "Retrieved from".
     rest = _URL.sub("", rest)
@@ -767,6 +865,29 @@ def _split_title_venue(rest: str) -> tuple[str, str | None]:
     return rest.strip().rstrip("."), None
 
 
+def _title_before_date(authors: list[str]) -> bool:
+    """Whether the text before the date reads as a title, not as authors: no
+    name carries an initial, none is a corporate author, and one runs longer
+    than a personal name with lowercase words in it, as titles do
+    ("Analysis of recommender systems"). A company name in capitals
+    ("Example Infotech Services Limited") stays an author."""
+    settings = get_settings()
+    patterns = load_reference_metadata_patterns(settings.reference_metadata_patterns_file)
+    for author in authors:
+        words = author.replace(",", " ").split()
+        if any(_INITIALS.fullmatch(word) for word in words):
+            return False
+        if any(word.strip(".,()").casefold() in patterns.corporate_author_words for word in words):
+            return False
+    return any(
+        len(words) > settings.reference_unseparated_author_max_tokens
+        and any(
+            word[:1].islower() and word.casefold() not in patterns.name_particles for word in words
+        )
+        for words in (author.split() for author in authors)
+    )
+
+
 def split_apa_authors(authors_raw: str) -> list[str]:
     """Group "Surname, I. I." pairs; surnames may hold several words.
 
@@ -847,9 +968,13 @@ def _parse_ieee_into(draft: CitationDraft, raw: str, *, legacy_quoted_titles: bo
         patterns = load_reference_metadata_patterns(get_settings().reference_metadata_patterns_file)
         quote_chars = {char for pair in patterns.quoted_title_pairs for char in pair}
         start = next((i for i, char in enumerate(body) if char in quote_chars), None)
-        if start is None or not body[:start].rstrip().endswith(","):
+        # Some styles close the author list with a period instead of a comma
+        # ("A. Cruz and B. Reyes. "Title.""). Each name must still begin with
+        # its initials, which is checked below before any field is kept.
+        separators = "," if _PREVIOUS_READER.get() else ",."
+        if start is None or body[:start].rstrip()[-1:] not in tuple(separators):
             return
-        authors_part = body[:start].strip().rstrip(",").strip()
+        authors_part = body[:start].strip().rstrip(separators).strip()
         span = quoted_title_span(body, start)
         if span is None:
             return
@@ -1095,8 +1220,32 @@ def _after_heading(
             headings.append(heading)
     tail = blocks[start + 1 : end]
     if heading.text[offset:].strip():
-        return [slice_block(heading, offset, len(heading.text)), *tail]
-    return tail
+        tail = [slice_block(heading, offset, len(heading.text)), *tail]
+    return [*_labels_read_before(blocks, start), *tail]
+
+
+def _labels_read_before(blocks: list[TextBlock], start: int) -> list[TextBlock]:
+    """List labels printed below the heading but read before it.
+
+    A numbered list set as a labels column beside a text column can be read
+    labels first, so the first page's "[1]".."[11]" come before the heading.
+    Only an unbroken run of label-only blocks directly before the heading, on
+    its page and lower on that page than the heading, is taken back.
+    """
+    heading = blocks[start]
+    if _PREVIOUS_READER.get() or heading.page is None or heading.bbox is None:
+        return []
+    run: list[TextBlock] = []
+    for block in reversed(blocks[:start]):
+        if not (
+            _standalone_label(block.text)
+            and block.page == heading.page
+            and block.bbox is not None
+            and block.bbox[1] >= heading.bbox[3]
+        ):
+            break
+        run.append(block)
+    return run[::-1]
 
 
 def _block_index_of_heading(
@@ -1219,14 +1368,14 @@ def _until_explicit_heading(
         if any(
             _NUMBERED_ENTRY.match(item.text) is not None
             or _standalone_label(item.text)
-            or parse_reference(item.text, 0).parse_status == CitationParseStatus.parsed
+            or _parse_group([item.text]).parse_status == CitationParseStatus.parsed
             for item in tail
         ):
             continue
         previous_groups = _segment_blocks(preceding, anchor_kind)
         if not previous_groups:
             continue
-        last = parse_reference(_merge([item.text for item in previous_groups[-1]]), 0)
+        last = _parse_group([item.text for item in previous_groups[-1]])
         if not (last.parse_status == CitationParseStatus.parsed or last.url or last.doi):
             continue
         return preceding
@@ -1280,14 +1429,13 @@ def _until_reference_end_heading(
                 # A supported closing heading can bound a complete primary
                 # bibliography without classifying the later appendix. Keep
                 # that entire later region protected from body/linkage use.
-                groups = _segment_blocks(preceding, anchor_kind)
+                groups = _entry_groups(preceding, anchor_kind)
                 if (
                     end_heading
                     and protected is not None
                     and groups
                     and all(
-                        parse_reference(_merge([part.text for part in group]), order).parse_status
-                        == CitationParseStatus.parsed
+                        _complete_entry([part.text for part in group], order)
                         for order, group in enumerate(groups)
                     )
                 ):
@@ -1299,6 +1447,49 @@ def _until_reference_end_heading(
                 return span
             return preceding
     return span
+
+
+def _entry_groups(span: list[TextBlock], anchor_kind: str) -> list[list[TextBlock]] | None:
+    """Entries as the selection reads them, with a labels column rebuilt.
+
+    An entry that is only its label proves the labels were read apart from
+    their entries; then the entries must be rebuilt from line positions, or
+    None is returned. A label-only block inside a larger group is weaker
+    evidence (right-aligned "[9]" and "[10]" start at different x positions),
+    so it is used only when the rebuild succeeds.
+    """
+    groups = _segment_blocks(span, anchor_kind)
+    if any(_standalone_label(_merge([block.text for block in group])) for group in groups):
+        return _pair_detached_labels(span)
+    if not _PREVIOUS_READER.get() and any(_standalone_label(block.text) for block in span):
+        return _pair_detached_labels(span) or groups
+    return groups
+
+
+def _complete_entry(texts: list[str], order_index: int) -> bool:
+    """Whether an entry before a closing heading was printed in full.
+
+    It parses, or it prints a reference date followed by more text that
+    reaches its locator (a DOI or address) or closes its last sentence. An
+    entry cut short by the heading ("Santos, M. (", "Cruz, A. (2022). A study
+    of") is none of these, so the list's end stays unclear rather than trusted.
+    """
+    if _parse_group(texts, order_index).parse_status == CitationParseStatus.parsed:
+        return True
+    if _PREVIOUS_READER.get():
+        return False
+    patterns = load_reference_metadata_patterns(get_settings().reference_metadata_patterns_file)
+    view = _join_lines(_read_through_markup("\n".join(texts), patterns))
+    date = date_patterns()["reference"].search(view)
+    if date is None or not any(char.isalpha() for char in view[date.end() :]):
+        return False
+    # The locator is printed last, so an entry that reached it after its
+    # date was not cut short, even if its address wraps onto another line.
+    # Without one, the entry must at least close its last sentence.
+    return view.rstrip().endswith((".", "?", "!")) or any(
+        locator.start() >= date.end()
+        for locator in [*_URL.finditer(view), *_DOI_TAIL.finditer(view)]
+    )
 
 
 def _contrasting_end_heading(
@@ -1483,21 +1674,55 @@ def _segment_blocks(span: list[TextBlock], anchor_kind: str) -> list[list[TextBl
 
     # Page anchors: hanging indent. The section's leftmost x0 is where
     # entries start; anything to the right continues the previous entry.
+    # A list that indents each entry's first line instead (later lines flush
+    # left) starts its entries at that indent; its flush-left lines continue.
     xs = [b.bbox[0] for b in span if b.bbox is not None]
     entry_x = min(xs) if xs else 0.0
+    indent_x = _first_line_indent(span, entry_x)
     entries: list[list[TextBlock]] = []
     current: list[TextBlock] = []
     for b in span:
         x0 = b.bbox[0] if b.bbox is not None else entry_x
-        # 3pt: rendering jitter on identical indents, far below any real
-        # hanging indent (~0.25in = 18pt) — layout invariant, not a knob.
-        if x0 <= entry_x + 3.0 and current:
+        starts = (
+            abs(x0 - indent_x) <= _INDENT_JITTER_PTS
+            if indent_x is not None
+            else x0 <= entry_x + _INDENT_JITTER_PTS
+        )
+        if starts and current:
             entries.append(current)
             current = []
         current.append(b)
     if current:
         entries.append(current)
     return [group for group in entries if _merge([block.text for block in group])]
+
+
+def _first_line_indent(span: list[TextBlock], leftmost: float) -> float | None:
+    """The indent where entries start, for a list that indents first lines.
+
+    The structural evidence is the list's own first entry: it must begin
+    indented, right of the flush-left lines, with an author-and-date opening.
+    Most openings must then sit at that same indent. A hanging-indent list
+    always begins flush left, so a wrapped author line that happens to read as
+    an opening ("G. D. (2024). Title") cannot switch it to this reading.
+    Mixed evidence returns None and the hanging-indent reading holds.
+    """
+    first = next((b for b in span if b.text.strip()), None)
+    if _PREVIOUS_READER.get() or first is None or first.bbox is None:
+        return None
+    position = first.bbox[0]
+    entry = date_patterns()["entry"]
+    if position - leftmost <= _INDENT_JITTER_PTS or not entry.match(first.text):
+        return None
+    openings = [b.bbox[0] for b in span if b.bbox is not None and entry.match(b.text)]
+    at_indent = sum(abs(x - position) <= _INDENT_JITTER_PTS for x in openings)
+    settings = get_settings()
+    if (
+        at_indent < settings.reference_first_line_indent_min_openings
+        or at_indent / len(openings) < settings.reference_first_line_indent_min_share
+    ):
+        return None
+    return position
 
 
 def _split_numbered_block_lines(span: list[TextBlock]) -> list[TextBlock]:
