@@ -52,6 +52,12 @@ def test_saved_pairs_and_old_rows_become_one_list():
     assert len(texts) == 4
 
 
+def test_old_rows_alone_invent_no_compared_count():
+    texts = _texts(_undecided_pairs_flowables(_report(), [_legacy(9), _legacy(10)], STYLES))
+    assert texts[1].startswith("VERIDICAL could not decide on 2 objective and result pairs. ")
+    assert " of " not in texts[1].split(".")[0]
+
+
 def test_nothing_undecided_adds_nothing():
     assert _undecided_pairs_flowables(_report(), [], STYLES) == []
 

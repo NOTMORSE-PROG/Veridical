@@ -324,6 +324,7 @@ async def test_unmatched_intent_is_low_severity_early_warning_no_llm_call():
         settings=get_settings().model_copy(update={"agreement_pairing_similarity_floor": 0.99}),
     )
     assert len(result.flags) == 1
+    assert result.n_unmatched_intents == 1
     assert result.flags[0].severity == FlagSeverity.low
     assert result.flags[0].detail["kind"] == "agreement_unmatched_intent"
     assert result.flags[0].detail["reason"] == UNMATCHED_INTENT_WORDING.format(
@@ -354,6 +355,7 @@ async def test_unmatched_outcome_is_a_count_not_a_flag():
     )
     assert result.flags == []
     assert result.n_unmatched_outcomes == 1
+    assert result.n_unmatched_intents == 0
 
 
 async def test_quota_exhausted_degrades_honestly_not_crash():
@@ -463,6 +465,7 @@ async def test_empty_intents_and_outcomes_makes_no_llm_call():
     result = await run_agreement_pairing(llm, [], [], check_run_id=1, settings=get_settings())
     assert result.flags == []
     assert result.n_unmatched_outcomes == 0
+    assert result.n_unmatched_intents == 0
     assert llm.calls == []
 
 

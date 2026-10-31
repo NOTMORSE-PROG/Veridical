@@ -1,0 +1,55 @@
+{
+  "_comment": "BUG-617: what the internal-agreement check covered. Same strings as frontend/src/domain/agreementScope.ts (a frontend test compares them). Coverage only: no count of agreeing pairs.",
+  "heading": "What this check compared",
+  "set_aside_list_heading": "Results set aside",
+  "limit": "Partly assessed: VERIDICAL cannot yet reliably tell which statements report this study's own results, so this check does not change readiness.",
+  "absence": "An objective with no matching result is not reported here.",
+  "not_identified": "The results section could not be found, so possible results were taken from every part of the paper. Some of them may describe other studies.",
+  "older_no_scope": "This report was made before VERIDICAL recorded what this check compared.",
+  "roles": {
+    "literature": [
+      "literature review",
+      "describes other studies"
+    ],
+    "introduction": [
+      "introduction",
+      "gives background"
+    ],
+    "methodology": [
+      "methodology",
+      "describes how the study was done"
+    ],
+    "front_matter": [
+      "front pages",
+      "does not report the study's own results"
+    ],
+    "table_of_contents": [
+      "table of contents",
+      "does not report the study's own results"
+    ],
+    "biography": [
+      "researchers' profile",
+      "does not report the study's own results"
+    ],
+    "references": [
+      "reference list",
+      "does not report the study's own results"
+    ],
+    "appendix": [
+      "appendices",
+      "does not report the study's own results"
+    ],
+    "future_work": [
+      "recommendations",
+      "does not report the study's own results"
+    ]
+  },
+  "role_folding": {
+    "fold_at": 4,
+    "shown": 2
+  },
+  "matching_heading": "About these pairs",
+  "matching_caveat": "VERIDICAL matches each objective with the results most like it. Some matched pairs may not belong together, and this matching is being improved. A matched pair is not proof that both statements are about the same thing.",
+  "interrupted_tail": "Pairs it did not compare are not treated as passed.",
+  "interrupted": "The check was interrupted before it compared every pair."
+}

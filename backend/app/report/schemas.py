@@ -333,12 +333,53 @@ class UndeterminedPairsOut(BaseModel):
     pairs: list[UndeterminedPairOut]
 
 
+class AgreementSetAsideOut(BaseModel):
+    """A result left out of the comparison because it sits in a part of the
+    paper that usually does not report the study's own results."""
+
+    text: str
+    page_anchor: str | None = None
+    role: str
+
+
+class AgreementRoleCountOut(BaseModel):
+    role: str
+    count: int = Field(ge=1)
+
+
+class AgreementScopeOut(BaseModel):
+    """What the agreement check covered, from its saved record (BUG-617).
+    Coverage only: no verdict counts, because a count of agreeing pairs
+    invites more trust than the pairing supports. A missing value is None,
+    never zero."""
+
+    n_objectives: int | None = Field(default=None, ge=0)
+    n_results: int | None = Field(default=None, ge=0)
+    # Objectives VERIDICAL matched to at least one result; None when the run
+    # did not record it.
+    n_objectives_matched: int | None = Field(default=None, ge=0)
+    # None when the run did not record its results-section reading.
+    results_section_identified: bool | None = None
+    n_results_set_aside: int | None = Field(default=None, ge=0)
+    n_results_too_short: int | None = Field(default=None, ge=0)
+    set_aside_by_role: list[AgreementRoleCountOut] = Field(default_factory=list)
+    # The statements themselves; left out of shared (adviser) copies.
+    set_aside: list[AgreementSetAsideOut] = Field(default_factory=list)
+    # An objective with no matching result is never reported.
+    absence_leads_withheld: bool = False
+    # Pairs the check could not judge (AI unavailable, capacity, a rejected
+    # key, an unreadable answer). None when the run recorded none of these.
+    n_pairs_skipped: int | None = Field(default=None, ge=0)
+
+
 class IntegrityModuleOut(BaseModel):
     check_kind: Literal[
         "internal_agreement", "citation_integrity", "statistical_forensics", "originality_reuse"
     ]
     state: Literal["completed", "partial", "incomplete", "not_applicable", "not_recorded"]
     undetermined: UndeterminedPairsOut | None = None
+    # internal_agreement only; None for runs saved before it was recorded.
+    agreement_scope: AgreementScopeOut | None = None
 
 
 class ReportOut(BaseModel):

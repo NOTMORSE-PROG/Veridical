@@ -56,7 +56,8 @@ export function UndeterminedPairs({ checkRunId, undetermined, legacy, incomplete
 
   if (items.length === 0) return null;
   const count = items.length;
-  const compared = Math.max(undetermined?.compared_count ?? 0, count);
+  // Older runs saved no compared count; the pairs listed are then all that is known.
+  const compared = undetermined ? Math.max(undetermined.compared_count, count) : null;
   const one = count === 1;
 
   function update(change: (next: URLSearchParams) => void) {
@@ -72,7 +73,9 @@ export function UndeterminedPairs({ checkRunId, undetermined, legacy, incomplete
 
   const visible = items.slice(0, shown);
   return <section className="signal-copy-flow signal-undecided-pairs" aria-labelledby={`${listId}-title`}>
-    <p id={`${listId}-title`}>VERIDICAL could not decide on {count} of {compared} objective and result pair{compared === 1 ? "" : "s"} it compared.</p>
+    <p id={`${listId}-title`}>{compared === null
+      ? `VERIDICAL could not decide on ${count} objective and result pair${one ? "" : "s"}.`
+      : `VERIDICAL could not decide on ${count} of ${compared} objective and result pair${compared === 1 ? "" : "s"} it compared.`}</p>
     <p>For these pairs, the check could not tell whether the result answers the objective. This is not a problem found in the manuscript. If objective coverage matters for this defense, read the pairs and decide yourself.</p>
     {incomplete && <p>This check did not finish, so pairs it never reached are not listed.</p>}
     <Button variant="secondary" aria-expanded={open} aria-controls={listId}
@@ -106,7 +109,7 @@ export function UndeterminedPairs({ checkRunId, undetermined, legacy, incomplete
   </section>;
 }
 
-function Statement({ label, text, anchor, linkLabel, checkRunId, controlId, location }: {
+export function Statement({ label, text, anchor, linkLabel, checkRunId, controlId, location }: {
   label: string; text: string; anchor: string; linkLabel: string; checkRunId: number; controlId: string;
   location: ReturnType<typeof useLocation>;
 }) {

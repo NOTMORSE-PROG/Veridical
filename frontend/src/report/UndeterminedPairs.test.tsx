@@ -58,6 +58,8 @@ it("pages a long list and says how many are shown", () => {
 
 it("folds saved rows from older runs into the same list, each linking to its record", () => {
   show(null, [legacy(41)]);
+  // That run saved no compared count, so none is invented from the list.
+  expect(screen.getByText("VERIDICAL could not decide on 1 objective and result pair.")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Show the pair" }));
   expect(screen.getByRole("link", { name: "Review this pair, pair 1 of 1" })).toHaveAttribute("href", "/flags/41");
 });

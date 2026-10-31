@@ -59,6 +59,12 @@ from reportlab.platypus import (
 from app.checks.escalation import NEEDS_REVIEW_OUTCOMES as _NEEDS_REVIEW_OUTCOMES_ENUM
 from app.config import get_settings
 from app.library.passage_indexing import indexing_scope_sentences
+from app.report.agreement_scope import (
+    agreement_scope_copy,
+    interrupted,
+    role_phrase,
+    scope_paragraphs,
+)
 from app.report.automatic_grade import automatic_grade_caution, automatic_grade_lines
 from app.report.citation_recency import recency_sentences
 from app.report.rule_facts import rule_facts_copy, rule_facts_presentation
@@ -170,6 +176,52 @@ def _is_legacy_undecided(flag: FlagSummaryOut) -> bool:
     )
 
 
+def _agreement_scope_flowables(report, module, listed_flags, undecided_legacy, styles) -> list:
+    """BUG-617: what the agreement check covered, so a module with no
+    findings never reads as a check that did not run. No count of agreeing
+    pairs is printed."""
+    scope = module.agreement_scope
+    if scope is None:
+        return []
+    # Only these two are possible inconsistencies; an injection warning sits
+    # on a pair that read as consistent and is a finding of another kind.
+    findings = sum(
+        flag.check_kind == "internal_agreement"
+        and flag.problem_kind in {"agreement_contradictory", "agreement_partial"}
+        for flag in listed_flags
+    )
+    undecided = (module.undetermined.count if module.undetermined else 0) + len(undecided_legacy)
+    compared = module.undetermined.compared_count if module.undetermined else None
+    items = [Paragraph(escape(agreement_scope_copy()["heading"]), styles["h3"])]
+    # The outcome comes first and in bold; what it covered follows.
+    items.extend(
+        Paragraph(escape(line), styles["body_bold" if index == 0 else "body"])
+        for index, line in enumerate(
+            scope_paragraphs(
+                scope,
+                findings=findings,
+                undecided=undecided,
+                compared=compared,
+                interrupted=interrupted(scope, module.state),
+            )
+        )
+    )
+    if scope.set_aside:
+        items.append(
+            Paragraph(escape(agreement_scope_copy()["set_aside_list_heading"]), styles["body_bold"])
+        )
+        for index, entry in enumerate(scope.set_aside, start=1):
+            place = role_phrase(entry.role)
+            where = f", {_display_anchor(entry.page_anchor)}" if entry.page_anchor else ""
+            items.append(
+                Paragraph(
+                    escape(f"{index}. {place[0].upper()}{place[1:]}{where}: “{entry.text}”"),
+                    styles["body"],
+                )
+            )
+    return items
+
+
 def _undecided_pairs_flowables(
     report, legacy: list[FlagSummaryOut], styles: dict[str, ParagraphStyle]
 ) -> list:
@@ -185,13 +237,19 @@ def _undecided_pairs_flowables(
     ] + [(flag.evidence_excerpt, flag.page_anchor, None, None) for flag in legacy]
     if not pairs:
         return []
-    compared = max(saved.compared_count if saved else 0, len(pairs))
+    # Older runs saved no compared count; the pairs listed are then all that is known.
+    lead = (
+        f"VERIDICAL could not decide on {len(pairs)} of "
+        f"{max(saved.compared_count, len(pairs))} objective and result pairs it compared."
+        if saved
+        else f"VERIDICAL could not decide on {len(pairs)} objective and result "
+        f"{'pair' if len(pairs) == 1 else 'pairs'}."
+    )
     items = [
         Paragraph("Pairs to read yourself", styles["h3"]),
         Paragraph(
             escape(
-                f"VERIDICAL could not decide on {len(pairs)} of {compared} objective and "
-                "result pairs it compared. This is not a problem found in the manuscript. If "
+                f"{lead} This is not a problem found in the manuscript. If "
                 "objective coverage matters for this defense, read the pairs and decide "
                 "yourself."
             ),
@@ -2672,16 +2730,24 @@ def _build_report_pdf(data: ReportExportData, image_path) -> bytes:
                     Paragraph(escape(scope_detail), styles["body"]),
                 ]
             )
-        flow.extend(
-            module_sections.get(kind)
-            or [
+        agreement = (
+            _agreement_scope_flowables(report, module, listed_flags, undecided_legacy, styles)
+            if kind == "internal_agreement" and module is not None
+            else []
+        )
+        flow.extend(agreement)
+        sections = module_sections.get(kind)
+        if sections:
+            flow.extend(sections)
+        elif not agreement:
+            # The agreement card already says what was found and compared.
+            flow.append(
                 Paragraph(
                     "No findings were recorded in this module. This does not establish "
                     "that every part of the manuscript was checked or passed.",
                     styles["body"],
                 )
-            ]
-        )
+            )
         if kind == "internal_agreement":
             flow.extend(undecided_section)
     flow.extend(

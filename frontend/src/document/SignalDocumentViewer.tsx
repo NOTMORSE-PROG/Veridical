@@ -58,6 +58,7 @@ import { Button } from "../ui/Button";
 import { EmptyState } from "../ui/EmptyState";
 import { clampPage, Pagination, pageOf } from "../ui/Pagination";
 import { moduleEmptyState } from "../report/moduleEmptyState";
+import { AGREEMENT_SCOPE_COPY, foundLine, interruptedLine, isInterrupted, matchedLine, outcomeLines } from "../domain/agreementScope";
 import { useReviewWorkspaceCapacity } from "./useReviewWorkspaceCapacity";
 import { ReadinessBand } from "../ui/ReadinessBand";
 import { useSelectedSourceReveal } from "./useSelectedSourceReveal";
@@ -154,6 +155,7 @@ function ReviewQueue({ findings, regions, sourceAvailability, report, collection
   const open = findings.filter((finding) => !finding.isResolved);
   const resolved = findings.filter((finding) => finding.isResolved);
   const visible = filter === "open" ? open : filter === "resolved" ? resolved : findings;
+  const location = useLocation();
   const [params, setParams] = useSearchParams();
   const page = clampPage(params.get(FINDINGS_PAGE_PARAM), visible.length, LIST_PAGE_SIZE.findings);
   const pageItems = pageOf(visible, page, LIST_PAGE_SIZE.findings);
@@ -168,6 +170,26 @@ function ReviewQueue({ findings, regions, sourceAvailability, report, collection
     <div className="signal-document-review-queue">
       {invalidSelection && <Alert title="That finding is no longer available" tone="warning" role="status">The review queue is open.</Alert>}
       {findings.length === 0 && !showComparisons && collection.state === "success" && (() => {
+        // BUG-617: the agreement check says what it covered rather than that
+        // it only partly ran; the full account is on the readiness report.
+        const agreement = moduleKind === "internal_agreement"
+          ? report.integrity_modules?.find((module) => module.check_kind === "internal_agreement") : undefined;
+        const scope = agreement?.agreement_scope;
+        if (scope) {
+          const found = [foundLine(scope), matchedLine(scope)].filter(Boolean).join(" ");
+          const compared = agreement?.undetermined?.compared_count ?? null;
+          const interrupted = isInterrupted(scope, agreement?.state);
+          const outcome = outcomeLines(scope, { findings: 0, undecided: agreement?.undetermined?.count ?? 0, compared, interrupted, surface: "document" });
+          const stopped = interruptedLine(scope, { compared, interrupted, outcomeShown: outcome.length > 0 });
+          const destination = `/report/${report.check_run_id}?module=internal_agreement&review_step=findings`;
+          return <EmptyState id="workspace-module-empty" title={AGREEMENT_SCOPE_COPY.heading}
+            action={<ActionLink to={destination} variant="secondary"
+              // Arrive on the card itself, not at the top of the report.
+              onClick={() => rememberRouteReturnFocus(destination, location.pathname + location.search, `agreement-scope-${report.check_run_id}-title`, {
+                armed: true, fallbackElementId: "readiness-report-heading", scrollBlock: "start" })}>Open the full account on the readiness report</ActionLink>}>
+            {outcome.length > 0 && <p><strong>{outcome.join(" ")}</strong></p>}{stopped && <p>{stopped}</p>}
+            {found && <p>{found}</p>}<p>{AGREEMENT_SCOPE_COPY.limit}</p></EmptyState>;
+        }
         const empty = moduleEmptyState(report, moduleKind);
         return <EmptyState id="workspace-module-empty" title={empty.title} action={empty.limits
           ? <ActionLink to={`/report/${report.check_run_id}?section=limits`} variant="secondary">Open assessment limits</ActionLink> : undefined}><p>{empty.description}</p></EmptyState>;

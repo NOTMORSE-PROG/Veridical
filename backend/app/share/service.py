@@ -18,6 +18,7 @@ from app.models.run import CheckResult, CheckRun, Flag
 from app.models.share import ShareLink
 from app.pipeline.service import get_check_run
 from app.report.assessment import lock_assessment
+from app.report.module_scope import public_modules
 from app.report.schemas import (
     CriterionResultOut,
     PublicCriterionResultOut,
@@ -185,7 +186,7 @@ async def _record_public_details(session: AsyncSession, link: ShareLink) -> None
         assessment_revision=saved.assessment_revision,
         token_sha256=hashlib.sha256(link.token.encode()).hexdigest(),
         subject=report.subject,
-        integrity_modules=report.integrity_modules,
+        integrity_modules=public_modules(report.integrity_modules),
         finding_details=details,
     )
     await write_audit_event(
