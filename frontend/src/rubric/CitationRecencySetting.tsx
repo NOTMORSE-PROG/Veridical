@@ -21,6 +21,7 @@ const RECENCY_SETTING_COPY = {
   counts: "Count these notes toward readiness",
   fromDefault: "default",
   fromFormat: "set for this format",
+  changed: "changed, not saved",
   save: "Save recency setting",
   saved: "Saved. New checks use this setting; existing reports keep the values they were checked with.",
   useDefaults: "Use the defaults",
@@ -41,6 +42,8 @@ const draftOf = (settings: CitationRecencySettingsOut): Draft => ({
 // following the defaults.
 function changes(draft: Draft, settings: CitationRecencySettingsOut): CitationRecencySettingsIn {
   const body: Record<string, unknown> = {};
+  // Turned off, the other values are hidden and not saved.
+  if (!draft.enabled) return draft.enabled !== settings.enabled ? { enabled: false } : {};
   for (const field of FIELDS) {
     if (draft[field] !== settings[field]) body[field] = draft[field];
   }
@@ -63,12 +66,14 @@ export function CitationRecencySetting({ familyId, rubricId }: { familyId: strin
   const refusalId = useId();
   const windowRef = useRef<HTMLInputElement>(null);
   const saveRef = useRef<HTMLButtonElement>(null);
+  const statusRef = useRef<HTMLParagraphElement>(null);
   const windowRefusal = fieldRefusal(save.error, "window_years");
   useRefusalFocus(windowRefusal, windowRef);
   useEffect(() => { if (settings && !draft) setDraft(draftOf(settings)); }, [settings, draft]);
   if (!settings || !draft) return null;
 
-  const source = (field: keyof Draft) => settings.setting_sources[field] === "format" ? RECENCY_SETTING_COPY.fromFormat : RECENCY_SETTING_COPY.fromDefault;
+  const source = (field: keyof Draft) => draft[field] !== settings[field] ? RECENCY_SETTING_COPY.changed
+    : settings.setting_sources[field] === "format" ? RECENCY_SETTING_COPY.fromFormat : RECENCY_SETTING_COPY.fromDefault;
   const otherRefusal = formRefusal(save.error, ["window_years"]);
   const windowValid = Number.isInteger(draft.window_years) && draft.window_years >= 1 && draft.window_years <= 100;
   const body = changes(draft, settings);
@@ -87,11 +92,13 @@ export function CitationRecencySetting({ familyId, rubricId }: { familyId: strin
       setAnswered(out);
       setDraft(draftOf(out));
       setSaved(true);
+      // Save is now disabled and Use the defaults may be gone, so focus goes
+      // to the confirmation instead of falling to the page.
+      requestAnimationFrame(() => statusRef.current?.focus());
     } catch {
-      // The refusal or failure is shown below.
+      // A refused window takes focus itself; anything else returns to Save.
+      requestAnimationFrame(() => { if (!fieldRefusal(save.error, "window_years")) saveRef.current?.focus(); });
     }
-    // Save was busy, and Use the defaults may have gone; focus stays here.
-    requestAnimationFrame(() => { if (!windowRefusal) saveRef.current?.focus(); });
   }
 
   const windowDescribedBy = [!windowValid ? windowErrorId : null, windowRefusal ? refusalId : null].filter(Boolean).join(" ") || undefined;
@@ -129,7 +136,7 @@ export function CitationRecencySetting({ familyId, rubricId }: { familyId: strin
       {Object.values(settings.setting_sources).includes("format") &&
         <Button variant="quiet" disabled={save.isPending} onClick={() => submit({})}>{RECENCY_SETTING_COPY.useDefaults}</Button>}
     </div>
-    {saved && <p role="status">{RECENCY_SETTING_COPY.saved}</p>}
+    <p ref={statusRef} role="status" tabIndex={-1} className="signal-recency-setting__status">{saved ? RECENCY_SETTING_COPY.saved : ""}</p>
     {otherRefusal && <p role="alert" className="signal-field-error">{otherRefusal} {RECENCY_SETTING_COPY.nothingSaved}</p>}
     {save.isError && !isValidationRefusal(save.error) && <p role="alert" className="signal-field-error">
       {save.error instanceof ApiError && save.error.status >= 400 && save.error.status < 500 ? save.error.message : OUTCOME_UNKNOWN_COPY}</p>}

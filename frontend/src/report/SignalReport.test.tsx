@@ -149,6 +149,21 @@ describe("SignalReportPage", () => {
     expect(await screen.findByText(label)).toBeInTheDocument();
   });
 
+  it("lists not-counted source-age notes apart from findings, with no way to select them for a bulk action", async () => {
+    const note = (id: number, excerpt: string): FlagSummaryOut => ({ ...FLAG, id, check_kind: "citation_integrity", severity: "low",
+      problem_kind: "outside_recency_window", evidence_excerpt: excerpt, page_anchor: `reference #${id}`,
+      affects_readiness: false, readiness_exclusion_reason: "recency_note_not_counted" });
+    stubReport(BASE_REPORT, [], [
+      { ...FLAG, id: 8, check_kind: "citation_integrity", severity: "low", problem_kind: "orphan_in_text_citation", evidence_excerpt: "Cruz, 2020" },
+      note(9, "Biggs, J. (1996). Enhancing teaching."), note(10, "Tang, C. (2011). Teaching for quality."),
+    ]);
+    renderWithProviders(<SignalReportPage />, { route: "/report/5?section=findings&module=citation_integrity", path: "/report/:checkRunId" });
+    const notes = await screen.findByRole("region", { name: "Source-age notes (1)" });
+    expect(within(notes).getByText("Recency note: not counted")).toBeInTheDocument();
+    expect(within(notes).queryByRole("checkbox")).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /Integrity findings \(1\)/ })).toBeInTheDocument();
+  });
+
   it("records the decision on the report and offers grade changes beside the records", async () => {
     stubReport({ ...BASE_REPORT, results: [{ ...BASE_REPORT.results[0],
       resolution: { type: "mark_pass", reason: "Checked against the manuscript.", ai_majority_verdict: null } }] });

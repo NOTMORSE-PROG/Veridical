@@ -136,8 +136,8 @@ function ConfirmFinding({ flag }: { flag: FlagOut }) {
     <p>{flag.finding_confirm_note ? `Your note: ${flag.finding_confirm_note}` : "No note was added."} It still counts for readiness. You can dismiss it instead if you change your mind.</p>
   </div>;
   return <div className="signal-finding-confirm">
-    <h3>Is this a real issue?</h3>
-    <p>Confirm it to mark it as checked. It keeps counting for readiness.</p>
+    <h3>{isRecencyNote(flag) ? "Keep this note?" : "Is this a real issue?"}</h3>
+    <p>{isRecencyNote(flag) ? "Confirm it to mark it as checked. It keeps counting for readiness." : "Confirm it to mark it as checked. It keeps counting for readiness."}</p>
     <label htmlFor={noteId}>Comment (optional)</label>
     <textarea ref={noteRef} id={noteId} rows={2} value={note} disabled={confirm.isPending}
       aria-invalid={Boolean(refusal) || undefined} aria-describedby={refusal ? refusalId : undefined}
@@ -278,10 +278,10 @@ function ResolutionControl({ flag: observedFlag }: { flag: FlagOut }) {
         <ActionLink to={`/report/${flag.check_run_id}`} variant="secondary">View updated report</ActionLink>
       </>
     : optional ? <>
-        <p>{isRecencyNote(flag) ? "This note does not change readiness. You can read it without writing a comment or dismissing it." : "This comparison does not change readiness. You can inspect the evidence without writing a comment or dismissing it."}</p>
+        <p>{isRecencyNote(flag) ? "This note does not change readiness. You can read it without writing a comment." : "This comparison does not change readiness. You can inspect the evidence without writing a comment or dismissing it."}</p>
       </>
     : <>
-      <p>{flag.ai_verdict_summary ? "If you think this finding is wrong, dismiss it and explain why. The original evidence stays in the review record." : "VERIDICAL did not reach a conclusion. Review the evidence before deciding whether to dismiss this finding."}</p>
+      <p>{isRecencyNote(flag) ? "If an older source suits the claim it supports, dismiss this note and say why. The original note stays in the review record." : flag.ai_verdict_summary ? "If you think this finding is wrong, dismiss it and explain why. The original evidence stays in the review record." : "VERIDICAL did not reach a conclusion. Review the evidence before deciding whether to dismiss this finding."}</p>
       {confirmSourceEligible && (flag.citation_source_key ? (
         <div className="signal-confirm-source-option">
           <h3>Verified the source yourself?</h3>

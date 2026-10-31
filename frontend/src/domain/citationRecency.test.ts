@@ -50,11 +50,16 @@ describe("the citation recency note", () => {
   it("names unreadable references with their reasons, caps a long list, and says later sources are inside", () => {
     const note = citationRecencyNote({ ...ASSESSED, n_year_not_readable: 3, year_not_readable_reasons: { no_date: 2, conflicting_years: 1 },
       year_not_readable_reference_numbers: [4, 9, 12], n_dated_after_reference_year: 1 })!;
-    expect(note.summary).toContain("3 sources have no readable year and are not judged (references 4, 9 and 12; marked n.d. or in press: 2, more than one year: 1).");
+    expect(note.summary).toContain("3 sources have no readable year and are not judged (references 4, 9 and 12; 2 marked n.d. or in press, 1 with more than one year given).");
     expect(note.details).toContain("1 dated source is later than 2023; it counts as inside the window.");
     const many = citationRecencyNote({ ...ASSESSED, n_year_not_readable: 14, year_not_readable_reasons: { no_year: 14 },
       year_not_readable_reference_numbers: Array.from({ length: 14 }, (_, index) => index + 1) })!;
     expect(many.summary[1]).toBe("14 sources have no readable year and are not judged (references 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 and 4 more; no year given).");
+  });
+
+  it("says nothing about readiness when no source is old, and never prints a raw reason code", () => {
+    expect(all({ ...ASSESSED, n_outside_window: 0 })).not.toMatch(/count toward readiness/);
+    expect(all({ ...ASSESSED, year_not_readable_reasons: { something_new: 1 } })).toContain("(reference 7: year not readable)");
   });
 
   it("says why the list was not read, and whether the format turned the note off", () => {

@@ -30,12 +30,14 @@ export const CITATION_RECENCY_COPY = {
     manuscript_year_after_check_date: "the year on the title page is later than the check date",
     manuscript_year_precedes_cited_source: "a cited source is dated after the year on the title page",
   } as Record<string, string>,
+  // [said of one reference, said after a count]
   unreadableReason: {
-    no_date: "marked n.d. or in press",
-    no_year: "no year given",
-    conflicting_years: "more than one year",
-    no_text: "no entry text",
-  } as Record<string, string>,
+    no_date: ["marked n.d. or in press", "marked n.d. or in press"],
+    no_year: ["no year given", "with no year given"],
+    conflicting_years: ["more than one year given", "with more than one year given"],
+    no_text: ["no entry text", "with no entry text"],
+  } as Record<string, [string, string]>,
+  unreadableOther: ["year not readable", "with a year that could not be read"] as [string, string],
 } as const;
 
 // Reference numbers listed before the rest are summed up.
@@ -89,7 +91,7 @@ export function citationRecencyNote(recency: CitationRecencySummaryOut | null | 
   const oldest = recency.oldest_year_in_window ?? (recency.reference_year != null ? recency.reference_year - window : null);
   const summary: string[] = [];
   const details: string[] = [];
-  if (recency.counts_toward_readiness != null) summary.push(recency.counts_toward_readiness ? CITATION_RECENCY_COPY.counted : CITATION_RECENCY_COPY.notCounted);
+  if (recency.counts_toward_readiness != null && recency.n_outside_window > 0) summary.push(recency.counts_toward_readiness ? CITATION_RECENCY_COPY.counted : CITATION_RECENCY_COPY.notCounted);
   if (recency.reference_year != null && oldest != null) {
     details.push(`The ${window}-year window counts back from ${referenceYearPhrase(recency)}: sources published in ${oldest} or later are inside it, and sources published before ${oldest} are noted.`);
   }
@@ -97,9 +99,9 @@ export function citationRecencyNote(recency: CitationRecencySummaryOut | null | 
     const numbers = recency.year_not_readable_reference_numbers ?? [];
     const reasons = Object.entries(recency.year_not_readable_reasons ?? {})
       .filter(([, count]) => count > 0)
-      .map(([reason, count]) => ({ text: CITATION_RECENCY_COPY.unreadableReason[reason] ?? reason, count }));
+      .map(([reason, count]) => ({ words: CITATION_RECENCY_COPY.unreadableReason[reason] ?? CITATION_RECENCY_COPY.unreadableOther, count }));
     const which = numbers.length ? `${numbers.length === 1 ? "reference" : "references"} ${listNumbers(numbers)}` : "";
-    const why = reasons.length === 1 ? reasons[0].text : reasons.map((reason) => `${reason.text}: ${reason.count}`).join(", ");
+    const why = reasons.length === 1 ? reasons[0].words[0] : reasons.map((reason) => `${reason.count} ${reason.words[1]}`).join(", ");
     const inside = [which, why].filter(Boolean).join(numbers.length === 1 && reasons.length === 1 ? ": " : "; ");
     const lead = plural(recency.n_year_not_readable, "source has", "sources have");
     summary.push(`${lead} no readable year and ${recency.n_year_not_readable === 1 ? "is" : "are"} not judged${inside ? ` (${inside})` : ""}.`);
