@@ -10,6 +10,13 @@ import pymupdf
 import pytest
 
 from app.config import Settings
+from app.ingest.native_table_order import (
+    NativeCell,
+    NativeGrid,
+    TableOrderUnresolved,
+    saved_table_witness_valid,
+    validate_grid,
+)
 from app.ingest.patterns import load_patterns
 from app.ingest.pdf import _extract_open_document, _native_tables_in_source_space
 from app.ingest.quality import reading_order_issues
@@ -238,7 +245,10 @@ def test_two_tables_keep_intermediate_prose_and_independent_identities():
     assert text.index("12") < text.index("Prose between") < text.index("Second table")
 
 
-def test_merged_cells_retain_native_data_but_are_outside_the_admitted_grid_family():
+def test_a_merged_cell_on_exact_grid_lines_is_read_once_at_its_top_left_slot():
+    """A header spanning two columns is the table's own structure: its one
+    rectangle sits on the grid's lines and covers the slot beside it, so the
+    page is ordered row by row with the header read once."""
     with pymupdf.open() as doc:
         page = doc.new_page()
         for x in (60, 280):
@@ -250,10 +260,93 @@ def test_merged_cells_retain_native_data_but_are_outside_the_admitted_grid_famil
         page.insert_text((65, 140), "Alpha", fontsize=10)
         page.insert_text((175, 140), "12", fontsize=10)
         result = extract(doc)
-    assert result.reading_order[0].status == "unresolved"
-    assert result.reading_order[0].table_order is None
+    record = result.reading_order[0]
+    assert record.status == "ordered", record.reason
+    assert not reading_order_issues(result)
     assert "Merged header" in result.tables[0].rows[0][0]
-    assert reading_order_issues(result)
+    [grid] = record.table_order.tables
+    assert [(cell.row, cell.column) for cell in grid.cells] == [(0, 0), (1, 0), (1, 1)]
+    assert saved_table_witness_valid(result, record)
+
+
+def _grid(*cells, rows=2, columns=2, bbox=(0.0, 0.0, 100.0, 100.0)):
+    return NativeGrid(bbox, rows, columns, [NativeCell(r, c, rect, "") for r, c, rect in cells])
+
+
+PAGE = (0.0, 0.0, 600.0, 800.0)
+
+
+def test_a_full_grid_still_validates_as_before():
+    validate_grid(
+        _grid(
+            (0, 0, (0.0, 0.0, 50.0, 50.0)),
+            (0, 1, (50.0, 0.0, 100.0, 50.0)),
+            (1, 0, (0.0, 50.0, 50.0, 100.0)),
+            (1, 1, (50.0, 50.0, 100.0, 100.0)),
+        ),
+        PAGE,
+        0.01,
+    )
+
+
+@pytest.mark.parametrize(
+    "cells, reason",
+    [
+        # A span that ends between grid lines.
+        (
+            [
+                (0, 0, (0.0, 0.0, 70.0, 50.0)),
+                (1, 0, (0.0, 50.0, 50.0, 100.0)),
+                (1, 1, (50.0, 50.0, 100.0, 100.0)),
+            ],
+            "native_table_merged_cell",
+        ),
+        # Two cells claiming one slot, as a list misread as a table does.
+        (
+            [
+                (0, 0, (0.0, 0.0, 100.0, 50.0)),
+                (0, 1, (50.0, 0.0, 100.0, 50.0)),
+                (1, 0, (0.0, 50.0, 50.0, 100.0)),
+                (1, 1, (50.0, 50.0, 100.0, 100.0)),
+            ],
+            "native_table_cells_overlap",
+        ),
+        # A slot no cell covers.
+        (
+            [
+                (0, 0, (0.0, 0.0, 50.0, 50.0)),
+                (0, 1, (50.0, 0.0, 100.0, 50.0)),
+                (1, 0, (0.0, 50.0, 50.0, 100.0)),
+            ],
+            "native_table_merged_cell",
+        ),
+        # A row with no cell starting on it has no line to read from.
+        (
+            [(0, 0, (0.0, 0.0, 50.0, 100.0)), (0, 1, (50.0, 0.0, 100.0, 100.0))],
+            "native_table_merged_cell",
+        ),
+    ],
+)
+def test_a_merged_cell_off_the_grid_lines_stays_unresolved(cells, reason):
+    with pytest.raises(TableOrderUnresolved, match=reason):
+        validate_grid(_grid(*cells), PAGE, 0.01)
+
+
+def test_a_covered_slot_with_text_of_its_own_is_refused_with_its_reason():
+    from types import SimpleNamespace
+
+    from app.config import Settings
+    from app.ingest.native_table_order import NativeTableProposal, snapshot_native_table
+
+    table = SimpleNamespace(
+        row_count=1,
+        col_count=2,
+        bbox=(0.0, 0.0, 100.0, 50.0),
+        rows=[SimpleNamespace(cells=[(0.0, 0.0, 100.0, 50.0), None])],
+    )
+    proposal = NativeTableProposal(page_bbox=PAGE)
+    snapshot_native_table(table, [["Header", "stray"]], proposal, Settings(_env_file=None))
+    assert proposal.problem == "native_table_merged_cell"
 
 
 @pytest.mark.parametrize("rotation", [0, 90, 180, 270])
