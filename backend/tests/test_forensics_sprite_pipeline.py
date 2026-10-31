@@ -360,7 +360,7 @@ def test_invalid_rows_share_the_admission_budget_and_tail_counts_stay_honest():
     assert result["omitted_receipt_rows"] == 4997
     assert len(result["rows"]) == 3
     assert result["rows"][2]["reason"] == "input_admission_budget_reached"
-    assert result["rows"][2]["cells"] == {}
+    assert result["rows"][2]["values"] is None
 
 
 def test_child_scientific_thread_limit_does_not_change_parent_environment(monkeypatch):
@@ -395,3 +395,54 @@ def test_child_scientific_thread_limit_does_not_change_parent_environment(monkey
     assert result["rows"][0]["worker_startup_seconds"] == 0.2
     assert result["rows"][0]["worker_search_seconds"] == 0.01
     assert result["limits"]["math_threads"] == 1
+
+
+def _plain_table(page, rows):
+    return TableBlock(page=page, rows=[["Respondents", "N", "Mean"], *rows], source="native")
+
+
+def test_grim_still_runs_on_tables_after_the_sprite_input_budget_is_used_up():
+    # 60 earlier descriptive rows (distinct n, all GRIM-possible) use up the
+    # default input budget; the impossible mean sits in a later table.
+    early = [
+        _plain_table(3, [[f"Group {i}", str(20 + i), f"{(2 * (20 + i) + 1) / (20 + i):.2f}"]])
+        for i in range(60)
+    ]
+    late = _plain_table(90, [["Students", "10", "3.33"]])
+    result = _compute_forensics_findings(extraction(tables=[*early, late]))
+    kinds = [(f.detail["kind"], f.page_anchor) for f in result.flag_drafts]
+    assert ("grim_inconsistent", "p. 90") in kinds
+    assert result.skipped_composite_rows == 0
+    # The tail is reported as not assessed by SPRITE, never as a multi-item table.
+    assert result.reconstruction["single_item_excluded_tables"] == []
+    assert result.reconstruction["budget_unassessed_tables"][-1] == 60
+
+
+@pytest.mark.parametrize("past_budget", [False, True])
+def test_declared_or_ambiguous_multi_item_tables_stay_excluded_with_or_without_budget(
+    past_budget,
+):
+    filler = [
+        _plain_table(3, [[f"G{i}", str(20 + i), f"{(2 * (20 + i) + 1) / (20 + i):.2f}"]])
+        for i in range(60 if past_budget else 0)
+    ]
+    declared = [*VALUES]
+    declared[1], declared[2], declared[6] = "10", "3.33", "3"
+    two_means = TableBlock(
+        page=95,
+        rows=[["Item", "N", "Mean", "Weighted Mean"], ["Q1", "10", "3.33", "3.33"]],
+        source="native",
+    )
+    for table in (TableBlock(page=91, rows=[HEADERS, declared]), two_means):
+        result = _compute_forensics_findings(extraction(tables=[*filler, table]))
+        assert not any(f.detail["kind"] == "grim_inconsistent" for f in result.flag_drafts)
+
+
+def test_a_declared_multi_item_table_inside_the_budget_is_still_excluded_from_grim():
+    values = [*VALUES]
+    values[1] = "10"
+    values[2] = "3.33"
+    values[6] = "5"
+    result = _compute_forensics_findings(extraction([HEADERS, values]))
+    assert not any(f.detail["kind"] == "grim_inconsistent" for f in result.flag_drafts)
+    assert result.skipped_composite_rows == 1

@@ -99,7 +99,7 @@ def _compute_forensics_findings(extraction: ExtractionResult) -> _ForensicsCompu
     flag_drafts: list[ForensicsFlagDraft] = [
         *grim_grimmer.flags,
         *p_flags,
-        *evaluate_percentage_sums(stats),
+        *evaluate_percentage_sums(stats, tables=extraction.tables),
         *evaluate_group_counts(stats),
     ]
     return _ForensicsComputation(

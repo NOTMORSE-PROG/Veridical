@@ -14,6 +14,7 @@ from fractions import Fraction
 
 from app.checks.forensics.keywords import load_keywords
 from app.checks.forensics.sprite_inputs import (
+    NOT_ADMITTED_REASONS,
     SpriteRow,
     extract_sprite_rows,
     load_sprite_policy,
@@ -158,9 +159,12 @@ def evaluate_sprite(extraction: ExtractionResult, settings: Settings | None = No
     )
     receipts = []
     single_item_excluded_tables = set()
+    budget_unassessed_tables = set()
     considered = attempted = compatible = 0
     for row in rows:
         considered += 1
+        if row.reason in NOT_ADMITTED_REASONS:
+            budget_unassessed_tables.add(row.table_index)
         if single_item_incompatible(row, policy):
             single_item_excluded_tables.add(row.table_index)
         state = {"state": "unassessed", "reason": row.reason}
@@ -204,5 +208,8 @@ def evaluate_sprite(extraction: ExtractionResult, settings: Settings | None = No
         "unassessed_rows": considered - compatible,
         "omitted_receipt_rows": considered - len(receipts),
         "single_item_excluded_tables": sorted(single_item_excluded_tables),
+        # Tables SPRITE did not read because its row or time limit ran out
+        # (not assessed, budget). GRIM still checks them.
+        "budget_unassessed_tables": sorted(budget_unassessed_tables),
         "rows": receipts,
     }
