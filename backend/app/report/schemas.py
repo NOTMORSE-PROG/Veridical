@@ -295,9 +295,15 @@ class OriginalityScopeOut(BaseModel):
     # comparison ran at all (distinct from an empty Library).
     # "reference_boundary_unclear": it had text, but the body could not be
     # told apart from the reference list, so none of it was compared.
+    # "reference_list_unconfirmed": an older run that left the whole body out
+    # because the reference list could not be confirmed; it had text.
     not_compared_reason: (
         Literal[
-            "no_text", "no_comparison_archive", "source_unresolved", "reference_boundary_unclear"
+            "no_text",
+            "no_comparison_archive",
+            "source_unresolved",
+            "reference_boundary_unclear",
+            "reference_list_unconfirmed",
         ]
         | None
     ) = None

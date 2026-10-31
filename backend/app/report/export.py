@@ -621,6 +621,8 @@ def _archive_disclosure(
             "Originality and reuse check: the body could not be told apart from the "
             "reference list, so no text was compared. This is not evidence of originality."
         )
+    if not_compared_reason == "reference_list_unconfirmed":
+        return _native_source_note_copy()["originality_reference_list_unconfirmed"]
     if archive_size_n is None:
         return (
             "Originality and reuse check did not run for this manuscript "
@@ -822,6 +824,8 @@ def _criterion_source_flowables(row: CriterionResultOut, styles: dict[str, Parag
                 styles["body"],
             )
         )
+    if coverage.images_not_assessed:
+        parts.append(Paragraph(escape(copy["criterion_images_not_read"]), styles["body"]))
     state = coverage.native_math_inventory_state
     count = coverage.n_native_equations_unassessed
     if state == "complete" and count:
@@ -878,7 +882,10 @@ def _rule_facts_flowables(row: CriterionResultOut, styles: dict[str, ParagraphSt
 
 
 def _criterion_flowable(
-    row: CriterionResultOut, styles: dict[str, ParagraphStyle], *, include_evidence=True
+    row: CriterionResultOut,
+    styles: dict[str, ParagraphStyle],
+    *,
+    include_evidence=True,
 ) -> list:
     title = f"Criterion #{row.criterion_id}: {row.text}" if row.resolution else row.text
     parts = [
@@ -1757,7 +1764,14 @@ def _build_report_pdf(data: ReportExportData, image_path) -> bytes:
                     "an external service"
                 )
             if coverage.n_source_pages_unassessed:
-                counts.append(f"{coverage.n_source_pages_unassessed} source pages unassessed")
+                counts.append(
+                    f"{coverage.n_source_pages_unassessed} source pages unassessed"
+                    + (
+                        f" (pages {_page_ranges(coverage.source_pages_unassessed)})"
+                        if coverage.source_pages_unassessed
+                        else ""
+                    )
+                )
             if coverage.pages_not_compared:
                 counts.append(f"Pages not compared: {_page_ranges(coverage.pages_not_compared)}")
             elif coverage.not_compared_from:
@@ -2334,7 +2348,9 @@ def _build_report_pdf(data: ReportExportData, image_path) -> bytes:
                 PTOContainer(
                     [
                         *_criterion_flowable(
-                            row, styles, include_evidence=data.source_evidence is None
+                            row,
+                            styles,
+                            include_evidence=data.source_evidence is None,
                         ),
                         *(
                             [

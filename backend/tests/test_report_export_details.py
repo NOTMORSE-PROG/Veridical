@@ -409,6 +409,36 @@ def test_export_names_what_originality_left_out_and_why():
     assert "Not compared from Extracted paragraph 213 to the end of the document" in text
 
 
+def test_export_says_why_an_older_originality_run_compared_nothing():
+    from app.report.export import _archive_disclosure
+
+    text = _archive_disclosure(None, "library", "reference_list_unconfirmed")
+    assert "no text was compared" in text
+    assert "reference list" in text
+    assert "no comparable content" not in text
+    assert "same result" not in text
+
+
+def test_export_lists_the_unread_pages_behind_the_count():
+    from app.report.schemas import IntegrityCheckStatusOut
+
+    data = _data()
+    data.report.integrity_check_status = [
+        IntegrityCheckStatusOut(
+            check_kind="internal_agreement",
+            outcome="escalated",
+            n_skipped_quota=0,
+            n_skipped_api_down=0,
+            n_skipped_parse_failure=0,
+            coverage_reason="source_reading_order_partial",
+            n_source_pages_unassessed=5,
+            source_pages_unassessed=[12, 13, 14, 40, 41],
+        )
+    ]
+    text = " ".join(_text(build_report_pdf(data)).split())
+    assert "5 source pages unassessed (pages 12-14, 40-41)" in text
+
+
 def test_long_group_label_does_not_overlap_footer_or_running_header():
     data = _data()
     data.report.manuscript_group_label = "Very long instructor group name " * 8

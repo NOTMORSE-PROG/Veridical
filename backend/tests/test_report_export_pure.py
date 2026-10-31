@@ -202,6 +202,9 @@ def test_export_distinguishes_source_failure_from_absent_content():
     assert "could not be read reliably" in _archive_disclosure(None, "library", "source_unresolved")
     assert "no comparable content" in _archive_disclosure(None, "library", "no_text")
     assert "no Library records" in _archive_disclosure(0, "library", "no_comparison_archive")
+    refused = _archive_disclosure(None, "library", "reference_list_unconfirmed")
+    assert "reference list" in refused and "not evidence of originality" in refused
+    assert "no comparable content" not in refused
 
 
 def test_bug_312_export_pending_review_renders_stored_escalation_reasons():

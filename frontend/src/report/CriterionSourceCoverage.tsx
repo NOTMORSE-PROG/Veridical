@@ -9,8 +9,12 @@ export function CriterionSourceCoverage({ value, sourceAction, firstSlot, criter
   const unread = value.unread_pages?.length ? <p><strong>Some pages not read.</strong>{" "}
     {value.unread_pages.length === 1 ? "Page" : "Pages"} {pageRanges(value.unread_pages)} could not be read in a reliable order, so this
     assessment is based on the other pages. Check {value.unread_pages.length === 1 ? "that page" : "those pages"} before relying on it.</p> : null;
+  const images = value.images_not_assessed ? <p><strong>Image content not assessed.</strong>{" "}
+    Grading reads the manuscript&apos;s text, not its images, so anything shown only in a figure, diagram or screenshot was not part of this
+    assessment. Check those images yourself if this criterion depends on them.</p> : null;
   const native = nativeCoverage(value, sourceAction, firstSlot, criterionText);
-  return unread && native ? <div className="signal-attached-flow">{unread}{native}</div> : unread ?? native;
+  const parts = [unread, images, native].filter(Boolean);
+  return parts.length > 1 ? <div className="signal-attached-flow">{parts}</div> : parts[0] ?? null;
 }
 
 function nativeCoverage(value: Coverage, sourceAction: (anchor: string, slot: number) => ReactNode, firstSlot: number, criterionText: string) {

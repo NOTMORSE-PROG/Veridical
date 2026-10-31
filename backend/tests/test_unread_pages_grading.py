@@ -170,3 +170,23 @@ def test_printed_report_names_the_unread_pages():
         part.getPlainText() for part in _criterion_source_flowables(row, _styles(_register_fonts()))
     )
     assert "Pages 45-47, 53 could not be read in a reliable order" in whole
+
+
+def test_printed_report_says_images_were_not_read_by_the_grade():
+    from app.report.export import _criterion_source_flowables, _register_fonts, _styles
+    from tests.test_native_source_notes_export import _data
+
+    row = _data().report.results[0]
+    row.kind = row.type = "semantic"
+    row.source_coverage = project_source_coverage(
+        {
+            "native_math_coverage_version": "v1",
+            "native_math_inventory_state": "not_applicable",
+            "n_native_equations_unassessed": 0,
+            "images_not_assessed": True,
+        }
+    )
+    whole = " ".join(
+        part.getPlainText() for part in _criterion_source_flowables(row, _styles(_register_fonts()))
+    )
+    assert "Image content was not assessed" in whole

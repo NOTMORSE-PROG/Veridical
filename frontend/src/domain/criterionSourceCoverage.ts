@@ -6,6 +6,7 @@ function unknown(state: "not_recorded" | "unavailable"): CriterionSourceCoverage
     n_native_equations_unlocated: null, native_math_excluded_paragraphs: [], native_math_coverage_items: [] };
 }
 const count = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+const flagValid = (flag: unknown) => flag === undefined || typeof flag === "boolean";
 const pagesValid = (pages: unknown) => pages === undefined
   || (Array.isArray(pages) && pages.every(page => count(page) && page > 0) && new Set(pages).size === pages.length);
 
@@ -15,7 +16,7 @@ export function privateCriterionCoverage(row: ResultRowCommon, publicView: boole
   if (value == null) return row.kind === "semantic" && (row.type === "semantic" || row.type === "structural") ? unknown("not_recorded") : null;
   if (value.native_math_coverage_version !== "v1" && value.native_math_coverage_version !== null) return unknown("unavailable");
   if (!Array.isArray(value.native_math_coverage_items) || !Array.isArray(value.native_math_excluded_paragraphs)
-    || !pagesValid(value.unread_pages)) return unknown("unavailable");
+    || !pagesValid(value.unread_pages) || !flagValid(value.images_not_assessed)) return unknown("unavailable");
   const { native_math_inventory_state: state, n_native_equations_unassessed: total,
     n_native_equations_unlocated: unlocated, native_math_coverage_items: locations, native_math_excluded_paragraphs: excluded } = value;
   if (state === "not_recorded" || state === "unavailable") {
@@ -23,7 +24,7 @@ export function privateCriterionCoverage(row: ResultRowCommon, publicView: boole
     return state === "not_recorded" && row.kind !== "semantic" ? null : value;
   }
   if (state === "not_applicable") return value.native_math_coverage_version === "v1" && total === 0 && unlocated === null && !locations.length && !excluded.length
-    && value.native_math_inventory_scope === null ? (value.unread_pages?.length ? value : null) : unknown("unavailable");
+    && value.native_math_inventory_scope === null ? (value.unread_pages?.length || value.images_not_assessed ? value : null) : unknown("unavailable");
   if (state !== "complete" || value.native_math_coverage_version !== "v1" || value.native_math_inventory_scope !== "main_document_body"
     || !count(total) || !count(unlocated) || locations.some(item => !item || !count(item.n_occurrences) || item.n_occurrences === 0
       || (item.paragraph !== null && !count(item.paragraph)) || !["paragraph", "table_cell"].includes(item.kind))
@@ -40,6 +41,7 @@ export function criterionCoverageSuffix(value: CriterionSourceCoverage | null): 
   if (value.native_math_inventory_state === "not_recorded") return ": source coverage not recorded";
   if (value.native_math_inventory_state === "unavailable") return ": source coverage unavailable";
   if (value.unread_pages?.length) return ": some pages not read";
+  if (value.images_not_assessed) return ": image content not assessed";
   return (value.n_native_equations_unassessed ?? 0) > 0 ? ": source content omitted" : "";
 }
 

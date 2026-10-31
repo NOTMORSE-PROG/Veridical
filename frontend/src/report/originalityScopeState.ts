@@ -7,6 +7,6 @@ import type { OriginalityScope } from "../api/types";
 export function originalityUnassessed(scope: OriginalityScope | null | undefined): boolean {
   return Boolean(
     scope
-      && (scope.not_compared_reason === "no_text" || scope.compared_count === null || scope.compared_count === 0),
+      && (scope.not_compared_reason === "no_text" || scope.not_compared_reason === "reference_list_unconfirmed" || scope.compared_count === null || scope.compared_count === 0),
   );
 }

@@ -54,6 +54,9 @@ from app.models.run import CheckResult, Flag
 # `matched_chapter_title` stay in `detail` below for internal use only —
 # confirmed never serialized to any API response (`app/flags/service.py`
 # reads only `verdict`/`basis` off `detail`).
+# Older results matched on this note; keep it word for word.
+NO_TEXT_NOTE = "No embeddable content was extracted from this manuscript."
+
 EXACT_DUPLICATE_WHOLE_DOC_WORDING = (
     "This manuscript appears to be an exact or near-exact textual duplicate of "
     "Library record #{ref}: possible resubmission or reuse. Please verify manually."
@@ -421,7 +424,7 @@ async def run_originality_reuse_check(
                 "note": "The body could not be told apart from the reference list, so no "
                 "text was compared."
                 if body_refused
-                else "No embeddable content was extracted from this manuscript.",
+                else NO_TEXT_NOTE,
             },
         )
         session.add(result)
