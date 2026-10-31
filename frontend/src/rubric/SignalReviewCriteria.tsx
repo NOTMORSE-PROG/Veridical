@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link, useBlocker, useParams } from "react-router";
 import { ApiError } from "../api/client";
 import type { CriterionType, RubricAcknowledgementReason, RubricIssueDetail, RubricLevel } from "../api/types";
@@ -378,7 +378,11 @@ function CriteriaEditor({ id }: { id: number }) {
   const announceRef = useRef(announce);
   announceRef.current = announce;
 
-  useEffect(() => {
+  // A layout effect, so the focus runs in the commit that draws the new
+  // control. A passive effect left over from an earlier render can run
+  // after the click handler but before that commit, and would use up the
+  // request while the control is still missing.
+  useLayoutEffect(() => {
     const target = pendingFocusRef.current;
     if (!target) return;
     pendingFocusRef.current = null;
@@ -453,7 +457,9 @@ function CriteriaEditor({ id }: { id: number }) {
   // Activation refused for items still to check: take the instructor to the
   // list of them once it is on the page.
   const focusBlockedSummary = useRef(false);
-  useEffect(() => {
+  // Layout, for the same reason as the focus request above: a stale passive
+  // run must not clear the request before the summary has been drawn.
+  useLayoutEffect(() => {
     if (!blocked) { focusBlockedSummary.current = false; return; }
     // Behind the leave dialog the page is inert; wait until it has closed.
     if (!focusBlockedSummary.current || !blockedRef.current || blocker.state === "blocked") return;

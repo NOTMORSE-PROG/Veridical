@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Rubric, RubricIssueDetail, RubricLevelSource } from "../api/types";
 import { renderWithProviders } from "../test/renderWithProviders";
@@ -660,10 +660,15 @@ describe("rubric review before activation (BUG-566)", () => {
     renderPage();
     fireEvent.change(await screen.findByLabelText("Criterion text, criterion 1"), { target: { value: "Introduction, edited" } });
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
-    fireEvent.click(within(await screen.findByRole("alert")).getByRole("button", { name: "Discard my changes" }));
+    const discardButton = within(await screen.findByRole("alert")).getByRole("button", { name: "Discard my changes" });
+    // A click alone does not move focus; start on the button, as a real one would,
+    // so the heading is only focused if the page puts it there.
+    act(() => discardButton.focus());
+    fireEvent.click(discardButton);
     fireEvent.click(within(await screen.findByRole("dialog", { name: "Discard your changes?" })).getByRole("button", { name: "Discard changes" }));
+    // The reload is asynchronous, so wait for what it announces before checking where focus went.
+    expect(await screen.findByText("Your changes were discarded. The page shows the saved version.")).toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole("heading", { level: 1 })).toHaveFocus());
-    expect(screen.getByText("Your changes were discarded. The page shows the saved version.")).toBeInTheDocument();
     expect(screen.queryByText(/Check the items this change opens again/)).not.toBeInTheDocument();
   });
 
