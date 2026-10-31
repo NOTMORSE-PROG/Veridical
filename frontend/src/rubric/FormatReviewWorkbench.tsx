@@ -1,5 +1,5 @@
 import { useCallback, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ShowSourcePageContext, type ShowSourcePage } from "./sourcePage";
+import { ShowSourcePageContext, type ShowSourcePage, type SourceTarget } from "./sourcePage";
 import { useSearchParams } from "react-router";
 import type { Rubric } from "../api/types";
 import { RubricSourcePane } from "./RubricSourcePane";
@@ -30,7 +30,7 @@ export function FormatReviewWorkbench({ rubric, onUploadNewVersion, children }: 
   const pendingReturn = useRef(false);
   const pendingSourceFocus = useRef(false);
   const returnTarget = useRef<HTMLElement | null>(null);
-  const [pageRequest, setPageRequest] = useState<{ page: number; attempt: number } | null>(null);
+  const [pageRequest, setPageRequest] = useState<{ page: number; attempt: number; target: SourceTarget | null } | null>(null);
   const [pagesAvailable, setPagesAvailable] = useState<boolean | null>(null);
   const id = useId();
 
@@ -67,15 +67,18 @@ export function FormatReviewWorkbench({ rubric, onUploadNewVersion, children }: 
       if (opener) opener.scrollIntoView({ block: "nearest" });
     } else if (pendingSourceFocus.current && (split || view === "source")) {
       pendingSourceFocus.current = false;
-      sourcePanel.current?.focus({ preventScroll: true });
+      // Land on what to look for when a level asked for its page.
+      const target = sourcePanel.current?.querySelector<HTMLElement>(".signal-source-target");
+      (target ?? sourcePanel.current)?.focus({ preventScroll: true });
+      target?.scrollIntoView({ block: "nearest" });
     } else if (split && tablist.current?.contains(window.document.activeElement)) {
       (view === "source" ? sourcePanel.current : criteriaHeading.current)?.focus({ preventScroll: true });
     }
   }, [split, view]);
 
   function activate(next: View) { setView(next); setFocusTab(next); }
-  const showPage = useCallback<ShowSourcePage>((page, returnTo) => {
-    setPageRequest((current) => ({ page, attempt: (current?.attempt ?? 0) + 1 }));
+  const showPage = useCallback<ShowSourcePage>((page, returnTo, target) => {
+    setPageRequest((current) => ({ page, attempt: (current?.attempt ?? 0) + 1, target: target ?? null }));
     // Side by side, focus stays on the button; in tabs the original replaces
     // the criteria, and Back to criteria returns to that button.
     if (split) return;
@@ -110,7 +113,8 @@ export function FormatReviewWorkbench({ rubric, onUploadNewVersion, children }: 
       className="signal-format-workbench__source">
       {!split && <Button variant="quiet" onClick={() => { pendingReturn.current = true; activate("criteria"); }}>Back to criteria</Button>}
       <RubricSourcePane rubric={rubric} isVisible={split || view === "source"} onUploadNewVersion={onUploadNewVersion}
-        requestedPage={pageRequest?.page ?? null} requestedPageAttempt={pageRequest?.attempt} onPagesAvailable={setPagesAvailable} />
+        requestedPage={pageRequest?.page ?? null} requestedPageAttempt={pageRequest?.attempt} requestedTarget={pageRequest?.target ?? null}
+        focusTarget={!split} onPagesAvailable={setPagesAvailable} />
     </section>
     <section ref={criteriaPanel} onFocusCapture={() => { lastPaneFocus.current = "criteria"; }} id={`${id}-criteria`} role={split ? "region" : "tabpanel"} aria-label={split ? "Prepared criteria" : undefined}
       aria-labelledby={split ? undefined : `${id}-criteria-tab`} hidden={!split && view !== "criteria"}

@@ -137,6 +137,29 @@ describe("ManageRubricPage", () => {
     expect(screen.getByRole("link", { name: "Review and activate" })).toBeInTheDocument();
   });
 
+  it("labels the shown version from its open items, not from how it was prepared (BUG-566)", async () => {
+    const detail = (details: unknown) => ({ id: V1.id, rubric_family_id: FAMILY_ID, version: 1, title: "V1.pdf", parse_status: "needs_review",
+      parse_issues: ["Purpose levels may be shifted."], is_active: true, is_latest_version: false, criteria: [], parse_issue_details: details });
+    const issue = (status: string) => ({ id: 1, criterion_id: 2, level: 3, code: "not_in_source", message: "m", status, resolution: null });
+    vi.stubGlobal("fetch", stubFetchByPath({
+      "/rubric-families": [V1],
+      [`/rubric-families/${FAMILY_ID}/versions`]: [V1],
+      [`/rubrics/${V1.id}`]: detail([issue("open")]),
+    }));
+    const { unmount } = renderWithProviders(<ManageRubricPage />);
+    expect(await screen.findByText("Active with items to check · correct it in a new version")).toBeInTheDocument();
+    unmount();
+
+    vi.stubGlobal("fetch", stubFetchByPath({
+      "/rubric-families": [V1],
+      [`/rubric-families/${FAMILY_ID}/versions`]: [V1],
+      [`/rubrics/${V1.id}`]: detail([issue("acknowledged")]),
+    }));
+    renderWithProviders(<ManageRubricPage />);
+    expect(await screen.findByText("Flagged when prepared · all items checked")).toBeInTheDocument();
+    expect(screen.queryByText(/needs review/i)).not.toBeInTheDocument();
+  });
+
   it("lets an instructor switch when more than one required format exists", async () => {
     const secondFamily: RubricListItem = {
       ...V1,

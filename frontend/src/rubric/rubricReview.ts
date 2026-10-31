@@ -1,7 +1,10 @@
 // BUG-566: what the review screen says about each level description, and
 // which parser issues still need the instructor before a format can grade.
-import type { RubricAcknowledgementReason, RubricIssueDetail, RubricLevel, RubricLevelSource } from "../api/types";
-import { RUBRIC_ISSUE_COPY, RUBRIC_KEEP_REASONS } from "../config/ui";
+import type { Rubric, RubricAcknowledgementReason, RubricIssueDetail, RubricLevel, RubricLevelSource } from "../api/types";
+import {
+  RUBRIC_ISSUE_COPY, RUBRIC_KEEP_NOTE_MIN_CHARS, RUBRIC_KEEP_NOTE_REQUIRED_CODES, RUBRIC_KEEP_REASONS,
+  RUBRIC_KEEP_REASONS_BY_CODE, RUBRIC_REVIEW_STATE_LABELS, type RubricKeepReasonOption,
+} from "../config/ui";
 
 export interface PendingAcknowledgement {
   issue_id: number;
@@ -102,8 +105,74 @@ export function rowLocation(levels: readonly RubricLevel[]): { page: number | nu
   return { page: placed.page, text: parts.join(" · ") || null };
 }
 
-export function keepReasonLabel(code: string | null | undefined): string | null {
-  return RUBRIC_KEEP_REASONS.find((reason) => reason.value === code)?.label ?? null;
+/** The label a reason had when it was offered for this issue code, so the
+ * record reads the way the choice did. */
+export function keepReasonLabel(code: string | null | undefined, issueCode?: string): string | null {
+  const offered = issueCode ? RUBRIC_KEEP_REASONS_BY_CODE[issueCode] : undefined;
+  return (offered ?? RUBRIC_KEEP_REASONS).find((reason) => reason.value === code)?.label
+    ?? RUBRIC_KEEP_REASONS.find((reason) => reason.value === code)?.label ?? null;
+}
+
+/** Reasons that fit every issue being kept together. When the issues share
+ * none, only the explained "other" reason is left. */
+export function keepReasonsFor(codes: readonly string[]): readonly RubricKeepReasonOption[] {
+  const lists = codes.map((code) => RUBRIC_KEEP_REASONS_BY_CODE[code] ?? RUBRIC_KEEP_REASONS);
+  if (!lists.length) return RUBRIC_KEEP_REASONS;
+  const shared = lists[0].filter((option) => lists.every((list) => list.some((other) => other.value === option.value)));
+  return shared.length ? shared : lists[0].filter((option) => option.value === "other");
+}
+
+export function keepNoteRequired(codes: readonly string[]): boolean {
+  return codes.some((code) => RUBRIC_KEEP_NOTE_REQUIRED_CODES.includes(code));
+}
+
+/** A note counts once it has enough letters or digits to say something. */
+export function noteHasContent(note: string): boolean {
+  return (note.match(/[\p{L}\p{N}]/gu)?.length ?? 0) >= RUBRIC_KEEP_NOTE_MIN_CHARS;
+}
+
+export function itemsToCheck(count: number): string {
+  return `${count} ${count === 1 ? "item" : "items"} to check`;
+}
+
+/** For wording found under another level's column of the same row: the
+ * level of this criterion that column belongs to, matched by name against
+ * the column heading ("PROFICIEN T 3" -> Proficient). */
+export function columnLevelName(level: RubricLevel, levels: readonly RubricLevel[]): string | null {
+  const heading = level.source?.column_heading;
+  if (!heading) return null;
+  const letters = (text: string) => text.toLowerCase().replace(/[^\p{L}]/gu, "");
+  const found = letters(heading);
+  const match = levels.find((other) => other.level !== level.level && letters(other.name) && found.includes(letters(other.name)));
+  return match?.name ?? (tidy(heading) || null);
+}
+
+export type FormatReviewState =
+  | { kind: "legacy" }
+  | { kind: "to_check"; open: number }
+  | { kind: "active_with_items"; open: number }
+  | { kind: "flagged_all_checked" }
+  | { kind: "all_match" };
+
+/** The live review state. Only the open items decide it: parse_status
+ * says how preparation went and stays "needs_review" after every item is
+ * kept. Formats prepared before items were recorded have no state here. */
+export function formatReviewState(rubric: Pick<Rubric, "is_active" | "parse_status" | "parse_issue_details">): FormatReviewState {
+  const details = rubric.parse_issue_details;
+  if (details === null || details === undefined) return { kind: "legacy" };
+  const open = details.filter((issue) => issue.status === "open").length;
+  if (open) return rubric.is_active ? { kind: "active_with_items", open } : { kind: "to_check", open };
+  return rubric.parse_status === "needs_review" ? { kind: "flagged_all_checked" } : { kind: "all_match" };
+}
+
+export function formatReviewLabel(state: FormatReviewState): string | null {
+  switch (state.kind) {
+    case "legacy": return null;
+    case "to_check": return itemsToCheck(state.open);
+    case "active_with_items": return RUBRIC_REVIEW_STATE_LABELS.activeWithItems;
+    case "flagged_all_checked": return RUBRIC_REVIEW_STATE_LABELS.flaggedAllChecked;
+    case "all_match": return RUBRIC_REVIEW_STATE_LABELS.allMatch;
+  }
 }
 
 // Labels extracted from a PDF can carry line breaks and zero-width spaces.

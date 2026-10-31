@@ -22,6 +22,7 @@ import { manuscriptIdentity } from "../domain/manuscriptLabel";
 import { useRouteFocus } from "../routing/useRouteFocus";
 import { WorkflowLink } from "../routing/WorkflowLink";
 import { RerunModal } from "../rubric/RerunModal";
+import { FormatReviewStateTag } from "../rubric/RubricReviewParts";
 import { UploadRubricModal } from "../rubric/UploadRubricModal";
 import { useRubricFamilies } from "../rubric/useRubric";
 import { ActionLink, TrailingChevronIcon } from "../ui/ActionLink";
@@ -749,7 +750,7 @@ export function DashboardPage() {
               : families && families.length > 1
                 ? "Choose a required format to finish setup"
                 : "Add a required format before checking"}</h2>
-            {families?.length === 1 && <p><strong>{families[0].title} · Version {families[0].version}</strong></p>}
+            {families?.length === 1 && <p><strong>{families[0].title} · Version {families[0].version}</strong> <FormatReviewStateTag rubricId={families[0].id} /></p>}
             <p>{families?.length === 1
               ? "Review and confirm the prepared criteria before starting a check."
               : families && families.length > 1

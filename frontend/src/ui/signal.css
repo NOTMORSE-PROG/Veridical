@@ -2124,6 +2124,18 @@
     color: var(--color-signal-neutral-text);
   }
 
+  /* Live review state of a format: items to check use the Needs Review colour;
+     a settled state stays neutral. */
+  .signal-version-state--to-check {
+    background: var(--color-signal-review-bg);
+    color: var(--color-signal-review-text);
+  }
+
+  .signal-version-state--settled {
+    background: var(--color-signal-neutral-bg);
+    color: var(--color-signal-neutral-text);
+  }
+
   .signal-version-history {
     margin-block-start: var(--signal-space-8);
   }
@@ -7110,8 +7122,27 @@
   .signal-keep-form__actions {
     display: flex;
     flex-wrap: wrap;
+    align-items: center;
     gap: var(--signal-space-2);
   }
+
+  .signal-keep-form__actions p { margin: 0; font-weight: var(--signal-weight-semibold); }
+
+  /* "Show page": what to look for on the page, outlined above the original.
+     Levels have no page coordinates, so the PDF itself cannot be marked. */
+  .signal-source-target {
+    margin: var(--signal-space-3) var(--signal-space-4) 0;
+    border: var(--signal-border-emphasis) solid var(--signal-evidence-focus);
+    border-radius: var(--signal-radius-control);
+    padding: var(--signal-space-3) var(--signal-space-4);
+    background: var(--color-signal-review-bg);
+  }
+
+  .signal-source-target p { margin: 0; font-size: var(--signal-type-label); }
+  .signal-source-target blockquote { margin: var(--signal-space-2) 0 0; }
+  .signal-source-target:focus-visible { outline: var(--signal-border-emphasis) solid var(--color-signal-focus); outline-offset: var(--signal-border-emphasis); }
+
+  .signal-refused-edits { margin-block: 0; }
 
   .signal-review-status {
     display: flex;
@@ -7150,6 +7181,16 @@
   .signal-review-nav p { margin: 0 auto 0 0; font-size: var(--signal-type-label); font-weight: var(--signal-weight-semibold); }
 
   .signal-format-editor-scroll:has(.signal-review-nav) { scroll-padding-block-start: var(--signal-review-nav-height); }
+
+  /* Narrow windows, including 1440x900 at 200% zoom (720x450): a fixed-height
+     inner pane leaves too little room, and the item bar scrolls out with the
+     page. Let the page scroll instead and keep the bar under the sticky header. */
+  @media (max-width: 1023px) {
+    .signal-format-workbench__criteria { block-size: auto; }
+    .signal-format-editor-scroll { overflow: visible; }
+    .signal-format-workbench__criteria .signal-review-nav { inset-block-start: var(--signal-workspace-header-height); }
+    :root:has(.signal-review-nav) { scroll-padding-block-start: calc(var(--signal-workspace-header-height) + var(--signal-review-nav-height)); }
+  }
 
   .signal-format-issues h3 { margin: 0; font-size: var(--signal-type-label); }
 

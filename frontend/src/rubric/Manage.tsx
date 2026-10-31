@@ -12,6 +12,7 @@ import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import { RerunModal } from "./RerunModal";
+import { FormatReviewStateTag } from "./RubricReviewParts";
 import { UploadRubricModal } from "./UploadRubricModal";
 import { CitationRecencySetting } from "./CitationRecencySetting";
 import {
@@ -231,6 +232,7 @@ export function ManageRubricPage() {
             <span>Version {displayVersion.version}</span>
             <span>{displayVersion.criteria_count} {displayVersion.criteria_count === 1 ? "criterion" : "criteria"}</span>
             <VersionState version={displayVersion} latest={latestVersion} />
+            <FormatReviewStateTag rubricId={displayVersion.id} />
           </div>
           <ProgramControl familyId={family.rubric_family_id} program={displayVersion.program} />
           <CitationRecencySetting familyId={family.rubric_family_id} rubricId={displayVersion.id} />

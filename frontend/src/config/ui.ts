@@ -27,19 +27,66 @@ export const RUBRIC_ISSUE_COPY: Record<string, string> = {
   wrong_column: "This wording is in the document, but under a different level of this row.",
 };
 // Why an instructor keeps wording the parser could not match. Values are the
-// server's reason codes.
-export const RUBRIC_KEEP_REASONS = [
+// server's reason codes; the labels depend on what the parser raised, so a
+// reason never contradicts the problem it answers.
+export interface RubricKeepReasonOption {
+  value: "document_wording" | "outside_table" | "other";
+  label: string;
+}
+const OTHER_KEEP_REASON: RubricKeepReasonOption = { value: "other", label: "Another reason, explained in the note" };
+export const RUBRIC_KEEP_REASONS: readonly RubricKeepReasonOption[] = [
   { value: "document_wording", label: "The document says it this way" },
   { value: "outside_table", label: "The wording comes from outside the table" },
   { value: "other", label: "Other reason" },
-] as const;
+];
+// Issue codes with their own choices. Codes not listed offer RUBRIC_KEEP_REASONS.
+// "The document says it this way" is never offered for wording VERIDICAL
+// could not find in the document.
+export const RUBRIC_KEEP_REASONS_BY_CODE: Readonly<Record<string, readonly RubricKeepReasonOption[]>> = {
+  not_in_source: [
+    { value: "outside_table", label: "It is in the document outside the table, for example in a note under it" },
+    OTHER_KEEP_REASON,
+  ],
+  joins_cells: [
+    { value: "document_wording", label: "In the document, this level's cell holds all of this wording" },
+    OTHER_KEEP_REASON,
+  ],
+  partial_cell: [
+    { value: "document_wording", label: "This part of the cell is the whole description for this level" },
+    OTHER_KEEP_REASON,
+  ],
+  wrong_column: [
+    { value: "document_wording", label: "This level should be graded with that wording" },
+    OTHER_KEEP_REASON,
+  ],
+  wrong_row: [
+    { value: "document_wording", label: "This criterion should be graded with that row's wording" },
+    OTHER_KEEP_REASON,
+  ],
+  shared_cell: [
+    { value: "document_wording", label: "The document uses the same wording in both places" },
+    OTHER_KEEP_REASON,
+  ],
+};
 export const RUBRIC_KEEP_NOTE_MAX_LENGTH = INSTRUCTOR_NOTE_MAX_LENGTH;
+// A required note must say something: at least this many letters or digits,
+// so "x" or "..." is not accepted as the record of what was compared.
+export const RUBRIC_KEEP_NOTE_MIN_CHARS = 12;
 // Issues that say a level's wording is not where the document puts it. Keeping
 // one needs a note, so the record says what the instructor compared rather
 // than a reason that contradicts the flag.
 export const RUBRIC_KEEP_NOTE_REQUIRED_CODES: readonly string[] = [
   "not_in_source", "joins_cells", "partial_cell", "wrong_column", "wrong_row", "shared_cell",
 ];
+// What a format's review state is called on the format page, the dashboard
+// and the review screen. parse_status only records how preparation went and
+// never changes afterwards, so the live state comes from the open items.
+export const RUBRIC_REVIEW_STATE_LABELS = {
+  // "{count} item(s) to check" is built by itemsToCheck() in rubric/rubricReview.ts.
+  flaggedAllChecked: "Flagged when prepared · all items checked",
+  activeWithItems: "Active with items to check · correct it in a new version",
+  allMatch: "All level descriptions match the document",
+} as const;
 // Criterion text can be a paragraph; names in buttons and summaries are cut here.
 export const RUBRIC_CRITERION_NAME_MAX_CHARS = 60;
 // API encoding units for criterion results, independent of readiness thresholds.
