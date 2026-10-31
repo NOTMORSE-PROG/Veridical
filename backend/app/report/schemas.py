@@ -277,6 +277,10 @@ class CitationRecencySummaryOut(BaseModel):
     year_not_readable_reasons: dict[str, int] = Field(default_factory=dict)
     # 1-based reference numbers, as an instructor counts the list.
     year_not_readable_reference_numbers: list[int] = Field(default_factory=list)
+    # Why only part of the list was dated, when it was:
+    # "reference_membership_partial" (entries kept as complete were dated;
+    # later material such as an appendix was left out). None otherwise.
+    scope_limit_reason: str | None = None
 
 
 class OriginalityScopeOut(BaseModel):

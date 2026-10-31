@@ -578,12 +578,14 @@ async def _citation_recency(
     extraction: ExtractionResult,
     settings: Settings,
     blocked_reason: str | None,
+    scope_limit_reason: str | None = None,
 ) -> RecencyAssessment:
     """The recency note (V-092) under the format's setting for this run.
 
     Runs only on a reference list whose entries are bound to the source; a
     list that could not be established is reported as unassessed rather
-    than read for dates."""
+    than read for dates. `scope_limit_reason` says why only part of the list
+    was dated (BUG-602: entries kept before unclassified later material)."""
     stored = await session.scalar(
         select(Rubric.citation_recency)
         .join(CheckRun, CheckRun.rubric_id == Rubric.id)
@@ -605,7 +607,10 @@ async def _citation_recency(
         check_year = check_year_of(created_at or datetime.now(UTC), settings)
     except (OSError, ValueError, UnicodeError, ZoneInfoNotFoundError):
         return RecencyAssessment(unassessed_summary("recency_policy_unavailable", policy))
-    return assess_recency(citations, extraction, policy, grammar, check_year)
+    assessment = assess_recency(citations, extraction, policy, grammar, check_year)
+    if scope_limit_reason and assessment.summary.get("status") == "assessed":
+        assessment.summary["scope_limit_reason"] = scope_limit_reason
+    return assessment
 
 
 async def run_citation_integrity_check(
@@ -1247,11 +1252,13 @@ async def _run_citation_integrity_check(
         settings,
         "no_references"
         if not citations
-        else "reference_membership_partial"
-        if membership_partial
         else "reference_list_unavailable"
         if selection.issues
         else None,
+        # BUG-602: a year is read from each entry alone, so the entries kept
+        # as complete are dated even when later material (an appendix) could
+        # not be told apart from the list; the summary says it was left out.
+        scope_limit_reason="reference_membership_partial" if membership_partial else None,
     )
     for draft in recency.flags:
         citation = references_by_index.get(draft.detail["order_index"])
