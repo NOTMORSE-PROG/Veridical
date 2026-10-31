@@ -26,13 +26,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.audit.service import write_audit_event
 from app.checks.citations.extract import (
     CitationFlagDraft,
+    ScanGapSite,
     cross_match,
     extract_in_text_citations,
     numeric_linkage_flags,
     orphan_flags,
     uncited_flags,
 )
-from app.checks.citations.linkage_guard import guarded_absence_candidates
+from app.checks.citations.linkage_guard import (
+    WITHHELD_SCAN_INCOMPLETE,
+    guarded_absence_candidates,
+    reportable_orphans,
+    scoped_absence_candidates,
+    unread_sites_detail,
+)
 from app.checks.citations.metadata import (
     MetadataComparison,
     compare_metadata,
@@ -72,7 +79,6 @@ from app.external import openlibrary as openlibrary_client
 from app.external import s2 as s2_client
 from app.external.schemas import VerificationResult
 from app.ingest.analytical_source import analytical_source
-from app.ingest.citation_dates import reference_date_key
 from app.ingest.normalize import normalize
 from app.ingest.patterns import HeadingPatterns
 from app.ingest.reference_inventory import (
@@ -810,7 +816,10 @@ async def _run_citation_integrity_check(
     )
     body_blocks = [block for scope in native_source.scopes_for(body_blocks) for block in scope]
     gaps: set[str] = set()
-    in_text = extract_in_text_citations(body_blocks, settings=settings, coverage_gaps=gaps)
+    gap_sites: list[ScanGapSite] = []
+    in_text = extract_in_text_citations(
+        body_blocks, settings=settings, coverage_gaps=gaps, gap_sites=gap_sites
+    )
     cross = cross_match(in_text, citations)
     numeric = analyze_numbered_citations(
         body_blocks,
@@ -822,10 +831,37 @@ async def _run_citation_integrity_check(
     numbered = numeric.n_numbered_reference_entries > 0
     absence_candidates = numeric.confidently_uncited if numbered else cross.confidently_uncited
     identity_unassessed, identifier_leads = set(), []
+    # BUG-590: an unread citation withholds only the absence claims it could
+    # affect: entries whose names appear in its paragraph. Only a scan that
+    # stopped early still withholds every entry.
+    absence_withheld: dict[int, str] = {}
+    # BUG-590: an orphan is withheld only when some entry could be its source;
+    # one unparsed entry no longer withholds every orphan in the document.
+    orphans, orphans_withheld = (
+        ([], []) if numbered else reportable_orphans(cross.orphans, citations, settings)
+    )
     if not numbered:
         absence_candidates, identity_unassessed, identifier_leads = guarded_absence_candidates(
             absence_candidates, citations, body_blocks, settings
         )
+        absence_candidates, absence_withheld = scoped_absence_candidates(
+            absence_candidates,
+            body_blocks,
+            gap_sites,
+            gaps,
+            settings,
+            possible_sources={
+                index
+                for item in orphans_withheld
+                for index in item.possible_reference_order_indexes
+            },
+        )
+    # The author-year scan's gaps say nothing reliable about which numbered
+    # reference a bracket mark points at, so a numbered list keeps the
+    # whole-list rule.
+    scan_gap_covers_all = bool(gaps) and (
+        numbered or WITHHELD_SCAN_INCOMPLETE in absence_withheld.values()
+    )
     # Text left unread (native Word equations, pages with unresolved order)
     # may hold the only citation of a reference, so absence stays unassessed.
     partial_source = native_source.limited or bool(extraction.unread_pages)
@@ -838,7 +874,7 @@ async def _run_citation_integrity_check(
         or membership_partial
         or partial_source
         or projection_reason
-        or gaps
+        or scan_gap_covers_all
         or selection.issues
         or (not numbered and not cross.linked)
     ):
@@ -847,12 +883,19 @@ async def _run_citation_integrity_check(
         {ref.order_index for ref in numeric.absence_unassessed_references}
         if numbered
         else identity_unassessed
+        | set(absence_withheld)
         | {
             ref.order_index
             for ref in (cross.possibly_cited + (cross.uncited if not cross.linked else []))
         }
     ) | native_absence_unassessed
-    if metadata_only or membership_partial or projection_reason or gaps or selection.issues:
+    if (
+        metadata_only
+        or membership_partial
+        or projection_reason
+        or scan_gap_covers_all
+        or selection.issues
+    ):
         unassessed_indexes = {ref.order_index for ref in citations}
     linkage_unassessed = len(unassessed_indexes)
     metadata_unassessed = set()
@@ -860,12 +903,6 @@ async def _run_citation_integrity_check(
     metadata_api_down = 0
     metadata_not_found = 0
     verification_records = []
-    usable_metadata = all(
-        c.parse_status == CitationParseStatus.parsed
-        and c.authors
-        and reference_date_key(c) is not None
-        for c in citations
-    )
 
     # Metadata belongs to the reference; support belongs to each captured use.
     # Occurrence indexes are local inventory positions, not canonical source IDs.
@@ -919,7 +956,7 @@ async def _run_citation_integrity_check(
         numeric_linkage_flags(numeric.orphan_marks, absence_candidates, len(citations))
         if numbered
         else [
-            *(orphan_flags(cross.orphans) if usable_metadata else []),
+            *orphan_flags(orphans),
             *uncited_flags(absence_candidates),
         ]
     )
@@ -1179,7 +1216,7 @@ async def _run_citation_integrity_check(
         else "numeric_citation_style_unassessed"
         if numbered and (linkage_unassessed or numeric.linkage_unassessed)
         else "author_year_citation_parse_unassessed"
-        if linkage_unassessed or cross.ambiguous
+        if linkage_unassessed or cross.ambiguous or orphans_withheld
         else "claim_support_unavailable"
         if content_unassessed
         else None
@@ -1279,10 +1316,29 @@ async def _run_citation_integrity_check(
             "n_in_text_citations": len(in_text),
             "n_linked": len(cross.linked),
             "n_orphans": len(cross.orphans),
+            "n_orphans_reported": len(orphans),
             "n_uncited": len(absence_candidates),
             "coverage_reason": coverage_reason,
             "n_metadata_skipped_insufficient": len(metadata_unassessed),
             "n_linkage_unassessed": linkage_unassessed,
+            # BUG-590: what each unreadable line kept from being said, so a
+            # withheld finding is counted and traceable, never silently gone.
+            "n_orphans_unassessed": len(orphans_withheld),
+            "orphans_unassessed": [
+                {
+                    "raw_mark": item.citation.raw_text,
+                    "page": item.citation.page,
+                    "paragraph": item.citation.paragraph,
+                    "reason": item.reason,
+                    "possible_reference_order_indexes": list(item.possible_reference_order_indexes),
+                }
+                for item in orphans_withheld
+            ],
+            "uncited_unassessed": [
+                {"reference_order_index": index, "reason": reason}
+                for index, reason in sorted(absence_withheld.items())
+            ],
+            "unread_citation_sites": unread_sites_detail(gap_sites),
             "n_metadata_api_down": metadata_api_down,
             "n_metadata_not_found": metadata_not_found,
             "n_claim_support_unassessed": len(content_unassessed),

@@ -799,6 +799,11 @@ class Settings(BaseSettings):
     citation_claim_excerpt_max_chars: int = Field(default=480, ge=80, le=4000)
     citation_in_text_max_matches: int = Field(default=2000, ge=1, le=10000)
     citation_wrap_font_size_tolerance_pt: float = Field(default=0.5, ge=0.0, le=4.0)
+    # A single word of a name (one part of "Coves-Martinez", or "Statista" in
+    # "Statista Research Department") counts as naming that source when it is
+    # at least this long. Shorter pieces match ordinary words too often. Used
+    # only to withhold linkage findings, never to raise one.
+    citation_linkage_name_word_min_chars: int = Field(default=4, ge=2, le=20)
 
     # Exact-DOI metadata title policy. Packaged default if unset; changing a
     # custom policy requires a process restart. Each comparison saves its hash.

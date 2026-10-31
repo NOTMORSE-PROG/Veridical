@@ -219,6 +219,22 @@ class CrossMatchResult:
 
 
 @dataclass(frozen=True)
+class ScanGapSite:
+    """Where the in-text scan met a citation it could not read.
+
+    `text` is the whole paragraph the unread mark sits in, so later rules can
+    ask which reference entries that mark could possibly name. `text` is None
+    when the gap covers the whole document (the scan stopped at its match
+    limit, so everything after that point is unread).
+    """
+
+    reasons: frozenset[str]
+    text: str | None
+    page: int | None
+    paragraph: int | None
+
+
+@dataclass(frozen=True)
 class CitationFlagDraft:
     """Flag-ready shape (severity + honest wording already applied) for
     V-029's citation-integrity stage to persist as a real `Flag` row
@@ -281,13 +297,19 @@ def extract_in_text_citations(
     *,
     settings: Settings | None = None,
     coverage_gaps: set[str] | None = None,
+    gap_sites: list[ScanGapSite] | None = None,
 ) -> list[InTextCitation]:
     """Scan `blocks` (already filtered to exclude the reference-list span
     and furniture — see `app.ingest.references.non_reference_blocks`) for
-    APA in-text citation shapes."""
+    APA in-text citation shapes.
+
+    Every unreadable mark adds its reason to `coverage_gaps`; when
+    `gap_sites` is given, the paragraph it sits in is recorded there too, so
+    a caller can withhold only what that mark could affect."""
     settings = settings or get_settings()
     out: list[InTextCitation] = []
     gaps = coverage_gaps if coverage_gaps is not None else set()
+    sites = gap_sites if gap_sites is not None else []
     # BUG-240 AC1: a PDF block is a physical line. Scanning them one at a
     # time truncated claims at the line break ("Haan (2025), with"), and a
     # half-line is not a proposition an abstract can support or contradict.
@@ -295,53 +317,139 @@ def extract_in_text_citations(
         text = block.text
         if not text:
             continue
-        spans = _sentence_spans(text)
-        anchor = _anchor_for(block)
-
-        for group_m in _PAREN_GROUP.finditer(text):
-            if len(out) >= settings.citation_in_text_max_matches:
+        # Gaps met in this paragraph, recorded with the paragraph they affect.
+        local: set[str] = set()
+        try:
+            if _scan_block(block, settings, out, local):
                 gaps.add("citation_count_limit")
+                sites.append(
+                    ScanGapSite(
+                        reasons=frozenset({"citation_count_limit"}),
+                        text=None,
+                        page=block.page,
+                        paragraph=block.paragraph,
+                    )
+                )
                 return out
-            if not date_patterns(settings)["group"].search(group_m.group(1)):
+        finally:
+            if local:
+                gaps.update(local)
+                sites.append(
+                    ScanGapSite(
+                        reasons=frozenset(local),
+                        text=text,
+                        page=block.page,
+                        paragraph=block.paragraph,
+                    )
+                )
+    return out
+
+
+def _scan_block(
+    block: TextBlock, settings: Settings, out: list[InTextCitation], gaps: set[str]
+) -> bool:
+    """Append the citations found in one merged paragraph. Returns True when
+    the scan reached its match limit and must stop."""
+    text = block.text
+    spans = _sentence_spans(text)
+    anchor = _anchor_for(block)
+    for group_m in _PAREN_GROUP.finditer(text):
+        if len(out) >= settings.citation_in_text_max_matches:
+            return True
+        if not date_patterns(settings)["group"].search(group_m.group(1)):
+            continue
+        if len(group_m.group(1)) > settings.citation_parenthetical_group_max_chars:
+            gaps.add("parenthetical_group_limit")
+            continue
+        for raw_entry in group_m.group(1).split(";"):
+            raw_entry = raw_entry.strip()
+            if not raw_entry:
                 continue
-            if len(group_m.group(1)) > settings.citation_parenthetical_group_max_chars:
-                gaps.add("parenthetical_group_limit")
+            parsed = _parenthetical_entry(raw_entry, settings, gaps)
+            if parsed is None:
                 continue
-            for raw_entry in group_m.group(1).split(";"):
-                raw_entry = raw_entry.strip()
-                if not raw_entry:
-                    continue
-                parsed = _parenthetical_entry(raw_entry, settings, gaps)
-                if parsed is None:
-                    continue
-                if len(out) >= settings.citation_in_text_max_matches:
-                    gaps.add("citation_count_limit")
-                    return out
-                surnames, year, extra_years = parsed
+            if len(out) >= settings.citation_in_text_max_matches:
+                return True
+            surnames, year, extra_years = parsed
+            claim, cropped = _sentence_at(
+                text,
+                group_m.start(),
+                group_m.end(),
+                spans,
+                max_chars=settings.citation_claim_excerpt_max_chars,
+            )
+            is_secondary = bool(_SECONDARY_MARK.search(raw_entry))
+            found = [(surnames, y, is_secondary) for y in (year, *extra_years)]
+            outer = _SECONDARY_OUTER.search(raw_entry) if is_secondary else None
+            if outer is not None:
+                outer_parsed = _parenthetical_entry(outer.group("outer"), settings, gaps)
+                if outer_parsed is not None:
+                    found.extend(
+                        (outer_parsed[0], y, False) for y in (outer_parsed[1], *outer_parsed[2])
+                    )
+            for found_surnames, found_year, found_secondary in found:
+                out.append(
+                    InTextCitation(
+                        surnames=found_surnames,
+                        year=found_year,
+                        is_narrative=False,
+                        is_secondary=found_secondary,
+                        raw_text=group_m.group(0),
+                        anchor=anchor,
+                        page=block.page,
+                        paragraph=block.paragraph,
+                        claim_sentence=claim,
+                        claim_excerpt_cropped=cropped,
+                    )
+                )
+
+    for m in date_patterns(settings)["narrative"].finditer(text):
+        if len(out) >= settings.citation_in_text_max_matches:
+            return True
+        year_end = _narrative_year_end(text, m.end(), settings, gaps)
+        if year_end is None:
+            continue
+        author_span = _narrative_author_span(
+            text,
+            m.start(),
+            settings.citation_author_max_chars,
+            settings.citation_author_max_tokens,
+            settings.citation_unseparated_author_max_tokens,
+            gaps,
+        )
+        if author_span is None:
+            continue
+        start, authors = author_span
+        surnames = _split_authors(authors)
+        if not surnames:
+            continue
+        preceding = text[max(0, start - _LOOKBACK_CHARS) : start]
+        stops = list(_LOOKBACK_STOP.finditer(preceding))
+        if stops:
+            preceding = preceding[stops[-1].end() :]
+        raw_text = text[start:year_end]
+        is_secondary = bool(_SECONDARY_MARK.search(raw_text)) or bool(
+            _SECONDARY_MARK.search(preceding)
+        )
+        outer = _SECONDARY_OUTER.search(raw_text[:-1]) if raw_text.endswith(")") else None
+        if outer is not None:
+            outer_parsed = _parenthetical_entry(outer.group("outer"), settings, gaps)
+            if outer_parsed is not None:
                 claim, cropped = _sentence_at(
                     text,
-                    group_m.start(),
-                    group_m.end(),
+                    start,
+                    year_end,
                     spans,
                     max_chars=settings.citation_claim_excerpt_max_chars,
                 )
-                is_secondary = bool(_SECONDARY_MARK.search(raw_entry))
-                found = [(surnames, y, is_secondary) for y in (year, *extra_years)]
-                outer = _SECONDARY_OUTER.search(raw_entry) if is_secondary else None
-                if outer is not None:
-                    outer_parsed = _parenthetical_entry(outer.group("outer"), settings, gaps)
-                    if outer_parsed is not None:
-                        found.extend(
-                            (outer_parsed[0], y, False) for y in (outer_parsed[1], *outer_parsed[2])
-                        )
-                for found_surnames, found_year, found_secondary in found:
+                for outer_year in (outer_parsed[1], *outer_parsed[2]):
                     out.append(
                         InTextCitation(
-                            surnames=found_surnames,
-                            year=found_year,
+                            surnames=outer_parsed[0],
+                            year=outer_year,
                             is_narrative=False,
-                            is_secondary=found_secondary,
-                            raw_text=group_m.group(0),
+                            is_secondary=False,
+                            raw_text=raw_text,
                             anchor=anchor,
                             page=block.page,
                             paragraph=block.paragraph,
@@ -349,90 +457,34 @@ def extract_in_text_citations(
                             claim_excerpt_cropped=cropped,
                         )
                     )
-
-        for m in date_patterns(settings)["narrative"].finditer(text):
-            if len(out) >= settings.citation_in_text_max_matches:
-                gaps.add("citation_count_limit")
-                return out
-            year_end = _narrative_year_end(text, m.end(), settings, gaps)
-            if year_end is None:
-                continue
-            author_span = _narrative_author_span(
-                text,
-                m.start(),
-                settings.citation_author_max_chars,
-                settings.citation_author_max_tokens,
-                settings.citation_unseparated_author_max_tokens,
-                gaps,
+        claim, cropped = _sentence_at(
+            text,
+            start,
+            year_end,
+            spans,
+            max_chars=settings.citation_claim_excerpt_max_chars,
+        )
+        raw_narrative_y = m.group("year")
+        norm_narrative_y = (
+            "n.d."
+            if "nd" in raw_narrative_y.lower().replace(".", "").replace(" ", "")
+            else raw_narrative_y
+        )
+        out.append(
+            InTextCitation(
+                surnames=surnames,
+                year=norm_narrative_y,
+                is_narrative=True,
+                is_secondary=is_secondary,
+                raw_text=raw_text,
+                anchor=anchor,
+                page=block.page,
+                paragraph=block.paragraph,
+                claim_sentence=claim,
+                claim_excerpt_cropped=cropped,
             )
-            if author_span is None:
-                continue
-            start, authors = author_span
-            surnames = _split_authors(authors)
-            if not surnames:
-                continue
-            preceding = text[max(0, start - _LOOKBACK_CHARS) : start]
-            stops = list(_LOOKBACK_STOP.finditer(preceding))
-            if stops:
-                preceding = preceding[stops[-1].end() :]
-            raw_text = text[start:year_end]
-            is_secondary = bool(_SECONDARY_MARK.search(raw_text)) or bool(
-                _SECONDARY_MARK.search(preceding)
-            )
-            outer = _SECONDARY_OUTER.search(raw_text[:-1]) if raw_text.endswith(")") else None
-            if outer is not None:
-                outer_parsed = _parenthetical_entry(outer.group("outer"), settings, gaps)
-                if outer_parsed is not None:
-                    claim, cropped = _sentence_at(
-                        text,
-                        start,
-                        year_end,
-                        spans,
-                        max_chars=settings.citation_claim_excerpt_max_chars,
-                    )
-                    for outer_year in (outer_parsed[1], *outer_parsed[2]):
-                        out.append(
-                            InTextCitation(
-                                surnames=outer_parsed[0],
-                                year=outer_year,
-                                is_narrative=False,
-                                is_secondary=False,
-                                raw_text=raw_text,
-                                anchor=anchor,
-                                page=block.page,
-                                paragraph=block.paragraph,
-                                claim_sentence=claim,
-                                claim_excerpt_cropped=cropped,
-                            )
-                        )
-            claim, cropped = _sentence_at(
-                text,
-                start,
-                year_end,
-                spans,
-                max_chars=settings.citation_claim_excerpt_max_chars,
-            )
-            raw_narrative_y = m.group("year")
-            norm_narrative_y = (
-                "n.d."
-                if "nd" in raw_narrative_y.lower().replace(".", "").replace(" ", "")
-                else raw_narrative_y
-            )
-            out.append(
-                InTextCitation(
-                    surnames=surnames,
-                    year=norm_narrative_y,
-                    is_narrative=True,
-                    is_secondary=is_secondary,
-                    raw_text=raw_text,
-                    anchor=anchor,
-                    page=block.page,
-                    paragraph=block.paragraph,
-                    claim_sentence=claim,
-                    claim_excerpt_cropped=cropped,
-                )
-            )
-    return out
+        )
+    return False
 
 
 def _parenthetical_entry(
