@@ -29,6 +29,7 @@ import argparse
 import asyncio
 import hashlib
 import json
+import os
 import sys
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
@@ -54,12 +55,15 @@ from app.llm.queue import (  # noqa: E402
     LLMQueue,
     TransportDailyQuotaExhausted,
     TransportRateLimited,
+    TransportServerError,
 )
 from app.models.audit import AuditLog  # noqa: E402
+from app.models.enums import IngestStatus  # noqa: E402
 from app.models.instructor import Instructor  # noqa: E402
 from app.models.manuscript import Manuscript  # noqa: E402
 from app.models.rubric import Criterion, Rubric  # noqa: E402
 from app.models.run import CheckResult, CheckRun  # noqa: E402
+from app.rubric.issues import open_issue_ids  # noqa: E402
 
 LANE = "grading"
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
@@ -96,13 +100,28 @@ class BudgetedTransport:
         except BudgetExceeded as exc:
             self.stop_reason = f"daily budget reached: {exc}"
             raise HarnessStop(self.stop_reason) from exc
+        except TimeoutError as exc:
+            # The ledger could not be locked, so the attempt cannot be paid for.
+            self.stop_reason = f"budget ledger unavailable: {exc}"
+            raise HarnessStop(self.stop_reason) from exc
         self.attempts += 1
         try:
             return await self._inner.generate(
                 model=model, prompt=prompt, temperature=temperature, **context
             )
+        except TransportServerError:
+            # A 5xx or a timeout: the queue retries it, and each retry is
+            # reserved again above. If the retries run out, the run is
+            # degraded and `degraded_reason` keeps it out of the scores.
+            raise
         except (TransportRateLimited, TransportDailyQuotaExhausted) as exc:
             self.stop_reason = f"429 from the provider ({type(exc).__name__})"
+            raise HarnessStop(self.stop_reason) from exc
+        except Exception as exc:
+            # Anything else (the model withdrawn, the key refused) would be
+            # failed over or turned into unassessed rows by the product, and
+            # neither is what this harness measures.
+            self.stop_reason = f"{type(exc).__name__} from the provider: {exc}"
             raise HarnessStop(self.stop_reason) from exc
 
 
@@ -125,12 +144,17 @@ class MeasuredCallsOnly(LLMClient):
         )
 
 
-def _env_value(name: str) -> str | None:
-    env = ROOT / ".env"
+def _env_value(name: str, env_file: str | None) -> str | None:
+    """The variable from the process environment, else from the env file
+    that keeps the production key for reference. A missing file raises, so
+    the production-key guard cannot pass just because it found nothing."""
+    if os.environ.get(name):
+        return os.environ[name]
+    if not env_file:
+        raise SystemExit("config has no env_file to check the production key against")
+    env = Path(env_file)
     if not env.exists():
-        env = Path("C:/PROJECTS/Veridical/.env")
-    if not env.exists():
-        return None
+        raise SystemExit(f"Refusing to spend quota: {env} is missing, so the key can't be checked")
     for line in env.read_text(encoding="utf-8").splitlines():
         if line.startswith(f"{name}="):
             return line.split("=", 1)[1].strip().strip("'\"")
@@ -145,7 +169,7 @@ def check_guards(settings: Settings, config: dict) -> None:
         problems.append("LLM_CACHE_BYPASS is off: repeats would replay cached answers")
     if not settings.gemini_api_key:
         problems.append("GEMINI_API_KEY is not set")
-    prod_key = _env_value(config.get("production_key_variable", "GEMINI_API_KEY_PROD"))
+    prod_key = _env_value(config["production_key_variable"], config.get("env_file"))
     if prod_key and settings.gemini_api_key == prod_key:
         problems.append("GEMINI_API_KEY is the production key; use the local test key")
     host = urlsplit(sqlalchemy_url(settings.database_url)).hostname
@@ -155,6 +179,22 @@ def check_guards(settings: Settings, config: dict) -> None:
         problems.append("STORAGE_BACKEND must be local for a harness run")
     if settings.pipeline_worker_autostart:
         problems.append("PIPELINE_WORKER_AUTOSTART must be off")
+    # The run must use the deployed configuration (what a split vote becomes,
+    # how long a whole-thesis prompt may take), or it measures a setup no
+    # instructor gets. A missing map is a refusal, not a pass.
+    parity = config.get("production_settings")
+    if not isinstance(parity, dict) or not parity:
+        problems.append("config has no production_settings map to check the settings against")
+    else:
+        for name, expected in parity.items():
+            if name.startswith("_"):
+                continue
+            if not hasattr(settings, name):
+                problems.append(f"production_settings names an unknown setting {name!r}")
+            elif getattr(settings, name) != expected:
+                problems.append(
+                    f"{name.upper()} is {getattr(settings, name)!r}; production uses {expected!r}"
+                )
     if problems:
         raise SystemExit("Refusing to spend quota:\n- " + "\n- ".join(problems))
 
@@ -190,6 +230,17 @@ def build_client(settings: Settings, session_factory, budget: Budget, config: di
     return client, transport
 
 
+def grading_settings(settings: Settings, config: dict) -> dict:
+    """Every setting that can change a grade, as the run used it, so a
+    figure can be traced to the configuration that produced it."""
+    prefixes = tuple(config["recorded_setting_prefixes"])
+    return {
+        name: value
+        for name, value in sorted(settings.model_dump(mode="json").items())
+        if name.startswith(prefixes) and "key" not in name
+    }
+
+
 def _metadata(
     settings: Settings, config: dict, transport: BudgetedTransport, budget: Budget
 ) -> dict:
@@ -199,6 +250,7 @@ def _metadata(
         "model": config["model"],
         "key_project": config.get("key_project_label", "local test project"),
         "temperature": settings.gemini_temperature,
+        "grading_settings": grading_settings(settings, config),
         "cache_bypass": True,
         "transport_attempts": transport.attempts,
         "budget_today": budget.spent(),
@@ -211,6 +263,23 @@ def _dump(path: Path, payload: dict) -> None:
     path.write_text(
         json.dumps(payload, indent=1, ensure_ascii=False, default=str), encoding="utf-8"
     )
+
+
+def activation_refusal(rubric) -> str | None:
+    """Why the harness will not activate this format, or None.
+
+    Acknowledging a flagged level is the instructor's call, so the harness
+    never does it: grading against a level that was not traced to the format
+    would measure the decomposer, not the grader."""
+    if rubric.is_active:
+        return None
+    blocked = open_issue_ids(rubric)
+    if blocked:
+        return (
+            f"The decomposed format has {len(blocked)} open review item(s) "
+            f"(ids {blocked}). Nothing was activated or graded"
+        )
+    return None
 
 
 async def _chunks(path: Path) -> AsyncIterator[bytes]:
@@ -231,6 +300,9 @@ async def setup(session_factory, settings: Settings, client, transport, budget, 
             session.add(instructor)
             await session.commit()
             state["instructor_id"] = instructor.id
+            # Saved at once: the email is unique, so a re-run after a failed
+            # decomposition must reuse this row rather than create another.
+            _dump(state_file, state)
         if "rubric_id" not in state:
             pdf = Path(config["rubric_pdf"])
             rubric = await create_rubric_from_upload(
@@ -246,6 +318,12 @@ async def setup(session_factory, settings: Settings, client, transport, budget, 
             state["rubric_sha256"] = hashlib.sha256(pdf.read_bytes()).hexdigest()
             _dump(state_file, state)
         rubric = await session.get(Rubric, state["rubric_id"])
+        state["rubric_parse_status"] = rubric.parse_status.value
+        state["rubric_issues"] = rubric.parse_issue_details or []
+        _dump(state_file, state)
+        refusal = activation_refusal(rubric)
+        if refusal:
+            raise SystemExit(f"{refusal}; see rubric_issues in {state_file}.")
         if not rubric.is_active:
             await activate_rubric(session, rubric.id, state["instructor_id"])
         criteria = (
@@ -280,6 +358,11 @@ async def setup(session_factory, settings: Settings, client, transport, budget, 
                 "ingest_status": manuscript.ingest_status.value,
             }
             _dump(state_file, state)
+            if manuscript.ingest_status != IngestStatus.done:
+                raise SystemExit(
+                    f"{name} did not ingest ({manuscript.ingest_status.value}); "
+                    "no repeat can grade it."
+                )
     state["setup"] = _metadata(settings, config, transport, budget)
     _dump(state_file, state)
 
@@ -318,6 +401,35 @@ async def _run_record(session, run_id: int) -> dict:
     }
 
 
+UNASSESSED_OUTCOMES = {"api_down", "quota_exhausted", "unverifiable"}
+
+
+def degraded_reason(record: dict) -> str | None:
+    """Why a finished run cannot be scored, or None.
+
+    An outage or a timeout leaves criteria unassessed rather than stopping
+    the run, and scoring that as a repeat would report the provider's bad
+    hour as grader instability."""
+    stages = (record["check_run"].get("stage_status") or {}).get("stages", {})
+    semantic = stages.get("semantic") or {}
+    if semantic.get("status") != "done":
+        return f"the grading stage did not finish ({semantic.get('status')!r})"
+    if semantic.get("degraded_count"):
+        return f"{semantic['degraded_count']} criteria ungraded ({semantic.get('degraded_code')})"
+    unassessed = sorted(
+        {
+            r["outcome"]
+            for r in record["results"]
+            if r["kind"] == "semantic" and r["outcome"] in UNASSESSED_OUTCOMES
+        }
+    )
+    if unassessed:
+        return f"criteria left unassessed: {', '.join(unassessed)}"
+    if not any(r["kind"] == "semantic" for r in record["results"]):
+        return "no criterion was graded"
+    return None
+
+
 async def repeat(
     number: int, session_factory, settings: Settings, client, transport, budget, config, out: Path
 ):
@@ -334,10 +446,10 @@ async def repeat(
             run = await create_check_run(
                 session, state["instructor_id"], manuscript["id"], state["rubric_id"], settings
             )
-            try:
-                await run_check_run(session, run, settings, llm=client)
-            except (HarnessRefused, HarnessStop):
-                await session.rollback()
+            # The pipeline records its own failures on the run (a stop, or the
+            # refused integrity call that ends a grading-only run), so nothing
+            # propagates here; what happened is read back from the run below.
+            await run_check_run(session, run, settings, llm=client)
         async with session_factory() as session:
             record = await _run_record(session, run.id)
         record["document"] = name
@@ -345,10 +457,13 @@ async def repeat(
         record["refused_prompt_types"] = sorted(set(client.refused))
         record["meta"] = _metadata(settings, config, transport, budget)
         client.refused.clear()
-        if transport.stop_reason:
-            # The run was cut short; keep it apart so it is never scored.
+        stop = transport.stop_reason or degraded_reason(record)
+        if stop:
+            # The run was cut short or left criteria unassessed; keep it apart
+            # so it is never scored, and stop before spending more.
+            record["stop_reason"] = stop
             _dump(folder / "stopped" / f"{name}.json", record)
-            raise SystemExit(f"Stopped: {transport.stop_reason}")
+            raise SystemExit(f"Stopped: {stop}")
         _dump(target, record)
         print(f"r{number} {name}: run {run.id}, {transport.attempts} attempts so far", flush=True)
 
