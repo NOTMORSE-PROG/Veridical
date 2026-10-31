@@ -132,6 +132,9 @@ def test_repeat_scores_skip_stopped_runs_and_use_the_grader_level(tmp_path):
             }
         return {
             "document": "thesis",
+            "llm_events": [
+                {"event_type": "llm_call", "payload": {"prompt_type": "semantic_grading"}}
+            ],
             "results": [
                 {
                     "criterion_id": 1,
@@ -163,6 +166,24 @@ def test_repeat_scores_skip_stopped_runs_and_use_the_grader_level(tmp_path):
     (stopped / "other.json").write_text(
         json.dumps(record(2, "Exemplary", "passed") | {"document": "other"})
     )
+    # A thesis the product refused to grade before any call: escalated in
+    # every repeat, but that is not the grader agreeing with itself.
+    unread = {
+        "document": "unread",
+        "llm_events": [],
+        "results": [
+            {
+                "criterion_id": cid,
+                "kind": "semantic",
+                "outcome": "escalated",
+                "detail": {"coverage_reason": "source_reading_order_unresolved"},
+            }
+            for cid in (1, 2)
+        ],
+    }
+    for number in (1, 2):
+        (tmp_path / "repeats" / f"r{number}" / "unread.json").write_text(json.dumps(unread))
+    (pages / "unread.json").write_text(json.dumps({"pages": {}}))
 
     rows, details = score_repeats(
         tmp_path, pages, image_page_max_chars=5, targets={"repeat_all_equal": 0.95}
@@ -177,6 +198,7 @@ def test_repeat_scores_skip_stopped_runs_and_use_the_grader_level(tmp_path):
     grounded = by_metric["quotes found on the cited page (repeats)"]
     assert (grounded.numerator, grounded.denominator) == (2, 2)
     assert details["stopped"] == ["repeats/r2/stopped/other.json"]
+    assert details["not_graded_by_the_model"] == {"unread": ["source_reading_order_unresolved"]}
     # Tone went from decided to escalated: a change for the instructor, but
     # the grader proposed the same level both times.
     strict = by_metric["every repeat gave the same result (an escalation flip counts as a change)"]

@@ -89,6 +89,26 @@ def decision_basis(detail: dict) -> str:
     return "unrecorded"
 
 
+GRADING_PROMPT = "semantic_grading"
+
+
+def graded_by_the_model(record: dict) -> bool:
+    return any(
+        event["event_type"] == "llm_call"
+        and (event.get("payload") or {}).get("prompt_type") == GRADING_PROMPT
+        for event in record.get("llm_events") or []
+    )
+
+
+def _ungraded_reason(record: dict) -> str:
+    reasons = {
+        (r.get("detail") or {}).get("coverage_reason") or r["outcome"]
+        for r in record["results"]
+        if r["kind"] == "semantic"
+    }
+    return ", ".join(sorted(str(reason) for reason in reasons)) or "no criterion result"
+
+
 def common_scale(criteria) -> tuple[str, ...]:
     """The one level scale every levelled criterion shares. Run it straight
     after setup: a format with mixed scales has to be scored per scale, and
@@ -106,12 +126,20 @@ def score_repeats(folder: Path, pages_dir: Path, *, image_page_max_chars: int, t
     repeat_dirs = sorted(p for p in (folder / "repeats").glob("r*") if p.is_dir())
     grades: list[Grade] = []
     decisions, quotes = [], []
+    not_graded: dict[str, set[str]] = {}
     pages_cache: dict[str, dict[int, str]] = {}
     for repeat_dir in repeat_dirs:
         number = int(repeat_dir.name[1:])
         for record_file in sorted(repeat_dir.glob("*.json")):
             record = _load(record_file)
             document = record["document"]
+            if not graded_by_the_model(record):
+                # Every criterion was settled before any grading call (a
+                # source-reading limitation, say). That is the product
+                # failing closed, not the grader agreeing with itself, so it
+                # is listed and kept out of every grader rate.
+                not_graded.setdefault(document, set()).add(_ungraded_reason(record))
+                continue
             for result in record["results"]:
                 if result["kind"] != "semantic" or result["criterion_id"] not in criteria:
                     continue
@@ -254,6 +282,7 @@ def score_repeats(folder: Path, pages_dir: Path, *, image_page_max_chars: int, t
         "stopped": sorted(
             p.relative_to(folder).as_posix() for p in folder.glob("repeats/r*/stopped/*.json")
         ),
+        "not_graded_by_the_model": {doc: sorted(why) for doc, why in sorted(not_graded.items())},
         "outcomes": tally(decisions, lambda d: f"r{d['repeat']} {d['outcome']}"),
         "decisions": decisions,
         "quotes_needing_a_person": [q for q in quotes if q["where"] != ON_ANCHOR_PAGE],
