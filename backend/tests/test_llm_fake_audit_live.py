@@ -138,3 +138,17 @@ async def test_fake_client_audit_row_never_leaks_check_run_id_into_context_paylo
     assert row.check_run_id == 7
     assert "check_run_id" not in row.payload["context"]
     assert row.payload["context"]["consistency_pass"] == "pass_1"
+
+
+async def test_fake_client_drops_nul_from_the_prompt_it_audits(session_factory):
+    """BUG-550: a NUL in prompt text failed this audit write (JSONB cannot
+    hold U+0000), which made a rubric upload return 500."""
+    from app.ingest.normalize import NUL
+
+    client = FakeLLMClient(session_factory=session_factory)
+    await client.complete("rubric_decomposition", f"Chapter{NUL}One", note=f"x{NUL}y")
+
+    async with session_factory() as session:
+        row = (await session.execute(select(AuditLog))).scalar_one()
+    assert row.payload["prompt"] == "ChapterOne"
+    assert row.payload["context"]["note"] == "xy"

@@ -11,11 +11,16 @@ import re
 _ZERO_WIDTH = re.compile("[" + "".join(map(chr, (0x200B, 0x200C, 0x200D, 0x2060, 0xFEFF))) + "]")
 _WHITESPACE = re.compile(r"\s+")
 _DIGITS = re.compile(r"\d+")
+# A PDF that draws glyph code 0 extracts as U+0000. PostgreSQL text and JSONB
+# cannot store it (a prompt carrying it failed the audit write), and the
+# instructor cannot fix the source file, so document text drops it. Typed
+# request text is refused instead (app/db_types.py).
+NUL = "\x00"
 
 
 def normalize(text: str) -> str:
-    """Replace zero-width chars with spaces, collapse whitespace, strip."""
-    return _WHITESPACE.sub(" ", _ZERO_WIDTH.sub(" ", text)).strip()
+    """Drop NUL, replace zero-width chars with spaces, collapse whitespace, strip."""
+    return _WHITESPACE.sub(" ", _ZERO_WIDTH.sub(" ", text.replace(NUL, ""))).strip()
 
 
 def match_key(text: str) -> str:

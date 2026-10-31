@@ -183,6 +183,22 @@ def test_post_rubrics_returns_persisted_criteria(client, tmp_path):
     assert sum(c["weight"] for c in body["criteria"]) == pytest.approx(100.0)
 
 
+def test_post_rubrics_accepts_a_pdf_whose_text_carries_nul(client, tmp_path):
+    """BUG-550: glyph code 0 in the format's text failed the AI audit write
+    (PostgreSQL JSONB cannot hold U+0000) and the upload returned 500."""
+    from tests.test_document_nul_text import glyph_zero_pdf
+
+    path = glyph_zero_pdf(tmp_path / "rubric.pdf", r"The manuscript must include an\000 abstract.")
+    with path.open("rb") as fh:
+        resp = client.post(
+            "/rubrics",
+            params={"title": "NUL Rubric"},
+            files={"file": ("rubric.pdf", fh, "application/pdf")},
+        )
+    assert resp.status_code == 200, resp.text
+    assert "\x00" not in resp.text and "\\u0000" not in resp.text
+
+
 def _upload(client, tmp_path, *, title="Demo Rubric"):
     path = _rubric_pdf(tmp_path)
     with path.open("rb") as fh:

@@ -513,6 +513,9 @@ class ExtractionResult(BaseModel):
     # order is unresolved (their text is absent from that copy). Never stored.
     unread_pages: list[int] | None = Field(default=None, exclude=True)
     docx_omitted_image_occurrences: int = Field(default=0, ge=0)
+    # NUL characters the document's text carried and extraction dropped (see
+    # normalize.NUL). Omitted when zero so existing extractions keep their bytes.
+    nul_characters_removed: int = Field(default=0, ge=0, exclude_if=lambda count: count == 0)
     tables: list[TableBlock] = Field(default_factory=list)
     equations: list[EquationBlock] = Field(default_factory=list)
     geometry: list[PageGeometry] = Field(default_factory=list)
