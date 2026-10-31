@@ -183,6 +183,20 @@ def light_paraphrase(text: str, table: dict[str, str], share: float, rng: random
     return " ".join(edited), len(picked) / max(1, len(words))
 
 
+def shared_wording(own: str, other: str, config: dict) -> dict:
+    """Word 5-gram containment and the longest common run between two
+    passages, and whether either reaches the confirmation thresholds."""
+    share = containment(own, other, config["match"]["shingle"])
+    run = longest_common_run(own, other)
+    verify = config["verify"]
+    return {
+        "containment": round(share, 3),
+        "longest_run": run,
+        "confirmed": share >= verify["containment_confirmed"]
+        or run >= verify["longest_run_confirmed"],
+    }
+
+
 def banned_hits(text: str, banned: list[str]) -> list[str]:
     lowered = (text or "").lower()
     return [term for term in banned if term in lowered]
@@ -1085,6 +1099,20 @@ async def _measure(ctx: Context, config: dict, url: str, settings) -> dict:
                         "similarity": flag["detail"].get("similarity"),
                         "matched_manuscript_id": flag["detail"].get("matched_manuscript_id"),
                         "matched_page": flag["detail"].get("matched_page"),
+                        # Whether the two passages share wording at all, so a
+                        # finding no plant explains can be told from real shared
+                        # text (yardstick 02 thresholds in `verify`).
+                        **(
+                            {
+                                "shared_wording": shared_wording(
+                                    flag["evidence_excerpt"],
+                                    flag["detail"].get("matched_text") or "",
+                                    config,
+                                )
+                            }
+                            if is_passage_flag(flag)
+                            else {}
+                        ),
                         "plants": [
                             {
                                 "type": plant.type,
