@@ -90,8 +90,6 @@ _ENTRY_OPENING_QUOTES = "\"'`\u00b4\u201c\u2018\u00ab\u2039\u201e\u201a\ufffd \t
 # identify a list entry, never an author name to reconstruct or guess.
 _ENTRY_AUTHOR_REPEAT = re.compile(r"^[\u2014\u2015]+,?\s*")
 _TRAILING_PUNCT = ".,;:)"
-# Shown link text that is already an address or identifier.
-_SHOWN_LOCATOR = re.compile(r"\s*(?:https?://|doi:\s*|10\.\d{4,9}/)", re.IGNORECASE)
 # Rendering jitter between lines set at the same indent: far below any real
 # list indent (~0.25in = 18pt). A layout invariant, not a tuning knob.
 _INDENT_JITTER_PTS = 3.0
@@ -205,6 +203,13 @@ def select_references(result: ExtractionResult, patterns: HeadingPatterns) -> Re
             marker = _REFERENCE_MARKER.match(line)
             if marker and _parse_reference_number(marker.group(1) or marker.group(2)) is None:
                 return ReferenceSelection([], span, (*issues, "unreadable_reference_number"))
+    if (
+        result.anchor_kind == "page"
+        and _first_line_indent_evidence(
+            span, min((b.bbox[0] for b in span if b.bbox is not None), default=0.0)
+        )[1]
+    ):
+        issues.append("ambiguous_reference_entry_boundaries")
     groups = _entry_groups(span, result.anchor_kind)
     if groups is None:
         # An entry that is only its label means the labels were read apart
@@ -306,6 +311,8 @@ def extract_references(
             # The source/link contract establishes the complete identifier.
             # Generic reference punctuation stripping must not shorten it.
             draft.doi = recovery.doi
+        if not legacy and urls[index] and "](" in urls[index]:
+            urls[index] = _before_markup_link(urls[index])
         if not legacy and metadata_patterns.markup_link.search(parser_view):
             # A link annotation behind printed link markup points at the
             # target, which may be a search redirect. Only the address the
@@ -671,7 +678,7 @@ def _read_through_markup(text: str, patterns) -> str:
 
     def link(match: re.Match[str]) -> str:
         shown, target = match.group("shown"), match.group("target")
-        if _SHOWN_LOCATOR.match(shown) or patterns.markup_redirect.search(target):
+        if patterns.markup_shown_locator.match(shown) or patterns.markup_redirect.search(target):
             return shown
         return f"{shown} {target}"
 
@@ -688,10 +695,19 @@ def _before_markup_link(identifier: str) -> str:
 def _parse_group(texts: list[str], order_index: int = 0) -> CitationDraft:
     """Parse an entry exactly as ingestion stores it, so a boundary decision
     never rests on a reading that differs from the saved one."""
-    patterns = load_reference_metadata_patterns(get_settings().reference_metadata_patterns_file)
-    raw = "\n".join(texts)
-    view = _join_lines(raw if _PREVIOUS_READER.get() else _read_through_markup(raw, patterns))
-    return parse_reference(view, order_index)
+    return parse_reference(_shown_entry("\n".join(texts)), order_index)
+
+
+def _shown_entry(raw: str) -> str:
+    """The parse view of an entry. With an unreadable metadata policy the raw
+    text is returned, and parsing then fails closed on the same policy."""
+    if _PREVIOUS_READER.get():
+        return _join_lines(raw)
+    try:
+        patterns = load_reference_metadata_patterns(get_settings().reference_metadata_patterns_file)
+    except (OSError, ValueError, UnicodeError):
+        return _join_lines(raw)
+    return _join_lines(_read_through_markup(raw, patterns))
 
 
 def _parse_into(draft: CitationDraft, raw: str, *, legacy_quoted_titles: bool = False) -> None:
@@ -737,13 +753,6 @@ def _parse_into(draft: CitationDraft, raw: str, *, legacy_quoted_titles: bool = 
         authors_raw = authors_raw.rstrip(".")
     if authors_raw:
         draft.authors = split_apa_authors(authors_raw)
-    if draft.authors and not _PREVIOUS_READER.get() and _title_before_date(draft.authors):
-        # APA moves the title of a work with no author in front of the date
-        # ("Title of the page. (n.d.). Site name."). What follows the date is
-        # then the site, not the title, so neither is read as one; the entry
-        # stays for the instructor to check.
-        draft.authors = None
-        return
 
     if not legacy_quoted_titles and (span := quoted_title_span(raw, year_m.end())):
         _parse_locators(draft, raw[: year_m.end()] + raw[span.after :])
@@ -772,6 +781,13 @@ def _parse_into(draft: CitationDraft, raw: str, *, legacy_quoted_titles: bool = 
     rest = _DOI_TAIL.sub("", rest)
     rest = _RETRIEVED.sub("", rest).strip()
     title, venue = _split_title_venue(rest)
+    if venue is None and not previous and draft.authors and _title_before_date(draft.authors):
+        # APA moves the title of a work with no author in front of the date
+        # ("Title of the page. (n.d.). Site name."). The one part after the
+        # date is then the site, not the title, so neither is read as one;
+        # the entry stays for the instructor to check.
+        draft.authors = None
+        return
     if venue is None and (publication_tail := _BARE_VOLUME_PAGES.fullmatch(title)):
         draft.title = publication_tail.group("title").strip()
         draft.venue = publication_tail.group("tail").strip()
@@ -877,7 +893,8 @@ def _title_before_date(authors: list[str]) -> bool:
         words = author.replace(",", " ").split()
         if any(_INITIALS.fullmatch(word) for word in words):
             return False
-        if any(word.strip(".,()").casefold() in patterns.corporate_author_words for word in words):
+        institution = patterns.corporate_author_words | patterns.author_institution_words
+        if any(word.strip(".,()").casefold() in institution for word in words):
             return False
     return any(
         len(words) > settings.reference_unseparated_author_max_tokens
@@ -997,6 +1014,16 @@ def _parse_ieee_into(draft: CitationDraft, raw: str, *, legacy_quoted_titles: bo
         for name in names
     ):
         return  # no independent initials/surname boundary before the title
+    if (
+        not legacy_quoted_titles
+        and not _PREVIOUS_READER.get()
+        and any(
+            word.endswith(".") and word[:1].isupper() and not _INITIALS.fullmatch(word)
+            for name in names
+            for word in name.split()
+        )
+    ):
+        return  # a sentence ends inside what would be the author list
     if not authors:
         return
     draft.authors = authors
@@ -1429,7 +1456,11 @@ def _until_reference_end_heading(
                 # A supported closing heading can bound a complete primary
                 # bibliography without classifying the later appendix. Keep
                 # that entire later region protected from body/linkage use.
-                groups = _entry_groups(preceding, anchor_kind)
+                groups = (
+                    _segment_blocks(preceding, anchor_kind)
+                    if _PREVIOUS_READER.get()
+                    else _entry_groups(preceding, anchor_kind)
+                )
                 if (
                     end_heading
                     and protected is not None
@@ -1471,16 +1502,18 @@ def _complete_entry(texts: list[str], order_index: int) -> bool:
 
     It parses, or it prints a reference date followed by more text that
     reaches its locator (a DOI or address) or closes its last sentence. An
-    entry cut short by the heading ("Santos, M. (", "Cruz, A. (2022). A study
-    of") is none of these, so the list's end stays unclear rather than trusted.
+    entry cut short by the heading ("Santos, M. (", "Cruz, A. (2022") is none
+    of these, so the list's end stays unclear rather than trusted.
     """
     if _parse_group(texts, order_index).parse_status == CitationParseStatus.parsed:
         return True
     if _PREVIOUS_READER.get():
         return False
-    patterns = load_reference_metadata_patterns(get_settings().reference_metadata_patterns_file)
-    view = _join_lines(_read_through_markup("\n".join(texts), patterns))
-    date = date_patterns()["reference"].search(view)
+    view = _shown_entry("\n".join(texts))
+    try:
+        date = date_patterns()["reference"].search(view)
+    except (OSError, ValueError, UnicodeError):
+        return False
     if date is None or not any(char.isalpha() for char in view[date.end() :]):
         return False
     # The locator is printed last, so an entry that reached it after its
@@ -1707,22 +1740,72 @@ def _first_line_indent(span: list[TextBlock], leftmost: float) -> float | None:
     an opening ("G. D. (2024). Title") cannot switch it to this reading.
     Mixed evidence returns None and the hanging-indent reading holds.
     """
+    position, conflict = _first_line_indent_evidence(span, leftmost)
+    return None if conflict else position
+
+
+def _first_line_indent_evidence(
+    span: list[TextBlock], leftmost: float
+) -> tuple[float | None, bool]:
+    """The first-line indent the list shows, and whether it also shows an
+    entry that contradicts it.
+
+    The contradiction is a full author-and-date opening ("Cruz, A. (2020).")
+    away from the indent, right after a line that could end an entry. A
+    wrapped line of initials ("D. (2021). Title") or a line continuing an
+    unfinished one sits flush left in such a list and is not one. Such an
+    entry would be merged into the one above it, so the entries are refused.
+    """
     first = next((b for b in span if b.text.strip()), None)
     if _PREVIOUS_READER.get() or first is None or first.bbox is None:
-        return None
+        return None, False
     position = first.bbox[0]
-    entry = date_patterns()["entry"]
+    try:
+        entry = date_patterns()["entry"]
+    except (OSError, ValueError, UnicodeError):
+        return None, False  # no date grammar, no layout evidence
     if position - leftmost <= _INDENT_JITTER_PTS or not entry.match(first.text):
-        return None
-    openings = [b.bbox[0] for b in span if b.bbox is not None and entry.match(b.text)]
-    at_indent = sum(abs(x - position) <= _INDENT_JITTER_PTS for x in openings)
+        return None, False
+    openings = [b for b in span if b.bbox is not None and entry.match(b.text)]
+    at_indent = sum(abs(b.bbox[0] - position) <= _INDENT_JITTER_PTS for b in openings)
     settings = get_settings()
     if (
         at_indent < settings.reference_first_line_indent_min_openings
         or at_indent / len(openings) < settings.reference_first_line_indent_min_share
     ):
-        return None
-    return position
+        return None, False
+    conflict = any(
+        block.bbox is not None
+        and entry.match(block.text)
+        and abs(block.bbox[0] - position) > _INDENT_JITTER_PTS
+        and not _initials_only_opening(block.text)
+        and _closes_entry(previous.text)
+        for previous, block in zip(span, span[1:], strict=False)
+    )
+    return position, conflict
+
+
+def _closes_entry(text: str) -> bool:
+    """Whether a line could be an entry's last: it ends on a locator, or on a
+    period that is not an author's initial. A line that stops mid-phrase
+    ("... system for the") runs on, so the next line continues it."""
+    words = text.split()
+    if not words:
+        return False
+    last = words[-1]
+    if _URL.fullmatch(last) or _DOI_TAIL.fullmatch(last):
+        return True
+    return last.endswith(".") and not _INITIALS.fullmatch(last)
+
+
+def _initials_only_opening(text: str) -> bool:
+    """ "G. D. (2024). Title": the tail of an author list wrapped onto a new line."""
+    words = [
+        word
+        for word in re.split(r"[\s,&]+", text[: text.find("(")])
+        if word and word.casefold() != "and"
+    ]
+    return bool(words) and all(_INITIALS.fullmatch(word) for word in words)
 
 
 def _split_numbered_block_lines(span: list[TextBlock]) -> list[TextBlock]:

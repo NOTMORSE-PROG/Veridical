@@ -11,6 +11,7 @@ ONLY high-severity outcome this check ever produces — everything else
 those are, by themselves, evidence of anything wrong with the manuscript.
 """
 
+import logging
 import re
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import asdict, dataclass, replace
@@ -96,6 +97,8 @@ from app.models.enums import CheckKind, CitationParseStatus, FlagSeverity, Resul
 from app.models.manuscript import Manuscript
 from app.models.rubric import Rubric
 from app.models.run import CheckResult, CheckRun, Flag
+
+logger = logging.getLogger(__name__)
 
 
 class VerdictKind(StrEnum):
@@ -625,11 +628,18 @@ async def run_citation_integrity_check(
 def _reader_for_saved_rows(
     citations: list[Citation], extraction: ExtractionResult, patterns: HeadingPatterns
 ) -> AbstractContextManager[object]:
-    if not citations or _same_rows(extract_references(extraction, patterns), citations):
+    try:
+        if not citations or _same_rows(extract_references(extraction, patterns), citations):
+            return nullcontext()
+        with previous_reference_reader():
+            previous = extract_references(extraction, patterns)
+    except (OSError, ValueError, UnicodeError):
+        # An unreadable reference policy is reported by the check itself.
         return nullcontext()
-    with previous_reference_reader():
-        previous = extract_references(extraction, patterns)
-    return previous_reference_reader() if _same_rows(previous, citations) else nullcontext()
+    if not _same_rows(previous, citations):
+        return nullcontext()
+    logger.info("Citation rows were saved by the previous reference reader; checking with it")
+    return previous_reference_reader()
 
 
 def _same_rows(drafts, citations: list[Citation]) -> bool:

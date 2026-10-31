@@ -11,6 +11,7 @@ from app.checks.citations import verify
 from app.ingest.patterns import load_patterns
 from app.ingest.reference_inventory import reference_source_scope_issues
 from app.ingest.references import (
+    _PREVIOUS_READER,
     extract_references,
     non_reference_blocks,
     parse_reference,
@@ -249,12 +250,29 @@ def test_title_printed_before_the_date_is_not_read_as_authors():
 
 @pytest.mark.parametrize(
     "authors",
-    ["Example Infotech Services Limited", "Department of Science and Technology", "Google"],
+    [
+        "Example Infotech Services Limited",
+        "Department of Science and Technology",
+        "Google",
+        "Republic of the Philippines",
+        "Bangko Sentral ng Pilipinas",
+        "Pamantasan ng Lungsod ng Maynila",
+    ],
 )
-def test_organisation_authors_stay_authors(authors):
-    draft = parse_reference(f"{authors}. (2023). A guide to apps. Example Press.", 0)
+@pytest.mark.parametrize("venue", [" Example Press.", ""])
+def test_organisation_authors_stay_authors(authors, venue):
+    draft = parse_reference(f"{authors}. (2023). A guide to the apps.{venue}", 0)
     assert draft.authors == [authors]
-    assert draft.title == "A guide to apps"
+    assert draft.title == "A guide to the apps"
+
+
+def test_long_lowercase_author_with_a_title_after_the_date_stays_an_author():
+    # Two parts after the date: the first is the title, so the text before the
+    # date is not a title.
+    draft = parse_reference(
+        "Analysis of recommender systems group. (2024). A guide. Example Press.", 0
+    )
+    assert draft.authors == ["Analysis of recommender systems group"]
 
 
 def test_author_list_closed_by_a_period_before_a_quoted_title():
@@ -433,9 +451,231 @@ async def test_recheck_of_rows_saved_by_the_previous_reader_keeps_its_outcome(mo
     provider.assert_not_called()
 
 
-def test_saved_rows_matching_the_current_reader_use_it():
+def _reader_in_use(saved, extraction, patterns):
+    with verify._reader_for_saved_rows(saved, extraction, patterns):
+        return _PREVIOUS_READER.get()
+
+
+def test_saved_rows_choose_the_reader_that_saved_them():
     extraction = _first_line_indent_list(appendix=False)
     patterns = load_patterns()
-    saved = [Citation(manuscript_id=1, **vars(d)) for d in extract_references(extraction, patterns)]
-    with verify._reader_for_saved_rows(saved, extraction, patterns) as reader:
-        assert reader is None
+    current = [
+        Citation(manuscript_id=1, **vars(d)) for d in extract_references(extraction, patterns)
+    ]
+    assert _reader_in_use(current, extraction, patterns) is False
+    with previous_reference_reader():
+        old = [
+            Citation(manuscript_id=1, **vars(d)) for d in extract_references(extraction, patterns)
+        ]
+    assert _reader_in_use(old, extraction, patterns) is True
+    old[0].title = "Edited after upload"
+    assert _reader_in_use(old, extraction, patterns) is False
+
+
+def test_previous_reader_keeps_link_markup_in_saved_locators():
+    # Rows saved before markup was read through kept the whole printed link;
+    # the previous reader must reproduce that, or such rows would not bind.
+    text = (
+        "Cruz, A. (2020). A title. Journal of Examples, 1(2), 3–4. "
+        "[https://doi.org/10.5555/abc.1](https://www.google.com/search?q=https%3A%2F%2Fdoi.org)"
+    )
+    extraction = _extraction([(1, 72.0, "REFERENCES", True), (1, 72.0, text, False)])
+    with previous_reference_reader():
+        (old,) = extract_references(extraction, load_patterns())
+    (new,) = extract_references(extraction, load_patterns())
+    assert "](" in old.doi and "](" in (old.url or "](")
+    assert new.doi == "10.5555/abc.1" and new.url == "https://doi.org/10.5555/abc.1"
+
+
+def test_unpaired_link_markup_cuts_identifiers_at_the_target():
+    text = (
+        "Cruz, A. (2020). A title. Journal of Examples, 1(2), 3–4. "
+        "[https://doi.org/10.5555/abc.1](www.example.org/redirect)"
+    )
+    extraction = _extraction([(1, 72.0, "REFERENCES", True), (1, 72.0, text, False)])
+    (draft,) = extract_references(extraction, load_patterns())
+    assert draft.doi == "10.5555/abc.1"
+    assert draft.url == "https://doi.org/10.5555/abc.1"
+
+
+def test_boundary_decisions_parse_the_view_ingestion_stores():
+    from app.ingest.references import _parse_group
+
+    text = "Cruz, A. (2020). A title. *Journal of Examples*, 1(2), 3–4."
+    extraction = _extraction([(1, 72.0, "REFERENCES", True), (1, 72.0, text, False)])
+    (stored,) = extract_references(extraction, load_patterns())
+    gate = _parse_group([text])
+    assert (
+        (gate.title, gate.venue)
+        == (stored.title, stored.venue)
+        == (
+            "A title",
+            "Journal of Examples, 1(2), 3–4",
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    ("indented", "flush", "reads_indent"),
+    [(2, 0, False), (3, 0, True), (4, 1, True), (3, 1, False)],
+)
+def test_first_line_indent_needs_enough_indented_openings(indented, flush, reads_indent):
+    lines = [(1, FLUSH, "REFERENCES", True)]
+    for index in range(indented):
+        lines += [
+            (1, INDENT, f"Abad{index}, K. (2020). A long title that wraps onto a", False),
+            (1, FLUSH, "second line. Journal of Examples, 1, 1–2.", False),
+        ]
+    for _ in range(flush):
+        lines += [(1, FLUSH, "D. (2021). A wrapped author tail. Journal, 1, 1–2.", False)]
+    drafts = extract_references(_extraction(lines), load_patterns())
+    titles = [d.title for d in drafts]
+    whole = "A long title that wraps onto a second line"
+    assert (titles.count(whole) == indented) is reads_indent
+
+
+def test_full_flush_left_entry_in_a_first_line_indent_list_is_refused():
+    lines = [(1, FLUSH, "REFERENCES", True)]
+    for name in ("Abad", "Bello", "Cruz", "Diaz"):
+        lines += [
+            (1, INDENT, f"{name}, K. (2020). A long title that wraps onto a", False),
+            (1, FLUSH, "second line. Journal of Examples, 1, 1–2.", False),
+        ]
+    lines += [(1, FLUSH, "Estrada, L. (2019). Typed flush left. Journal, 2, 3–4.", False)]
+    extraction = _extraction(lines)
+    selection = select_references(extraction, load_patterns())
+    assert "ambiguous_reference_entry_boundaries" in selection.issues
+    assert not extract_references(extraction, load_patterns())
+
+
+@pytest.mark.parametrize(
+    ("entry", "complete"),
+    [
+        ("Loo, M. (2023). Shape study. 2023 Example Conference (EC), 1–7.", True),
+        ("Loo, M. (2023). Shape study. 2023 Example Conference (EC), 1–7", False),
+        ("Loo, M. (2023). Shape study. 2023 Example Conference, https://example.org/a", True),
+        ("Loo, M. (2023).", False),
+        ("Loo, M. 2023 Example Conference, 1–7.", False),
+        (
+            "Loo, M. https://example.org/x (2023). Shape study. 2023 Example Conference (EC), 1–7",
+            False,
+        ),
+    ],
+)
+def test_entry_completeness_before_an_unclassified_appendix(entry, complete):
+    from app.ingest.references import _complete_entry
+
+    assert _complete_entry([entry], 0) is complete
+
+
+def _with_reading_order(extraction, unresolved):
+    from app.ingest.schemas import PageReadingOrder
+
+    for index, block in enumerate(extraction.blocks):
+        block.source_line_ids = [f"{block.page}:{index}:0"]
+    extraction.reading_order = [
+        PageReadingOrder(
+            page=page,
+            status="unresolved" if page in unresolved else "ordered",
+            reason="table_regions_unresolved" if page in unresolved else None,
+            source_inventory_sha256="a" * 64,
+            source_line_count=sum(block.page == page for block in extraction.blocks),
+            ordered_source_line_ids=[
+                identifier
+                for block in extraction.blocks
+                if block.page == page
+                for identifier in block.source_line_ids
+            ],
+        )
+        for page in range(1, extraction.page_count + 1)
+    ]
+    return extraction
+
+
+def test_labels_read_first_do_not_pull_the_previous_page_into_the_list_scope():
+    from app.ingest.references import reference_reading_order_issues
+
+    extraction = _with_reading_order(_labels_column(), unresolved={1})
+    selection = select_references(extraction, load_patterns())
+    assert not reference_reading_order_issues(extraction, selection)
+    assert len(extract_references(extraction, load_patterns())) == 3
+
+
+@pytest.mark.parametrize(
+    "image",
+    [
+        ImageBlock(page=4, bbox=(300, 20, 538, 60)),  # above the closing heading
+        ImageBlock(page=3, bbox=(85, 140, 538, 360)),  # on a page inside the list
+    ],
+)
+def test_images_that_may_hold_entries_still_block_a_complete_list(image):
+    extraction = _labels_column()
+    extraction.images = [image]
+    selection = select_references(extraction, load_patterns())
+    assert reference_source_scope_issues(extraction, selection, require_complete=False)
+
+
+def test_image_beside_the_closing_heading_in_another_column_still_blocks():
+    extraction = _labels_column()
+    # Below the heading's top but not under it: another column of the page.
+    extraction.images = [ImageBlock(page=4, bbox=(440, 90, 538, 300))]
+    selection = select_references(extraction, load_patterns())
+    assert reference_source_scope_issues(extraction, selection, require_complete=False)
+
+
+def test_unreadable_reference_policy_does_not_break_list_selection(monkeypatch, tmp_path):
+    from app.config import get_settings
+
+    policy = tmp_path / "bad.json"
+    policy.write_text("[]", encoding="utf-8")
+    monkeypatch.setenv("REFERENCE_METADATA_PATTERNS_FILE", str(policy))
+    get_settings.cache_clear()
+    extraction = _first_line_indent_list(appendix=False)
+    patterns = load_patterns()
+    selection = select_references(extraction, patterns)
+    assert selection.span
+    assert non_reference_blocks(extraction, patterns, ambiguous_entries_ok=True)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "[4] A. Cruz. Smart Farming Systems. “Chapter 3: Sensors.” Example Press, 2020.",
+        "[8] A. Cruz. Mobile app development. M.S. thesis, “TIP,” Manila, 2020.",
+    ],
+)
+def test_a_sentence_inside_the_author_list_is_not_an_author(text):
+    draft = parse_reference(text, 3)
+    assert draft.parse_status == CitationParseStatus.parse_failed
+    assert draft.authors is None
+
+
+def test_a_label_above_the_heading_is_not_taken_into_the_list():
+    extraction = _labels_column()
+    stray = TextBlock(page=2, text="[9]", bbox=(89, 40, 106, 52), max_font_size=12, bold_ratio=0)
+    extraction.blocks.insert(1, stray)
+    selection = select_references(extraction, load_patterns())
+    assert not selection.issues
+    assert len(extract_references(extraction, load_patterns())) == 3
+
+
+def test_flush_left_line_continuing_an_unfinished_line_is_not_a_contradiction():
+    lines = [(1, FLUSH, "REFERENCES", True)]
+    for name in ("Abad", "Bello", "Cruz", "Diaz"):
+        lines += [
+            (1, INDENT, f"{name}, K. (2020). A long title that wraps onto a", False),
+            (1, FLUSH, "second line. Journal of Examples, 1, 1–2.", False),
+        ]
+    lines += [
+        (1, INDENT, "View of an appointment system for the", False),
+        (
+            1,
+            FLUSH,
+            "Example State University. (n.d.). Journal of Examples. https://example.org/a",
+            False,
+        ),
+    ]
+    extraction = _extraction(lines)
+    selection = select_references(extraction, load_patterns())
+    assert "ambiguous_reference_entry_boundaries" not in selection.issues
+    assert len(extract_references(extraction, load_patterns())) == 5

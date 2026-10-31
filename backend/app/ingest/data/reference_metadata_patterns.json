@@ -87,6 +87,21 @@
     "al",
     "el"
   ],
+  "author_institution_words": [
+    "republic",
+    "philippines",
+    "pilipinas",
+    "senate",
+    "congress",
+    "court",
+    "government",
+    "bangko",
+    "pamantasan",
+    "kagawaran",
+    "kolehiyo",
+    "unibersidad"
+  ],
+  "markup_shown_locator_pattern": "(?i)\\s*(?:https?://|doi:\\s*|10\\.\\d{4,9}/)",
   "corporate_author_words": [
     "university",
     "institute",
