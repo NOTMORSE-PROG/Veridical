@@ -149,5 +149,5 @@ def test_only_a_failed_check_is_called_not_confirmed(scope, prefix):
         grading_passes=2,
     )
     caution = automatic_grade_caution(row)
-    assert caution.startswith("Evidence check not confirmed") is prefix
+    assert caution.startswith("The quote check did not support") is prefix
     assert "This grade is about the whole paper." in caution

@@ -3,8 +3,10 @@
   "capabilities": {
     "whole_paper_assessment_required": {
       "about": "the whole paper, such as its tone, how its ideas connect or how often errors appear",
-      "check": "Check it against the manuscript as a whole",
-      "subsumes": ["collection_assessment_required"]
+      "check": "Read a few pages from different chapters",
+      "subsumes": [
+        "collection_assessment_required"
+      ]
     },
     "collection_assessment_required": {
       "about": "a whole set, such as every reference or every requirement",
@@ -16,6 +18,6 @@
     }
   },
   "joined_check": "Check these yourself",
-  "caution": "This grade is about {about}, which a few quoted passages cannot show. {check} before relying on it.",
-  "reason": "This rating is about {about}, which a few quoted passages cannot show, so VERIDICAL did not assign it. {check}, then choose the level."
+  "caution": "Quotes cannot confirm this grade. It is about {about}. {check} before relying on it.",
+  "reason": "Quotes cannot confirm this rating, so VERIDICAL did not assign it. It is about {about}. {check}, then choose the level."
 }
