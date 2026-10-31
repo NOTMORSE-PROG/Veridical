@@ -1,6 +1,6 @@
 {
   "_comment": "Instructor-facing reasons for the table-formatting-presence rule (F3.2). Data, not code: edit the wording here.",
-  "images_not_read": "Tables could not be verified: images were not read for tables. This manuscript has embedded images that were not read for tables (no recognised table caption beside them, AI capacity, connectivity, or the reading limit), and no typed table was found, so its tables may be pasted as images. Check the manuscript's tables directly before deciding.",
+  "images_not_read": "Tables could not be verified: images were not read for tables. No typed table was found, so the manuscript's tables may be pasted as images. Check its tables directly before deciding.",
   "no_tables": "No tables were found in the manuscript.",
   "too_few_captions": "Fewer than the expected share of tables carry a caption."
 }

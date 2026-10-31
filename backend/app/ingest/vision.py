@@ -199,6 +199,26 @@ def summarize_image_readings(result: ExtractionResult) -> ImageReadingSummary | 
     return ImageReadingSummary(**counts)
 
 
+def images_read_for_tables(result: ExtractionResult) -> bool | None:
+    """True only when every image that could hold a table has a completed
+    reading. A single image too small to read (an icon or a logo) cannot hold
+    one; an image merged from small pieces can, and it is never read. A
+    failed, malformed or uncued image means tables were not ruled out."""
+    if result.image_readings is None:
+        return None
+    for reading in result.image_readings:
+        completed = reading.status == "classified_only" or (
+            reading.status == "transcribed" and reading.reason is None
+        )
+        image = (
+            result.images[reading.image_index] if reading.image_index < len(result.images) else None
+        )
+        too_small = reading.reason == "size_filter" and image is not None and image.piece_count == 1
+        if not completed and not too_small:
+            return False
+    return True
+
+
 def mark_pending_unavailable(result: ExtractionResult, reason: str) -> None:
     for reading in result.image_readings or []:
         if reading.status == "not_selected" and reading.reason == "not_attempted":

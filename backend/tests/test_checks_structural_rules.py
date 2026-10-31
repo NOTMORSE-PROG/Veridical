@@ -48,6 +48,7 @@ def _ctx(
     vision_status: str = "none",
     has_images: bool = False,
     citations: list | None = None,
+    images_read_for_tables: bool | None = None,
 ) -> RuleContext:
     settings = get_settings()
     return RuleContext(
@@ -59,6 +60,7 @@ def _ctx(
         tables=tables or [],
         vision_status=vision_status,
         has_images=has_images,
+        images_read_for_tables=images_read_for_tables,
         citations=citations or [],
         margin_tolerance_pts=settings.structural_margin_tolerance_pts,
         citation_style_min_ratio=settings.structural_citation_style_min_ratio,
@@ -539,7 +541,25 @@ def test_table_formatting_escalates_when_images_exist_but_were_never_confirmed_r
     assert outcome.detail["reason"].startswith(
         "Tables could not be verified: images were not read for tables."
     )
-    assert "no recognised table caption" in outcome.detail["reason"]
+    assert "may be pasted as images" in outcome.detail["reason"]
+
+
+def test_a_finished_image_pass_does_not_rule_out_tables_unless_every_image_was_read():
+    """The pass can finish with the one cued image unreadable, or with
+    uncued images never read: no absence of tables was shown, so the
+    criterion goes to the instructor. Only when every image that could hold
+    a table was read and none held one does it fail."""
+    spec = get_rule(TABLE_FORMAT_RULE_ID)
+    criterion = FakeCriterion(text="Tables must be properly formatted with captions")
+    unread = _ctx(tables=[], vision_status="done", has_images=True, images_read_for_tables=False)
+    assert spec.run(criterion, unread).outcome == ResultOutcome.escalated
+    read = _ctx(tables=[], vision_status="done", has_images=True, images_read_for_tables=True)
+    assert spec.run(criterion, read).outcome == ResultOutcome.failed
+    # The saved readings win over the status, both ways.
+    status_only = _ctx(
+        tables=[], vision_status="none", has_images=True, images_read_for_tables=True
+    )
+    assert spec.run(criterion, status_only).outcome == ResultOutcome.failed
 
 
 def test_table_formatting_without_images_keeps_failing_when_no_table_is_found():

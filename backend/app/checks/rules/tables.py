@@ -71,7 +71,12 @@ def _run(criterion, ctx: RuleContext) -> RuleOutcome:
         # never drops out as not applicable: a criterion left out of the
         # composite would quietly raise the readiness band of a thesis whose
         # tables are uncaptioned screenshots.
-        if ctx.anchor_kind == "page" and ctx.has_images and ctx.vision_status != "done":
+        read = (
+            ctx.images_read_for_tables
+            if ctx.images_read_for_tables is not None
+            else ctx.vision_status == "done"
+        )
+        if ctx.anchor_kind == "page" and ctx.has_images and not read:
             return RuleOutcome(
                 outcome=ResultOutcome.escalated,
                 anchor="document",

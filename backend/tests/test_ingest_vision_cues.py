@@ -263,3 +263,34 @@ def test_a_distance_that_is_not_finite_is_refused(tmp_path, value):
     custom.write_text(text, encoding="utf-8")
     with pytest.raises(ValueError, match="caption_gap_pts"):
         load_patterns(custom)
+
+
+@pytest.mark.parametrize(
+    "readings, merged, expected",
+    [
+        ([("transcribed", None), ("classified_only", "content_not_transcribed")], False, True),
+        # A single icon too small to read cannot hold a table.
+        ([("transcribed", None), ("not_selected", "size_filter")], False, True),
+        # An image merged from small pieces can, and it is never read.
+        ([("transcribed", None), ("not_selected", "size_filter")], True, False),
+        ([("transcribed", None), ("not_selected", "no_table_cue")], False, False),
+        ([("transcribed", "low_confidence")], False, False),
+        ([("invalid_response", "invalid_response")], False, False),
+        ([("failed", "crop_unavailable")], False, False),
+        ([("failed", "api_down")], False, False),
+        ([("not_selected", "unsupported_source")], False, False),
+    ],
+)
+def test_images_count_as_read_for_tables_only_when_every_one_could_be(readings, merged, expected):
+    result = _result(images=[IMAGE] * len(readings))
+    if merged:
+        result.images[-1] = result.images[-1].model_copy(update={"piece_count": 40})
+    result.image_readings = [
+        _reading(index, status, reason, attempted=status not in {"not_selected"})
+        for index, (status, reason) in enumerate(readings)
+    ]
+    assert vision.images_read_for_tables(result) is expected
+
+
+def test_an_extraction_saved_without_readings_leaves_the_rule_to_its_status():
+    assert vision.images_read_for_tables(_result()) is None
