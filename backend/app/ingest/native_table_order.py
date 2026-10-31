@@ -206,6 +206,13 @@ def validate_grid(grid: NativeGrid, page_bbox: Rect | None, eps: float) -> None:
         bottom = _span_end(rows, cell.row, cell.bbox[3], eps)
         right = _span_end(columns, cell.column, cell.bbox[2], eps)
         if bottom is None or right is None:
+            # A cell that ends between lines because it runs into another
+            # cell (a list misread as a table) is an overlap, not a span.
+            if any(
+                other is not cell and _intersects(cell.bbox, other.bbox, eps)
+                for other in grid.cells
+            ):
+                raise TableOrderUnresolved("native_table_cells_overlap")
             raise TableOrderUnresolved(reason)
         slots = {(r, k) for r in range(cell.row, bottom) for k in range(cell.column, right)}
         if covered & slots:
@@ -495,6 +502,15 @@ def saved_table_witness_valid(extraction, record) -> bool:
                 ],
             )
             validate_grid(native, witness.page_bbox, witness.geometry_tolerance_pts)
+            # A slot covered by a merged cell holds no text of its own.
+            origins = {(c.row, c.column) for c in grid.cells}
+            if any(
+                saved.rows[r][k]
+                for r in range(grid.row_count)
+                for k in range(grid.column_count)
+                if (r, k) not in origins
+            ):
+                return False
             current_ids = []
             for cell in grid.cells:
                 if (

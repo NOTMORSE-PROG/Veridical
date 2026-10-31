@@ -332,21 +332,102 @@ def test_a_merged_cell_off_the_grid_lines_stays_unresolved(cells, reason):
         validate_grid(_grid(*cells), PAGE, 0.01)
 
 
-def test_a_covered_slot_with_text_of_its_own_is_refused_with_its_reason():
-    from types import SimpleNamespace
-
-    from app.config import Settings
+def _two_by_two_with_header(covered_text):
+    """A header spanning both columns over two plain cells."""
     from app.ingest.native_table_order import NativeTableProposal, snapshot_native_table
 
     table = SimpleNamespace(
-        row_count=1,
+        row_count=2,
         col_count=2,
-        bbox=(0.0, 0.0, 100.0, 50.0),
-        rows=[SimpleNamespace(cells=[(0.0, 0.0, 100.0, 50.0), None])],
+        bbox=(0.0, 0.0, 100.0, 100.0),
+        rows=[
+            SimpleNamespace(cells=[(0.0, 0.0, 100.0, 50.0), None]),
+            SimpleNamespace(cells=[(0.0, 50.0, 50.0, 100.0), (50.0, 50.0, 100.0, 100.0)]),
+        ],
     )
     proposal = NativeTableProposal(page_bbox=PAGE)
-    snapshot_native_table(table, [["Header", "stray"]], proposal, Settings(_env_file=None))
-    assert proposal.problem == "native_table_merged_cell"
+    snapshot_native_table(
+        table, [["Header", covered_text], ["a", "b"]], proposal, Settings(_env_file=None)
+    )
+    return proposal
+
+
+def test_a_covered_slot_with_text_of_its_own_is_refused_with_its_reason():
+    assert _two_by_two_with_header(None).problem is None
+    assert _two_by_two_with_header("stray").problem == "native_table_merged_cell"
+
+
+def test_a_saved_table_with_text_in_a_covered_slot_fails_its_check():
+    with pymupdf.open() as doc:
+        page = doc.new_page()
+        for x in (60, 280):
+            page.draw_line((x, 80), (x, 150))
+        page.draw_line((170, 115), (170, 150))
+        for y in (80, 115, 150):
+            page.draw_line((60, y), (280, y))
+        page.insert_text((65, 100), "Merged header", fontsize=10)
+        page.insert_text((65, 140), "Alpha", fontsize=10)
+        page.insert_text((175, 140), "12", fontsize=10)
+        result = extract(doc)
+    record = result.reading_order[0]
+    assert saved_table_witness_valid(result, record)
+    result.tables[0].rows[0][1] = "stray"
+    assert not saved_table_witness_valid(result, record)
+
+
+FULL = [
+    (0, 0, (0.0, 0.0, 50.0, 50.0)),
+    (0, 1, (50.0, 0.0, 100.0, 50.0)),
+    (1, 0, (0.0, 50.0, 50.0, 100.0)),
+    (1, 1, (50.0, 50.0, 100.0, 100.0)),
+]
+
+
+@pytest.mark.parametrize(
+    "cells",
+    [
+        # Cells out of row-major order.
+        [FULL[1], FULL[0], FULL[2], FULL[3]],
+        # A row whose cells disagree about where it starts.
+        [
+            FULL[0],
+            (0, 1, (50.0, 0.0, 100.0, 50.0)),
+            (1, 0, (0.0, 50.0, 50.0, 100.0)),
+            (1, 1, (50.0, 52.0, 100.0, 100.0)),
+        ],
+        # The first line is not on the table's edge.
+        [(0, 0, (0.0, 2.0, 50.0, 50.0)), (0, 1, (50.0, 2.0, 100.0, 50.0)), FULL[2], FULL[3]],
+        # A cell outside the table.
+        [FULL[0], FULL[1], FULL[2], (1, 1, (50.0, 50.0, 110.0, 100.0))],
+    ],
+)
+def test_a_grid_whose_lines_do_not_hold_is_refused(cells):
+    with pytest.raises(TableOrderUnresolved):
+        validate_grid(_grid(*cells), PAGE, 0.01)
+
+
+def test_rows_that_do_not_increase_are_refused():
+    grid = _grid(
+        (0, 0, (0.0, 0.0, 100.0, 0.005)),
+        (1, 0, (0.0, 0.005, 100.0, 100.0)),
+        rows=2,
+        columns=1,
+    )
+    with pytest.raises(TableOrderUnresolved):
+        validate_grid(grid, PAGE, 0.01)
+
+
+def test_a_list_misread_as_a_table_is_refused_as_overlapping_cells():
+    # The first cell covers the second, which ends between row lines.
+    grid = _grid(
+        (0, 0, (0.0, 0.0, 100.0, 50.0)),
+        (0, 1, (36.0, 0.0, 100.0, 30.0)),
+        (1, 0, (0.0, 50.0, 100.0, 100.0)),
+        rows=2,
+        columns=2,
+    )
+    with pytest.raises(TableOrderUnresolved, match="native_table_cells_overlap"):
+        validate_grid(grid, PAGE, 0.01)
 
 
 @pytest.mark.parametrize("rotation", [0, 90, 180, 270])
