@@ -23,7 +23,7 @@ from app.ingest.native_table_order import (
     capture_native_characters,
     snapshot_native_table,
 )
-from app.ingest.normalize import furniture_key, match_key, normalize
+from app.ingest.normalize import NUL, furniture_key, match_key, normalize
 from app.ingest.patterns import HeadingPatterns, load_patterns
 from app.ingest.reading_order import line_source_id, order_page, propose_regions
 from app.ingest.schemas import (
@@ -92,6 +92,7 @@ def _extract_open_document(
     ordering_enabled = settings.ingest_reading_order_strategy == "native_regions_v1"
     order_proposals = {}
     merge_budget = [settings.preparation_image_piece_merge_max_comparisons]
+    nul_removed = 0
 
     for index in range(doc.page_count):
         page = doc[index]
@@ -140,7 +141,8 @@ def _extract_open_document(
                 continue
             if link_textpage is None:
                 link_textpage = page.get_textpage(flags=pymupdf.TEXTFLAGS_TEXT)
-            displayed = page.get_textbox(rect, textpage=link_textpage)
+            # Counted with the page's text below, so only dropped here.
+            displayed = page.get_textbox(rect, textpage=link_textpage).replace(NUL, "")
             if len(displayed) > settings.ingest_uri_max_chars:
                 uri_links_complete = False
                 continue
@@ -163,6 +165,12 @@ def _extract_open_document(
         page_lines: list[Line] = []
         page_image_boxes: list[Bbox] = []
         raw_blocks = page.get_text("dict", sort=True)["blocks"]
+        nul_removed += sum(
+            span["text"].count(NUL)
+            for block in raw_blocks
+            for line in block.get("lines", [])
+            for span in line.get("spans", [])
+        )
         for block_no, block in enumerate(raw_blocks):
             bbox: Bbox = tuple(block["bbox"])
             if block["type"] == 1:
@@ -247,6 +255,7 @@ def _extract_open_document(
         uri_links=uri_links,
         uri_links_complete=uri_links_complete,
         reading_order=reading_order,
+        nul_characters_removed=nul_removed,
     )
 
 
