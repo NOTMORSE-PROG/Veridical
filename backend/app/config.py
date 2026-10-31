@@ -1153,6 +1153,14 @@ class Settings(BaseSettings):
     # the chapter/whole-doc thresholds it was copied from.
     reuse_passage_exact_duplicate_threshold: float = 0.95
     reuse_passage_high_similarity_threshold: float = 0.85
+    # BUG-620: a similarity match is raised only when the two passages also
+    # share wording (`app/checks/reuse/lexical.py`). The static embedding puts
+    # same-genre text close together (two requirements lists at 0.855, two
+    # signature blocks at 0.935) with no words in common. Shared word shingles
+    # are counted over the smaller passage; either test is enough.
+    reuse_confirm_shingle_words: int = Field(default=5, ge=1)
+    reuse_confirm_shingle_share: float = Field(default=0.5, ge=0, le=1)
+    reuse_confirm_run_words: int = Field(default=12, ge=1)
 
     # --- Library (V-066, F7.1/F7.2 surfaces) -----------------------------------
     # How many chapters' worth of passage excerpt the library shows for a

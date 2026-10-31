@@ -1785,3 +1785,58 @@ async def test_a_body_that_cannot_be_told_from_its_references_is_named_not_empty
     assert result.detail["pages_not_compared"] == [1, 2, 3]
     assert result.detail["comparison_ran"] is False
     assert "no embeddable content" not in result.detail["note"].casefold()
+
+
+async def test_a_similar_section_with_no_shared_wording_is_counted_not_raised(session_factory):
+    """BUG-620: with the similarity bars lowered so the vectors match, text on
+    the same topic in different words raises nothing and is counted; a real
+    copy of the same Library text is still raised."""
+    settings = get_settings().model_copy(
+        update={
+            "reuse_high_similarity_threshold": 0.3,
+            "reuse_passage_high_similarity_threshold": 0.3,
+        }
+    )
+    library_text = (
+        "Attendance in most classrooms is still recorded on paper sign-in sheets that the "
+        "instructor tallies by hand after each session, which wastes class time and leads "
+        "to frequent recording mistakes in the final report."
+    )
+    same_topic = (
+        "Many teachers keep track of who came to class with a printed list that students "
+        "initial, then count the marks later; this slows lessons down and errors creep "
+        "into the records that are submitted at the end of the term."
+    )
+    other_chapter = (
+        "Our grading pipeline layers automated rule checks underneath a reviewer model, "
+        "escalating uncertain cases to the instructor rather than deciding on its own."
+    )
+    source_id, source_run = await _seed_manuscript_and_run(session_factory, group_label="Source")
+    await _add_to_library(session_factory, source_id, _extraction(library_text, CH2))
+
+    topic_id, topic_run = await _seed_manuscript_and_run(session_factory, group_label="Topic")
+    async with session_factory() as session:
+        topic = await _run_with_saved_source(
+            session, topic_id, topic_run, _extraction(same_topic, other_chapter), settings
+        )
+    copy_id, copy_run = await _seed_manuscript_and_run(session_factory, group_label="Copy")
+    async with session_factory() as session:
+        copied = await _run_with_saved_source(
+            session, copy_id, copy_run, _extraction(library_text, other_chapter), settings
+        )
+    assert topic.detail["n_similar_without_shared_wording"] >= 1
+    passage_kinds = [kind for kind in await _flag_kinds(session_factory, topic.id)]
+    assert not any(kind.endswith("_passage") for kind in passage_kinds)
+    assert any(kind.endswith("_passage") for kind in await _flag_kinds(session_factory, copied.id))
+
+
+async def _flag_kinds(session_factory, result_id: int) -> list[str]:
+    async with session_factory() as session:
+        return list(
+            (
+                await session.scalars(
+                    text("SELECT detail->>'kind' FROM flag WHERE check_result_id = :id"),
+                    {"id": result_id},
+                )
+            ).all()
+        )
