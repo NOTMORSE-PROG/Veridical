@@ -5,6 +5,14 @@ import type { DocumentParagraphsOut, Rubric } from "../api/types";
 import { useMe } from "../auth/useAuth";
 import { DocxPane } from "../document/DocxPane";
 import { Button } from "../ui/Button";
+import type { SourceTarget } from "./sourcePage";
+
+const TARGET_HEADINGS: Record<SourceTarget["kind"], string> = {
+  cell: "Find this cell",
+  row: "Find this row",
+  compare: "Compare this wording",
+  format: "Compare the criteria with this page",
+};
 
 const PdfPane = lazy(() => import("../document/PdfPane").then((module) => ({ default: module.PdfPane })));
 
@@ -32,10 +40,19 @@ function documentMatches(value: unknown, rubric: FormatVersion): value is Format
         || (row.source_format === "pdf" && row.reconstruction === "original_pdf"));
 }
 
-export function RubricSourcePane({ rubric, isVisible, onUploadNewVersion }: {
+export function RubricSourcePane({ rubric, isVisible, onUploadNewVersion, requestedPage = null, requestedPageAttempt, requestedTarget = null, focusTarget = false, onPagesAvailable }: {
   rubric: FormatVersion;
   isVisible: boolean;
   onUploadNewVersion: () => void;
+  requestedPage?: number | null;
+  requestedPageAttempt?: number;
+  // What to find on the requested page, shown above it.
+  requestedTarget?: SourceTarget | null;
+  // In tabs the original replaces the criteria, so focus moves to the target.
+  focusTarget?: boolean;
+  // True for a stored PDF original, false when there are no pages to show,
+  // null while that is not known yet.
+  onPagesAvailable?: (available: boolean | null) => void;
 }) {
   const { data: instructor } = useMe();
   const owner = instructor?.id ?? null;
@@ -44,6 +61,7 @@ export function RubricSourcePane({ rubric, isVisible, onUploadNewVersion }: {
   const lifetime = useRef(0);
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState(false);
+  const targetRef = useRef<HTMLDivElement>(null);
   const document = useQuery({
     queryKey: ["rubric-document", owner, rubric.id, rubric.rubric_family_id, rubric.version],
     enabled: owner !== null && isVisible,
@@ -58,6 +76,18 @@ export function RubricSourcePane({ rubric, isVisible, onUploadNewVersion }: {
     staleTime: Infinity,
   });
   const metadata = document.data;
+  const pagesAvailable = document.isError ? false
+    : !metadata ? null
+      : metadata.available && metadata.source_format === "pdf";
+  useEffect(() => { onPagesAvailable?.(pagesAvailable); }, [onPagesAvailable, pagesAvailable]);
+  const targetShown = Boolean(requestedTarget && requestedPage !== null && metadata?.available && metadata.source_format === "pdf");
+  // The target appears once the original has loaded, which can be after the
+  // pane opened; bring it into view then.
+  useEffect(() => {
+    if (!targetShown || !targetRef.current) return;
+    targetRef.current.scrollIntoView({ block: "nearest" });
+    if (focusTarget) targetRef.current.focus({ preventScroll: true });
+  }, [targetShown, requestedPageAttempt, focusTarget]);
   const hash = metadata?.available ? metadata.source_sha256 : null;
   const downloadIdentity = `${owner}:${rubric.id}:${rubric.version}:${hash ?? ""}`;
   const identityRef = useRef(downloadIdentity);
@@ -155,11 +185,18 @@ export function RubricSourcePane({ rubric, isVisible, onUploadNewVersion }: {
       <Button variant="secondary" busy={downloading} onClick={() => void downloadOriginal()}>Download original</Button>
     </div>
     {downloadError && <p role="alert">The original could not be downloaded. Try again; your criteria have not changed.</p>}
+    {metadata.source_format === "pdf" && requestedTarget && requestedPage !== null
+      && <div key={requestedPageAttempt} ref={targetRef} className="signal-source-target" tabIndex={-1} role="status">
+        <p><strong>{TARGET_HEADINGS[requestedTarget.kind]}</strong>
+          {" "}· {requestedTarget.location}</p>
+        {requestedTarget.text && <blockquote>{requestedTarget.text}</blockquote>}
+      </div>}
     {metadata.source_format === "pdf"
       ? <Suspense fallback={<p role="status">Loading original format.</p>}><PdfPane key={`${owner}:${rubric.id}:${hash}`} documentKind="required_format"
           fileUrl={`${BASE_URL}/rubrics/${rubric.id}/document/file?${sourceQuery}`}
           loadFile={loadPdfSource}
-          regions={[]} flags={[]} selectedFlagId={null} onSelectFlag={() => {}} requestedPage={null} focusSelection={false} /></Suspense>
+          regions={[]} flags={[]} selectedFlagId={null} onSelectFlag={() => {}} requestedPage={requestedPage}
+          requestedPageAttempt={requestedPageAttempt} focusSelection={false} /></Suspense>
       : <DocxPane key={`${owner}:${rubric.id}:${hash}`} documentKind="required_format"
           paragraphs={paragraphs.data?.paragraphs} tables={paragraphs.data?.tables} images={paragraphs.data?.images}
           nativeMath={paragraphs.data?.native_math} omittedImageOccurrences={paragraphs.data?.omitted_image_occurrences}

@@ -26,13 +26,16 @@ export class ApiError extends Error {
   readonly fields: readonly string[];
   // Each named field's own message, so one field's reason is never shown on another.
   readonly fieldMessages: ReadonlyMap<string, string>;
+  // Facts the server attached to a refusal, e.g. which items are still open.
+  readonly details: Readonly<Record<string, unknown>>;
 
-  constructor(status: number, code: string, message: string, fields: readonly string[] = [], fieldMessages: ReadonlyMap<string, string> = new Map()) {
+  constructor(status: number, code: string, message: string, fields: readonly string[] = [], fieldMessages: ReadonlyMap<string, string> = new Map(), details: Readonly<Record<string, unknown>> = {}) {
     super(message);
     this.status = status;
     this.code = code;
     this.fields = fields;
     this.fieldMessages = fieldMessages;
+    this.details = details;
   }
 }
 
@@ -71,9 +74,11 @@ function validationError(items: ValidationItem[]): ApiError {
 // FastAPI's request validation {detail: [...]}, which would otherwise reach
 // the screen as "Request failed (422)."
 function errorFromResponse(status: number, body: unknown): ApiError {
-  const value = (body && typeof body === "object" ? body : {}) as { error?: { code?: string; message?: string }; detail?: unknown };
+  const value = (body && typeof body === "object" ? body : {}) as { error?: { code?: string; message?: string; details?: unknown }; detail?: unknown };
   if (value.error?.code || value.error?.message) {
-    return new ApiError(status, value.error.code ?? "internal", value.error.message ?? `Request failed (${status}).`);
+    const details = value.error.details && typeof value.error.details === "object" && !Array.isArray(value.error.details)
+      ? value.error.details as Record<string, unknown> : {};
+    return new ApiError(status, value.error.code ?? "internal", value.error.message ?? `Request failed (${status}).`, [], new Map(), details);
   }
   if (status === 422 && Array.isArray(value.detail) && value.detail.length > 0) return validationError(value.detail as ValidationItem[]);
   return new ApiError(status, "internal", `Request failed (${status}).`);

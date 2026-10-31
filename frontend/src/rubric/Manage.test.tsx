@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useLocation } from "react-router";
 import type { RubricListItem } from "../api/types";
@@ -137,6 +137,29 @@ describe("ManageRubricPage", () => {
     expect(screen.getByRole("link", { name: "Review and activate" })).toBeInTheDocument();
   });
 
+  it("labels the shown version from its open items, not from how it was prepared (BUG-566)", async () => {
+    const detail = (details: unknown) => ({ id: V1.id, rubric_family_id: FAMILY_ID, version: 1, title: "V1.pdf", parse_status: "needs_review",
+      parse_issues: ["Purpose levels may be shifted."], is_active: true, is_latest_version: false, criteria: [], parse_issue_details: details });
+    const issue = (status: string) => ({ id: 1, criterion_id: 2, level: 3, code: "not_in_source", message: "m", status, resolution: null });
+    vi.stubGlobal("fetch", stubFetchByPath({
+      "/rubric-families": [V1],
+      [`/rubric-families/${FAMILY_ID}/versions`]: [V1],
+      [`/rubrics/${V1.id}`]: detail([issue("open")]),
+    }));
+    const { unmount } = renderWithProviders(<ManageRubricPage />);
+    expect(await screen.findByText("Active with items to check · correct it in a new version")).toBeInTheDocument();
+    unmount();
+
+    vi.stubGlobal("fetch", stubFetchByPath({
+      "/rubric-families": [V1],
+      [`/rubric-families/${FAMILY_ID}/versions`]: [V1],
+      [`/rubrics/${V1.id}`]: detail([issue("acknowledged")]),
+    }));
+    renderWithProviders(<ManageRubricPage />);
+    expect(await screen.findByText("Flagged when prepared · all items checked")).toBeInTheDocument();
+    expect(screen.queryByText(/needs review/i)).not.toBeInTheDocument();
+  });
+
   it("lets an instructor switch when more than one required format exists", async () => {
     const secondFamily: RubricListItem = {
       ...V1,
@@ -204,6 +227,28 @@ describe("ManageRubricPage", () => {
       ),
     );
     expect(await screen.findByText("Version 2 is now active.")).toBeInTheDocument();
+  });
+
+  it("sends the instructor to review a version whose items are still open instead of activating it (BUG-566)", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const path = new URL(String(input), "http://localhost").pathname;
+      if (path === `/rubrics/${V2.id}/activate`) {
+        return new Response(JSON.stringify({ error: { code: "unresolved_rubric_issues", message: "Open items", details: { open_issue_ids: ["a"] } } }), { status: 409 });
+      }
+      if (path === "/rubric-families") return new Response(JSON.stringify([V1]), { status: 200 });
+      if (path === `/rubric-families/${FAMILY_ID}/versions`) return new Response(JSON.stringify([V2, V1]), { status: 200 });
+      return new Response("{}", { status: 200 });
+    }));
+    renderWithProviders(<ManageRubricPage />);
+
+    await screen.findByText("V2.pdf");
+    fireEvent.click(screen.getByRole("button", { name: "Activate" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Version 2 has 1 item to check");
+    await waitFor(() => expect(alert).toHaveFocus());
+    expect(within(alert).getByRole("link", { name: "Review Version 2" })).toHaveAttribute("href", `/rubric/${V2.id}/review`);
+    expect(screen.queryByText("Version 2 is now active.")).not.toBeInTheDocument();
   });
 
   it("does not offer Delete for the active version", async () => {

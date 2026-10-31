@@ -28,6 +28,53 @@ export interface RubricLevel {
   name: string;
   descriptor: string;
   points: number;
+  // BUG-566: where the server found this descriptor in the uploaded format.
+  // Absent on levels prepared before descriptors were checked. Server-owned:
+  // the review screen sends it back unchanged and never builds one.
+  source?: RubricLevelSource;
+}
+
+export interface RubricLevelSource {
+  match: "exact" | "unmatched";
+  // Null for a DOCX format, which has no pages.
+  page: number | null;
+  table: number | null;
+  // 1-based; null when the text was found outside a table.
+  row: number | null;
+  col: number | null;
+  cell_text: string | null;
+  row_label: string | null;
+  column_heading: string | null;
+}
+
+export type RubricIssueCode =
+  | "not_in_source" | "joins_cells" | "partial_cell" | "not_one_row"
+  | "wrong_row" | "shared_cell" | "level_left_out" | "other";
+
+export type RubricAcknowledgementReason = "document_wording" | "outside_table" | "other";
+
+export interface RubricIssueDetail {
+  id: number;
+  criterion_id: number | null;
+  // Null means the issue is about the criterion's whole row.
+  level: number | null;
+  code: RubricIssueCode | string;
+  message: string;
+  status: "open" | "resolved" | "acknowledged";
+  resolution: {
+    kind: "acknowledged" | "rechecked" | "criterion_removed";
+    reason_code: RubricAcknowledgementReason | null;
+    note: string | null;
+    by_instructor_id: number | null;
+    by_name: string | null;
+    at: string;
+  } | null;
+}
+
+export interface RubricSourceSummary {
+  // Sorted; the first page is the copy that was read.
+  copy_pages: number[];
+  withheld_count: number;
 }
 
 export interface Criterion {
@@ -103,6 +150,11 @@ export interface Rubric {
   is_active: boolean;
   is_latest_version: boolean;
   can_edit_criteria?: boolean;
+  // BUG-566: optional so older responses and fixtures still read. Null on
+  // versions prepared before descriptors were checked.
+  revision?: number;
+  source_summary?: RubricSourceSummary | null;
+  parse_issue_details?: RubricIssueDetail[] | null;
   criteria: Criterion[];
 }
 

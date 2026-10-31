@@ -330,6 +330,8 @@
   --signal-radius-panel: 0.75rem;
   --signal-radius-pill: 999px;
   --signal-control-height: 2.75rem;
+  /* Rubric review: keeps a focused level clear of the sticky item navigator. */
+  --signal-review-nav-height: calc(var(--signal-control-height) + var(--signal-space-4));
   --signal-control-height-coarse: 3rem;
   --signal-reading-bar-height: var(--signal-control-height-coarse);
   /* Set at runtime to the pinned review-step height; zero when not pinned. */

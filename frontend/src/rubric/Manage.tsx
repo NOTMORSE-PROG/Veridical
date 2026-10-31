@@ -12,6 +12,7 @@ import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import { RerunModal } from "./RerunModal";
+import { FormatReviewStateTag } from "./RubricReviewParts";
 import { UploadRubricModal } from "./UploadRubricModal";
 import { CitationRecencySetting } from "./CitationRecencySetting";
 import {
@@ -93,6 +94,11 @@ export function ManageRubricPage() {
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget>();
   const [deleteError, setDeleteError] = useState<string>();
   const [actionError, setActionError] = useState<string>();
+  // BUG-566: a version with parser items still open cannot be activated
+  // here; the instructor checks them on that version's review screen.
+  const [blockedVersion, setBlockedVersion] = useState<{ version: RubricListItem; open: number }>();
+  const blockedRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (blockedVersion) blockedRef.current?.focus(); }, [blockedVersion]);
   const [liveMessage, setLiveMessage] = useState("");
   const [recentActivation, setRecentActivation] = useState<number>();
 
@@ -108,12 +114,18 @@ export function ManageRubricPage() {
 
   async function activateVersion(version: RubricListItem) {
     setActionError(undefined);
+    setBlockedVersion(undefined);
     try {
       await activate.mutateAsync(version.id);
       setLiveMessage(`Version ${version.version} is now active.`);
       setRecentActivation(version.version);
       historyHeadingRef.current?.focus();
     } catch (cause) {
+      if (cause instanceof ApiError && cause.code === "unresolved_rubric_issues") {
+        const ids = cause.details.open_issue_ids;
+        setBlockedVersion({ version, open: Array.isArray(ids) ? ids.length : 0 });
+        return;
+      }
       setActionError(cause instanceof ApiError ? cause.message : "Could not activate this version. Try again.");
     }
   }
@@ -185,6 +197,11 @@ export function ManageRubricPage() {
 
       <p className="signal-live-region" role="status" aria-live="polite">{liveMessage}</p>
       {actionError && <Alert title="Could not update this format" tone="error" role="alert">{actionError}</Alert>}
+      {blockedVersion && <Alert ref={blockedRef} tabIndex={-1} tone="warning" role="alert"
+        title={`Version ${blockedVersion.version.version} has ${blockedVersion.open ? `${blockedVersion.open} ${blockedVersion.open === 1 ? "item" : "items"}` : "items"} to check`}>
+        <p>Some level descriptions in this version could not be matched with the document. Check each one before activating it.</p>
+        <ActionLink to={`/rubric/${blockedVersion.version.id}/review`}>Review Version {blockedVersion.version.version}</ActionLink>
+      </Alert>}
 
       {(families?.length ?? 0) > 1 && (
         <div className="signal-family-switcher">
@@ -215,6 +232,7 @@ export function ManageRubricPage() {
             <span>Version {displayVersion.version}</span>
             <span>{displayVersion.criteria_count} {displayVersion.criteria_count === 1 ? "criterion" : "criteria"}</span>
             <VersionState version={displayVersion} latest={latestVersion} />
+            <FormatReviewStateTag rubricId={displayVersion.id} />
           </div>
           <ProgramControl familyId={family.rubric_family_id} program={displayVersion.program} />
           <CitationRecencySetting familyId={family.rubric_family_id} rubricId={displayVersion.id} />
