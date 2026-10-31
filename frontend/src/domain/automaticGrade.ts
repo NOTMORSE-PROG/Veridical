@@ -8,13 +8,14 @@ export const AUTOMATIC_GRADE_COPY = {
   lower_of_two: "Graded automatically: two grading passes disagreed and no third pass settled it with quotes VERIDICAL could check, so the lower of the two grades was used.",
   single_verified_pass: "Graded automatically: only one grading pass settled on a grade with quotes VERIDICAL could check, so its grade was used.",
   caution: "Evidence check not confirmed: {reason}",
+  scope_caution: "{reason}",
   allRecorded: "Every criterion has a recorded outcome. Automatic grades are listed under Read saved grades, where Change grade sets a different level. Continue to the integrity signals.",
   confirmUnchanged: "Recording this decision also confirms the {count} automatic grade(s) you did not change.",
   change: "Change grade",
   changeAgain: "Change grade again",
 } as const;
 
-type AutomaticGradeRow = Pick<CriterionResultOut, "decision_basis" | "support_caution" | "agreeing_passes" | "grading_passes">;
+type AutomaticGradeRow = Pick<CriterionResultOut, "decision_basis" | "support_caution" | "support_caution_scope" | "agreeing_passes" | "grading_passes">;
 
 const fill = (template: string, values: Record<string, string | number>) =>
   template.replace(/\{(\w+)\}/g, (_match, key: string) => String(values[key]));
@@ -66,7 +67,10 @@ const STALE_NO_GRADE = /[\s;,.]*no automatic grade was assigned\.?\s*$/i;
 export function automaticGradeCaution(row: AutomaticGradeRow): string | null {
   const reason = row.support_caution?.replace(STALE_NO_GRADE, "").trim();
   if (!reason || automaticGradeLines(row).length === 0) return null;
-  return fill(AUTOMATIC_GRADE_COPY.caution, { reason: /[.!?]$/.test(reason) ? reason : `${reason}.` });
+  // A level quoted passages cannot show at all: the caution says what the
+  // grade is about, not that a check failed.
+  const template = row.support_caution_scope ? AUTOMATIC_GRADE_COPY.scope_caution : AUTOMATIC_GRADE_COPY.caution;
+  return fill(template, { reason: /[.!?]$/.test(reason) ? reason : `${reason}.` });
 }
 
 export function fillAutomaticConfirmation(count: number): string {

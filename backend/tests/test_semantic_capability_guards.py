@@ -39,7 +39,7 @@ def local_item():
         ("All the devices are documented", "collection_assessment_required"),
         ("Every one of the items is documented", "collection_assessment_required"),
         ("A few references are questionable", "collection_assessment_required"),
-        ("Professional tone is maintained throughout", "collection_assessment_required"),
+        ("Professional tone is maintained throughout", "whole_paper_assessment_required"),
     ],
 )
 async def test_support_model_cannot_supply_missing_assessment_capability(
@@ -142,11 +142,11 @@ def test_a_kept_grade_never_says_no_grade_was_assigned():
     item.text = "The publications are peer-reviewed"
     batch = SimpleNamespace(scope_patterns_file=None, label="whole document")
     support = _capability_failure(batch, item, {"verdict": item.levels[1]["name"]})
-    assert "no automatic grade was assigned" in support["reason"]
+    assert "did not assign it" in support["reason"]
     detail = {"verdict": item.levels[1]["name"], "reasoning": "r"}
     outcome, kept = apply_support(ResultOutcome.passed, detail, support, decide=True)
     assert outcome == ResultOutcome.passed
-    assert "independent verification of external properties" in kept["support_caution"]
-    assert "no automatic grade" not in kept["support_caution"]
+    assert "facts outside the manuscript" in kept["support_caution"]
+    assert "did not assign" not in kept["support_caution"]
     outcome, withheld = apply_support(ResultOutcome.passed, detail, support, decide=False)
     assert outcome == ResultOutcome.escalated and withheld["reason"] == support["reason"]

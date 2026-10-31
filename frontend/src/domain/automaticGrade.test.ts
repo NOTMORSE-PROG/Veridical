@@ -21,6 +21,14 @@ describe("automaticGradeLines", () => {
       .toBe("Evidence check not confirmed: Review the criterion and its performance level directly.");
   });
 
+  it("does not call a whole-paper grade's caution a failed evidence check", () => {
+    const caution = "This grade is about the whole paper, such as its tone, which a few quoted passages cannot show.";
+    expect(automaticGradeCaution({ agreeing_passes: 2, grading_passes: 2, support_caution: caution, support_caution_scope: true }))
+      .toBe(caution);
+    expect(automaticGradeCaution({ agreeing_passes: 2, grading_passes: 2, support_caution: caution }))
+      .toBe(`Evidence check not confirmed: ${caution}`);
+  });
+
   it("says nothing for rows the AI did not grade", () => {
     expect(automaticGradeLines({})).toEqual([]);
     expect(automaticGradeLines({ support_caution: "orphaned caution" })).toEqual([]);

@@ -242,6 +242,7 @@ def _automatic_grade_fields(row: CriterionResultOut) -> dict:
     return {
         "decision_basis": row.decision_basis,
         "support_caution": row.support_caution,
+        "support_caution_scope": row.support_caution_scope,
         "agreeing_passes": row.agreeing_passes,
         "grading_passes": row.grading_passes,
     }

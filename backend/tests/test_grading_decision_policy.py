@@ -489,6 +489,7 @@ def test_report_rows_explain_an_automatic_grade_until_an_instructor_judges():
     assert _automatic_grade(decided, detail, None) == {
         "decision_basis": None,
         "support_caution": "The quote shows the topic but not the preview.",
+        "support_caution_scope": False,
         "agreeing_passes": 2,
         "grading_passes": 3,
         "votes": ["Proficient", "Acceptable", "Proficient"],

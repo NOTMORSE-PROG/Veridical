@@ -1,0 +1,21 @@
+{
+  "_note": "What the instructor reads when a grade's level is something quoted passages cannot show (BUG-608). One entry per capability in semantic_evidence_scopes.json, in the order they are named. A capability listed under 'subsumes' drops out when the broader one also applies, so a grade is not described twice.",
+  "capabilities": {
+    "whole_paper_assessment_required": {
+      "about": "the whole paper, such as its tone, how its ideas connect or how often errors appear",
+      "check": "Check it against the manuscript as a whole",
+      "subsumes": ["collection_assessment_required"]
+    },
+    "collection_assessment_required": {
+      "about": "a whole set, such as every reference or every requirement",
+      "check": "Check the full set"
+    },
+    "external_verification_required": {
+      "about": "facts outside the manuscript, such as whether a source is peer-reviewed or certified",
+      "check": "Check those facts"
+    }
+  },
+  "joined_check": "Check these yourself",
+  "caution": "This grade is about {about}, which a few quoted passages cannot show. {check} before relying on it.",
+  "reason": "This rating is about {about}, which a few quoted passages cannot show, so VERIDICAL did not assign it. {check}, then choose the level."
+}
