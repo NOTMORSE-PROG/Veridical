@@ -39,14 +39,21 @@ def _locked(path: Path):
             handle = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
             os.close(handle)
             break
-        except FileExistsError:
+        # Windows reports a lock file that another process is deleting as a
+        # permission error rather than as existing; both mean "busy".
+        except (FileExistsError, PermissionError):
             try:
-                if time.time() - lock.stat().st_mtime > STALE_LOCK_SECONDS:
-                    # A run that died while holding the lock must not block the rest.
-                    lock.unlink(missing_ok=True)
-                    continue
+                stale = time.time() - lock.stat().st_mtime > STALE_LOCK_SECONDS
             except FileNotFoundError:
                 continue
+            if stale:
+                # Taking over a stale lock races with another process doing the
+                # same, and a lost update would undercount spent calls, so a
+                # person removes it after checking no run is still going.
+                raise TimeoutError(
+                    f"Budget lock {lock} is older than {STALE_LOCK_SECONDS:.0f}s: a run "
+                    "probably died holding it. Check no harness run is going, then delete it."
+                ) from None
             if time.monotonic() > deadline:
                 raise TimeoutError(f"Budget lock {lock} stayed held") from None
             time.sleep(0.05)

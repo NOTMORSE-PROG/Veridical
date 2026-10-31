@@ -55,6 +55,18 @@ SCOPE = (
     "instructors."
 )
 FLAGGED = ("contradictory", "partial", "cannot_determine")
+LIMITATIONS = (
+    "Labels come from templates, not instructors. Recall plants say outright that the "
+    "objective was not met and reuse the objective's own verb phrase, so they are easier "
+    "than real contradictions; this is not general detection of unmet objectives.",
+    "28 objectives from four theses, most plants on one host that is a public doctoral "
+    "dissertation, not a capstone. Rates are marked indicative because the objectives, not "
+    "the plants, are the independent units.",
+    "Templates are shared by dev and holdout, so tuning on dev would carry into holdout. "
+    "The version 1 baseline tuned nothing.",
+    "Batches mix plants from several copies instead of one manuscript's pairs, and the "
+    "reading-order source gate is not applied.",
+)
 DEFAULTS = {
     "model": "gemini-3.5-flash-lite",
     "max_calls": 45,
@@ -215,8 +227,13 @@ async def judge(batches, client, cache_dir: Path, model: str) -> list[str]:
 def _rows(records, *, split, seed, resamples, always_one):
     rows: list[MetricRow] = []
     mine = [r for r in records if r["split"] == split]
+    # A dry run judged nothing: only the local pairing figures mean anything,
+    # and a recall made only of unreached plants would read as a real 0%.
+    judged_any = any("verdict" in r for r in records)
 
     def add(metric, unit, cases, success, note, *, unreached_is_miss=False):
+        if not judged_any:
+            return
         # A plant the judge never saw is a miss for recall; anything sent but
         # left unanswered (a stop or a failed batch) is not scored at all.
         judged = [
@@ -238,7 +255,15 @@ def _rows(records, *, split, seed, resamples, always_one):
             )
         rows.append(
             rate_row(
-                LANE, metric, unit, len(hits), len(judged), split=split, note=note, extra=extra
+                LANE,
+                metric,
+                unit,
+                len(hits),
+                len(judged),
+                split=split,
+                note=note,
+                extra=extra,
+                clusters=extra["objectives"],
             )
         )
 
@@ -350,8 +375,22 @@ def run(ctx: Context) -> tuple[list[MetricRow], dict]:
         record.pop("_candidate", None)
     verdict_counts = defaultdict(lambda: defaultdict(int))
     for record in records:
-        verdict_counts[record["kind"]][record.get("verdict", "not_reached")] += 1
+        default = "not_reached" if not record["reached"] else "not_judged"
+        verdict_counts[record["kind"]][record.get("verdict", default)] += 1
+    unjudged = sum(
+        1 for r in records if r["reached"] and r.get("verdict") not in (*FLAGGED, "consistent")
+    )
+    warnings = []
+    if config.get("dry_run"):
+        warnings.append("DRY RUN: no model call was made; only pairing figures are given.")
+    elif unjudged:
+        warnings.append(
+            f"INCOMPLETE RUN: {unjudged} reached pairs were not judged "
+            f"({client.stop_reason or 'failed batches'}). They are left out of every rate, "
+            "so the rates describe only the judged part."
+        )
     return rows, {
+        "warnings": warnings,
         "model": config["model"],
         "batches": len(batches),
         "attempts_sent": client.attempts if client else 0,

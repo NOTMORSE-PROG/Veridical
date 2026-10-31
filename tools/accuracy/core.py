@@ -43,8 +43,16 @@ class MetricRow:
     extra: dict = field(default_factory=dict)
 
 
-def rate_row(lane, metric, unit, numerator, denominator, *, split="all", note="", extra=None):
+def rate_row(
+    lane, metric, unit, numerator, denominator, *, split="all", note="", extra=None, clusters=None
+):
+    """One rate with its Wilson interval. When the cases come in clusters
+    (several plants built on one objective, every plant on one host), the
+    number of clusters is what D-016's floor applies to, not the case count."""
     interval = wilson_interval(numerator, denominator) if denominator else None
+    extra = dict(extra or {})
+    if clusters is not None:
+        extra["clusters"] = clusters
     return MetricRow(
         lane=lane,
         metric=metric,
@@ -54,10 +62,10 @@ def rate_row(lane, metric, unit, numerator, denominator, *, split="all", note=""
         rate=numerator / denominator if denominator else None,
         ci_low=interval.low if interval else None,
         ci_high=interval.high if interval else None,
-        indicative=denominator < MIN_VIABLE_N,
+        indicative=denominator < MIN_VIABLE_N or (clusters is not None and clusters < MIN_VIABLE_N),
         split=split,
         note=note,
-        extra=extra or {},
+        extra=extra,
     )
 
 
@@ -71,7 +79,10 @@ def cluster_bootstrap(
     for key, success in outcomes:
         clusters.setdefault(key, []).append(success)
     groups = list(clusters.values())
-    if not groups:
+    # With fewer than two clusters, or every cluster at the same rate, every
+    # resample is identical and the "interval" is a point. That says nothing
+    # about uncertainty, so no interval is given.
+    if len(groups) < 2 or len({sum(g) / len(g) for g in groups}) < 2:
         return None
     rng = random.Random(seed)
     rates = []
@@ -176,19 +187,35 @@ def split_for(rng: random.Random) -> str:
 
 
 def git_commit(repo: Path) -> str:
+    """The commit a report was produced from, marked "+uncommitted" when the
+    measured code differs from it, so a figure is never credited to a commit
+    that did not produce it."""
     try:
-        return subprocess.run(
+        head = subprocess.run(
             ["git", "-C", str(repo), "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        changed = subprocess.run(
+            ["git", "-C", str(repo), "status", "--porcelain", "--", "backend/app", "tools"],
             capture_output=True,
             text=True,
             check=True,
         ).stdout.strip()
     except (OSError, subprocess.CalledProcessError):
         return "unknown"
+    return f"{head}+uncommitted" if changed else head
 
 
 def write_report(
-    ctx: Context, lanes: list[str], rows: list[MetricRow], details: dict, scopes: dict[str, str]
+    ctx: Context,
+    lanes: list[str],
+    rows: list[MetricRow],
+    details: dict,
+    scopes: dict[str, str],
+    limitations: dict[str, list[str]] | None = None,
+    warnings: dict[str, list[str]] | None = None,
 ) -> Path:
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     out = ctx.output / f"{stamp}-{'-'.join(lanes)}"
@@ -199,6 +226,8 @@ def write_report(
         "code_commit": ctx.code_commit,
         "seed": ctx.seed,
         "scopes": scopes,
+        "limitations": limitations or {},
+        "warnings": warnings or {},
         "rows": [asdict(row) for row in rows],
         "details": details,
     }
@@ -220,8 +249,21 @@ def _markdown(payload: dict) -> str:
         f"Code {payload['code_commit']}, seed {payload['seed']}, "
         f"generated {payload['generated_at']}.",
         "",
-        *[f"- **{lane}**: {scope}" for lane, scope in payload["scopes"].items()],
-        "",
+    ]
+    if payload["code_commit"].endswith("+uncommitted"):
+        lines += [
+            "**Measured on code with uncommitted changes: these figures cannot be "
+            "reproduced from the commit named above. Do not quote them.**",
+            "",
+        ]
+    for lane, items in payload.get("warnings", {}).items():
+        lines += [f"**{lane}: {item}**" for item in items]
+        lines += [""] if items else []
+    lines += [*[f"- **{lane}**: {scope}" for lane, scope in payload["scopes"].items()], ""]
+    for lane, items in payload.get("limitations", {}).items():
+        if items:
+            lines += [f"Limitations of the {lane} figures:", "", *[f"- {i}" for i in items], ""]
+    lines += [
         "| Lane | Metric | Split | Result | 95% Wilson | n | Note |",
         "|---|---|---|---|---|---|---|",
     ]
@@ -237,14 +279,34 @@ def _markdown(payload: dict) -> str:
             f"{caveat}{row['numerator']}/{row['denominator']} = {_percent(row['rate'])} | "
             f"{interval} | {row['denominator']} | {row['note']} |"
         )
+    # Development rows are excluded: they are where the checks were looked at.
+    # Every reported row (holdout, or measured once over all cases) is listed.
     under = [
         row
         for row in payload["rows"]
-        if row["split"] == "holdout" and row["ci_low"] is not None and row["ci_low"] < 0.90
+        if row["split"] != "dev" and row["ci_low"] is not None and row["ci_low"] < 0.90
     ]
-    lines += ["", "## Under 90% (holdout lower bound)", ""]
+    lines += ["", "## Under 90% (lower bound, holdout and whole-set rows)", ""]
     lines += [
-        f"- {row['lane']} {row['metric']}: lower bound {_percent(row['ci_low'])}. {row['note']}"
+        f"- {row['lane']} {row['metric']} ({row['split']}): lower bound "
+        f"{_percent(row['ci_low'])}. Reason: {_reason(row)}"
         for row in under
     ] or ["- None."]
     return "\n".join(lines) + "\n"
+
+
+def _reason(row: dict) -> str:
+    parts = [row["note"]] if row["note"] else []
+    if row["extra"].get("misses_by_host"):
+        parts.append(
+            "Misses by host: "
+            + ", ".join(f"{h} {n}" for h, n in sorted(row["extra"]["misses_by_host"].items()))
+            + "."
+        )
+    if row["indicative"]:
+        parts.append(
+            f"Too few cases or clusters for a baseline (n={row['denominator']}"
+            + (f", {row['extra']['clusters']} clusters" if "clusters" in row["extra"] else "")
+            + ")."
+        )
+    return " ".join(parts) or "No reason recorded; see the lane details."

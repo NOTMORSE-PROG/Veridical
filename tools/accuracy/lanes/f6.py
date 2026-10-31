@@ -36,6 +36,17 @@ SCOPE = (
 ERROR_TYPES = ("p_nongross", "p_gross", "grim_impossible", "percent_sum_off")
 CONTROL_TYPES = ("p_correct", "grim_possible", "percent_sum_ok")
 PER_TYPE = 20
+# Plant types that count as detected only through one particular finding.
+REQUIRED_KIND = {"p_gross": "p_value_decision_error"}
+LIMITATIONS = (
+    "Plants are templated sentences and small tables inserted after the last block of a "
+    "body page; real reporting is more varied.",
+    "Five hosts, and every GRIM miss so far is on one of them (KSA, BUG-584): per-host "
+    "misses are listed with each row.",
+    "Dev and holdout are drawn per plant from the same hosts and frames, so a fix aimed at "
+    "one host moves both halves. Hosts whose plants were used to find a checker bug (KSA, "
+    "BUG-584) are development-only, and the split was re-drawn with a new seed after that.",
+)
 PLANTS_PER_COPY = 3
 PAGE_GAP = 5
 FRAMES = (
@@ -126,7 +137,7 @@ def _percent_table(rng, plant_type):
 
 
 def build_cases(ctx: Context):
-    rng = random.Random(ctx.seed)
+    rng = random.Random(_config(ctx)["seed"])
     hosts = ctx.hosts()
     queue = [t for t in (*ERROR_TYPES, *CONTROL_TYPES) for _ in range(PER_TYPE)]
     rng.shuffle(queue)
@@ -138,12 +149,23 @@ def build_cases(ctx: Context):
     return copies
 
 
-def _plant(extraction, case):
+def _config(ctx: Context) -> dict:
+    """The lane's own seed and the hosts kept out of the holdout, from
+    `<golden>/f6/config.json`. Plants on a host used to find and fix a checker
+    bug are development cases from then on."""
+    config = {"seed": ctx.seed, "dev_only_hosts": [], **ctx.lane_config(LANE)}
+    config["dev_only_hosts"] = set(config["dev_only_hosts"])
+    return config
+
+
+def _plant(extraction, case, *, dev_only=False):
     rng = random.Random(case["seed"])
     pages = spaced_pages(rng, body_pages(extraction), len(case["types"]), PAGE_GAP)
     plants = []
     for page, plant_type in zip(pages, case["types"], strict=True):
         split = split_for(rng)
+        if dev_only:
+            split = "dev"
         if plant_type.startswith("p_"):
             sentence, token = _inferential(rng, plant_type)
             index = max(
@@ -168,8 +190,12 @@ def _plant(extraction, case):
     return plants
 
 
+def _kind(flag):
+    return (flag.detail or {}).get("kind")
+
+
 def _key(flag):
-    return ((flag.detail or {}).get("kind"), flag.page_anchor, flag.evidence_excerpt)
+    return (_kind(flag), flag.page_anchor, flag.evidence_excerpt)
 
 
 def _page(anchor):
@@ -177,6 +203,40 @@ def _page(anchor):
         return int(str(anchor).split()[-1])
     except (ValueError, IndexError):
         return None
+
+
+def match_findings(plants: list[dict], fresh: list) -> tuple[list[dict], set[int]]:
+    """Which plants were detected, and which new findings name an error plant.
+
+    A finding counts as matched only when an error plant claims it: a finding
+    on a control is a false alarm even when the same copy also holds an
+    error plant."""
+    records, matched = [], set()
+    for plant in plants:
+        near = [
+            i
+            for i, f in enumerate(fresh)
+            if _page(f.page_anchor) is not None
+            and abs(_page(f.page_anchor) - plant["page"]) <= 1
+            and plant["token"].replace(" ", "") in (f.evidence_excerpt or "").replace(" ", "")
+        ]
+        # A gross error is the one that flips significance; only the finding
+        # that says so counts as detecting it.
+        required = REQUIRED_KIND.get(plant["type"])
+        hits = [i for i in near if not required or _kind(fresh[i]) == required]
+        if plant["type"] in ERROR_TYPES:
+            # A weaker finding on a real error still names a real error, so it is
+            # not a false alarm; only recall asks for the specific kind.
+            matched.update(near)
+        records.append(
+            {
+                **plant,
+                "detected": bool(hits),
+                "kinds": sorted({_kind(fresh[i]) for i in near}),
+                "severities": sorted({str(fresh[i].severity) for i in near}),
+            }
+        )
+    return records, matched
 
 
 def run(ctx: Context) -> tuple[list[MetricRow], dict]:
@@ -187,51 +247,56 @@ def run(ctx: Context) -> tuple[list[MetricRow], dict]:
     }
     tally = defaultdict(lambda: [0, 0])  # (split, type) -> [detected, planted]
     new_flags, matched_flags, unmatched, records = 0, 0, Counter(), []
+    dev_only_hosts = _config(ctx)["dev_only_hosts"]
     for case in build_cases(ctx):
         extraction = load_extraction(hosts[case["host"]])
-        plants = _plant(extraction, case)
+        plants = _plant(extraction, case, dev_only=case["host"] in dev_only_hosts)
         fresh = [
             f
             for f in _compute_forensics_findings(extraction).flag_drafts
             if _key(f) not in twins[case["host"]]
         ]
         new_flags += len(fresh)
-        claimed = set()
-        for plant in plants:
-            hits = [
-                i
-                for i, f in enumerate(fresh)
-                if _page(f.page_anchor) is not None
-                and abs(_page(f.page_anchor) - plant["page"]) <= 1
-                and plant["token"].replace(" ", "") in (f.evidence_excerpt or "").replace(" ", "")
-            ]
-            claimed.update(hits)
-            tally[(plant["split"], plant["type"])][1] += 1
-            if hits:
-                tally[(plant["split"], plant["type"])][0] += 1
-            records.append(
-                {
-                    **plant,
-                    "host": case["host"],
-                    "detected": bool(hits),
-                    "kinds": sorted({(fresh[i].detail or {}).get("kind") for i in hits}),
-                    "severities": sorted({str(fresh[i].severity) for i in hits}),
-                }
-            )
+        plant_records, matched = match_findings(plants, fresh)
+        for record in plant_records:
+            tally[(record["split"], record["type"])][1] += 1
+            tally[(record["split"], record["type"])][0] += record["detected"]
+            records.append({**record, "host": case["host"]})
+        matched_flags += len(matched)
         for i, flag in enumerate(fresh):
-            plant = next((p for p in plants if i in claimed and p["type"] in ERROR_TYPES), None)
-            if i in claimed and plant:
-                matched_flags += 1
-            else:
-                unmatched[(flag.detail or {}).get("kind")] += 1
+            if i not in matched:
+                unmatched[_kind(flag)] += 1
     rows = []
     for split in ("dev", "holdout"):
         for plant_type in ERROR_TYPES:
             found, planted = tally[(split, plant_type)]
+            missed = Counter(
+                r["host"]
+                for r in records
+                if r["split"] == split and r["type"] == plant_type and not r["detected"]
+            )
             rows.append(
-                rate_row(LANE, f"recall {plant_type}", "plant", found, planted, split=split)
+                rate_row(
+                    LANE,
+                    f"recall {plant_type}",
+                    "plant",
+                    found,
+                    planted,
+                    split=split,
+                    note=(
+                        "Counted only when the decision-error finding fired."
+                        if plant_type in REQUIRED_KIND
+                        else ""
+                    ),
+                    extra={"misses_by_host": dict(missed)} if missed else None,
+                )
             )
         errors = [tally[(split, t)] for t in ERROR_TYPES]
+        missed = Counter(
+            r["host"]
+            for r in records
+            if r["split"] == split and r["type"] in ERROR_TYPES and not r["detected"]
+        )
         rows.append(
             rate_row(
                 LANE,
@@ -240,6 +305,7 @@ def run(ctx: Context) -> tuple[list[MetricRow], dict]:
                 sum(e[0] for e in errors),
                 sum(e[1] for e in errors),
                 split=split,
+                extra={"misses_by_host": dict(missed)} if missed else None,
             )
         )
         controls = [tally[(split, t)] for t in CONTROL_TYPES]

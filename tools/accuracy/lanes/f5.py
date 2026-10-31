@@ -84,6 +84,19 @@ LINKAGE_KINDS = {
 _PLANT_LINE_BASE = 100000
 _PLANT_GAP_LINES = 0.4
 USER_AGENT = "veridical-accuracy-harness"
+APA_MAX_AUTHORS = 20
+LIMITATIONS = (
+    "Retracted plants are drawn from works whose Crossref record already carries a "
+    "Retraction Watch relation, the field the check reads, so retraction recall measures "
+    "reading that field, not finding retractions recorded elsewhere.",
+    "Linkage depends on the host: DESTAMP (author-year) parses, MIT's 144 numbered entries "
+    "do not (BUG-534), and the other three hosts' reference lists are refused, so pooled "
+    "linkage figures mostly reflect which host a plant landed on.",
+    "The shipped check withholds every linkage finding on both usable hosts (BUG-590), so "
+    "'intact entries kept silent [check output]' is silent by construction there.",
+    "The existence case set is frozen in f5/existence_cases.json on first build; registry "
+    "answers come from the cache, with the fetch dates listed in the details.",
+)
 FEED_FIELDS = "DOI,title,update-to,updated-by,issued,author,container-title,volume,issue,page"
 
 
@@ -103,6 +116,8 @@ class CachingTransport(httpx.AsyncBaseTransport):
         self.last_sent: dict[str, float] = {}
         self.sent = 0
         self.hits = 0
+        # Dates the registry answers used in this run were fetched on.
+        self.fetched_on: set[str] = set()
 
     def _interval(self, url: httpx.URL) -> float:
         if url.host == "api.crossref.org":
@@ -125,6 +140,7 @@ class CachingTransport(httpx.AsyncBaseTransport):
         if path.exists():
             self.hits += 1
             stored = json.loads(path.read_text(encoding="utf-8"))
+            self.fetched_on.add(stored["fetched_at"][:10])
             return httpx.Response(
                 stored["status"],
                 headers=stored["headers"],
@@ -139,6 +155,7 @@ class CachingTransport(httpx.AsyncBaseTransport):
         body = await response.aread()
         self.last_sent[url.host] = time.monotonic()
         self.sent += 1
+        self.fetched_on.add(datetime.now(UTC).date().isoformat())
         if response.status_code == 429:
             raise RateLimited(f"429 from {url.host}")
         keep = {
@@ -672,6 +689,12 @@ async def _part_a(ctx, config, patterns, settings):
 # --- Part B: existence and retraction --------------------------------------------------
 
 
+def _split_of(doi: str) -> str:
+    """Dev or holdout from the DOI itself, so a plant keeps its side whatever
+    order the cases are verified in."""
+    return "dev" if int(hashlib.sha256(doi.lower().encode()).hexdigest(), 16) % 2 else "holdout"
+
+
 def _clean(text):
     return re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", "", text or ""))).strip()
 
@@ -679,14 +702,21 @@ def _clean(text):
 def _apa_entry(msg, doi):
     """A reference entry in the host's APA shape, from a Crossref record."""
     names = []
-    for author in (msg.get("author") or [])[:4]:
+    for author in msg.get("author") or []:
         family, given = _clean(author.get("family")), _clean(author.get("given"))
         initials = " ".join(f"{p[0]}." for p in re.split(r"[\s-]+", given) if p)
         if family:
             names.append(f"{family}, {initials}".rstrip(", "))
     if not names:
         return None
-    authors = names[0] if len(names) == 1 else ", ".join(names[:-1]) + ", & " + names[-1]
+    # APA 7 lists up to 20 authors; beyond that, the first 19, an ellipsis and
+    # the last. Dropping authors would make a correct citation look wrong.
+    if len(names) > APA_MAX_AUTHORS:
+        authors = ", ".join(names[: APA_MAX_AUTHORS - 1]) + ", . . . " + names[-1]
+    elif len(names) == 1:
+        authors = names[0]
+    else:
+        authors = ", ".join(names[:-1]) + ", & " + names[-1]
     parts = (msg.get("issued") or {}).get("date-parts") or [[None]]
     year, title = parts[0][0], _clean((msg.get("title") or [""])[0]).rstrip(".")
     venue = _clean((msg.get("container-title") or [""])[0])
@@ -808,102 +838,118 @@ async def _part_b(ctx, config, patterns, settings, client, cache_stats):
     today = datetime.now(UTC).date().isoformat()
     notes: list[str] = []
     candidates = {"nonexistent_doi": [], "retracted_doi": [], "valid_doi": []}
+    # The case set is frozen on first build: Crossref's random sample and the
+    # handle answers would otherwise change it whenever the cache is cleared.
+    frozen = ctx.golden / LANE / "existence_cases.json"
     try:
-        feed = await _json(
-            client,
-            "https://api.crossref.org/works",
-            {
-                "filter": "update-type:retraction",
-                "rows": str(config["retraction_feed_rows"]),
-                "select": FEED_FIELDS,
-            },
-        )
-        pool = await _json(
-            client,
-            "https://api.crossref.org/works",
-            {
-                "filter": (
-                    "type:journal-article,"
-                    f"from-pub-date:{config['valid_pool_from_year']},"
-                    f"until-pub-date:{config['valid_pool_until_year']}"
-                ),
-                "sample": str(config["valid_pool_rows"]),
-                "select": FEED_FIELDS,
-            },
-        )
-        valid_pool = [m for m in pool["message"]["items"] if _worth_citing(m)]
-        rng.shuffle(valid_pool)
-        # A feed item either is the retracted work (it carries `updated-by`) or names it in
-        # `update-to`; both are followed, and each is re-fetched on the planting day.
-        targets = {}
-        for item in feed["message"]["items"]:
-            if any(
-                (r.get("type") or "").lower() == "retraction" for r in item.get("updated-by") or []
-            ):
-                targets.setdefault(item["DOI"], None)
-            for relation in item.get("update-to") or []:
-                if (relation.get("type") or "").lower() == "retraction" and relation.get("DOI"):
-                    targets.setdefault(relation["DOI"], None)
-        wanted = config["per_type"]
-        for doi in targets:
-            if len(candidates["retracted_doi"]) >= wanted:
-                break
-            record = await _json(client, f"https://api.crossref.org/works/{doi}")
-            if record is None:
-                continue
-            msg = record["message"]
-            retractions = [
-                r
-                for r in (msg.get("updated-by") or []) + (msg.get("update-to") or [])
-                if (r.get("type") or "").lower() == "retraction"
-            ]
-            watched = [r for r in retractions if r.get("source") == "retraction-watch"]
-            title = _clean((msg.get("title") or [""])[0])
-            # A notice's own title announces the retraction, so it would not test anything.
-            if (
-                not watched
-                or _apa_entry(msg, msg["DOI"]) is None
-                or re.match(config["notice_title_pattern"], title, re.IGNORECASE)
-            ):
-                continue
-            candidates["retracted_doi"].append(
+        if not frozen.exists():
+            feed = await _json(
+                client,
+                "https://api.crossref.org/works",
                 {
-                    "doi": msg["DOI"],
-                    "entry": _apa_entry(msg, msg["DOI"]),
-                    "checked_on": today,
-                    "relations": [
-                        {"type": r.get("type"), "source": r.get("source"), "label": r.get("label")}
-                        for r in retractions
-                    ],
-                }
+                    "filter": "update-type:retraction",
+                    "rows": str(config["retraction_feed_rows"]),
+                    "select": FEED_FIELDS,
+                },
             )
-        for msg in valid_pool:
-            if len(candidates["valid_doi"]) >= wanted:
-                break
-            candidates["valid_doi"].append(
-                {"doi": msg["DOI"], "entry": _apa_entry(msg, msg["DOI"]), "checked_on": today}
+            pool = await _json(
+                client,
+                "https://api.crossref.org/works",
+                {
+                    "filter": (
+                        "type:journal-article,"
+                        f"from-pub-date:{config['valid_pool_from_year']},"
+                        f"until-pub-date:{config['valid_pool_until_year']}"
+                    ),
+                    "sample": str(config["valid_pool_rows"]),
+                    "select": FEED_FIELDS,
+                },
             )
-        for msg in valid_pool:
-            if len(candidates["nonexistent_doi"]) >= wanted:
-                break
-            for _ in range(5):
-                doi = _shaped_nonexistent(rng, msg["DOI"])
-                if doi == msg["DOI"]:
-                    continue
-                code = await _handle_code(client, doi)
-                if code == config["handle_not_found_code"]:
-                    candidates["nonexistent_doi"].append(
-                        {
-                            "doi": doi,
-                            "entry": _apa_entry(msg, doi),
-                            "checked_on": today,
-                            "handle_response_code": code,
-                            "borrowed_from": msg["DOI"],
-                        }
-                    )
+            valid_pool = [m for m in pool["message"]["items"] if _worth_citing(m)]
+            rng.shuffle(valid_pool)
+            # A feed item either is the retracted work (it carries `updated-by`) or names it in
+            # `update-to`; both are followed, and each is re-fetched on the planting day.
+            targets = {}
+            for item in feed["message"]["items"]:
+                if any(
+                    (r.get("type") or "").lower() == "retraction"
+                    for r in item.get("updated-by") or []
+                ):
+                    targets.setdefault(item["DOI"], None)
+                for relation in item.get("update-to") or []:
+                    if (relation.get("type") or "").lower() == "retraction" and relation.get("DOI"):
+                        targets.setdefault(relation["DOI"], None)
+            wanted = config["per_type"]
+            for doi in targets:
+                if len(candidates["retracted_doi"]) >= wanted:
                     break
+                record = await _json(client, f"https://api.crossref.org/works/{doi}")
+                if record is None:
+                    continue
+                msg = record["message"]
+                retractions = [
+                    r
+                    for r in (msg.get("updated-by") or []) + (msg.get("update-to") or [])
+                    if (r.get("type") or "").lower() == "retraction"
+                ]
+                watched = [r for r in retractions if r.get("source") == "retraction-watch"]
+                title = _clean((msg.get("title") or [""])[0])
+                # A notice's own title announces the retraction, so it would not test anything.
+                if (
+                    not watched
+                    or _apa_entry(msg, msg["DOI"]) is None
+                    or re.match(config["notice_title_pattern"], title, re.IGNORECASE)
+                ):
+                    continue
+                candidates["retracted_doi"].append(
+                    {
+                        "doi": msg["DOI"],
+                        "entry": _apa_entry(msg, msg["DOI"]),
+                        "checked_on": today,
+                        "relations": [
+                            {
+                                "type": r.get("type"),
+                                "source": r.get("source"),
+                                "label": r.get("label"),
+                            }
+                            for r in retractions
+                        ],
+                    }
+                )
+            for msg in valid_pool:
+                if len(candidates["valid_doi"]) >= wanted:
+                    break
+                candidates["valid_doi"].append(
+                    {"doi": msg["DOI"], "entry": _apa_entry(msg, msg["DOI"]), "checked_on": today}
+                )
+            for msg in valid_pool:
+                if len(candidates["nonexistent_doi"]) >= wanted:
+                    break
+                for _ in range(5):
+                    doi = _shaped_nonexistent(rng, msg["DOI"])
+                    if doi == msg["DOI"]:
+                        continue
+                    code = await _handle_code(client, doi)
+                    if code == config["handle_not_found_code"]:
+                        candidates["nonexistent_doi"].append(
+                            {
+                                "doi": doi,
+                                "entry": _apa_entry(msg, doi),
+                                "checked_on": today,
+                                "handle_response_code": code,
+                                "borrowed_from": msg["DOI"],
+                            }
+                        )
+                        break
     except RateLimited as stop:
         notes.append(f"stopped early: {stop}")
+    if frozen.exists():
+        candidates = json.loads(frozen.read_text(encoding="utf-8"))["candidates"]
+    elif not notes:
+        frozen.write_text(
+            json.dumps({"built_on": today, "candidates": candidates}, indent=1),
+            encoding="utf-8",
+        )
     drafts_by_type = {}
     outcomes = []
     for plant_type, items in candidates.items():
@@ -918,7 +964,7 @@ async def _part_b(ctx, config, patterns, settings, client, cache_stats):
                 notes.append(f"stopped early: {stop}")
                 break
             for item, draft, (verdict, flag) in zip(chunk, drafts, verdicts, strict=False):
-                split = split_for(rng)
+                split = _split_of(item["doi"])
                 intact = (
                     draft.doi == item["doi"] and draft.parse_status == CitationParseStatus.parsed
                 )
@@ -1031,7 +1077,12 @@ def _linkage_rows(tally, new_counts, unmatched):
                     control[1] - control[0],
                     control[1],
                     split=split,
-                    note="An untouched, correctly linked entry; a new finding naming it is false.",
+                    note="An untouched, correctly linked entry; a new finding naming it is false."
+                    + (
+                        " Silent by construction: the check emitted no linkage finding at all."
+                        if level == "shipped" and new_counts[level][1] == 0
+                        else ""
+                    ),
                 )
             )
         matched, total = new_counts[level]
@@ -1092,6 +1143,7 @@ def run(ctx: Context) -> tuple[list[MetricRow], dict]:
             "existence_notes": notes,
             "registry_requests_sent": transport.sent,
             "registry_cache_hits": transport.hits,
+            "registry_answers_fetched_on": sorted(transport.fetched_on),
             "verdicts": dict(Counter((o["type"], o["verdict"]).__repr__() for o in outcomes)),
         }
     )
