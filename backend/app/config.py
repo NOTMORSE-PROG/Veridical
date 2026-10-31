@@ -771,6 +771,8 @@ class Settings(BaseSettings):
     # change; empty = packaged default (same convention as structural_keywords_file).
     forensics_keywords_file: Path | None = None
     forensics_sprite_policy_file: Path | None = None
+    # When a table's percentages are held to "sum to 100%"; empty = packaged default.
+    forensics_percentage_policy_file: Path | None = None
     forensics_sprite_max_rows: int = Field(default=3, ge=1)
     forensics_sprite_max_input_rows: int = Field(default=50, ge=1)
     forensics_sprite_max_receipt_rows: int = Field(default=50, ge=1)
@@ -1239,6 +1241,7 @@ class Settings(BaseSettings):
         "llm_model_pool_file",
         "forensics_keywords_file",
         "forensics_sprite_policy_file",
+        "forensics_percentage_policy_file",
         mode="before",
     )
     @classmethod

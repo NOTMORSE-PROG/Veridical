@@ -38,6 +38,13 @@ class SpriteRow:
         return {**asdict(self), "values": asdict(self.values) if self.values else None}
 
 
+# Rows SPRITE never looked at because its own cost limit (rows or time) ran out.
+# They carry no cells, so they say nothing about whether the table is multi-item.
+NOT_ADMITTED_REASONS = frozenset(
+    {"input_admission_budget_reached", "input_admission_deadline_reached"}
+)
+
+
 def single_item_incompatible(row: SpriteRow, policy: dict) -> bool:
     """Use explicit native declarations only to tighten the older single-item check."""
     if row.reason == "native_table_required":
@@ -146,19 +153,6 @@ def extract_sprite_rows(
         for row_index, row in enumerate(table.rows):
             if row_index == 0 or not any(cell.strip() for cell in row):
                 continue
-            if constructed >= max_rows or (deadline is not None and time.monotonic() >= deadline):
-                yield SpriteRow(
-                    table_index,
-                    row_index,
-                    anchor,
-                    {},
-                    "input_admission_budget_reached"
-                    if constructed >= max_rows
-                    else "input_admission_deadline_reached",
-                    None,
-                )
-                continue
-            constructed += 1
             cells = {
                 name: {
                     "column": indexes[0],
@@ -168,6 +162,22 @@ def extract_sprite_rows(
                 for name, indexes in columns.items()
                 if len(indexes) == 1
             }
+            if constructed >= max_rows or (deadline is not None and time.monotonic() >= deadline):
+                # Not read by SPRITE, but the declared cells are kept so the
+                # multi-item test judges this row exactly as it would inside
+                # the budget. Ambiguous columns stay empty, as they are excluded.
+                yield SpriteRow(
+                    table_index,
+                    row_index,
+                    anchor,
+                    {} if ambiguous else cells,
+                    "input_admission_budget_reached"
+                    if constructed >= max_rows
+                    else "input_admission_deadline_reached",
+                    None,
+                )
+                continue
+            constructed += 1
             reason = None
             values = None
             if id(table) not in allowed:

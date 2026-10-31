@@ -1,0 +1,30 @@
+{
+  "version": "percentage_sum_v2",
+  "_comment": [
+    "When a table's percentages may be held to 'sum to 100%'. Percentages",
+    "are only parts of a whole when the table shows it; independent rates",
+    "(penetration, growth, pass rates, per-100 figures) must not be summed.",
+    "Cue words match whole words, with an optional plural s.",
+    "Wording and numbers here are data so an instructor can disagree."
+  ],
+  "total_row_labels": ["total", "grand total", "kabuuan"],
+  "whole_header_cues": ["100%", "distribution"],
+  "independent_header_cues": [
+    "per 100",
+    "per 1,000",
+    "per 1000",
+    "per capita",
+    "rate",
+    "growth",
+    "penetration",
+    "change",
+    "increase",
+    "decrease",
+    "index"
+  ],
+  "max_part_percent": 100.0,
+  "near_whole_band": 6.0,
+  "share_match_tolerance": 1.5,
+  "share_match_min_fraction": 0.75,
+  "share_match_min_rows": 3
+}
