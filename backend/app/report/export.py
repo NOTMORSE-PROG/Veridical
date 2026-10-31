@@ -59,7 +59,12 @@ from reportlab.platypus import (
 from app.checks.escalation import NEEDS_REVIEW_OUTCOMES as _NEEDS_REVIEW_OUTCOMES_ENUM
 from app.config import get_settings
 from app.library.passage_indexing import indexing_scope_sentences
-from app.report.agreement_scope import agreement_scope_copy, role_phrase, scope_paragraphs
+from app.report.agreement_scope import (
+    agreement_scope_copy,
+    interrupted,
+    role_phrase,
+    scope_paragraphs,
+)
 from app.report.automatic_grade import automatic_grade_caution, automatic_grade_lines
 from app.report.citation_recency import recency_sentences
 from app.report.rule_facts import rule_facts_copy, rule_facts_presentation
@@ -178,28 +183,27 @@ def _agreement_scope_flowables(report, module, listed_flags, undecided_legacy, s
     scope = module.agreement_scope
     if scope is None:
         return []
-    status = next(
-        (s for s in report.integrity_check_status if s.check_kind == "internal_agreement"), None
-    )
-    interrupted = module.state == "incomplete" or bool(
-        status
-        and (status.n_skipped_quota or status.n_skipped_api_down or status.n_skipped_parse_failure)
-    )
+    # Only these two are possible inconsistencies; an injection warning sits
+    # on a pair that read as consistent and is a finding of another kind.
     findings = sum(
-        flag.check_kind == "internal_agreement" and not _is_optional_comparison_lead(flag)
+        flag.check_kind == "internal_agreement"
+        and flag.problem_kind in {"agreement_contradictory", "agreement_partial"}
         for flag in listed_flags
     )
     undecided = (module.undetermined.count if module.undetermined else 0) + len(undecided_legacy)
     compared = module.undetermined.compared_count if module.undetermined else None
     items = [Paragraph(escape(agreement_scope_copy()["heading"]), styles["h3"])]
+    # The outcome comes first and in bold; what it covered follows.
     items.extend(
-        Paragraph(escape(line), styles["body"])
-        for line in scope_paragraphs(
-            scope,
-            findings=findings,
-            undecided=undecided,
-            compared=compared,
-            interrupted=interrupted,
+        Paragraph(escape(line), styles["body_bold" if index == 0 else "body"])
+        for index, line in enumerate(
+            scope_paragraphs(
+                scope,
+                findings=findings,
+                undecided=undecided,
+                compared=compared,
+                interrupted=interrupted(scope, module.state),
+            )
         )
     )
     if scope.set_aside:
@@ -233,13 +237,19 @@ def _undecided_pairs_flowables(
     ] + [(flag.evidence_excerpt, flag.page_anchor, None, None) for flag in legacy]
     if not pairs:
         return []
-    compared = max(saved.compared_count if saved else 0, len(pairs))
+    # Older runs saved no compared count; the pairs listed are then all that is known.
+    lead = (
+        f"VERIDICAL could not decide on {len(pairs)} of "
+        f"{max(saved.compared_count, len(pairs))} objective and result pairs it compared."
+        if saved
+        else f"VERIDICAL could not decide on {len(pairs)} objective and result "
+        f"{'pair' if len(pairs) == 1 else 'pairs'}."
+    )
     items = [
         Paragraph("Pairs to read yourself", styles["h3"]),
         Paragraph(
             escape(
-                f"VERIDICAL could not decide on {len(pairs)} of {compared} objective and "
-                "result pairs it compared. This is not a problem found in the manuscript. If "
+                f"{lead} This is not a problem found in the manuscript. If "
                 "objective coverage matters for this defense, read the pairs and decide "
                 "yourself."
             ),

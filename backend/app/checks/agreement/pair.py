@@ -151,6 +151,9 @@ class PairingResult:
     # Which results were kept as the thesis's own, which were set aside and
     # why, or the note that no results section could be identified.
     results_sections: dict | None = None
+    # Objectives no result was matched to, so the report can say how many
+    # of the objectives found were compared at all.
+    n_unmatched_intents: int | None = None
 
     @property
     def n_skipped_total(self) -> int:
@@ -839,6 +842,7 @@ async def run_agreement_pairing(
     return PairingResult(
         flags=flags,
         n_unmatched_outcomes=prepared.n_results - len(matched_outcome_indexes),
+        n_unmatched_intents=len(prepared.unmatched_intents),
         results_sections=prepared.results_sections,
         n_skipped_quota=counters["quota"],
         n_skipped_api_down=counters["api_down"],

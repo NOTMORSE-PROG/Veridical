@@ -149,6 +149,7 @@ def _agreement_scope(detail) -> AgreementScopeOut | None:
         return AgreementScopeOut(
             n_objectives=_count(detail.get("n_intents")),
             n_results=_count(detail.get("n_outcomes")),
+            n_objectives_matched=_matched(detail),
             results_section_identified=identified if isinstance(identified, bool) else None,
             n_results_set_aside=_count(sections.get("n_results_set_aside"))
             if entries is not None
@@ -159,9 +160,33 @@ def _agreement_scope(detail) -> AgreementScopeOut | None:
             ],
             set_aside=entries or [],
             absence_leads_withheld=detail.get("absence_leads_withheld") is True,
+            n_pairs_skipped=_skipped(detail),
         )
     except ValidationError:
         return None
+
+
+_SKIP_FIELDS = (
+    "n_skipped_quota",
+    "n_skipped_api_down",
+    "n_skipped_parse_failure",
+    "n_skipped_ai_not_configured",
+    "n_skipped_ai_key_rejected",
+)
+
+
+def _matched(detail: dict) -> int | None:
+    found, unmatched = _count(detail.get("n_intents")), _count(detail.get("n_unmatched_intents"))
+    if found is None or unmatched is None or unmatched > found:
+        return None
+    return found - unmatched
+
+
+def _skipped(detail: dict) -> int | None:
+    counts = [_count(detail.get(field)) for field in _SKIP_FIELDS if field in detail]
+    if not counts or None in counts:
+        return None
+    return sum(counts)
 
 
 def public_modules(modules: list[IntegrityModuleOut]) -> list[IntegrityModuleOut]:

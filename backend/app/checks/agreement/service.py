@@ -163,6 +163,7 @@ async def run_internal_agreement_check(
             "n_outcomes": len(outcomes),
             "n_flags": len(pairing.flags),
             "n_unmatched_outcomes": pairing.n_unmatched_outcomes,
+            "n_unmatched_intents": pairing.n_unmatched_intents,
             "n_skipped_quota": pairing.n_skipped_quota,
             "n_skipped_api_down": pairing.n_skipped_api_down,
             "n_skipped_parse_failure": pairing.n_skipped_parse_failure,

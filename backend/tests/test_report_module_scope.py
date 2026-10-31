@@ -181,6 +181,17 @@ def test_parts_a_run_did_not_record_stay_unknown_not_zero():
     assert value.absence_leads_withheld is False
 
 
+@pytest.mark.parametrize(
+    "unmatched, matched",
+    [(8, 9), (0, 17), (17, 0), (None, None), (18, None), (-1, None), ("8", None)],
+)
+def test_matched_objectives_are_found_less_unmatched_or_unknown(unmatched, matched):
+    detail = dict(REPORT_44)
+    if unmatched is not None:
+        detail["n_unmatched_intents"] = unmatched
+    assert scope(detail).n_objectives_matched == matched
+
+
 def test_a_malformed_set_aside_entry_makes_that_part_unknown():
     detail = {
         "n_intents": 4,

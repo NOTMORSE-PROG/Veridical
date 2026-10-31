@@ -80,7 +80,7 @@ import { OriginalityCoverageNotice } from "./OriginalityCoverageNotice";
 import { originalityCoverageNote } from "./originalityCoverage";
 import { CitationRecencySummary } from "./CitationRecencySummary";
 import { AgreementCheckScope } from "./AgreementCheckScope";
-import { AGREEMENT_SCOPE_COPY } from "../domain/agreementScope";
+import { AGREEMENT_SCOPE_COPY, countInconsistencies, isInterrupted } from "../domain/agreementScope";
 import { isRecencyNote, isUncountedRecencyNote, notCountedLabel, sourceAgeNotesLabel } from "../domain/findingSummary";
 
 interface FindingSelection {
@@ -1199,9 +1199,9 @@ export function SignalFlagsPanel({
       {selectedModule === "originality_reuse" && <OriginalityScope scope={originalityScope} showAddAction />}
       {selectedModule === "originality_reuse" && <OriginalityCoverageNotice report={review?.assessment} />}
       {agreementScope && <AgreementCheckScope checkRunId={checkRunId} scope={agreementScope}
-        findings={optional.state === "success" ? otherFlags?.length ?? 0 : null}
+        findings={optional.state === "success" ? countInconsistencies(otherFlags ?? []) : null}
         undecided={undecidedCount} compared={agreementModule?.undetermined?.compared_count ?? null}
-        interrupted={agreementModule?.state === "incomplete" || Boolean(agreementStatus && (agreementStatus.n_skipped_quota || agreementStatus.n_skipped_api_down || agreementStatus.n_skipped_parse_failure))}
+        interrupted={isInterrupted(agreementScope, agreementModule?.state) || Boolean(agreementStatus && (agreementStatus.n_skipped_quota || agreementStatus.n_skipped_api_down || agreementStatus.n_skipped_parse_failure))}
         limitsLink={Boolean(emptyState.limits)} />}
       {review && active && <BulkSelectionBar slot="before" findings={selectedClusters.length} locations={selectedLocations} elsewhere={selectedElsewhere} decided={Boolean(review.decision)}
         onAction={(action) => { setBulkMessage(""); setBulkAction(action); }}

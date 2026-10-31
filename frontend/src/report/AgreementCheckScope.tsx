@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { useLocation, useSearchParams } from "react-router";
 import type { AgreementScopeOut } from "../api/types";
 import { FLAG_LIST_INITIAL_COUNT } from "../config/ui";
-import { AGREEMENT_SCOPE_COPY, foundLine, outcomeLines, rolePhrase, setAsideLines } from "../domain/agreementScope";
+import { AGREEMENT_SCOPE_COPY, foundLine, interruptedLine, matchedLine, outcomeLines, rolePhrase, setAsideLines } from "../domain/agreementScope";
 import { instructorAnchor } from "../domain/sourceAnchor";
 import { rememberRouteReturnFocus } from "../routing/useRouteFocus";
 import { reviewDeskDestination } from "../routing/reviewDeskReturn";
@@ -12,9 +12,10 @@ import { Button } from "../ui/Button";
 const OPEN_PARAM = "set_aside";
 const SHOWN_PARAM = "set_aside_shown";
 
-/** What the internal-agreement check covered: what it found, what it set
- * aside and why, and what the comparison found. It says what was done, so a
- * check with no findings never reads as one that did not run (BUG-617). */
+/** What the internal-agreement check covered: the comparison's outcome
+ * first, then what it found, what it set aside and why. It says what was
+ * done, so a check with no findings never reads as one that did not run
+ * (BUG-617). */
 export function AgreementCheckScope({ checkRunId, scope, findings, undecided, compared, interrupted, limitsLink }: {
   checkRunId: number;
   scope: AgreementScopeOut;
@@ -45,27 +46,18 @@ export function AgreementCheckScope({ checkRunId, scope, findings, undecided, co
     setParams(next, { replace: true });
   }
 
-  const found = foundLine(scope);
-  const setAside = scope.results_section_identified === false ? [] : setAsideLines(scope);
-  const outcome = findings === null ? [] : outcomeLines(scope, { findings, undecided, compared, surface: "screen" });
+  const outcome = findings === null ? [] : outcomeLines(scope, { findings, undecided, compared, interrupted, surface: "screen" });
   const count = items.length;
   const visible = items.slice(0, shown);
   const one = count === 1;
   return <section className="signal-agreement-scope" aria-labelledby={`${id}-title`}>
-    <h3 id={`${id}-title`}>{AGREEMENT_SCOPE_COPY.heading}</h3>
-    <p className="signal-agreement-scope__purpose">{AGREEMENT_SCOPE_COPY.purpose}</p>
-    {found && <p><strong>{found}</strong></p>}
-    {setAside.length > 0 && <p>{setAside.join(" ")}</p>}
-    {scope.results_section_identified === false && <p>{AGREEMENT_SCOPE_COPY.notIdentified}</p>}
-    {outcome.length > 0 && <p>{outcome.join(" ")}</p>}
-    {interrupted && <p>{AGREEMENT_SCOPE_COPY.interrupted}</p>}
-    <p>{AGREEMENT_SCOPE_COPY.limit}</p>
-    {scope.absence_leads_withheld && <p>{AGREEMENT_SCOPE_COPY.absence}</p>}
-    {scope.results_section_identified == null && <p>{AGREEMENT_SCOPE_COPY.olderNoSections}</p>}
+    {/* Focusable so manuscript review's link can bring the instructor here. */}
+    <h3 id={`${id}-title`} tabIndex={-1} className="signal-agreement-scope__title">{AGREEMENT_SCOPE_COPY.heading}</h3>
+    <ScopeLines scope={scope} outcome={outcome} compared={compared} interrupted={interrupted} />
     {(count > 0 || limitsLink) && <div className="signal-control-cluster">
       {count > 0 && <Button variant="secondary" aria-expanded={open} aria-controls={`${id}-list`}
         onClick={() => update((next) => { if (open) { next.delete(OPEN_PARAM); next.delete(SHOWN_PARAM); } else next.set(OPEN_PARAM, "open"); })}>
-        {open ? (one ? "Hide the result set aside" : `Hide the ${count} results set aside`) : one ? "Show the result set aside" : `Show the ${count} results set aside`}
+        {`${open ? "Hide" : "Show"} ${one ? "the result from another part of the paper" : `the ${count} results from other parts of the paper`}`}
       </Button>}
       {limitsLink && <ActionLink to={`/report/${checkRunId}?section=limits`} variant="secondary">Open assessment limits</ActionLink>}
     </div>}
@@ -98,26 +90,49 @@ export function AgreementCheckScope({ checkRunId, scope, findings, undecided, co
   </section>;
 }
 
+/** The lines both copies share, in reading order: the outcome first and in
+ * bold, then what it covered, its limit, and how the pairs were matched. */
+function ScopeLines({ scope, outcome, compared, interrupted, adviser = false }: {
+  scope: AgreementScopeOut;
+  outcome: string[];
+  compared: number | null;
+  interrupted: boolean;
+  adviser?: boolean;
+}) {
+  const found = [foundLine(scope), matchedLine(scope)].filter(Boolean).join(" ");
+  const notIdentified = scope.results_section_identified === false;
+  // With no results section found, nothing was set aside by its part; only
+  // the too-short count still applies.
+  const lines = setAsideLines(scope);
+  const setAside = notIdentified ? (scope.n_results_too_short ? lines.slice(-1) : []) : lines;
+  const stopped = interruptedLine(scope, { compared, interrupted, outcomeShown: outcome.length > 0 });
+  return <>
+    {outcome.length > 0 && <p className="signal-agreement-scope__outcome"><strong>{outcome.join(" ")}</strong></p>}
+    {stopped && <p>{stopped}</p>}
+    {found && <p>{found}</p>}
+    {setAside.length > 0 && <p>{setAside.join(" ")}{adviser && !notIdentified && scope.n_results_set_aside ? ` ${AGREEMENT_SCOPE_COPY.adviserSetAside}` : ""}</p>}
+    {notIdentified && <p>{AGREEMENT_SCOPE_COPY.notIdentified}</p>}
+    <p>{AGREEMENT_SCOPE_COPY.limit}</p>
+    {scope.absence_leads_withheld && <p>{AGREEMENT_SCOPE_COPY.absence}</p>}
+    {Boolean(compared) && <details className="signal-agreement-scope__matching">
+      <summary>{AGREEMENT_SCOPE_COPY.matchingHeading}</summary>
+      <p>{AGREEMENT_SCOPE_COPY.matchingCaveat}</p>
+    </details>}
+  </>;
+}
+
 /** The adviser view's copy: the same coverage, without the statements set
  * aside (the shared copy does not carry them) and without list controls. */
-export function AgreementScopeSummary({ scope, findings, undecided, compared }: {
+export function AgreementScopeSummary({ scope, findings, undecided, compared, interrupted }: {
   scope: AgreementScopeOut;
   findings: number;
   undecided: number;
   compared: number | null;
+  interrupted: boolean;
 }) {
-  const found = foundLine(scope);
-  const setAside = scope.results_section_identified === false ? [] : setAsideLines(scope);
-  const outcome = outcomeLines(scope, { findings, undecided, compared, surface: "adviser" });
+  const outcome = outcomeLines(scope, { findings, undecided, compared, interrupted, surface: "adviser" });
   return <section className="signal-agreement-scope" aria-labelledby="shared-agreement-scope-title">
-    <h4 id="shared-agreement-scope-title">{AGREEMENT_SCOPE_COPY.heading}</h4>
-    <p className="signal-agreement-scope__purpose">{AGREEMENT_SCOPE_COPY.purpose}</p>
-    {found && <p><strong>{found}</strong></p>}
-    {setAside.length > 0 && <p>{setAside.join(" ")} {AGREEMENT_SCOPE_COPY.adviserSetAside}</p>}
-    {scope.results_section_identified === false && <p>{AGREEMENT_SCOPE_COPY.notIdentified}</p>}
-    {outcome.length > 0 && <p>{outcome.join(" ")}</p>}
-    <p>{AGREEMENT_SCOPE_COPY.limit}</p>
-    {scope.absence_leads_withheld && <p>{AGREEMENT_SCOPE_COPY.absence}</p>}
-    {scope.results_section_identified == null && <p>{AGREEMENT_SCOPE_COPY.olderNoSections}</p>}
+    <h4 id="shared-agreement-scope-title" className="signal-agreement-scope__title">{AGREEMENT_SCOPE_COPY.heading}</h4>
+    <ScopeLines scope={scope} outcome={outcome} compared={compared} interrupted={interrupted} adviser />
   </section>;
 }

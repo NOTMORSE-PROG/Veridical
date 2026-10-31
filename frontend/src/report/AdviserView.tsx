@@ -18,6 +18,7 @@ import { SharedAssessmentContext } from "./SharedAssessmentContext";
 import { SharedEvidencePacket, useSharedEvidenceManifest } from "./SharedEvidencePacket";
 import { IntegrityModuleNavigation, IntegrityModuleSummary, selectedIntegrityModule } from "./IntegrityModules";
 import { AgreementScopeSummary } from "./AgreementCheckScope";
+import { countInconsistencies, isInterrupted } from "../domain/agreementScope";
 import { CitationSourceLinks } from "../flags/CitationSourceLinks";
 import { CitationComparison } from "../flags/CitationComparison";
 import { isLegacyUndecided } from "../domain/undecidedPairs";
@@ -200,8 +201,9 @@ export function AdviserViewPage() {
         <div id="shared-selected-module">
           <IntegrityModuleSummary kind={selectedModule} />
           {selectedModule === "internal_agreement" && agreementModule?.agreement_scope && <AgreementScopeSummary scope={agreementModule.agreement_scope}
-            findings={moduleFlags.filter(flag => !isOptionalComparisonLead(flag)).length} undecided={undecidedCount}
-            compared={agreementModule.undetermined?.compared_count ?? null} />}
+            findings={countInconsistencies(moduleFlags)} undecided={undecidedCount}
+            compared={agreementModule.undetermined?.compared_count ?? null}
+            interrupted={isInterrupted(agreementModule.agreement_scope, agreementModule.state)} />}
           {params.has("finding") && requestedGroupIndex < 0 && <p role="status">Requested finding is unavailable in this module. Showing its first shared finding.</p>}
           {findingGroups.length > 0 && <>
             <p>{findingGroups.length} review item{findingGroups.length === 1 ? "" : "s"} in this module, across {moduleFlags.length} saved record{moduleFlags.length === 1 ? "" : "s"}. Choose an item to read its explanation and evidence.</p>
@@ -222,7 +224,7 @@ export function AdviserViewPage() {
             </nav>}
           </>}
           <div id="shared-selected-finding" key={`${token}:${report.assessment_revision}:${manifest?.snapshot_id}:${selectedFlag?.id}`}>
-          {selectedModule === "internal_agreement" && undecidedCount > 0 && <p className="signal-field-hint">VERIDICAL could not decide on {undecidedCount} objective and result pair{undecidedCount === 1 ? "" : "s"}. These are not findings; the instructor's report lists them.</p>}
+          {selectedModule === "internal_agreement" && undecidedCount > 0 && !agreementModule?.agreement_scope && <p className="signal-field-hint">VERIDICAL could not decide on {undecidedCount} objective and result pair{undecidedCount === 1 ? "" : "s"}. These are not findings; the instructor's report lists them.</p>}
         <SignalPublicFlags flags={moduleFlags} selectedRecordId={selectedFlag?.id} selectedModule={selectedModule} originalityScope={selectedModule === "originality_reuse" ? report.originality_scope : null} checkRunId={report.check_run_id} statisticalScope={selectedModule === "statistical_forensics" ? report.statistical_check_scope : null} />
           {(selectedFlag ? [selectedFlag] : []).map(flag => {
             const detail = details.find(saved => saved.id === flag.id);

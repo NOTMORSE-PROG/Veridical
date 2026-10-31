@@ -355,6 +355,9 @@ class AgreementScopeOut(BaseModel):
 
     n_objectives: int | None = Field(default=None, ge=0)
     n_results: int | None = Field(default=None, ge=0)
+    # Objectives VERIDICAL matched to at least one result; None when the run
+    # did not record it.
+    n_objectives_matched: int | None = Field(default=None, ge=0)
     # None when the run did not record its results-section reading.
     results_section_identified: bool | None = None
     n_results_set_aside: int | None = Field(default=None, ge=0)
@@ -364,6 +367,9 @@ class AgreementScopeOut(BaseModel):
     set_aside: list[AgreementSetAsideOut] = Field(default_factory=list)
     # An objective with no matching result is never reported.
     absence_leads_withheld: bool = False
+    # Pairs the check could not judge (AI unavailable, capacity, a rejected
+    # key, an unreadable answer). None when the run recorded none of these.
+    n_pairs_skipped: int | None = Field(default=None, ge=0)
 
 
 class IntegrityModuleOut(BaseModel):

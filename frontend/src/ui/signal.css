@@ -3947,7 +3947,7 @@
   }
 
   .signal-evidence-quote cite {
-    color: var(--color-signal-ink-muted);
+    color: var(--color-signal-ink-secondary);
     font-size: var(--signal-type-label);
     font-style: normal;
     font-weight: var(--signal-weight-semibold);
@@ -9072,9 +9072,11 @@
   .signal-agreement-scope { display: grid; gap: var(--signal-space-3); min-inline-size: 0; padding: var(--signal-space-5); border: var(--signal-border-hairline) solid var(--color-signal-border); border-radius: var(--signal-radius-control); background: var(--color-signal-canvas); }
   .signal-agreement-scope :is(h3, h4, h5, p) { margin: 0; }
   .signal-agreement-scope p { max-inline-size: var(--signal-prose-width); }
-  .signal-agreement-scope__purpose { color: var(--color-signal-ink-secondary); }
+  .signal-agreement-scope__title { font-size: var(--signal-type-body-lg); font-weight: var(--signal-weight-semibold); }
+  .signal-agreement-scope__matching summary { cursor: pointer; color: var(--color-signal-ink-secondary); }
+  .signal-agreement-scope__matching p { margin-block-start: var(--signal-space-2); }
   .signal-agreement-scope__list { display: grid; gap: var(--signal-space-4); margin: 0; padding-inline-start: 0; list-style: none; }
-  .signal-agreement-scope__list li { display: grid; gap: var(--signal-space-2); min-inline-size: 0; }
+  .signal-agreement-scope__list li { display: grid; gap: var(--signal-space-2); min-inline-size: 0; justify-items: start; }
   .signal-agreement-scope blockquote { overflow-wrap: anywhere; }
   .signal-integrity-review-notes { display: grid; gap: var(--signal-space-3); min-inline-size: 0; }
   .signal-integrity-review-notes summary { cursor: pointer; font-size: var(--signal-type-label); color: var(--color-signal-ink-secondary); }

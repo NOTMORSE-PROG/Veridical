@@ -14,7 +14,7 @@ export const CHECK_KIND_META: Record<string, CheckKindMeta> = {
   internal_agreement: {
     eyebrow: "Internal agreement check",
     title: "Possible internal contradiction",
-    verificationPrompt: "Compare the linked manuscript locations and confirm whether they describe the same item consistently.",
+    verificationPrompt: "Compare each objective with the result it was matched to, and decide whether the result answers it.",
   },
   citation_integrity: {
     eyebrow: "Citation integrity check",

@@ -733,6 +733,8 @@ export interface AgreementSetAsideOut {
 export interface AgreementScopeOut {
   n_objectives?: number | null;
   n_results?: number | null;
+  /** Objectives matched to at least one result; null when not recorded. */
+  n_objectives_matched?: number | null;
   results_section_identified?: boolean | null;
   n_results_set_aside?: number | null;
   n_results_too_short?: number | null;
@@ -740,6 +742,8 @@ export interface AgreementScopeOut {
   /** Empty on shared (adviser) copies. */
   set_aside: AgreementSetAsideOut[];
   absence_leads_withheld: boolean;
+  /** Pairs the check could not judge; null when the run recorded none of these. */
+  n_pairs_skipped?: number | null;
 }
 
 export interface IntegrityModuleOut {
