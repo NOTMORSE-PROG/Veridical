@@ -704,3 +704,30 @@ def test_numbered_list_with_period_closed_authors_reads_every_field():
     assert [d.year for d in drafts] == [1998, 2002, 2025]
     assert drafts[0].title.startswith("An adaptive model of thermal comfort")
     assert drafts[2].doi == "10.5555/je.2025.103510"
+
+
+@pytest.mark.parametrize(
+    ("opening", "closing"),
+    [
+        ("“It's Hard Not to Have Regrets:”", "colon inside, curly"),
+        ('"It\'s Hard Not to Have Regrets:"', "colon inside, straight"),
+        ("“It's Hard Not to Have Regrets”:", "colon outside, curly"),
+    ],
+)
+def test_quoted_phrase_at_the_start_of_a_title_stays_in_the_title(opening, closing):
+    draft = parse_reference(
+        f"Feifer, D., & Wolfe, J. (2023). {opening} Qualitative analysis of decisional "
+        "regret. Journal of Pain and Symptom Management, 65(5), e399–e407. "
+        "https://doi.org/10.5555/jpsm.2023.1",
+        0,
+    )
+    assert draft.parse_status == CitationParseStatus.parsed, closing
+    assert draft.title.startswith(opening.rstrip(":"))
+    assert draft.title.endswith("Qualitative analysis of decisional regret")
+    assert draft.venue.startswith("Journal of Pain and Symptom Management")
+
+
+def test_a_wholly_quoted_title_keeps_the_quoted_reading():
+    draft = parse_reference("Cruz, A. (2020). “A quoted title.” Journal of Examples, 1(2), 3–4.", 0)
+    assert draft.title == "A quoted title."
+    assert draft.venue.startswith("Journal of Examples")

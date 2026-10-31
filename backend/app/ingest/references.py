@@ -754,7 +754,11 @@ def _parse_into(draft: CitationDraft, raw: str, *, legacy_quoted_titles: bool = 
     if authors_raw:
         draft.authors = split_apa_authors(authors_raw)
 
-    if not legacy_quoted_titles and (span := quoted_title_span(raw, year_m.end())):
+    if (
+        not legacy_quoted_titles
+        and not _quoted_phrase_opens_title(raw, year_m.end())
+        and (span := quoted_title_span(raw, year_m.end()))
+    ):
         _parse_locators(draft, raw[: year_m.end()] + raw[span.after :])
         draft.title = raw[span.start : span.end]
         tail = raw[span.after :]
@@ -879,6 +883,35 @@ def _split_title_venue(rest: str) -> tuple[str, str | None]:
     if unresolved_numeric_boundary and not _BARE_VOLUME_PAGES.fullmatch(rest.strip().rstrip(".")):
         raise ValueError("ambiguous_numeric_title_boundary")
     return rest.strip().rstrip("."), None
+
+
+def _quoted_phrase_opens_title(raw: str, start: int) -> bool:
+    """A quoted phrase that is only the start of the title.
+
+    "“It's Hard Not to Have Regrets:” Qualitative Analysis of..." quotes a
+    phrase and continues the title after a colon, inside or just outside the
+    closing quote. The whole title then runs to the first sentence end after
+    the quote, not to the quote. Only a colon marks this; any other quoted
+    title keeps the stricter quoted reading.
+    """
+    if _PREVIOUS_READER.get():
+        return False
+    patterns = load_reference_metadata_patterns(get_settings().reference_metadata_patterns_file)
+    while start < len(raw) and (
+        raw[start].isspace() or raw[start] in patterns.quoted_title_separators
+    ):
+        start += 1
+    pairs = dict(patterns.quoted_title_pairs)
+    if start == len(raw) or raw[start] not in pairs:
+        return False
+    close = raw.find(pairs[raw[start]], start + 1)
+    if close < 0:
+        return False
+    inside = raw[start + 1 : close].rstrip()
+    after = raw[close + 1 :]
+    colon = inside.endswith(":") or after.startswith(":")
+    following = after.lstrip(": ")
+    return colon and following[:1].isalpha()
 
 
 def _title_before_date(authors: list[str]) -> bool:
