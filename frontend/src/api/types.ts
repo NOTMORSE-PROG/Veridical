@@ -486,6 +486,8 @@ export interface CriterionSourceCoverage {
   native_math_coverage_items: { paragraph: number | null; kind: "paragraph" | "table_cell"; n_occurrences: number }[];
   /** PDF pages left out because their reading order could not be established. */
   unread_pages?: number[];
+  /** The manuscript has images; grading reads text only, so none reached this assessment. */
+  images_not_assessed?: boolean;
 }
 
 export interface CriterionResultOut extends ResultRowCommon {
@@ -657,7 +659,7 @@ export interface OriginalityScope {
   compared_count: number | null;
   corpus: "library" | "pre_library";
   /** "no_text": no readable text, so no comparison ran at all. */
-  not_compared_reason?: "no_text" | "no_comparison_archive" | "source_unresolved" | "reference_boundary_unclear" | null;
+  not_compared_reason?: "no_text" | "no_comparison_archive" | "source_unresolved" | "reference_boundary_unclear" | "reference_list_unconfirmed" | null;
 }
 
 export interface ReportOut extends ReportCommon {

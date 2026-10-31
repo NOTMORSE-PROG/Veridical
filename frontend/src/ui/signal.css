@@ -2948,6 +2948,10 @@
     margin-block-start: var(--signal-space-2);
   }
 
+  .signal-page-range {
+    white-space: nowrap;
+  }
+
   .signal-coverage-list__body {
     min-width: 0;
     grid-column: 2;

@@ -25,6 +25,11 @@ export const ORIGINALITY_NOT_COMPARED = {
   endUnclearFrom: (from: string) => `The end of the reference list could not be found, so everything from ${from} to the end of the document was not compared. Check any appendices there yourself. Running the check again gives the same result.`,
   endUnclear: "The end of the reference list could not be found, so the text from where the list starts to the end was not compared. Check any appendices there yourself. Running the check again gives the same result.",
   boundary: (span: string | null) => `The body could not be told apart from the reference list, so no text was compared${span ? `: ${span}, every page with text` : ""}. This is not evidence of originality. Running the check again gives the same result.`,
+  // Older runs left the whole body out when the reference list could not be
+  // confirmed. Same wording as the PDF export. Nothing here promises what a new
+  // run would do: the saved row cannot show it.
+  unconfirmedList: "No text was compared. When this check ran, the whole text was left out because the reference list's entries or end could not be confirmed. This is not evidence of originality.",
+  unconfirmedScope: "Originality and reuse: no text was compared. When this check ran, the whole text was left out because the reference list's entries or end could not be confirmed. This is not evidence of originality.",
   boundaryScope: "Originality and reuse: the body could not be told apart from the reference list, so no text was compared. This is not evidence of originality.",
   membershipPartial: "Text after the reference list, such as an appendix that lists sources, could not be confirmed as body text, so it was left out of the comparison. Running the check again gives the same result.",
   someTag: "Some text not compared",
@@ -64,6 +69,9 @@ export function originalityCoverageNote(report: CoverageReport | undefined): Ori
     return { none: true, tag: ORIGINALITY_NOT_COMPARED.noneTag, sentence: ORIGINALITY_NOT_COMPARED.boundary(pages.length ? pageSpan(pages) : null),
       also: reason === "reference_membership_partial" ? ORIGINALITY_NOT_COMPARED.alsoMembership
         : reason?.startsWith("native_math_") ? ORIGINALITY_NOT_COMPARED.alsoNativeMath : undefined };
+  }
+  if (report?.originality_scope?.not_compared_reason === "reference_list_unconfirmed") {
+    return { none: true, tag: ORIGINALITY_NOT_COMPARED.noneTag, sentence: ORIGINALITY_NOT_COMPARED.unconfirmedList };
   }
   if (!status) return null;
   const from = status.not_compared_from?.trim();

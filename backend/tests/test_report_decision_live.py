@@ -598,6 +598,74 @@ async def test_the_report_says_what_originality_left_out_and_why(session_factory
         assert status.pages_not_compared is None
 
 
+async def test_an_older_run_that_left_the_body_out_does_not_read_as_no_text(session_factory):
+    """Runs saved before the body could be compared without a confirmed
+    reference list recorded "no embeddable content" for manuscripts with
+    plenty of text. The report says why, and lists their unread pages."""
+    legacy = {
+        "note": "No embeddable content was extracted from this manuscript.",
+        "corpus": "library",
+        "n_flags": 0,
+        "archive_size_n": 0,
+        "comparison_ran": False,
+        "coverage_reason": "source_reading_order_partial",
+        "analysis_coverage": "partial",
+        "unread_pages": [4, 5, 6, 9],
+        "n_source_pages_unassessed": 4,
+        "reference_membership_issues": [],
+    }
+
+    async def scope(originality, citation_issues):
+        async with session_factory() as session:
+            instructor, check_run = await _seed_decidable_run(session)
+            session.add(
+                CheckResult(
+                    check_run_id=check_run.id,
+                    criterion_id=None,
+                    kind=CheckKind.originality_reuse,
+                    outcome=ResultOutcome.not_applicable,
+                    detail=originality,
+                )
+            )
+            if citation_issues is not None:
+                session.add(
+                    CheckResult(
+                        check_run_id=check_run.id,
+                        criterion_id=None,
+                        kind=CheckKind.citation_integrity,
+                        outcome=ResultOutcome.escalated,
+                        detail={"reference_selection_issues": citation_issues},
+                    )
+                )
+            await session.commit()
+            return await get_report(session, check_run.id, instructor.id)
+
+    report = await scope(legacy, ["ambiguous_duplicate_reference_number"])
+    assert report.originality_scope.not_compared_reason == "reference_list_unconfirmed"
+    assert report.originality_scope.compared_count is None
+    status = next(s for s in report.integrity_check_status if s.check_kind == "originality_reuse")
+    assert status.source_pages_unassessed == [4, 5, 6, 9]
+
+    # A reference list that was read cleanly leaves the old reading alone.
+    assert (await scope(legacy, [])).originality_scope.not_compared_reason == "no_text"
+    assert (await scope(legacy, None)).originality_scope.not_compared_reason == "no_text"
+    # Current rows always record pages_not_compared, so a real empty file
+    # beside an ambiguous list still reads as no text.
+    current = {**legacy, "pages_not_compared": []}
+    report = await scope(current, ["ambiguous_reference_end"])
+    assert report.originality_scope.not_compared_reason == "no_text"
+    # Any other selection issue left the body out too in those runs.
+    report = await scope(legacy, ["unreadable_reference_number"])
+    assert report.originality_scope.not_compared_reason == "reference_list_unconfirmed"
+    # An ambiguous heading is still refused today: it reads as the current
+    # refusal, never as a file with no text.
+    report = await scope(legacy, ["ambiguous_reference_heading", "ambiguous_reference_end"])
+    assert report.originality_scope.not_compared_reason == "reference_boundary_unclear"
+    # A damaged line record was a source problem; a current run stops there.
+    report = await scope(legacy, ["invalid_source_line_inventory", "ambiguous_reference_heading"])
+    assert report.originality_scope.not_compared_reason == "source_unresolved"
+
+
 async def test_deciding_an_already_decided_report_is_rejected(session_factory):
     async with session_factory() as session:
         instructor, check_run = await _seed_decidable_run(session)
@@ -1018,3 +1086,79 @@ async def test_cross_instructor_cannot_decide_or_reopen(session_factory):
                 "Another instructor cannot reopen this report.",
                 expected_revision=0,
             )
+
+
+async def _add_graded_criterion(session, check_run, *, text_="Explains the method"):
+    rubric_id = check_run.rubric_id
+    criterion = Criterion(
+        rubric_id=rubric_id,
+        type="semantic",
+        text=text_,
+        evidence=None,
+        weight=Decimal("100"),
+        position=1,
+    )
+    session.add(criterion)
+    await session.commit()
+    session.add(
+        CheckResult(
+            check_run_id=check_run.id,
+            criterion_id=criterion.id,
+            kind=CheckKind.semantic,
+            outcome=ResultOutcome.passed,
+            score=Decimal("100"),
+            detail={"basis": "llm"},
+        )
+    )
+    await session.commit()
+
+
+async def test_a_graded_criterion_says_what_its_grade_could_not_see(session_factory):
+    """A manuscript with images tells each graded criterion so, with the
+    grade untouched. Pages a criterion did not record as unread are never
+    added from the integrity checks: its grading may have read them."""
+    async with session_factory() as session:
+        instructor, check_run = await _seed_decidable_run(session)
+        await _add_graded_criterion(session, check_run)
+        for kind, detail in (
+            (
+                CheckKind.citation_integrity,
+                {"unread_pages": [4, 5, 9], "n_source_pages_unassessed": 3},
+            ),
+            (
+                CheckKind.statistical_forensics,
+                {"unread_pages": [4, 5, 9], "n_images_unassessed": 12},
+            ),
+        ):
+            session.add(
+                CheckResult(
+                    check_run_id=check_run.id,
+                    criterion_id=None,
+                    kind=kind,
+                    outcome=ResultOutcome.escalated,
+                    detail=detail,
+                )
+            )
+        await session.commit()
+        before = (await get_report(session, check_run.id, instructor.id)).results
+        semantic = next(r for r in before if r.kind == "semantic")
+        rule = next(r for r in before if r.kind == "structural")
+        assert semantic.source_coverage.unread_pages == []
+        assert semantic.source_coverage.images_not_assessed is True
+        assert semantic.outcome == "passed"
+        assert float(semantic.score) == 100.0
+        # A rule check does not read page text through the grader.
+        assert rule.source_coverage.unread_pages == []
+        assert rule.source_coverage.images_not_assessed is False
+
+
+async def test_a_clean_manuscript_adds_nothing_to_its_criteria(session_factory):
+    async with session_factory() as session:
+        instructor, check_run = await _seed_decidable_run(session)
+        await _add_graded_criterion(session, check_run)
+        report = await get_report(session, check_run.id, instructor.id)
+        semantic = next(r for r in report.results if r.kind == "semantic")
+        assert semantic.source_coverage.unread_pages == []
+        assert semantic.source_coverage.images_not_assessed is False
+        assert "unread_pages" not in semantic.source_coverage.model_dump()
+        assert "images_not_assessed" not in semantic.source_coverage.model_dump()

@@ -1,3 +1,5 @@
+import { createElement } from "react";
+import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { IntegrityCheckStatusOut, ReportOut } from "../api/types";
 import { coverageItems } from "./reportCoverage";
@@ -13,10 +15,51 @@ const status: IntegrityCheckStatusOut = {
 function item(patch: Partial<IntegrityCheckStatusOut> = {}) {
   return coverageItems({
     manuscript_id: 2, check_run_id: 3, integrity_check_status: [{ ...status, ...patch }],
-  } as ReportOut)[0];
+  } as ReportOut).filter((entry) => entry.key !== "source_pages_unread")[0];
 }
 
 describe("partial source coverage", () => {
+  it("names each check's unread pages as ranges, and links them once in their own row", () => {
+    const value = item({ source_pages_unassessed: [45, 46, 47, 53], n_source_pages_unassessed: 4 });
+    // The check's pages are the report's whole list, so it points there.
+    expect(value.subIssues?.join(" ")).toContain("4 pages could not be read reliably, so this check left them out. They are listed above, under Pages not read.");
+    expect(value.sources ?? []).toEqual([]);
+    const statuses = (["internal_agreement", "citation_integrity"] as const).map((check_kind) => ({ ...status, check_kind,
+      coverage_reason: "source_reading_order_partial", n_source_pages_unassessed: 4, source_pages_unassessed: [53, 45, 46, 47] }));
+    const items = coverageItems({ manuscript_id: 2, check_run_id: 3, integrity_check_status: statuses } as unknown as ReportOut);
+    const pages = items.filter((entry) => entry.key === "source_pages_unread");
+    expect(pages).toHaveLength(1);
+    const { container } = render(createElement("p", null, pages[0].detail));
+    expect(container.textContent).toContain("Pages 45-47, 53 could not be read in a reliable order");
+    expect([...container.querySelectorAll(".signal-page-range")].map((range) => range.textContent)).toEqual(["45-47", "53"]);
+    expect(pages[0].sources).toEqual([
+      { label: "Pages 45-47", to: "/report/3/document?anchor=page%2045" },
+      { label: "Page 53", to: "/report/3/document?anchor=page%2053" },
+    ]);
+    expect(items.filter((entry) => entry.sources?.some((source) => source.label === "Page 53"))).toHaveLength(1);
+    const partial = coverageItems({ manuscript_id: 2, check_run_id: 3, integrity_check_status: [statuses[0],
+      { ...statuses[1], n_source_pages_unassessed: 2, source_pages_unassessed: [45, 46] }] } as unknown as ReportOut)
+      .find((entry) => entry.key.startsWith("citation_integrity"));
+    expect(partial?.subIssues?.join(" ")).toContain("Pages 45-46 could not be read reliably, so this check left them out.");
+  });
+  it("keeps a bare count honest when the saved check did not record which pages", () => {
+    const value = item({ source_pages_unassessed: null, n_source_pages_unassessed: 3 });
+    expect(value.subIssues?.join(" ")).toContain("3 pages could not be read reliably. This record does not say which");
+    expect(value.sources ?? []).toEqual([]);
+  });
+  it("counts the pages of an originality check that was marked not applicable, and says why nothing was compared", () => {
+    const report = { manuscript_id: 2, check_run_id: 3,
+      originality_scope: { compared_count: null, corpus: "library", not_compared_reason: "reference_list_unconfirmed" },
+      integrity_check_status: [{ ...status, check_kind: "originality_reuse", outcome: "not_applicable", assessment_scope: null,
+        n_source_pages_unassessed: 15, source_pages_unassessed: [45, 46, 47] }] } as unknown as ReportOut;
+    const [pages, value] = coverageItems(report);
+    expect(pages.sources?.[0].label).toBe("Pages 45-47");
+    expect(value.detail).toMatch(/reference list/);
+    expect(value.detail).not.toMatch(/embeddable|no eligible text/i);
+    // Nothing was compared, so the unread pages could not have changed it.
+    expect(value.subIssues?.join(" ")).toContain("No text was compared, so the 3 pages that could not be read reliably did not change this result.");
+    expect(value.subIssues?.join(" ")).not.toContain("left them out");
+  });
   it("keeps check-domain order stable without mutating recorded arrays or dropping duplicate sources", () => {
     const native = { paragraph: 7, kind: "paragraph" as const, n_occurrences: 1 };
     const statuses = (["originality_reuse", "statistical_forensics", "citation_integrity", "internal_agreement"] as const).map(check_kind => ({

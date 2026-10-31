@@ -36,12 +36,14 @@ from app.checks.reuse.query import (
     passage_archive_size,
     query_similar_passages,
 )
+from app.checks.reuse.service import NO_TEXT_NOTE
 from app.checks.reuse.source import passage_match_supported
 from app.checks.support import SOURCE_SCOPE_POLICY_VERSION
 from app.config import Settings, get_settings
 from app.errors import ConflictError, GoneError, NotFoundError
 from app.findings.policy import exclusion_reason, reuse_excerpt
 from app.ingest.figures import saved_figure_readings
+from app.ingest.references import REFERENCE_LOCATION_UNKNOWN
 from app.ingest.regions import recover_region
 from app.ingest.schemas import SectionTree
 from app.ingest.service import (
@@ -416,6 +418,79 @@ def source_pages_unassessed(detail: dict) -> list[int] | None:
             else []
         )
     return sorted({page for page in pages if type(page) is int and page >= 1}) or None
+
+
+def _legacy_reference_refusal(
+    originality: dict, citation: dict | None
+) -> (
+    Literal["reference_list_unconfirmed", "reference_boundary_unclear", "source_unresolved"] | None
+):
+    """Why an older originality row compared no text, when it was not an
+    empty file. Rows saved before the body could be compared without a
+    confirmed reference list left the whole body out whenever the list had
+    any selection issue, and recorded it as a file with no text. Rows written
+    since always carry pages_not_compared, so they never match. A list whose
+    heading is ambiguous is still refused today, which the current reason for
+    a body that cannot be told apart from its references already says. A
+    damaged line record was a source problem, not a reference-list one; a
+    current run stops at the source check for it."""
+    if originality.get("comparison_ran") is not False or "pages_not_compared" in originality:
+        return None
+    if originality.get("note") != NO_TEXT_NOTE or originality.get("not_compared_reason"):
+        return None
+    issues = (citation or {}).get("reference_selection_issues")
+    codes = (
+        {issue for issue in issues if isinstance(issue, str)} if isinstance(issues, list) else set()
+    )
+    if not codes:
+        return None
+    if "invalid_source_line_inventory" in codes:
+        return "source_unresolved"
+    if codes & REFERENCE_LOCATION_UNKNOWN:
+        return "reference_boundary_unclear"
+    return "reference_list_unconfirmed"
+
+
+def _images_not_assessed(forensics_details: list[dict | None]) -> bool:
+    """Whether the manuscript has images. Criterion grading reads extracted
+    text only, so no image, including one the statistical check read,
+    reached a grade."""
+    return any(
+        isinstance(detail, dict)
+        and bool(
+            detail.get("n_image_occurrences")
+            or detail.get("n_images_unassessed")
+            or detail.get("n_image_occurrences_omitted")
+            or detail.get("image_coverage_items")
+        )
+        for detail in forensics_details
+    )
+
+
+def _with_image_coverage(
+    results: list[CriterionResultOut], images_not_assessed: bool
+) -> list[CriterionResultOut]:
+    """Tell each criterion the grader assessed that the manuscript's images
+    never reached its grade. Rows left ungraded (source quality, structural
+    alignment) say nothing about images. Only the disclosure changes; the
+    grade itself is untouched."""
+    if not images_not_assessed:
+        return results
+    return [
+        row
+        if row.kind != "semantic"
+        or row.basis != "llm"
+        or row.resolution
+        or row.source_coverage is None
+        else row.model_copy(
+            update={
+                "source_coverage": row.source_coverage.model_copy(
+                    update={"images_not_assessed": True}
+                )
+            }
+        )
+        for row in results
+    ]
 
 
 def _statistical_notation_state(detail: dict | None) -> bool | None:
@@ -939,7 +1014,10 @@ async def report_out_for_check_run(
                 )
                 else None
                 if ran
-                else "no_text"
+                else _legacy_reference_refusal(
+                    originality_detail, citation_row.detail if citation_row is not None else None
+                )
+                or "no_text"
             ),
         )
 
@@ -1022,7 +1100,9 @@ async def report_out_for_check_run(
         flag_deduction=scoring_payload["flag_deduction"],
         unresolved_high_flag_count=scoring_payload["unresolved_high_flag_count"],
         llm_mode=check_run.llm_mode.value,
-        results=results,
+        results=_with_image_coverage(
+            results, _images_not_assessed([row.detail for row in forensics_rows])
+        ),
         decision=report.decision.value if report is not None and report.decision else None,
         decided_at=report.decided_at if report is not None else None,
         decision_note=report.decision_note if report is not None else None,

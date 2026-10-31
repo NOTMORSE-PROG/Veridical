@@ -22,6 +22,9 @@ export function OriginalityScope({
   if (scope.not_compared_reason === "reference_boundary_unclear") {
     return <p className="signal-originality-scope">{ORIGINALITY_NOT_COMPARED.boundaryScope}</p>;
   }
+  if (scope.not_compared_reason === "reference_list_unconfirmed") {
+    return <p className="signal-originality-scope">{ORIGINALITY_NOT_COMPARED.unconfirmedScope}</p>;
+  }
   if (scope.not_compared_reason === "no_text") {
     return (
       <p className="signal-originality-scope">

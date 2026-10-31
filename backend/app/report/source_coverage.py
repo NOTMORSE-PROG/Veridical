@@ -36,14 +36,20 @@ class CriterionSourceCoverageOut(BaseModel):
     # PDF pages left out of the assessment because their reading order
     # could not be established; the rest of the manuscript was assessed.
     unread_pages: list[SourcePage] = Field(default_factory=list)
+    # The manuscript has images, and grading reads text only, so nothing
+    # shown only in an image reached this assessment.
+    images_not_assessed: bool = False
 
     @model_serializer(mode="wrap")
-    def omit_unread_pages_when_none(self, handler):
-        # Only a PDF assessed around unreadable pages carries the field, so
-        # earlier saved shapes and Word sources serialize exactly as before.
+    def omit_unset_gaps(self, handler):
+        # Only a PDF assessed around unreadable pages, or a manuscript with
+        # images, carries these fields, so earlier saved shapes and Word
+        # sources without images serialize exactly as before.
         data = handler(self)
         if not data.get("unread_pages"):
             data.pop("unread_pages", None)
+        if not data.get("images_not_assessed"):
+            data.pop("images_not_assessed", None)
         return data
 
     @model_validator(mode="after")

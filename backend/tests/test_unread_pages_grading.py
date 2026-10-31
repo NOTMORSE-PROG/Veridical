@@ -170,3 +170,65 @@ def test_printed_report_names_the_unread_pages():
         part.getPlainText() for part in _criterion_source_flowables(row, _styles(_register_fonts()))
     )
     assert "Pages 45-47, 53 could not be read in a reliable order" in whole
+
+
+def test_printed_report_says_images_were_not_read_by_the_grade():
+    from app.report.export import _criterion_source_flowables, _register_fonts, _styles
+    from tests.test_native_source_notes_export import _data
+
+    row = _data().report.results[0]
+    row.kind = row.type = "semantic"
+    row.source_coverage = project_source_coverage(
+        {
+            "native_math_coverage_version": "v1",
+            "native_math_inventory_state": "not_applicable",
+            "n_native_equations_unassessed": 0,
+            "images_not_assessed": True,
+        }
+    )
+    whole = " ".join(
+        part.getPlainText() for part in _criterion_source_flowables(row, _styles(_register_fonts()))
+    )
+    assert "Image content not assessed. This grade is based on the manuscript's text only" in whole
+
+
+def test_only_criteria_the_grader_assessed_say_images_were_not_read():
+    from app.report.service import _images_not_assessed, _with_image_coverage
+    from tests.test_native_source_notes_export import _data
+
+    base = (
+        _data()
+        .report.results[0]
+        .model_copy(
+            update={
+                "kind": "semantic",
+                "type": "semantic",
+                "basis": "llm",
+                "resolution": None,
+                "source_coverage": project_source_coverage(None),
+            }
+        )
+    )
+    rows = [
+        base,
+        base.model_copy(update={"basis": "source-quality"}),
+        base.model_copy(update={"basis": "structural-alignment"}),
+        base.model_copy(update={"kind": "structural"}),
+        base.model_copy(update={"resolution": object()}),
+    ]
+    flags = [row.source_coverage.images_not_assessed for row in _with_image_coverage(rows, True)]
+    assert flags == [True, False, False, False, False]
+    assert [r.source_coverage.images_not_assessed for r in _with_image_coverage(rows, False)] == [
+        False
+    ] * 5
+
+    # Any image counts: grading reads none, even one the statistical check read.
+    for detail in (
+        {"n_image_occurrences": 2},
+        {"n_images_unassessed": 1},
+        {"n_image_occurrences_omitted": 3},
+        {"image_coverage_items": [{"image_index": 0}]},
+    ):
+        assert _images_not_assessed([None, detail])
+    assert not _images_not_assessed([{"n_image_occurrences": 0}, None])
+    assert not _images_not_assessed([])

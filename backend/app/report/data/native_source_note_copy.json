@@ -22,5 +22,7 @@
   "criterion_singular": "occurrence",
   "criterion_plural": "occurrences",
   "unlocated_limit": "The saved source record does not establish that the remaining text and tables could be used safely.",
-  "criterion_unread_pages": "Pages {pages} could not be read in a reliable order and were left out. This assessment is based on the other pages; check those pages before relying on it."
+  "criterion_unread_pages": "Pages {pages} could not be read in a reliable order and were left out. This assessment is based on the other pages; check those pages before relying on it.",
+  "criterion_images_not_read": "Image content not assessed. This grade is based on the manuscript's text only; check any figures, diagrams or screenshots it depends on.",
+  "originality_reference_list_unconfirmed": "Originality and reuse check: no text was compared. When this check ran, the whole text was left out because the reference list's entries or end could not be confirmed. This is not evidence of originality."
 }

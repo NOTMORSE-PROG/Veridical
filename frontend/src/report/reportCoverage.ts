@@ -7,6 +7,9 @@ import { NATIVE_MATH_HISTORY_TITLE, NATIVE_MATH_HISTORY_LIMIT } from "../domain/
 import { CITATION_HISTORY_REPORT_LIMIT, CITATION_HISTORY_TITLE } from "../domain/citationHistory";
 import { descriptiveAssumptionLimit } from "./statisticalScopeCopy";
 import { originalityCoverageNote } from "./originalityCoverage";
+import { createElement } from "react";
+import { pageRanges } from "../domain/criterionSourceCoverage";
+import { PageRanges } from "./PageRanges";
 
 const INTEGRITY_LABEL: Record<IntegrityCheckStatusOut["check_kind"], string> = {
   internal_agreement: "Internal agreement",
@@ -42,7 +45,64 @@ const COVERAGE_COPY: Record<string, string> = {
 // full report and the manuscript-first review workspace. Keeping the
 // wording and recovery destinations here prevents the two surfaces from
 // making different claims about the same incomplete check.
-function integrityCoverageItem(status: IntegrityCheckStatusOut, manuscriptId: number, checkRunId: number, scope?: ReportOut["originality_scope"]): CoverageStatementItem {
+// Pages a check left out because their reading order could not be confirmed.
+// Each check names its own pages; the links to them are listed once, in the
+// "Pages not read" row, so a long list is not repeated under every check.
+function readablePages(status: IntegrityCheckStatusOut): number[] {
+  return [...new Set((status.source_pages_unassessed ?? []).filter((page) => Number.isSafeInteger(page) && page > 0))].sort((a, b) => a - b);
+}
+
+function withUnreadPages(item: CoverageStatementItem, status: IntegrityCheckStatusOut, allUnread: number[],
+  scope?: ReportOut["originality_scope"]): CoverageStatementItem {
+  const count = status.n_source_pages_unassessed;
+  if (!count) return item;
+  const pages = readablePages(status);
+  const noun = (n: number) => `${n} ${n === 1 ? "page" : "pages"}`;
+  const nothingCompared = status.check_kind === "originality_reuse"
+    && originalityCoverageNote({ integrity_check_status: [status], originality_scope: scope ?? null })?.none;
+  const line = nothingCompared
+    ? `No text was compared, so the ${noun(pages.length || count)} that could not be read reliably did not change this result.`
+    : !pages.length
+      ? `${noun(count)} could not be read reliably. This record does not say which; check the manuscript yourself.`
+      : pages.length === allUnread.length
+        ? `${noun(pages.length)} could not be read reliably, so this check left ${pages.length === 1 ? "it" : "them"} out. ${pages.length === 1 ? "It is" : "They are"} listed above, under ${UNREAD_PAGES_COPY.label}.`
+        : `${pages.length === 1 ? "Page" : "Pages"} ${pageRanges(pages)} could not be read reliably, so this check left ${pages.length === 1 ? "it" : "them"} out.`;
+  return { ...item, subIssues: [...(item.subIssues ?? []), line] };
+}
+
+export const UNREAD_PAGES_COPY = {
+  label: "Pages not read",
+  detail: (pages: number[]) => [
+    `${pages.length === 1 ? "Page" : "Pages"} `,
+    createElement(PageRanges, { key: "pages", pages }),
+    ` could not be read in a reliable order, so the checks listed below left ${pages.length === 1 ? "it" : "them"} out. Open ${pages.length === 1 ? "it" : "each one"} in manuscript review to check ${pages.length === 1 ? "it" : "them"} yourself.`,
+  ],
+  detailsLabel: "links to the pages not read",
+};
+
+const allUnreadPages = (statuses: IntegrityCheckStatusOut[]) => [...new Set(statuses.flatMap(readablePages))].sort((a, b) => a - b);
+
+function unreadPagesItem(statuses: IntegrityCheckStatusOut[], checkRunId: number): CoverageStatementItem | null {
+  const pages = allUnreadPages(statuses);
+  if (!pages.length) return null;
+  return {
+    key: "source_pages_unread",
+    label: UNREAD_PAGES_COPY.label,
+    detail: UNREAD_PAGES_COPY.detail(pages),
+    detailsLabel: UNREAD_PAGES_COPY.detailsLabel,
+    sources: pageRanges(pages).split(", ").map((range) => ({
+      label: `${range.includes("-") ? "Pages" : "Page"} ${range}`,
+      to: `/report/${checkRunId}/document?anchor=${encodeURIComponent(`page ${range.split("-")[0]}`)}`,
+    })),
+  };
+}
+
+function integrityCoverageItem(status: IntegrityCheckStatusOut, manuscriptId: number, checkRunId: number, scope: ReportOut["originality_scope"] | undefined,
+  allUnread: number[]): CoverageStatementItem {
+  return withUnreadPages(coverageItemBeforePages(status, manuscriptId, checkRunId, scope), status, allUnread, scope);
+}
+
+function coverageItemBeforePages(status: IntegrityCheckStatusOut, manuscriptId: number, checkRunId: number, scope?: ReportOut["originality_scope"]): CoverageStatementItem {
   const notation = status.check_kind === "statistical_forensics"
     && (status.statistical_notation_unassessed === true || status.coverage_reason === "statistical_notation_unassessed");
   const detail = status.analysis_coverage === "partial" ? notationCopy.partial : notationCopy.unsupported;
@@ -110,9 +170,6 @@ function baseIntegrityCoverageItem(status: IntegrityCheckStatusOut, manuscriptId
     if (status.n_skipped_api_down) subIssues.push(`${status.n_skipped_api_down} items skipped because a service was unavailable.`);
     if (status.n_skipped_quota) subIssues.push(`${status.n_skipped_quota} items skipped because AI capacity was unavailable.`);
     if (status.n_skipped_parse_failure) subIssues.push(`${status.n_skipped_parse_failure} items skipped because the model response could not be validated.`);
-    if (status.n_source_pages_unassessed) subIssues.push(status.source_pages_unassessed?.length
-      ? `${status.source_pages_unassessed.length === 1 ? "Page" : "Pages"} ${status.source_pages_unassessed.join(", ")} could not be read reliably. Check ${status.source_pages_unassessed.length === 1 ? "it" : "them"} in the manuscript yourself.`
-      : `${status.n_source_pages_unassessed} ${status.n_source_pages_unassessed === 1 ? "page" : "pages"} could not be read reliably. This record does not say which; check the manuscript yourself.`);
     if (status.n_metadata_skipped_insufficient) subIssues.push(`${status.n_metadata_skipped_insufficient} ${status.n_metadata_skipped_insufficient === 1 ? "reference" : "references"} unverified`);
     if (status.n_linkage_unassessed) subIssues.push(`${status.n_linkage_unassessed} reference ${status.n_linkage_unassessed === 1 ? "link" : "links"} unassessed`);
     if (status.n_claim_support_unassessed) subIssues.push(`${status.n_claim_support_unassessed} cited ${status.n_claim_support_unassessed === 1 ? "source" : "sources"} with unassessed claim support`);
@@ -170,10 +227,12 @@ export function coverageItems(report: ReportOut): CoverageStatementItem[] {
     });
   }
   const order = Object.keys(INTEGRITY_LABEL);
+  const unread = unreadPagesItem(report.integrity_check_status ?? [], report.check_run_id);
+  if (unread) items.push(unread);
   for (const status of [...(report.integrity_check_status ?? [])].sort((a, b) => order.indexOf(a.check_kind) - order.indexOf(b.check_kind))) {
     if (descriptiveLimit && status.check_kind === "statistical_forensics" && !status.coverage_reason
       && !status.n_skipped_api_down && !status.n_skipped_quota && !status.n_skipped_parse_failure) continue;
-    items.push(integrityCoverageItem(status, report.manuscript_id, report.check_run_id, report.originality_scope));
+    items.push(integrityCoverageItem(status, report.manuscript_id, report.check_run_id, report.originality_scope, allUnreadPages(report.integrity_check_status ?? [])));
   }
   return items;
 }
