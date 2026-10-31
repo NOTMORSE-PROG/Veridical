@@ -91,7 +91,7 @@ async function keepProficient(note = NOTE) {
   fireEvent.click(await screen.findByRole("button", { name: "Keep this wording, Purpose, Proficient" }));
   fireEvent.click(screen.getByRole("radio", { name: NOT_IN_SOURCE_REASON }));
   fireEvent.change(screen.getByLabelText("Note (required)"), { target: { value: note } });
-  fireEvent.click(screen.getByRole("button", { name: "Keep wording" }));
+  fireEvent.click(screen.getByRole("button", { name: /^Keep wording,/ }));
 }
 
 describe("rubric review before activation (BUG-566)", () => {
@@ -141,7 +141,7 @@ describe("rubric review before activation (BUG-566)", () => {
     const form = screen.getByRole("form");
     expect(within(form).queryByRole("radio", { name: "The document says it this way" })).not.toBeInTheDocument();
     expect(within(form).getAllByRole("radio").map((radio) => radio.closest("label")!.textContent)).toEqual([NOT_IN_SOURCE_REASON, OTHER_EXPLAINED]);
-    fireEvent.click(within(form).getByRole("button", { name: "Cancel" }));
+    fireEvent.click(within(form).getByRole("button", { name: /^Cancel,/ }));
 
     fireEvent.click(screen.getByRole("button", { name: "Keep this wording, Purpose, Beginner" }));
     expect(screen.getByRole("radio", { name: "This level should be graded with that wording" })).toBeInTheDocument();
@@ -152,25 +152,25 @@ describe("rubric review before activation (BUG-566)", () => {
     renderPage();
     fireEvent.click(await screen.findByRole("button", { name: "Keep this wording, Purpose, Proficient" }));
     await waitFor(() => expect(screen.getByRole("radio", { name: NOT_IN_SOURCE_REASON })).toHaveFocus());
-    fireEvent.click(screen.getByRole("button", { name: "Keep wording" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Keep wording,/ }));
     expect(screen.getByText("Choose why you are keeping this wording.")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("radio", { name: NOT_IN_SOURCE_REASON }));
-    fireEvent.click(screen.getByRole("button", { name: "Keep wording" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Keep wording,/ }));
     const note = screen.getByLabelText("Note (required)");
     expect(screen.getByText("Add a note saying what you compared.")).toBeInTheDocument();
     expect(note).toHaveFocus();
     expect(note).toHaveAccessibleDescription(/Say what you compared in the original/);
 
     fireEvent.change(note, { target: { value: "x" } });
-    fireEvent.click(screen.getByRole("button", { name: "Keep wording" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Keep wording,/ }));
     expect(screen.getByText("Write at least 12 letters or numbers saying what you compared.")).toBeInTheDocument();
     fireEvent.change(note, { target: { value: "... ok ... !!!" } });
-    fireEvent.click(screen.getByRole("button", { name: "Keep wording" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Keep wording,/ }));
     expect(screen.getByText("Write at least 12 letters or numbers saying what you compared.")).toBeInTheDocument();
 
     fireEvent.change(note, { target: { value: NOTE } });
-    fireEvent.click(screen.getByRole("button", { name: "Keep wording" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Keep wording,/ }));
     expect(within(levelRow("Proficient")).getByText("Kept as written")).toBeInTheDocument();
   });
 
@@ -203,7 +203,7 @@ describe("rubric review before activation (BUG-566)", () => {
     fireEvent.click(keepButton());
     fireEvent.click(screen.getByRole("radio", { name: OTHER_EXPLAINED }));
     fireEvent.change(screen.getByLabelText("Note (required)"), { target: { value: "  Matches the printed copy  " } });
-    fireEvent.click(screen.getByRole("button", { name: "Keep wording" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Keep wording,/ }));
     fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
 
     await waitFor(() => expect(puts(fetchMock)).toHaveLength(1));
@@ -265,7 +265,7 @@ describe("rubric review before activation (BUG-566)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Keep this wording, Purpose, Beginner" }));
     fireEvent.click(screen.getByRole("radio", { name: "This level should be graded with that wording" }));
     fireEvent.change(screen.getByLabelText("Note (required)"), { target: { value: "The original has it under Beginner" } });
-    fireEvent.click(screen.getByRole("button", { name: "Keep wording" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Keep wording,/ }));
 
     expect(within(levelRow("Beginner")).getByText("Kept as written")).toBeInTheDocument();
     fireEvent.click(within(levelRow("Beginner")).getByRole("button", { name: "Next item after Purpose, Beginner" }));
@@ -331,7 +331,7 @@ describe("rubric review before activation (BUG-566)", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Keep this wording, Purpose" }));
     expect(screen.getByLabelText("Note (optional)")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("radio", { name: "The document says it this way" }));
-    fireEvent.click(screen.getByRole("button", { name: "Keep wording" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Keep wording,/ }));
     fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
 
     await waitFor(() => expect(puts(fetchMock)).toHaveLength(1));
@@ -343,7 +343,7 @@ describe("rubric review before activation (BUG-566)", () => {
     expect(screen.queryByText("Could not save these criteria")).not.toBeInTheDocument();
 
     fireEvent.change(note, { target: { value: NOTE } });
-    fireEvent.click(screen.getByRole("button", { name: "Keep wording" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Keep wording,/ }));
     expect(screen.queryByRole("heading", { name: "Add a note to this kept item" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
     await waitFor(() => expect(puts(fetchMock)).toHaveLength(2));
@@ -445,23 +445,80 @@ describe("rubric review before activation (BUG-566)", () => {
     expect(screen.getByText("1 item to check before this format can be activated.")).toBeInTheDocument();
   });
 
-  it("lets the instructor keep a note about the whole format, which otherwise blocks activation", async () => {
-    const note: RubricIssueDetail = { id: 12, criterion_id: null, level: null, code: "other", message: "Text differs between the copies of the table on pages 2 and 3.", status: "open", resolution: null };
+  it("asks the instructor to check a warning about the whole format, with a note, before activation", async () => {
+    const note: RubricIssueDetail = {
+      id: 12, criterion_id: null, level: null, code: "other", status: "open", resolution: null,
+      message: "the parsed criteria reflect too little of the required format's substantive source text; compare them with the original document",
+    };
+    const checked = "Read pages 1 to 3 against all nine criteria";
     let current = rubric({ parse_issue_details: [note] });
     const fetchMock = serve(() => current, (_url, init) => {
       if (init?.method !== "PUT") return undefined;
-      current = rubric({ revision: 5, is_active: true, parse_issue_details: [{ ...note, status: "acknowledged", resolution: { ...KEPT_BY, reason_code: "outside_table", note: null } }] });
+      current = rubric({ revision: 5, is_active: true, parse_issue_details: [{ ...note, status: "acknowledged", resolution: { ...KEPT_BY, reason_code: "document_wording", note: checked } }] });
       return new Response(JSON.stringify(current), { status: 200 });
     });
     renderPage();
     const section = (await screen.findByRole("heading", { name: "Items about the whole format" })).closest("section")!;
-    expect(within(section).getByText(note.message)).toBeInTheDocument();
-    fireEvent.click(within(section).getByRole("button", { name: "Keep this wording, The whole format" }));
-    fireEvent.click(screen.getByRole("radio", { name: "The wording comes from outside the table" }));
-    fireEvent.click(screen.getByRole("button", { name: "Keep wording" }));
+    // The server's clause reads as a sentence.
+    expect(within(section).getByText("The parsed criteria reflect too little of the required format's substantive source text; compare them with the original document.")).toBeInTheDocument();
+    expect(within(section).getByText("Page 1, the table these criteria were read from")).toBeInTheDocument();
+    expect(within(section).queryByRole("button", { name: /Keep this wording/ })).not.toBeInTheDocument();
+    fireEvent.click(within(section).getByRole("button", { name: "Mark as checked, The whole format" }));
+    // There is no wording to keep, so the form does not offer the wording reasons.
+    expect(within(section).getByRole("group", { name: "What did you check?" })).toBeInTheDocument();
+    expect(within(section).queryByRole("radio", { name: "The document says it this way" })).not.toBeInTheDocument();
+    expect(within(section).queryByText(/grade with this wording/)).not.toBeInTheDocument();
+    fireEvent.click(within(section).getByRole("radio", { name: "I compared the criteria with the original, and nothing in it is missing" }));
+    // A reason alone is not enough: the note is the record of what was compared.
+    fireEvent.click(within(section).getByRole("button", { name: /^Mark as checked,/ }));
+    expect(within(section).getByText("Add a note saying what you compared.")).toBeInTheDocument();
+    fireEvent.change(within(section).getByLabelText("Note (required)"), { target: { value: checked } });
+    fireEvent.click(within(section).getByRole("button", { name: /^Mark as checked,/ }));
+    expect(within(section).getAllByText("Marked as checked").length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole("button", { name: "Confirm and activate format" }));
     await waitFor(() => expect(puts(fetchMock)).toHaveLength(1));
-    expect(puts(fetchMock)[0]).toMatchObject({ confirm: true, acknowledgements: [{ issue_id: 12, reason_code: "outside_table", note: null }] });
+    expect(puts(fetchMock)[0]).toMatchObject({ confirm: true, acknowledgements: [{ issue_id: 12, reason_code: "document_wording", note: checked }] });
+    expect(await within(section).findByText(/Checked by Ana Reyes/)).toBeInTheDocument();
+  });
+
+  it("lists the whole-format item first, as the page shows it, and words a misplaced level the same in the summary", async () => {
+    const formatNote: RubricIssueDetail = { id: 12, criterion_id: null, level: null, code: "other", message: "check the whole format", status: "open", resolution: null };
+    const misplaced: RubricIssueDetail = { id: 13, criterion_id: 2, level: 1, code: "wrong_column", message: "m", status: "open", resolution: null };
+    serve(() => rubric({
+      parse_issue_details: [misplaced, formatNote],
+      criteria: [
+        { id: 1, type: "structural", text: "Introduction", evidence: null, weight: 1, position: 0, levels: null },
+        {
+          id: 2, type: "semantic", text: "Purpose", evidence: null, weight: 1, position: 1,
+          levels: [
+            { level: 1, name: "Beginner", descriptor: "The purpose is unclear.", points: 1, source: cell(2, 3, "Purpose", "ACCEPTABL E 2") },
+            { level: 2, name: "Acceptable", descriptor: "Clear enough.", points: 2, source: cell(2, 4, "Purpose", "PROFICIEN T 3") },
+          ],
+        },
+      ],
+    }));
+    renderPage();
+    fireEvent.click(within(await screen.findByRole("navigation", { name: "Items to check" })).getByRole("button", { name: "Next item" }));
+    await waitFor(() => expect(itemBar()).toHaveTextContent("Item 1 of 2 to check"));
+    expect(document.activeElement).toBe(document.getElementById("criterion-row-issues-format"));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm and activate format" }));
+    const items = within(await screen.findByRole("alert")).getAllByRole("button");
+    expect(items[0]).toHaveTextContent("The whole format: Check the whole format.");
+    expect(items[1]).toHaveTextContent("Purpose · Beginner: This wording is in the document, but under Acceptable, not Beginner.");
+  });
+
+  it("keeps a half-filled keep form open when another one is opened", async () => {
+    const second: RubricIssueDetail = { ...ISSUE, id: 14, level: 1, code: "joins_cells" };
+    serve(() => rubric({ parse_issue_details: [ISSUE, second] }));
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Keep this wording, Purpose, Proficient" }));
+    fireEvent.change(within(levelRow("Proficient")).getByLabelText("Note (required)"), { target: { value: NOTE } });
+    fireEvent.click(screen.getByRole("button", { name: "Keep this wording, Purpose, Beginner" }));
+    expect(within(levelRow("Proficient")).getByLabelText("Note (required)")).toHaveValue(NOTE);
+    expect(within(levelRow("Beginner")).getByLabelText("Note (required)")).toHaveValue("");
+    // With two forms open, each one's buttons still say which item they act on.
+    expect(screen.getByRole("button", { name: "Keep wording, Purpose, Proficient" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Cancel, Purpose, Beginner" })).toBeInTheDocument();
   });
 
   it("does not save changes to an active format while an item is open", async () => {
@@ -548,7 +605,7 @@ describe("rubric review before activation (BUG-566)", () => {
     renderPage();
     fireEvent.click(await screen.findByRole("button", { name: "Keep this wording, Purpose, Proficient" }));
     fireEvent.keyDown(screen.getByRole("radio", { name: OTHER_EXPLAINED }), { key: "Escape" });
-    expect(screen.queryByRole("button", { name: "Keep wording" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Keep wording,/ })).not.toBeInTheDocument();
     await waitFor(() => expect(keepButton()).toHaveFocus());
   });
 
@@ -560,14 +617,14 @@ describe("rubric review before activation (BUG-566)", () => {
 
     fireEvent.keyDown(screen.getByLabelText("Note (required)"), { key: "Escape" });
     expect(screen.getByText("Discard what you entered?")).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByRole("button", { name: "Keep editing" })).toHaveFocus());
-    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: /^Keep editing,/ })).toHaveFocus());
+    fireEvent.click(screen.getByRole("button", { name: /^Keep editing,/ }));
     expect(screen.getByLabelText("Note (required)")).toHaveValue("Half a thought");
     expect(screen.getByLabelText("Note (required)")).toHaveFocus();
 
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Cancel,/ }));
     expect(screen.getByText("Discard what you entered?")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Discard,/ }));
     expect(screen.queryByLabelText("Note (required)")).not.toBeInTheDocument();
     await waitFor(() => expect(keepButton()).toHaveFocus());
   });
@@ -581,10 +638,10 @@ describe("rubric review before activation (BUG-566)", () => {
     expect(screen.queryByText(/Say what you compared in the original/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("radio", { name: "Other reason" }));
     expect(screen.getByLabelText("Note (required)")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Keep wording" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Keep wording,/ }));
     expect(screen.getByText("Add a note for this reason.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("radio", { name: "The document says it this way" }));
-    fireEvent.click(screen.getByRole("button", { name: "Keep wording" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Keep wording,/ }));
     fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
     await waitFor(() => expect(puts(fetchMock)).toHaveLength(1));
     expect(puts(fetchMock)[0]).toMatchObject({ acknowledgements: [{ issue_id: 14, reason_code: "document_wording", note: null }] });

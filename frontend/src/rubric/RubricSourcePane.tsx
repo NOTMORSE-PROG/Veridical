@@ -7,6 +7,13 @@ import { DocxPane } from "../document/DocxPane";
 import { Button } from "../ui/Button";
 import type { SourceTarget } from "./sourcePage";
 
+const TARGET_HEADINGS: Record<SourceTarget["kind"], string> = {
+  cell: "Find this cell",
+  row: "Find this row",
+  compare: "Compare this wording",
+  format: "Compare the criteria with this page",
+};
+
 const PdfPane = lazy(() => import("../document/PdfPane").then((module) => ({ default: module.PdfPane })));
 
 type FormatVersion = Pick<Rubric, "id" | "version" | "rubric_family_id">;
@@ -180,7 +187,7 @@ export function RubricSourcePane({ rubric, isVisible, onUploadNewVersion, reques
     {downloadError && <p role="alert">The original could not be downloaded. Try again; your criteria have not changed.</p>}
     {metadata.source_format === "pdf" && requestedTarget && requestedPage !== null
       && <div key={requestedPageAttempt} ref={targetRef} className="signal-source-target" tabIndex={-1} role="status">
-        <p><strong>{requestedTarget.kind === "cell" ? "Find this cell" : requestedTarget.kind === "row" ? "Find this row" : "Compare this wording"}</strong>
+        <p><strong>{TARGET_HEADINGS[requestedTarget.kind]}</strong>
           {" "}· {requestedTarget.location}</p>
         {requestedTarget.text && <blockquote>{requestedTarget.text}</blockquote>}
       </div>}

@@ -42,7 +42,15 @@ export const RUBRIC_KEEP_REASONS: readonly RubricKeepReasonOption[] = [
 // Issue codes with their own choices. Codes not listed offer RUBRIC_KEEP_REASONS.
 // "The document says it this way" is never offered for wording VERIDICAL
 // could not find in the document.
+// Items about the whole format (criterion_id null) are warnings from reading
+// the format, such as criteria covering too little of it. There is no wording
+// to keep, so they are offered and recorded under this key, not their code.
+export const RUBRIC_WHOLE_FORMAT_ISSUE_KEY = "whole_format";
 export const RUBRIC_KEEP_REASONS_BY_CODE: Readonly<Record<string, readonly RubricKeepReasonOption[]>> = {
+  [RUBRIC_WHOLE_FORMAT_ISSUE_KEY]: [
+    { value: "document_wording", label: "I compared the criteria with the original, and nothing in it is missing" },
+    OTHER_KEEP_REASON,
+  ],
   not_in_source: [
     { value: "outside_table", label: "It is in the document outside the table, for example in a note under it" },
     OTHER_KEEP_REASON,
@@ -75,8 +83,10 @@ export const RUBRIC_KEEP_NOTE_MIN_CHARS = 12;
 // Issues that say a level's wording is not where the document puts it. Keeping
 // one needs a note, so the record says what the instructor compared rather
 // than a reason that contradicts the flag.
+// A whole-format warning needs one too: the note is the only record of what
+// the instructor compared.
 export const RUBRIC_KEEP_NOTE_REQUIRED_CODES: readonly string[] = [
-  "not_in_source", "joins_cells", "partial_cell", "wrong_column", "wrong_row", "shared_cell",
+  "not_in_source", "joins_cells", "partial_cell", "wrong_column", "wrong_row", "shared_cell", RUBRIC_WHOLE_FORMAT_ISSUE_KEY,
 ];
 // What a format's review state is called on the format page, the dashboard
 // and the review screen. parse_status only records how preparation went and

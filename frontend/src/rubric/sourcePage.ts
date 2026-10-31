@@ -8,7 +8,8 @@ export interface SourceTarget {
   location: string;
   // The cell's own text where the level was found, or the wording to compare.
   text: string | null;
-  kind: "cell" | "compare" | "row";
+  // "format": the page a whole-format warning asks to compare the criteria with.
+  kind: "cell" | "compare" | "row" | "format";
 }
 
 // Lets a criterion's "Show page" button open that page of the original.

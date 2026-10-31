@@ -3,7 +3,7 @@
 import type { Rubric, RubricAcknowledgementReason, RubricIssueDetail, RubricLevel, RubricLevelSource } from "../api/types";
 import {
   RUBRIC_ISSUE_COPY, RUBRIC_KEEP_NOTE_MIN_CHARS, RUBRIC_KEEP_NOTE_REQUIRED_CODES, RUBRIC_KEEP_REASONS,
-  RUBRIC_KEEP_REASONS_BY_CODE, RUBRIC_REVIEW_STATE_LABELS, type RubricKeepReasonOption,
+  RUBRIC_KEEP_REASONS_BY_CODE, RUBRIC_REVIEW_STATE_LABELS, RUBRIC_WHOLE_FORMAT_ISSUE_KEY, type RubricKeepReasonOption,
 } from "../config/ui";
 
 export interface PendingAcknowledgement {
@@ -22,14 +22,15 @@ export type LevelStatus =
   | { kind: "row_unchecked" }
   | { kind: "not_checked" };
 
-/** Every issue on the page in reading order: criterion by criterion, the
- * row-level issue before that criterion's levels, then the issues that
- * belong to no criterion still on the page. */
+/** Every issue on the page in reading order: the items about the whole
+ * format first, as the page shows them above the criteria; then criterion by
+ * criterion, the row-level issue before that criterion's levels; then issues
+ * on criteria no longer on the page. */
 export function orderedIssues(details: readonly RubricIssueDetail[], criterionIds: readonly (number | null)[]): RubricIssueDetail[] {
   const position = new Map<number, number>();
   criterionIds.forEach((id, index) => { if (id !== null) position.set(id, index); });
-  const rank = (issue: RubricIssueDetail) =>
-    issue.criterion_id !== null && position.has(issue.criterion_id) ? position.get(issue.criterion_id)! : criterionIds.length;
+  const rank = (issue: RubricIssueDetail) => issue.criterion_id === null ? -1
+    : position.has(issue.criterion_id) ? position.get(issue.criterion_id)! : criterionIds.length;
   return details
     .map((issue, index) => ({ issue, index }))
     .sort((a, b) => rank(a.issue) - rank(b.issue)
@@ -75,8 +76,26 @@ export function levelStatus(
   return { kind: "matches" };
 }
 
+/** The key an issue's keep reasons and note rule are looked up under. */
+export function reasonKey(issue: Pick<RubricIssueDetail, "criterion_id" | "code">): string {
+  return issue.criterion_id === null ? RUBRIC_WHOLE_FORMAT_ISSUE_KEY : issue.code;
+}
+
 export function issueCopy(issue: RubricIssueDetail): string {
-  return RUBRIC_ISSUE_COPY[issue.code] ?? issue.message;
+  const known = RUBRIC_ISSUE_COPY[issue.code];
+  if (known) return known;
+  // The server's own message is a lower-case clause; show it as a sentence.
+  const text = issue.message.trim();
+  if (!text) return text;
+  const sentence = text.charAt(0).toUpperCase() + text.slice(1);
+  return /[.!?]$/.test(sentence) ? sentence : `${sentence}.`;
+}
+
+/** An issue on one level, worded the same wherever it is listed. Wording
+ * found under another level's column names that level. */
+export function levelIssueCopy(issue: RubricIssueDetail, level: RubricLevel | undefined, levels: readonly RubricLevel[]): string {
+  const under = issue.code === "wrong_column" && level ? columnLevelName(level, levels) : null;
+  return under && level ? `This wording is in the document, but under ${under}, not ${level.name}.` : issueCopy(issue);
 }
 
 /** "Page 1 · row "Purpose" · column "PROFICIENT 3"", with plain row and

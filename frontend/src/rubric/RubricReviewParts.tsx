@@ -8,9 +8,9 @@ import { Button } from "../ui/Button";
 import { useShowSourcePage, type SourceTarget } from "./sourcePage";
 import { useRubric } from "./useRubric";
 import {
-  columnLevelName, formatReviewLabel, formatReviewState, issueCopy, issueStatus, itemsToCheck, keepNoteRequired, keepReasonLabel,
-  keepReasonsFor, levelAnchorId, levelStatus, noteHasContent, rowLocation, shortDate, sourceLocation, type FormatReviewState, type LevelStatus,
-  type PendingAcknowledgement,
+  columnLevelName, formatReviewLabel, formatReviewState, issueStatus, itemsToCheck, keepNoteRequired, keepReasonLabel,
+  keepReasonsFor, levelAnchorId, levelIssueCopy, levelStatus, noteHasContent, reasonKey, rowLocation, shortDate, sourceLocation,
+  type FormatReviewState, type LevelStatus, type PendingAcknowledgement,
 } from "./rubricReview";
 
 function Icon({ children }: { children: ReactNode }) {
@@ -31,9 +31,13 @@ const TAGS: Record<LevelStatus["kind"], { label: string; icon: () => ReactNode }
   not_checked: { label: "Not checked against the document", icon: DashIcon },
 };
 
-export function LevelStatusTag({ kind }: { kind: LevelStatus["kind"] }) {
+// A whole-format warning has no wording to keep; the instructor checks it.
+const CHECKED_LABEL = "Marked as checked";
+
+export function LevelStatusTag({ kind, wholeFormat = false }: { kind: LevelStatus["kind"]; wholeFormat?: boolean }) {
   const tag = TAGS[kind];
-  return <span className={`signal-level-tag signal-level-tag--${kind.replace("_", "-")}`}><tag.icon /><span>{tag.label}</span></span>;
+  const label = wholeFormat && (kind === "kept" || kind === "kept_pending") ? CHECKED_LABEL : tag.label;
+  return <span className={`signal-level-tag signal-level-tag--${kind.replace("_", "-")}`}><tag.icon /><span>{label}</span></span>;
 }
 
 export function RubricReviewStatus({ total, open, unsaved, refused, readOnly, isActive, state, onFirst, onSave }: {
@@ -133,10 +137,16 @@ export function SourceReadingSummary({ summary }: { summary: RubricSourceSummary
   </details>;
 }
 
-function KeepWordingForm({ headingId, codes, consequence, initial, serverError, onKeep, onCancel }: {
+function KeepWordingForm({ headingId, place, codes, consequence, wholeFormat = false, initial, serverError, onKeep, onCancel }: {
   headingId: string;
+  // "Purpose, Proficient": names this form's buttons, since several forms
+  // can be open at once.
+  place: string;
   codes: readonly string[];
   consequence: string | null;
+  // A warning about the whole format: the instructor records what they
+  // compared, and no single wording is being kept.
+  wholeFormat?: boolean;
   // Set when the server refused this keep: the form opens again with what
   // was chosen, and says why at the note.
   initial?: { reason: RubricAcknowledgementReason; note: string | null };
@@ -168,6 +178,7 @@ function KeepWordingForm({ headingId, codes, consequence, initial, serverError, 
         : noteRequired ? "Add a note saying what you compared." : "Add a note for this reason."
     : null;
   const touched = reason !== null || note.trim() !== "";
+  const submitLabel = wholeFormat ? "Mark as checked" : "Keep wording";
 
   function askBeforeCancel() {
     if (touched) setConfirmingCancel(true);
@@ -189,10 +200,12 @@ function KeepWordingForm({ headingId, codes, consequence, initial, serverError, 
       if (noteProblem) { noteRef.current?.focus(); return; }
       onKeep(reason, note.trim() ? note.trim() : null);
     }}>
-    <p id={`${id}-consequence`}>{consequence ? `${consequence} ` : ""}VERIDICAL will grade with this wording exactly as shown.</p>
+    <p id={`${id}-consequence`}>{wholeFormat
+      ? "Once you mark this as checked, VERIDICAL grades with the criteria on this page as they are."
+      : `${consequence ? `${consequence} ` : ""}VERIDICAL will grade with this wording exactly as shown.`}</p>
     <fieldset aria-invalid={missingReason || undefined} aria-describedby={`${id}-consequence${missingReason ? ` ${id}-error` : ""}`}>
-      <legend>Why keep it?</legend>
-      {missingReason && <small id={`${id}-error`} className="signal-field-error">Choose why you are keeping this wording.</small>}
+      <legend>{wholeFormat ? "What did you check?" : "Why keep it?"}</legend>
+      {missingReason && <small id={`${id}-error`} className="signal-field-error">{wholeFormat ? "Choose what you checked." : "Choose why you are keeping this wording."}</small>}
       {reasons.map((option, index) => <label key={option.value}>
         <input ref={index === 0 ? firstRef : undefined} type="radio" name={`${id}-reason`} value={option.value}
           checked={reason === option.value} onChange={() => setReason(option.value)} />
@@ -201,7 +214,9 @@ function KeepWordingForm({ headingId, codes, consequence, initial, serverError, 
     </fieldset>
     <div className="signal-criterion-field">
       <label htmlFor={`${id}-note`}>{needsNote ? "Note (required)" : "Note (optional)"}</label>
-      {noteRequired && <small id={`${id}-note-hint`}>Say what you compared in the original, for example where it has this wording.</small>}
+      {noteRequired && <small id={`${id}-note-hint`}>{wholeFormat
+        ? "Say what you compared, for example which pages of the original you read against the criteria."
+        : "Say what you compared in the original, for example where it has this wording."}</small>}
       <textarea id={`${id}-note`} ref={noteRef} rows={2} maxLength={RUBRIC_KEEP_NOTE_MAX_LENGTH} value={note}
         aria-required={needsNote || undefined}
         aria-invalid={noteError ? true : undefined}
@@ -212,19 +227,20 @@ function KeepWordingForm({ headingId, codes, consequence, initial, serverError, 
     {confirmingCancel
       ? <div className="signal-keep-form__actions" role="group" aria-labelledby={`${id}-discard`}>
           <p id={`${id}-discard`}>Discard what you entered?</p>
-          <Button type="button" variant="danger" onClick={onCancel}>Discard</Button>
-          <Button ref={keepEditingRef} type="button" variant="secondary"
+          <Button type="button" variant="danger" aria-label={`Discard, ${place}`} onClick={onCancel}>Discard</Button>
+          <Button ref={keepEditingRef} type="button" variant="secondary" aria-label={`Keep editing, ${place}`}
             onClick={() => { setConfirmingCancel(false); (noteRef.current ?? firstRef.current)?.focus(); }}>Keep editing</Button>
         </div>
       : <div className="signal-keep-form__actions">
-          <Button type="submit" variant="secondary">Keep wording</Button>
-          <Button type="button" variant="quiet" onClick={askBeforeCancel}>Cancel</Button>
+          <Button type="submit" variant="secondary" aria-label={`${submitLabel}, ${place}`}>{submitLabel}</Button>
+          <Button type="button" variant="quiet" aria-label={`Cancel, ${place}`} onClick={askBeforeCancel}>Cancel</Button>
         </div>}
   </form>;
 }
 
-function IssueResolution({ status, readOnly, undoLabel, onUndo, pending, copyFor }: {
+function IssueResolution({ status, readOnly, undoLabel, onUndo, pending, copyFor, wholeFormat = false }: {
   status: LevelStatus;
+  wholeFormat?: boolean;
   readOnly: boolean;
   undoLabel: string;
   onUndo: () => void;
@@ -242,16 +258,17 @@ function IssueResolution({ status, readOnly, undoLabel, onUndo, pending, copyFor
   const first = status.issues[0];
   if (status.kind === "kept_pending") {
     const kept = pending.get(first.id);
-    const reason = keepReasonLabel(kept?.reason_code, first.code);
+    const reason = keepReasonLabel(kept?.reason_code, reasonKey(first));
     return <>{raised}<p className="signal-level-row__note">
-      Kept as written{reason ? `: ${reason}` : ""}{kept?.note ? ` · “${kept.note}”` : ""}. Not saved yet.
+      {wholeFormat ? CHECKED_LABEL : "Kept as written"}{reason ? `: ${reason}` : ""}{kept?.note ? ` · “${kept.note}”` : ""}. Not saved yet.
       {!readOnly && <> <Button variant="quiet" aria-label={undoLabel} onClick={onUndo}>Undo</Button></>}
     </p></>;
   }
   const resolution = first?.resolution;
-  const reason = keepReasonLabel(resolution?.reason_code, first?.code);
+  const reason = keepReasonLabel(resolution?.reason_code, first ? reasonKey(first) : undefined);
+  const verb = wholeFormat ? "Checked" : "Kept";
   return <>{raised}<p className="signal-level-row__note">
-    {resolution?.by_name ? `Kept by ${resolution.by_name}` : "Kept"}{resolution ? `, ${shortDate(resolution.at)}` : ""}{reason ? `: ${reason}` : ""}
+    {resolution?.by_name ? `${verb} by ${resolution.by_name}` : verb}{resolution ? `, ${shortDate(resolution.at)}` : ""}{reason ? `: ${reason}` : ""}
     {resolution?.note ? ` · “${resolution.note}”` : ""}
   </p></>;
 }
@@ -260,7 +277,7 @@ function IssueResolution({ status, readOnly, undoLabel, onUndo, pending, copyFor
  * because they are about how the levels fit together. */
 export function CriterionLevels({
   criterionKey, criterionName, levels, issues, pending, readOnly, onKeep, onUndoKeep, onPageShown, nextAfter, onGo, onSave,
-  noteRefused, summaryDescribedBy, forceOpen = false, rowHeading,
+  noteRefused, summaryDescribedBy, forceOpen = false, rowHeading, wholeFormat = false, formatPage = null,
 }: {
   criterionKey: string;
   criterionName: string;
@@ -280,9 +297,20 @@ export function CriterionLevels({
   summaryDescribedBy?: string;
   forceOpen?: boolean;
   rowHeading?: string;
+  // The items about the whole format, and the page of the original they
+  // were read from.
+  wholeFormat?: boolean;
+  formatPage?: number | null;
 }) {
   const showPage = useShowSourcePage();
-  const [keeping, setKeeping] = useState<number | "row" | null>(null);
+  // Each open keep form stays open, with what was typed in it, until it is
+  // kept or cancelled; opening another one does not close it.
+  const [keeping, setKeeping] = useState<ReadonlySet<number | "row">>(() => new Set());
+  const stopKeeping = (target: number | "row") => setKeeping((current) => {
+    const next = new Set(current);
+    next.delete(target);
+    return next;
+  });
   // An issue naming a level this criterion no longer has is about the row.
   const rowIssues = issues.filter((issue) => issue.level === null || !levels.some((level) => level.level === issue.level));
   const rowStatus = issueStatus(rowIssues, pending);
@@ -307,9 +335,9 @@ export function CriterionLevels({
     requestAnimationFrame(() => document.getElementById(id)?.focus());
   }
 
-  function showPageButton(page: number | null, placeName: string, target: SourceTarget) {
+  function showPageButton(page: number | null, placeName: string | null, target: SourceTarget) {
     if (!showPage || page === null) return null;
-    return <Button variant="quiet" aria-label={`Show page ${page} of the original, ${criterionName}, ${placeName}`}
+    return <Button variant="quiet" aria-label={`Show page ${page} of the original, ${placeLabel(placeName)}`}
       onClick={(event) => { showPage(page, event.currentTarget, target); onPageShown(page); }}>Show page {page}</Button>;
   }
 
@@ -321,10 +349,7 @@ export function CriterionLevels({
   }
 
   function copyFor(level: RubricLevel | undefined) {
-    return (issue: RubricIssueDetail) => {
-      const under = issue.code === "wrong_column" && level ? columnLevelName(level, levels) : null;
-      return under ? `This wording is in the document, but under ${under}, not ${level!.name}.` : issueCopy(issue);
-    };
+    return (issue: RubricIssueDetail) => levelIssueCopy(issue, level, levels);
   }
 
   // After keeping, the per-item button moves on, or points to Save once
@@ -345,21 +370,24 @@ export function CriterionLevels({
     const under = misplacedUnder(level, targetIssues);
     const consequence = under && level ? `Keeping it means ${level.name} is graded with the wording the document gives ${under}.` : null;
     const refused = targetIssues.filter((issue) => noteRefused.has(issue.id));
+    const codes = targetIssues.map(reasonKey);
     if (refused.length && !readOnly) {
       const kept = pending.get(refused[0].id);
-      return <KeepWordingForm headingId={headingId} codes={targetIssues.map((issue) => issue.code)} consequence={consequence}
+      return <KeepWordingForm headingId={headingId} place={placeLabel(placeName)} codes={codes} consequence={consequence} wholeFormat={wholeFormat}
         initial={kept ? { reason: kept.reason_code, note: kept.note } : undefined}
-        serverError="Nothing was saved. Add a note saying what you compared before keeping this wording."
+        serverError={`Nothing was saved. Add a note saying what you compared before ${wholeFormat ? "marking this as checked" : "keeping this wording"}.`}
         onCancel={() => { onUndoKeep(targetIssues); focusLater(actionId); }}
         onKeep={(reason, note) => { onKeep(targetIssues, reason, note); focusLater(headingId); }} />;
     }
-    if (keeping === target && !readOnly) return <KeepWordingForm headingId={headingId}
-      codes={targetIssues.map((issue) => issue.code)} consequence={consequence}
-      onCancel={() => { setKeeping(null); focusLater(actionId); }}
-      onKeep={(reason, note) => { onKeep(targetIssues, reason, note); setKeeping(null); focusLater(headingId); }} />;
+    if (keeping.has(target) && !readOnly) return <KeepWordingForm headingId={headingId} place={placeLabel(placeName)}
+      codes={codes} consequence={consequence} wholeFormat={wholeFormat}
+      onCancel={() => { stopKeeping(target); focusLater(actionId); }}
+      onKeep={(reason, note) => { onKeep(targetIssues, reason, note); stopKeeping(target); focusLater(headingId); }} />;
     const next = nextAfter(targetIssues);
+    const keepLabel = wholeFormat ? "Mark as checked" : "Keep this wording";
     return <div className="signal-level-row__actions">
-      {!readOnly && <Button id={actionId} variant="secondary" aria-label={`Keep this wording, ${placeLabel(placeName)}`} onClick={() => setKeeping(target)}>Keep this wording</Button>}
+      {!readOnly && <Button id={actionId} variant="secondary" aria-label={`${keepLabel}, ${placeLabel(placeName)}`}
+        onClick={() => setKeeping((current) => new Set(current).add(target))}>{keepLabel}</Button>}
       {next && <Button variant="quiet" aria-label={`Next item after ${placeLabel(placeName)}`} onClick={() => onGo(next)}>Next item</Button>}
     </div>;
   }
@@ -367,11 +395,16 @@ export function CriterionLevels({
   const rowBlock = rowStatus && <div className="signal-level-row signal-level-row--whole" data-status={rowStatus.kind}>
     <div className="signal-level-row__head">
       <h4 id={rowHeadingId} tabIndex={-1}><span className="sr-only">{criterionName}:</span> {rowHeading ?? (levels.length ? "How these levels fit the table" : "About this criterion")}</h4>
-      <LevelStatusTag kind={rowStatus.kind} />
+      <LevelStatusTag kind={rowStatus.kind} wholeFormat={wholeFormat} />
     </div>
-    <IssueResolution status={rowStatus} readOnly={readOnly} pending={pending} undoLabel={`Undo keeping, ${criterionName}`} copyFor={copyFor(undefined)}
+    <IssueResolution status={rowStatus} readOnly={readOnly} pending={pending} wholeFormat={wholeFormat}
+      undoLabel={`Undo ${wholeFormat ? "marking as checked" : "keeping"}, ${criterionName}`} copyFor={copyFor(undefined)}
       onUndo={() => { onUndoKeep(rowIssues); focusLater(`${rowHeadingId}-keep`); }} />
     {row.text && levels.length > 0 && <p className="signal-level-row__location"><span>{row.text}</span>{showPageButton(row.page, "whole row", { location: row.text, text: null, kind: "row" })}</p>}
+    {wholeFormat && formatPage !== null && <p className="signal-level-row__location">
+      <span>Page {formatPage}, the table these criteria were read from</span>
+      {showPageButton(formatPage, null, { location: `Page ${formatPage}`, text: null, kind: "format" })}
+    </p>}
     {(rowStatus.kind === "check" || rowIssues.some((issue) => noteRefused.has(issue.id))) && actions("row", rowStatus.issues, rowHeadingId, null)}
     {rowStatus.kind === "kept_pending" && !rowIssues.some((issue) => noteRefused.has(issue.id)) && <div className="signal-level-row__actions">{onwardButton(rowStatus.issues, null)}</div>}
   </div>;

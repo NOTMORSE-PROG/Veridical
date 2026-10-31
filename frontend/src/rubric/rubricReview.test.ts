@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { RubricIssueDetail, RubricLevel } from "../api/types";
 import {
   columnLevelName, formatReviewLabel, formatReviewState, keepNoteRequired, keepReasonLabel, keepReasonsFor, noteHasContent,
+  orderedIssues, reasonKey,
 } from "./rubricReview";
 
 const issue = (status: RubricIssueDetail["status"], id = 1): RubricIssueDetail => ({
@@ -54,6 +55,20 @@ describe("keeping wording", () => {
     expect(keepReasonLabel("outside_table", "not_in_source")).toBe("It is in the document outside the table, for example in a note under it");
     expect(keepReasonLabel("outside_table")).toBe("The wording comes from outside the table");
     expect(keepReasonLabel(null)).toBeNull();
+  });
+
+  it("offers a whole-format warning its own reasons and needs a note for it", () => {
+    const formatIssue = { criterion_id: null, code: "other" };
+    expect(reasonKey(formatIssue)).toBe("whole_format");
+    expect(reasonKey({ criterion_id: 2, code: "other" })).toBe("other");
+    expect(keepReasonsFor([reasonKey(formatIssue)]).map((reason) => reason.value)).toEqual(["document_wording", "other"]);
+    expect(keepReasonLabel("document_wording", reasonKey(formatIssue))).toBe("I compared the criteria with the original, and nothing in it is missing");
+    expect(keepNoteRequired([reasonKey(formatIssue)])).toBe(true);
+  });
+
+  it("orders the whole-format items first, then criterion by criterion", () => {
+    const at = (id: number, criterion_id: number | null, level: number | null): RubricIssueDetail => ({ ...issue("open", id), criterion_id, level });
+    expect(orderedIssues([at(1, 7, 2), at(2, null, null), at(3, 6, 1), at(4, 99, 1)], [6, 7]).map((item) => item.id)).toEqual([2, 3, 1, 4]);
   });
 
   it("needs a note for untraced wording, and a note must say something", () => {

@@ -12,7 +12,7 @@ import { UploadRubricModal } from "./UploadRubricModal";
 import { FormatReviewWorkbench } from "./FormatReviewWorkbench";
 import { CriterionLevels, ReviewItemNavigator, RubricReviewStatus, SourceReadingSummary } from "./RubricReviewParts";
 import {
-  formatReviewState, issueCopy, levelAnchorId, openIssues, orderedIssues, tidy, type PendingAcknowledgement,
+  formatReviewState, levelAnchorId, levelIssueCopy, openIssues, orderedIssues, tidy, type PendingAcknowledgement,
 } from "./rubricReview";
 
 interface CriterionRow {
@@ -392,8 +392,10 @@ function CriteriaEditor({ id }: { id: number }) {
   }, [rows, rubric]);
 
   const readOnly = rubric ? !rubric.is_latest_version || rubric.can_edit_criteria === false : true;
-  const dirty = !readOnly && rows !== undefined && savedRows !== undefined
-    && (JSON.stringify(rows) !== JSON.stringify(savedRows) || pending.size > 0);
+  const rowsChanged = rows !== undefined && savedRows !== undefined && JSON.stringify(rows) !== JSON.stringify(savedRows);
+  const dirty = !readOnly && rows !== undefined && savedRows !== undefined && (rowsChanged || pending.size > 0);
+  // The leave dialog names what would be lost.
+  const onlyKeepsUnsaved = !rowsChanged && pending.size > 0;
   const blocker = useBlocker(({ currentLocation, nextLocation }) =>
     dirty && currentLocation.pathname !== nextLocation.pathname,
   );
@@ -518,6 +520,12 @@ function CriteriaEditor({ id }: { id: number }) {
     const level = issue.level === null ? undefined : row?.levels?.find((item) => item.level === issue.level);
     if (!row) return { label: "The whole format", anchor: levelAnchorId("format", null) };
     return { label: `${criterionName(row, index)}${level ? ` · ${level.name}` : ""}`, anchor: levelAnchorId(row.key, level ? level.level : null) };
+  }
+
+  // Worded as on the item's own card.
+  function itemCopy(issue: RubricIssueDetail): string {
+    const levels = currentRows.find((row) => row.id !== null && row.id === issue.criterion_id)?.levels ?? [];
+    return levelIssueCopy(issue, levels.find((item) => item.level === issue.level), levels);
   }
 
   function goToIssue(issue: RubricIssueDetail) {
@@ -860,11 +868,11 @@ function CriteriaEditor({ id }: { id: number }) {
             <h2>{blocked.kind === "save" ? "Check these items before saving changes to this active format" : "Check these items before activating"}</h2>
             {blocked.kind === "save" && <p>Nothing was saved. Your edits are still on this page.</p>}
             {openItems.length > 0 && <ul>{openItems.map((issue) => <li key={issue.id}><button type="button" onClick={() => goToIssue(issue)}>
-              {issuePlace(issue).label}: {issueCopy(issue)}</button></li>)}</ul>}
+              {issuePlace(issue).label}: {itemCopy(issue)}</button></li>)}</ul>}
             {reopenedItems.length > 0 && <>
               <p>Saving would reopen {reopenedItems.length === 1 ? "this item" : "these items"} you kept, because the wording {reopenedItems.length === 1 ? "it was" : "they were"} kept for would change:</p>
               <ul>{reopenedItems.map((issue) => <li key={issue.id}><button type="button" onClick={() => goToIssue(issue)}>
-                {issuePlace(issue).label}: {issueCopy(issue)}</button></li>)}</ul>
+                {issuePlace(issue).label}: {itemCopy(issue)}</button></li>)}</ul>
             </>}
             {blocked.unknown > 0 && <p>Saving would also leave {blocked.unknown === 1 ? "one level description" : `${blocked.unknown} level descriptions`} that no longer {blocked.unknown === 1 ? "matches" : "match"} the document.</p>}
             {blocked.edits.length > 0 && <>
@@ -888,9 +896,9 @@ function CriteriaEditor({ id }: { id: number }) {
         {formatIssues.length > 0 && <section className="signal-format-issues" aria-labelledby="format-issues-heading">
           <h3 id="format-issues-heading">Items about the whole format</h3>
           <CriterionLevels criterionKey="format" criterionName="The whole format" levels={[]} issues={formatIssues} pending={pending}
-            readOnly={readOnly} onKeep={keepIssues} onUndoKeep={undoKeep} onPageShown={() => {}} nextAfter={nextAfter} onGo={goToIssue}
-            onSave={goToSave} noteRefused={noteRefused}
-            rowHeading="From reading the format" />
+            readOnly={readOnly} onKeep={keepIssues} onUndoKeep={undoKeep} onPageShown={(page) => announce(`Page ${page} shown in the original format.`)}
+            nextAfter={nextAfter} onGo={goToIssue} onSave={goToSave} noteRefused={noteRefused}
+            rowHeading="From reading the format" wholeFormat formatPage={rubric.source_summary?.copy_pages[0] ?? null} />
         </section>}
         {problems.length > 0 && (
           <div ref={summaryRef} tabIndex={-1} role="alert" className="signal-error-summary signal-criteria-errors">
@@ -982,7 +990,9 @@ function CriteriaEditor({ id }: { id: number }) {
           onClose={() => resolveBlocker("keep")}
           actions={<><Button variant="secondary" disabled={save.isPending} onClick={() => resolveBlocker("keep")}>Keep editing</Button><Button variant="danger" disabled={save.isPending} onClick={() => resolveBlocker("leave")}>Leave without saving</Button><Button variant="brand" busy={save.isPending} onClick={saveAndLeave}>{rubric.is_active ? "Save changes and leave" : "Save draft and leave"}</Button></>}
         >
-          <div className="signal-dialog-copy"><p>Your unsaved criteria changes will be discarded if you leave now.</p>{leaveSaveFailed && saveError && <Alert title="Could not save" tone="error" role="alert">{saveError}</Alert>}</div>
+          <div className="signal-dialog-copy"><p>{onlyKeepsUnsaved
+            ? "The items you kept or marked as checked on this page are not saved yet, and will be lost if you leave now."
+            : "Your unsaved criteria changes will be discarded if you leave now."}</p>{leaveSaveFailed && saveError && <Alert title="Could not save" tone="error" role="alert">{saveError}</Alert>}</div>
         </Dialog>
       )}
       {discardOpen && (discardReason === "conflict" ? (

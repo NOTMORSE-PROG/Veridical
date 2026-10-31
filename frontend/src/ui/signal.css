@@ -7176,6 +7176,9 @@
     margin-block-start: var(--signal-space-4);
     border-block-end: var(--signal-border-hairline) solid var(--color-signal-border);
     background: var(--color-signal-surface);
+    /* Stuck at the top of the scrolling pane, the bar also covers the pane's
+       top padding, so no criterion text shows above it. */
+    box-shadow: 0 calc(-1 * var(--signal-space-4)) 0 var(--color-signal-surface);
   }
 
   .signal-review-nav p { margin: 0 auto 0 0; font-size: var(--signal-type-label); font-weight: var(--signal-weight-semibold); }
@@ -7188,7 +7191,7 @@
   @media (max-width: 1023px) {
     .signal-format-workbench__criteria { block-size: auto; }
     .signal-format-editor-scroll { overflow: visible; }
-    .signal-format-workbench__criteria .signal-review-nav { inset-block-start: var(--signal-workspace-header-height); }
+    .signal-format-workbench__criteria .signal-review-nav { inset-block-start: var(--signal-workspace-header-height); box-shadow: none; }
     :root:has(.signal-review-nav) { scroll-padding-block-start: calc(var(--signal-workspace-header-height) + var(--signal-review-nav-height)); }
   }
 
