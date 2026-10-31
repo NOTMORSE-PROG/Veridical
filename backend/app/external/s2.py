@@ -18,7 +18,8 @@ from app.external.http import get_json
 from app.external.schemas import VerificationResult
 from app.rate_governor import RateGovernor
 
-_FIELDS = "title,abstract,externalIds,isOpenAccess,openAccessPdf"
+# publicationTypes is read only for what kind of work a reference is (V-098).
+_FIELDS = "title,abstract,externalIds,isOpenAccess,openAccessPdf,publicationTypes"
 
 _governor: RateGovernor | None = None
 

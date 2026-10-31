@@ -39,6 +39,7 @@ from app.checks.citations.verify import (
     run_citation_integrity_check,
 )
 from app.checks.consistency import SemanticPartialUnavailable, run_semantic_checks_with_consistency
+from app.checks.reference_criteria import apply_reference_strategies, load_reference_data
 from app.checks.reuse.service import (
     existing_originality_reuse_result,
     run_originality_reuse_check,
@@ -66,7 +67,7 @@ from app.models.audit import AuditLog
 from app.models.citation import Citation
 from app.models.enums import CheckKind, CheckRunStatus, IngestStatus, ResultOutcome
 from app.models.manuscript import Manuscript
-from app.models.rubric import Rubric
+from app.models.rubric import Criterion, Rubric
 from app.models.run import CheckResult, CheckRun, ReadinessReport
 from app.pipeline.guards import try_guard
 from app.report.service import aggregate_and_score
@@ -780,6 +781,40 @@ async def _record_unread_pages(
     await session.commit()
 
 
+async def _apply_reference_criteria(
+    session: AsyncSession,
+    check_run: CheckRun,
+    manuscript: Manuscript,
+    settings: Settings,
+    llm: LLMClient,
+) -> None:
+    data = load_reference_data(settings.reference_criteria_file)
+    criteria = list(
+        (
+            await session.scalars(
+                select(Criterion).where(Criterion.rubric_id == check_run.rubric_id)
+            )
+        ).all()
+    )
+    citation_result = await existing_citation_integrity_result(session, check_run.id)
+    citations = list(
+        (
+            await session.scalars(select(Citation).where(Citation.manuscript_id == manuscript.id))
+        ).all()
+    )
+    rubric = await session.get(Rubric, check_run.rubric_id)
+    await apply_reference_strategies(
+        session,
+        check_run.id,
+        criteria,
+        citation_result,
+        citations,
+        llm,
+        data,
+        quality_ranges=getattr(rubric, "reference_quality_ranges", None),
+    )
+
+
 async def _run_integrity_stage(
     session: AsyncSession,
     check_run: CheckRun,
@@ -866,6 +901,12 @@ async def _run_integrity_stage(
         citation_flags = (
             citation_existing.detail.get("n_flags", 0) if citation_existing.detail else 0
         )
+    await cancellation_boundary()
+
+    # V-098: criteria the format states about the reference list itself are
+    # judged from the citation check's lookups, now that they exist. Rows
+    # already judged this way are left alone, so a resumed stage is safe.
+    await _apply_reference_criteria(session, check_run, manuscript, settings, llm)
     await cancellation_boundary()
 
     if forensics_existing is None:

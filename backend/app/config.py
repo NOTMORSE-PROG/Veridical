@@ -346,6 +346,11 @@ class Settings(BaseSettings):
     semantic_evidence_scope_patterns_file: Path = (
         Path(__file__).parent / "checks" / "data" / "semantic_evidence_scopes.json"
     )
+    # V-098: criteria judged from the reference list after the citation check
+    # (which descriptors call for it, count wording, work-type classes).
+    reference_criteria_file: Path = (
+        Path(__file__).parent / "checks" / "data" / "reference_criteria.json"
+    )
     llm_retry_base_seconds: float = 1.0
     # BUG-162: the response cache (D-011) is keyed on prompt content, not
     # check_run_id, by design -- so a normal re-run of the same manuscript

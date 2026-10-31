@@ -388,7 +388,17 @@ def _to_criterion_result(
     )
 
 
-_DECISION_BASES = frozenset({"single_verified_pass", "lower_of_two", "middle_of_three"})
+_DECISION_BASES = frozenset(
+    {
+        "single_verified_pass",
+        "lower_of_two",
+        "middle_of_three",
+        # V-098: a level set from the reference list rather than by the passes.
+        "reference_counts",
+        "reference_profile",
+        "reference_ranges",
+    }
+)
 
 
 def scope_capabilities(criterion: Criterion, detail: dict) -> list[str] | None:

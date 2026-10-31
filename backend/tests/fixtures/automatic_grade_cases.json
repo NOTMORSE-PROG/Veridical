@@ -54,5 +54,21 @@
     },
     "lines": ["Graded automatically: the AI chose this grade in 2 of 2 grading passes. Matching passes show consistency, not confirmation."],
     "caution": null
+  },
+  {
+    "name": "a level set from the reference list's counts is named as such",
+    "row": {"decision_basis": "reference_counts", "agreeing_passes": 2, "grading_passes": 2},
+    "lines": [
+      "Graded automatically: the reference list's counts of major references and internet sites allow no higher level than this; the grading passes judged the formatting."
+    ],
+    "caution": null
+  },
+  {
+    "name": "two readings of the reference profile are named as such",
+    "row": {"decision_basis": "reference_profile"},
+    "lines": [
+      "Graded automatically: two separate readings of the reference list's source types chose this level."
+    ],
+    "caution": null
   }
 ]

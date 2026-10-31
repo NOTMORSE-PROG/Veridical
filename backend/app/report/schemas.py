@@ -113,7 +113,17 @@ class CriterionResultOut(BaseModel):
     # GRADING_DECISION_POLICY="decide" (owner, 2026-10-29): how an automatic
     # grade was chosen, shown with the grade until an instructor changes it.
     # Absent on instructor judgments and on rows the AI did not grade.
-    decision_basis: Literal["single_verified_pass", "lower_of_two", "middle_of_three"] | None = None
+    decision_basis: (
+        Literal[
+            "single_verified_pass",
+            "lower_of_two",
+            "middle_of_three",
+            "reference_counts",
+            "reference_profile",
+            "reference_ranges",
+        ]
+        | None
+    ) = None
     # Why the AI left a criterion ungraded, as stable codes the screen words
     # ("evidence_not_located", "evidence_already_used"); None when not recorded.
     reason_codes: list[str] | None = None
@@ -511,7 +521,17 @@ class PublicCriterionResultOut(BaseModel):
     # V-087: how an automatic grade was chosen and any caution about its
     # evidence. They describe the system's grading, not the instructor's
     # private reasoning, and are empty once the instructor sets the grade.
-    decision_basis: Literal["single_verified_pass", "lower_of_two", "middle_of_three"] | None = None
+    decision_basis: (
+        Literal[
+            "single_verified_pass",
+            "lower_of_two",
+            "middle_of_three",
+            "reference_counts",
+            "reference_profile",
+            "reference_ranges",
+        ]
+        | None
+    ) = None
     support_caution: str | None = None
     # The evidence check could not apply to this kind of level (BUG-608), so
     # the caution is shown without "not confirmed".

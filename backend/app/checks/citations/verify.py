@@ -81,6 +81,7 @@ from app.external import openalex as openalex_client
 from app.external import openlibrary as openlibrary_client
 from app.external import s2 as s2_client
 from app.external.schemas import VerificationResult
+from app.external.work_type import work_types
 from app.ingest.analytical_source import analytical_source
 from app.ingest.normalize import normalize
 from app.ingest.patterns import HeadingPatterns
@@ -123,6 +124,14 @@ class VerdictKind(StrEnum):
     # as `existence_confirmed`, never re-flagged.
     instructor_confirmed = "instructor_confirmed"
     metadata_mismatch = "metadata_mismatch"
+
+
+# A lookup whose found record is this entry's own (V-098 reads its type).
+_IDENTITY_CONFIRMED = {
+    VerdictKind.existence_confirmed,
+    VerdictKind.retracted,
+    VerdictKind.corrected,
+}
 
 
 @dataclass(frozen=True)
@@ -1261,6 +1270,12 @@ async def _run_citation_integrity_check(
                     else {}
                 ),
                 "provider": verdict.result.provider if verdict.result else None,
+                # Read by the reference-based criteria (V-098); no extra lookup.
+                # Only a confirmed identity says what this entry is: a search
+                # candidate that did not match is some other work.
+                "work_types": work_types(verdict.result)
+                if verdict.kind in _IDENTITY_CONFIRMED
+                else [],
                 "providers_attempted": verdict.result.attempted_providers if verdict.result else [],
                 "retraction_status": "checked"
                 if verdict.result and verdict.result.provider == "crossref"
