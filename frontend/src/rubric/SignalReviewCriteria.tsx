@@ -10,6 +10,7 @@ import { Dialog } from "../ui/Dialog";
 import { type CriterionEdit, useRubric, useSaveCriteria } from "./useRubric";
 import { UploadRubricModal } from "./UploadRubricModal";
 import { FormatReviewWorkbench } from "./FormatReviewWorkbench";
+import { equalWeights, readableWeights } from "./weights";
 import { CriterionLevels, ReviewItemNavigator, RubricReviewStatus, SourceReadingSummary } from "./RubricReviewParts";
 import {
   formatReviewState, levelAnchorId, levelIssueCopy, openIssues, orderedIssues, tidy, type OpenedAgain, type PendingAcknowledgement,
@@ -187,6 +188,7 @@ function CriterionCard({
   row,
   index,
   average,
+  allEqual,
   readOnly,
   showErrors,
   onChange,
@@ -197,6 +199,8 @@ function CriterionCard({
   row: CriterionRow;
   index: number;
   average: number;
+  // Every criterion has the same weight; the count of criteria.
+  allEqual: number | null;
   readOnly: boolean;
   showErrors: boolean;
   onChange: (patch: Partial<CriterionRow>) => void;
@@ -219,7 +223,9 @@ function CriterionCard({
         <p>{row.text}</p>
         <p><strong>Type: </strong>{TYPE_LABELS[row.type]}</p>
         <p><strong>Evidence expected: </strong>{row.evidence || "Not specified in this version."}</p>
-        <p><strong>Relative weight: </strong>{row.weight} · {importance(row.weight, average)} importance</p>
+        <p><strong>Relative weight: </strong>{allEqual !== null
+          ? `the same for all ${allEqual} criteria`
+          : `${row.weight} · ${importance(row.weight, average)} importance`}</p>
         {levels}
       </div>
     </li>
@@ -385,13 +391,16 @@ function CriteriaEditor({ id }: { id: number }) {
 
   useEffect(() => {
     if (!rubric || rows) return;
-    const next = rubric.criteria.map((criterion) => ({
+    // A stored split such as 11.111 is shown, and saved, as plain relative
+    // weights with the same ratios.
+    const weights = readableWeights(rubric.criteria.map((criterion) => criterion.weight));
+    const next = rubric.criteria.map((criterion, index) => ({
       key: String(criterion.id),
       id: criterion.id,
       type: criterion.type,
       text: criterion.text,
       evidence: criterion.evidence ?? "",
-      weight: criterion.weight,
+      weight: weights[index],
       levels: criterion.levels ?? null,
     }));
     setRows(next);
@@ -777,8 +786,8 @@ function CriteriaEditor({ id }: { id: number }) {
 
   function distributeWeights() {
     if (!currentRows.length) return;
-    const equal = Math.round((100 / currentRows.length) * 1000) / 1000;
-    setRows((current) => current?.map((row) => ({ ...row, weight: equal })));
+    // Weights are relative: equal weights are 1 each, never 100 split n ways.
+    setRows((current) => current?.map((row) => ({ ...row, weight: 1 })));
     announce("Relative weights set equally across all criteria.");
   }
 
@@ -985,6 +994,7 @@ function CriteriaEditor({ id }: { id: number }) {
               row={row}
               index={index}
               average={average}
+              allEqual={equalWeights(currentRows.map((item) => item.weight)) ? currentRows.length : null}
               readOnly={readOnly}
               showErrors={attempted !== undefined}
               onChange={(patch) => updateRow(row.key, patch)}

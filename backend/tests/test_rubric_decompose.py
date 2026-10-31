@@ -14,6 +14,7 @@ from app.rubric.decompose import (
     RubricParseError,
     decompose_rubric,
     raw_text_for_decomposition,
+    relative_weights,
 )
 
 
@@ -51,11 +52,49 @@ def test_raw_text_strips_furniture_and_blank_lines():
     assert text == "Criterion: contains an abstract.\nCriterion: cites at least five sources."
 
 
-async def test_decompose_rubric_normalizes_weights_to_sum_100():
+async def test_decompose_rubric_keeps_weights_readable():
+    """BUG-580: weights are relative, so they are never turned into a
+    computed percentage such as 11.111; every weight has at most two decimals."""
     criteria = await decompose_rubric("irrelevant for the fake client", FakeLLMClient())
-    total = sum(c.weight for c in criteria)
-    assert total == pytest.approx(100.0)
+    assert all(c.weight == round(c.weight, 2) for c in criteria)
     assert {c.type for c in criteria} <= {"structural", "semantic"}
+
+
+def test_relative_weights_keep_plain_weights_and_rescale_computed_ones():
+    # As the format states them.
+    assert relative_weights([20, 30, 50], 2) == [20, 30, 50]
+    assert relative_weights([1, 1, 2], 2) == [1, 1, 2]
+    assert relative_weights([0.25, 0.75], 2) == [0.25, 0.75]
+    # An equal split over nine criteria becomes nine equal, readable weights.
+    assert relative_weights([100 / 9] * 9, 2) == [1.0] * 9
+    assert relative_weights([11.111] * 9, 2) == [1.0] * 9
+    # Ratios survive the rescale.
+    assert relative_weights([100 / 6, 100 / 3, 50.0], 2) == [1.0, 2.0, 3.0]
+
+
+def test_relative_weights_keep_uneven_ratios_close_enough_for_the_same_score():
+    """Rescaling rounds each weight relative to a lightest of 1, so a ratio
+    moves by at most half a hundredth of the lightest weight."""
+    stored = [3.333, 96.667, 41.5, 12.25]
+    readable = relative_weights(stored, 2)
+    for before, after in zip(stored, readable, strict=True):
+        assert after / readable[0] == pytest.approx(before / stored[0], rel=0.005)
+
+
+def test_relative_weights_too_uneven_for_the_column_fall_back_to_a_split_of_100():
+    readable = relative_weights([0.0001, 50.0], 2)
+    assert max(readable) <= 99999.999
+    assert sum(readable) == pytest.approx(100.0, abs=0.01)
+
+
+async def test_decompose_rubric_rescales_an_equal_split_written_as_decimals():
+    response = {
+        "criteria": [
+            {"text": f"Criterion {n}", "type": "semantic", "weight": 11.111} for n in range(9)
+        ]
+    }
+    criteria = await decompose_rubric("x", SpyLLM(response))
+    assert [c.weight for c in criteria] == [1.0] * 9
 
 
 async def test_decompose_rubric_raises_on_missing_criteria_key():
@@ -200,9 +239,8 @@ async def test_decompose_handles_prose_style_input_with_no_numbering():
     }
     criteria = await decompose_rubric(prose, SpyLLM(scripted))
     assert len(criteria) == 3
-    # Rounding each weight to 3 decimals (an uneven 3-way split) can leave
-    # a cent-level remainder — real drift, not a bug; tolerance reflects it.
-    assert sum(c.weight for c in criteria) == pytest.approx(100.0, abs=0.01)
+    # An equal split stays as the format gives it (BUG-580).
+    assert [c.weight for c in criteria] == [1, 1, 1]
 
 
 async def test_raw_text_with_literal_braces_does_not_break_prompt_substitution():

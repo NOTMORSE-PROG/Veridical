@@ -510,6 +510,13 @@ class Settings(BaseSettings):
     rubric_withheld_value_marker: str = Field(
         default="[differs between copies, not shown]", min_length=1
     )
+    # Criterion weights are relative (scoring divides by their total), so
+    # they are kept as the format gives them when they have at most this many
+    # decimals. Otherwise, e.g. an equal split stated as 11.111, they are
+    # rescaled so the lightest criterion is 1. The instructor never sees a
+    # computed decimal (ground rule 8, BUG-580). Keep in step with frontend
+    # config/ui.ts RUBRIC_WEIGHT_MAX_DECIMALS.
+    rubric_weight_max_decimals: int = Field(default=2, ge=0, le=6)
 
     # --- Aggregation & scoring (V-019, F8.1, ENGINEERING §5) -----------------
     # Three-way status thresholds — VISIBLE in the report payload, never a

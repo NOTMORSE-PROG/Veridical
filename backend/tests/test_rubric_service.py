@@ -159,7 +159,9 @@ async def test_create_rubric_from_upload_persists_criteria_with_normalized_weigh
     assert [c.text for c in criteria] == ["Has an abstract", "Argument is well developed"]
     assert [c.type for c in criteria] == ["structural", "semantic"]
     assert [c.position for c in criteria] == [0, 1]
-    assert sum(float(c.weight) for c in criteria) == pytest.approx(100.0)
+    assert all(
+        float(c.weight) > 0 and float(c.weight) == round(float(c.weight), 2) for c in criteria
+    )
 
 
 async def test_failed_upload_leaves_no_orphaned_rubric_version(
