@@ -71,7 +71,17 @@ export function validateIngestReceipt(value: unknown): IngestSummary {
   if (prior !== null && (!object(prior) || !positive(prior.manuscript_id)
     || !timestamp(prior.created_at) || !nullableString(prior.original_filename)
     || !(prior.purged_at === null || timestamp(prior.purged_at)))) throw new UnconfirmedUploadError();
-  return v as unknown as IngestSummary;
+  if (v.image_reading === undefined || imageReading(v.image_reading, v.images as number)) return v as unknown as IngestSummary;
+  return { ...(v as unknown as IngestSummary), image_reading: undefined };
+}
+
+// Counts that do not add up are dropped, not trusted; the upload itself is
+// still confirmed, and the screen then says nothing about image reading.
+function imageReading(value: unknown, images: number): IngestSummary["image_reading"] {
+  if (!object(value) || ![value.checked, value.with_content, value.not_checked, value.no_cue].every(natural)) return undefined;
+  const { checked, with_content, not_checked, no_cue } = value as Record<string, number>;
+  if (with_content > checked || no_cue > not_checked || checked + not_checked !== images) return undefined;
+  return { checked, with_content, not_checked, no_cue };
 }
 
 export function validateRubricReceipt(value: unknown, familyId?: string): Rubric {

@@ -176,9 +176,10 @@ def test_a_merged_image_is_reported_but_not_read(tmp_path):
     assert outline > settings.ingest_vision_min_area_pts
     assert not readable_size(tiled, settings) and readable_size(figure, settings)
     patterns = load_patterns(settings.ingest_patterns_file)
-    assert _selected_indices(result, patterns, settings) == [1]
+    # The other image is readable but has no table or equation caption.
+    assert _selected_indices(result, patterns, settings) == []
     prepare_image_readings(result, patterns, settings)
-    assert [reading.reason for reading in result.image_readings] == ["size_filter", "not_attempted"]
+    assert [reading.reason for reading in result.image_readings] == ["size_filter", "no_table_cue"]
     prepare_figures(result, patterns, settings)
     assert result.figure_readings[0].reason == "source_or_relevance_unavailable"
 

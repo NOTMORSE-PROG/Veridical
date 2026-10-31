@@ -35,6 +35,7 @@ import { formatChoiceLabel } from "../domain/formatIdentity";
 import { UploadRefusedError } from "../api/directManuscriptUpload";
 import { UPLOAD_REFUSAL_COPY } from "../domain/uploadRefusal";
 import { ActionLink } from "../ui/ActionLink";
+import { IMAGE_READING_LIMIT, imageReadingLine } from "./uploadImageReading";
 
 function formatUploadDate(value: string): string {
   return new Date(value).toLocaleString(undefined, {
@@ -232,6 +233,7 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
   const summary = ingest.data;
 
   const extractionNotes = summary?.notes.filter((note) => note.trim()) ?? [];
+  const imageLine = summary ? imageReadingLine(summary) : null;
   const showsVisionUnavailable =
     summary?.vision_status === "unavailable" &&
     summary.images + summary.tables + summary.equations > 0;
@@ -361,6 +363,9 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
                   : "Page count is not available for this upload."}
               {" "}{summary.citations} reference {summary.citations === 1 ? "record" : "records"} extracted.
             </p>
+            {imageLine && <p className="signal-upload-summary__counts">
+              {imageLine}{summary.image_reading?.not_checked ? ` ${IMAGE_READING_LIMIT}` : ""}
+            </p>}
             {(extractionNotes.length > 0 || showsVisionUnavailable) && (
               <section className="signal-upload-summary__notes" aria-label="Extraction notes">
                 <h4>Extraction notes</h4>

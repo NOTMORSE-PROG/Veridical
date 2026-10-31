@@ -32,6 +32,13 @@
     "appendices"
   ],
   "caption": "^(?:table|figure|fig\\.)\\s+\\d",
+  "vision_cues": {
+    "_comment": "An image is sent to the table/equation reading prompt only with one of these cues beside it. Most thesis images are figures, screenshots and photos, and most tables are typed text that is read without a model call. Distances are PDF points. An uncued image is recorded as not checked, never as read.",
+    "table_caption": "^table\\s+(?:\\d|[ivxlc]+\\b)",
+    "equation_number": "^\\(\\s*\\d+(?:\\.\\d+)*[a-z]?\\s*\\)$",
+    "caption_gap_pts": 60,
+    "column_slack_pts": 20
+  },
   "toc_titles": [
     "table of contents",
     "contents",

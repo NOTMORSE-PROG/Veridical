@@ -165,6 +165,7 @@ class ImageReading(BaseModel):
             "not_attempted",
             "unsupported_source",
             "size_filter",
+            "no_table_cue",
             "selection_limit",
             "vision_disabled",
             "client_unavailable",
@@ -282,6 +283,19 @@ class ExistingUploadOut(BaseModel):
     purged_at: datetime | None
 
 
+class ImageReadingSummary(BaseModel):
+    """What the upload's image reading did, counted from its saved readings.
+    `vision_status` only says whether the pass ran; these say what it found."""
+
+    # Images checked for a table or equation (one model call each).
+    checked: int
+    # Of those, readings that transcribed a table or an equation.
+    with_content: int
+    # Images never checked, and how many of those had no table or equation cue.
+    not_checked: int
+    no_cue: int
+
+
 class IngestSummary(BaseModel):
     """Response body of POST /manuscripts/ingest — what the upload screen
     (4c/4f) needs to show; the full extraction lives in the raw store."""
@@ -300,6 +314,8 @@ class IngestSummary(BaseModel):
     equations: int
     citations: int
     vision_status: Literal["none", "done", "unavailable"]
+    # None when the saved extraction has no reading record (older uploads).
+    image_reading: ImageReadingSummary | None = None
     section_tree: "SectionTree"
     # User-facing notes (message templates) — e.g. the limited-checks note
     # for scans. Honest states, not errors.

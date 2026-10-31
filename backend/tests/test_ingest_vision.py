@@ -38,15 +38,28 @@ class SpyLLM(LLMClient):
         return self._responses[min(len(self.calls) - 1, len(self._responses) - 1)]
 
 
-def _pdf_with_images(tmp_path, *, n_results_images: int, n_intro_images: int = 0, tiny: int = 0):
-    """Ch1 (intro) and Ch4 RESULTS AND DISCUSSION; images placed per chapter."""
+def _pdf_with_images(
+    tmp_path,
+    *,
+    n_results_images: int,
+    n_intro_images: int = 0,
+    tiny: int = 0,
+    captioned: bool = True,
+):
+    """Ch1 (intro) and Ch4 RESULTS AND DISCUSSION; images placed per chapter.
+    Each image carries a table caption just above it unless `captioned` is
+    False; only a captioned image is sent for reading."""
     b = PdfBuilder()
     b.new_page().line("CHAPTER 1 INTRODUCTION", bold=True).line("Prose about the study.")
     for _ in range(n_intro_images):
+        if captioned:
+            b.line("Table 1.1 Respondent profile", y=290)
         b.image(rect=(100, 300, 300, 450))
     b.new_page().line("CHAPTER 4 RESULTS AND DISCUSSION", bold=True).line("Findings prose.")
     y = 200
-    for _ in range(n_results_images):
+    for number in range(n_results_images):
+        if captioned:
+            b.line(f"Table 4.{number + 1} Results", y=y - 4)
         b.image(rect=(100, y, 320, y + 120))
         y += 130
     for _ in range(tiny):

@@ -36,13 +36,14 @@ from app.config import Settings
 from app.errors import ApiDownError, QuotaExhaustedError
 from app.ingest.admission import PreparationLease
 from app.ingest.image_source import _crop as _native_crop
-from app.ingest.image_source import _selected_indices, readable_size
+from app.ingest.image_source import _selected_indices, cued_indices, readable_size
 from app.ingest.patterns import HeadingPatterns
 from app.ingest.schemas import (
     EquationBlock,
     ExtractionResult,
     ImageBlock,
     ImageReading,
+    ImageReadingSummary,
     TableBlock,
 )
 from app.llm import LLMNotConfiguredError
@@ -148,6 +149,7 @@ def prepare_image_readings(
     enabled: bool = True,
 ) -> list[int]:
     selected = _selected_indices(result, patterns, settings) if enabled else []
+    cued = cued_indices(result, patterns, settings) if enabled else set()
     result.image_reading_version = "v1"
     result.image_readings = []
     for index, image in enumerate(result.images):
@@ -157,12 +159,27 @@ def prepare_image_readings(
             reason = "unsupported_source"
         elif not readable_size(image, settings):
             reason = "size_filter"
+        elif index not in cued:
+            reason = "no_table_cue"
         else:
             reason = "not_attempted" if index in selected else "selection_limit"
         result.image_readings.append(
             ImageReading(image_index=index, status="not_selected", reason=reason)
         )
     return selected
+
+
+def summarize_image_readings(result: ExtractionResult) -> ImageReadingSummary | None:
+    readings = result.image_readings
+    if readings is None:
+        return None
+    checked = [reading for reading in readings if reading.attempted]
+    return ImageReadingSummary(
+        checked=len(checked),
+        with_content=sum(1 for reading in checked if reading.status == "transcribed"),
+        not_checked=len(readings) - len(checked),
+        no_cue=sum(1 for reading in readings if reading.reason == "no_table_cue"),
+    )
 
 
 def mark_pending_unavailable(result: ExtractionResult, reason: str) -> None:

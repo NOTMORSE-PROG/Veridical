@@ -78,6 +78,7 @@ async def ingest_manuscript_upload(
     )
     notes = [messages.IMAGE_ONLY_NOTE] if result.image_only else []
     from app.ingest.quality import reading_order_ingest_note
+    from app.ingest.vision import summarize_image_readings
 
     if source_note := reading_order_ingest_note(result, n_citations):
         notes.append(source_note)
@@ -93,6 +94,7 @@ async def ingest_manuscript_upload(
         tables=len(result.tables),
         equations=len(result.equations),
         vision_status=result.vision_status,
+        image_reading=summarize_image_readings(result),
         citations=n_citations,
         section_tree=result.section_tree,
         notes=notes,

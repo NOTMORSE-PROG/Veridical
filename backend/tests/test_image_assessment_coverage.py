@@ -51,7 +51,17 @@ def _extraction(*, images=None, text="Qualitative description."):
         image_only=False,
         text_chars=len(text),
         section_tree=SectionTree(source="none"),
-        blocks=[TextBlock(page=1, text=text, max_font_size=11, bold_ratio=0)],
+        blocks=[
+            TextBlock(page=1, text=text, max_font_size=11, bold_ratio=0),
+            # A table caption just below the test images, so they are read.
+            TextBlock(
+                page=1,
+                bbox=(0, 104, 100, 116),
+                text="Table 1. Scores",
+                max_font_size=10,
+                bold_ratio=0,
+            ),
+        ],
         images=images or [],
     )
 

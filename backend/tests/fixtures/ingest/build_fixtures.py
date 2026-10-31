@@ -21,7 +21,8 @@ FIXTURE_DIR = Path(__file__).parent
 
 def _image_table_pdf() -> None:
     """A normal-looking document whose results table exists only as an
-    embedded image — the F1.3 case."""
+    embedded image — the F1.3 case. Its caption sits just above it, as a
+    thesis table's does; an image without one is not sent for reading."""
     b = PdfBuilder()
     b.new_page().line("CHAPTER 1 INTRODUCTION", bold=True)
     for i in range(8):
@@ -29,6 +30,7 @@ def _image_table_pdf() -> None:
     b.new_page().line("CHAPTER 4 RESULTS AND DISCUSSION", bold=True)
     for i in range(6):
         b.line(f"Discussion of the findings, sentence {i}, referring to Table 4.2 below.")
+    b.line("Table 4.2 Mean scores by group", y=290)
     b.image(rect=(100, 300, 400, 450))
     b.save(FIXTURE_DIR / "image_table.pdf")
 

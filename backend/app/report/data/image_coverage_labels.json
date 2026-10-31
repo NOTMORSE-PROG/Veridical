@@ -4,6 +4,7 @@
   "vision_disabled": "Image reading was not requested",
   "not_attempted": "Image reading was not attempted",
   "size_filter": "Outside image-reading size limits",
+  "no_table_cue": "Not checked: no table or equation caption beside it",
   "selection_limit": "Image-reading limit reached",
   "client_unavailable": "Image-reading service was not configured",
   "api_down": "Image-reading service was unavailable",
