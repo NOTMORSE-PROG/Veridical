@@ -1,5 +1,6 @@
 """F5 separates exact registry identity from cited metadata agreement."""
 
+import html
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -87,12 +88,27 @@ def _record_url(template, doi):
         return None
 
 
+# Inline markup registries put in titles: JATS/HTML tags such as <i>, <sub>,
+# <scp>, <mml:mi>. A tag name starts with a letter, so "a <5 year" is text.
+_REGISTRY_TAG = re.compile(r"</?[A-Za-z][\w.:-]*(?:\s[^<>]*)?/?>")
+
+
+def registry_plain_title(title):
+    """A registry title as a reader sees it: tags dropped, entities unescaped,
+    spaces collapsed. "<i>Drynaria quercifolia</i>" is "Drynaria quercifolia"."""
+    if not isinstance(title, str):
+        return title
+    return " ".join(html.unescape(_REGISTRY_TAG.sub("", title)).split())
+
+
 def compare_metadata(
     citation, result, *, policy: TitlePolicy | None = None, settings: Settings | None = None
 ):
     policy = policy or load_title_policy()
     differences = []
-    title_status, title_reason = compare_titles(citation.title, result.title, policy)
+    title_status, title_reason = compare_titles(
+        citation.title, registry_plain_title(result.title), policy
+    )
     if title_status == "differs":
         differences.append("title")
     year, authors = None, []

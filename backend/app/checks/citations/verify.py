@@ -11,7 +11,9 @@ ONLY high-severity outcome this check ever produces — everything else
 those are, by themselves, evidence of anything wrong with the manuscript.
 """
 
+import logging
 import re
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -71,6 +73,7 @@ from app.external import s2 as s2_client
 from app.external.schemas import VerificationResult
 from app.ingest.analytical_source import analytical_source
 from app.ingest.citation_dates import reference_date_key
+from app.ingest.normalize import normalize
 from app.ingest.patterns import HeadingPatterns
 from app.ingest.reference_inventory import (
     reference_row_binding_issues,
@@ -81,6 +84,7 @@ from app.ingest.references import (
     extract_references,
     non_reference_blocks,
     possible_split_doi,
+    previous_reference_reader,
     reference_entry_locations,
     reference_reading_order_issues,
     reference_section_page,
@@ -93,6 +97,8 @@ from app.models.enums import CheckKind, CitationParseStatus, FlagSeverity, Resul
 from app.models.manuscript import Manuscript
 from app.models.rubric import Rubric
 from app.models.run import CheckResult, CheckRun, Flag
+
+logger = logging.getLogger(__name__)
 
 
 class VerdictKind(StrEnum):
@@ -597,6 +603,58 @@ async def _citation_recency(
 
 
 async def run_citation_integrity_check(
+    session: AsyncSession,
+    client: httpx.AsyncClient,
+    check_run_id: int,
+    citations: list[Citation],
+    extraction: ExtractionResult,
+    patterns: HeadingPatterns,
+    settings: Settings,
+    llm: LLMClient | None = None,
+) -> CheckResult:
+    """Check citation rows with the reader they were saved with.
+
+    Rows are saved at upload. If a manuscript uploaded before the current
+    reference reader matches the previous reader's output and not the
+    current one, the whole check uses the previous reader, so re-checking an
+    unchanged manuscript keeps its outcome. Uploading it again reads it anew.
+    """
+    with _reader_for_saved_rows(citations, extraction, patterns):
+        return await _run_citation_integrity_check(
+            session, client, check_run_id, citations, extraction, patterns, settings, llm
+        )
+
+
+def _reader_for_saved_rows(
+    citations: list[Citation], extraction: ExtractionResult, patterns: HeadingPatterns
+) -> AbstractContextManager[object]:
+    try:
+        if not citations or _same_rows(extract_references(extraction, patterns), citations):
+            return nullcontext()
+        with previous_reference_reader():
+            previous = extract_references(extraction, patterns)
+    except (OSError, ValueError, UnicodeError):
+        # An unreadable reference policy is reported by the check itself.
+        return nullcontext()
+    if not _same_rows(previous, citations):
+        return nullcontext()
+    logger.info("Citation rows were saved by the previous reference reader; checking with it")
+    return previous_reference_reader()
+
+
+def _same_rows(drafts, citations: list[Citation]) -> bool:
+    return len(drafts) == len(citations) and all(
+        normalize(draft.raw_text) == normalize(citation.raw_text)
+        and all(
+            getattr(draft, name) == getattr(citation, name)
+            for name in SOURCE_FIELDS
+            if name != "raw_text"
+        )
+        for draft, citation in zip(drafts, citations, strict=True)
+    )
+
+
+async def _run_citation_integrity_check(
     session: AsyncSession,
     client: httpx.AsyncClient,
     check_run_id: int,
