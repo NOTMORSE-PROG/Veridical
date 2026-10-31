@@ -36,7 +36,7 @@ from pydantic import BaseModel, Field
 from app.checks.agreement.context import DocumentContext, PairContext
 from app.checks.agreement.cues import AgreementCues, load_cues
 from app.checks.agreement.extract import Statement
-from app.checks.agreement.sections import gate_results
+from app.checks.agreement.sections import gate_objectives, gate_results
 from app.checks.injection import InjectionSignal, detect_injection_signal
 from app.checks.section_roles import SectionMap, load_section_roles
 from app.config import Settings
@@ -151,6 +151,9 @@ class PairingResult:
     # Which results were kept as the thesis's own, which were set aside and
     # why, or the note that no results section could be identified.
     results_sections: dict | None = None
+    # The same for objectives: aims stated outside the thesis's own objectives
+    # (another paper's aim in the literature review, a process step).
+    objective_sections: dict | None = None
 
     @property
     def n_skipped_total(self) -> int:
@@ -255,6 +258,7 @@ class PreparedPairs:
     matched_outcome_indexes: set[int]
     n_results: int
     results_sections: dict | None = None
+    objective_sections: dict | None = None
 
 
 def prepare_pairs(
@@ -291,6 +295,9 @@ def prepare_pairs(
     too_short = len(outcomes) - len(long_enough)
     gate = gate_results(long_enough, sections) if sections is not None else None
     results = gate.kept if gate is not None else long_enough
+    objective_gate = gate_objectives(intents, sections) if sections is not None else None
+    if objective_gate is not None:
+        intents = objective_gate.kept
     # Each side is read with its chapter title, so an objective introduced in
     # the "4 SoundSHROOM & BuzzCam" chapter is not paired with a result from
     # the "3 AirSpecs" chapter.
@@ -322,6 +329,7 @@ def prepare_pairs(
             **(gate.detail() if gate is not None else {}),
             "n_results_too_short": too_short,
         },
+        objective_sections=objective_gate.detail() if objective_gate is not None else None,
     )
 
 
@@ -840,6 +848,7 @@ async def run_agreement_pairing(
         flags=flags,
         n_unmatched_outcomes=prepared.n_results - len(matched_outcome_indexes),
         results_sections=prepared.results_sections,
+        objective_sections=prepared.objective_sections,
         n_skipped_quota=counters["quota"],
         n_skipped_api_down=counters["api_down"],
         n_skipped_parse_failure=counters["parse_failure"],

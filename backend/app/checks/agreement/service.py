@@ -183,6 +183,8 @@ async def run_internal_agreement_check(
             # needs survey, ...), or the note that no results section could be
             # identified and every section was used.
             "results_sections": pairing.results_sections,
+            # Objectives set aside the same way (BUG-625).
+            "objective_sections": pairing.objective_sections,
         },
     )
     session.add(result)
