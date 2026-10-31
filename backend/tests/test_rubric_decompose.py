@@ -72,6 +72,21 @@ def test_relative_weights_keep_plain_weights_and_rescale_computed_ones():
     assert relative_weights([100 / 6, 100 / 3, 50.0], 2) == [1.0, 2.0, 3.0]
 
 
+def test_relative_weights_keep_uneven_ratios_close_enough_for_the_same_score():
+    """Rescaling rounds each weight relative to a lightest of 1, so a ratio
+    moves by at most half a hundredth of the lightest weight."""
+    stored = [3.333, 96.667, 41.5, 12.25]
+    readable = relative_weights(stored, 2)
+    for before, after in zip(stored, readable, strict=True):
+        assert after / readable[0] == pytest.approx(before / stored[0], rel=0.005)
+
+
+def test_relative_weights_too_uneven_for_the_column_fall_back_to_a_split_of_100():
+    readable = relative_weights([0.0001, 50.0], 2)
+    assert max(readable) <= 99999.999
+    assert sum(readable) == pytest.approx(100.0, abs=0.01)
+
+
 async def test_decompose_rubric_rescales_an_equal_split_written_as_decimals():
     response = {
         "criteria": [
