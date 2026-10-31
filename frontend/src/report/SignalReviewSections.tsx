@@ -59,6 +59,8 @@ function readableNote(text: string) {
   return PLAIN_REASON_WORDING.reduce((out, [stored, plain]) => out.split(stored).join(plain), joined);
 }
 import { EmptyState } from "../ui/EmptyState";
+import { isLegacyUndecided } from "../domain/undecidedPairs";
+import { UndeterminedPairs } from "./UndeterminedPairs";
 import { MODULE_EMPTY_STATE, moduleEmptyState } from "./moduleEmptyState";
 import { ComparisonLeadList } from "./ComparisonLeadList";
 import { comparisonLeadCollection } from "./comparisonLeadCollection";
@@ -1119,8 +1121,14 @@ export function SignalFlagsPanel({
   const originalityNote = originalityCoverageNote(review?.assessment);
   const { data: me } = useMe();
   const viewedIds = useViewedFlagIds(me?.id);
-  const allOtherFlags = flags?.filter((flag) => !isOptionalComparisonLead(flag) && !isUncountedRecencyNote(flag));
+  // Saved "could not determine" agreement rows make no claim; they are listed
+  // once with the pairs the check could not decide, never as findings.
+  const allOtherFlags = flags?.filter((flag) => !isOptionalComparisonLead(flag) && !isUncountedRecencyNote(flag) && !isLegacyUndecided(flag));
   const otherFlags = allOtherFlags?.filter(flag => flag.check_kind === selectedModule);
+  const undecidedLegacy = flags?.filter(isLegacyUndecided) ?? [];
+  const agreementModule = review?.assessment?.integrity_modules?.find(module => module.check_kind === "internal_agreement");
+  const undecidedCount = (agreementModule?.undetermined?.count ?? 0) + undecidedLegacy.length;
+  const showUndecided = selectedModule === "internal_agreement" && undecidedCount > 0;
   // V-092: source-age notes the format does not count are listed apart from
   // findings, so no finding count, filter or selection includes them.
   const sourceAgeNoteFlags = flags?.filter((flag) => flag.check_kind === selectedModule && isUncountedRecencyNote(flag)) ?? [];
@@ -1171,7 +1179,7 @@ export function SignalFlagsPanel({
       <IntegrityModuleNavigation selected={selectedModule} controls={`signal-selected-module-${checkRunId}`}
         modules={review?.assessment?.integrity_modules}
         stateLabels={originalityNote ? { originality_reuse: originalityNote.tag } : undefined}
-        counts={new Map(["internal_agreement", "citation_integrity", "statistical_forensics", "originality_reuse"].map(kind => [kind, flags?.filter(flag => flag.check_kind === kind && !isUncountedRecencyNote(flag)).length ?? 0]))}
+        counts={new Map(["internal_agreement", "citation_integrity", "statistical_forensics", "originality_reuse"].map(kind => [kind, flags?.filter(flag => flag.check_kind === kind && !isUncountedRecencyNote(flag) && !isLegacyUndecided(flag)).length ?? 0]))}
         onSelect={kind => { const next = new URLSearchParams(moduleParams); next.set("module", kind); next.set("review_step", "findings"); [FLAG_VIEW_PARAM, CLUSTERS_OPEN_PARAM, VISIBLE_COUNT_PARAM].forEach(key => next.delete(key)); setModuleParams(next, { replace: true }); }} />
       <div id={`signal-selected-module-${checkRunId}`}>
 
@@ -1202,6 +1210,8 @@ export function SignalFlagsPanel({
         : onlyOptional || (selectedModule === "originality_reuse" && originalityNote) ? null : optional.state === "success" ? <EmptyState className="signal-integrity-empty" id={`signal-module-empty-${checkRunId}`} title={emptyState.title}
           action={emptyState.limits ? <ActionLink to={`/report/${checkRunId}?section=limits`} variant="secondary">Open assessment limits</ActionLink> : undefined}><p>{emptyState.description}</p></EmptyState>
           : <p>{optional.state === "error" ? "Other findings could not be loaded." : optional.state === "paused" ? "Waiting to load other findings." : optional.state === "fetching" ? "Loading other findings." : "Other findings are not available."}</p>}
+      {showUndecided && <UndeterminedPairs checkRunId={checkRunId} undetermined={agreementModule?.undetermined} legacy={undecidedLegacy}
+        incomplete={agreementModule?.state === "incomplete"} />}
       {sourceAgeNoteFlags.length > 0 && <SourceAgeNotes flags={sourceAgeNoteFlags} viewedIds={viewedIds} />}
       {selectedModule === "originality_reuse" && <ComparisonLeadList collection={optional} showActions viewedIds={viewedIds} onRetry={() => { void flagsQuery.refetch(); }} />}
       {review && active && <BulkSelectionBar slot="after" findings={selectedClusters.length} locations={selectedLocations} elsewhere={selectedElsewhere} decided={Boolean(review.decision)}

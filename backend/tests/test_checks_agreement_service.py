@@ -188,19 +188,20 @@ async def test_seeded_contradiction_produces_a_real_flag_row(session_factory):
             ),
         ]
     )
-    llm = ScriptedLLM(
-        [
+    answer = {
+        "verdicts": [
             {
-                "verdicts": [
-                    {
-                        "index": 0,
-                        "verdict": "contradictory",
-                        "reasoning": "The finding says it was not implemented.",
-                    }
-                ]
+                "index": 0,
+                "verdict": "contradictory",
+                "reasoning": "The finding says it was not implemented.",
+                "reason_category": "objective_reported_not_done",
+                "objective_quote": "build a biometric login module",
+                "finding_quote": "The biometric login module was not implemented",
             }
         ]
-    )
+    }
+    # The contradiction is asked about again before it is saved as a finding.
+    llm = ScriptedLLM([answer, answer])
     async with session_factory() as session:
         result = await run_internal_agreement_check(
             session, llm, check_run_id, extraction, get_settings()
@@ -210,6 +211,9 @@ async def test_seeded_contradiction_produces_a_real_flag_row(session_factory):
         assert result.detail["n_intents"] == 1
         assert result.detail["n_outcomes"] == 1
         assert result.detail["n_flags"] == 1
+        assert result.detail["prompt_version"] == "v2"
+        assert result.detail["verdict_counts"] == {"contradictory": 1}
+        assert result.detail["undetermined"] == {"count": 0, "compared_count": 1, "pairs": []}
 
         flag_query = text(
             "SELECT severity, page_anchor, detail FROM flag WHERE check_result_id = :id"

@@ -699,6 +699,14 @@ export interface ReportOut extends ReportCommon {
 export interface IntegrityModuleOut {
   check_kind: "internal_agreement" | "citation_integrity" | "statistical_forensics" | "originality_reuse";
   state: "completed" | "partial" | "incomplete" | "not_applicable" | "not_recorded";
+  /** Agreement pairs the check compared but could not decide: coverage, not findings. */
+  undetermined?: UndeterminedPairsOut | null;
+}
+
+export interface UndeterminedPairsOut {
+  count: number;
+  compared_count: number;
+  pairs: { intent_text: string; intent_anchor: string; outcome_text: string; outcome_anchor: string; reason?: string | null }[];
 }
 
 /** BUG-044 fix: the public, unauthenticated adviser view's report

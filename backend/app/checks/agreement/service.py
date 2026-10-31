@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.service import write_audit_event
 from app.checks.agreement.extract import extract_statements
-from app.checks.agreement.pair import run_agreement_pairing
+from app.checks.agreement.pair import PROMPT_VERSION, run_agreement_pairing
 from app.checks.source_quality import persist_source_limitation
 from app.config import Settings
 from app.ingest.analytical_source import analytical_source
@@ -40,6 +40,16 @@ def _agreement_thresholds(settings: Settings) -> dict[str, float | int]:
         "dedup_similarity_threshold": settings.agreement_dedup_similarity_threshold,
         "pairing_similarity_floor": settings.agreement_pairing_similarity_floor,
         "pairing_max_candidates_per_intent": settings.agreement_pairing_max_candidates_per_intent,
+        "context_sentences_before": settings.agreement_context_sentences_before,
+        "context_sentences_after": settings.agreement_context_sentences_after,
+        "context_max_chars": settings.agreement_context_max_chars,
+        "scope_statements_per_pair": settings.agreement_scope_statements_per_pair,
+        "scope_statement_max_chars": settings.agreement_scope_statement_max_chars,
+        "contradiction_confirmations": settings.agreement_contradiction_confirmations,
+        "contradiction_majority_of_three": settings.agreement_contradiction_majority_of_three,
+        "quote_min_chars": settings.agreement_quote_min_chars,
+        "context_locate_chars": settings.agreement_context_locate_chars,
+        "scope_min_word_chars": settings.agreement_scope_min_word_chars,
     }
 
 
@@ -110,6 +120,7 @@ async def run_internal_agreement_check(
         check_run_id=check_run_id,
         settings=settings,
         allow_absence_leads=False,
+        extraction=extraction,
     )
 
     # BUG-073: a check that skipped even one candidate pair did NOT fully
@@ -156,6 +167,17 @@ async def run_internal_agreement_check(
             "n_skipped_parse_failure": pairing.n_skipped_parse_failure,
             "n_skipped_ai_not_configured": pairing.n_skipped_ai_not_configured,
             "n_skipped_ai_key_rejected": pairing.n_skipped_ai_key_rejected,
+            "prompt_version": PROMPT_VERSION,
+            # Pairs the judge could not decide are coverage, shown once on the
+            # report beside the findings, not one finding row each.
+            "undetermined": {
+                "count": len(pairing.undetermined),
+                "compared_count": pairing.n_compared,
+                "pairs": pairing.undetermined,
+            },
+            "verdict_counts": pairing.verdict_counts,
+            "contradictions_withheld": pairing.downgrades,
+            "explained_in_context": pairing.explained_in_context,
         },
     )
     session.add(result)

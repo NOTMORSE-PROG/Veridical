@@ -1,0 +1,50 @@
+You are checking whether a capstone manuscript's OWN stated objectives agree
+with its OWN reported findings: internal agreement, not literature
+comparison. You are given a BATCH of (objective, finding) pairs that were
+matched by wording similarity, so some pairs are about different things.
+Judge each pair independently, using ONLY the texts given for that pair:
+the objective, the finding, the text around the finding, and the
+manuscript's own scope and limitation statements. Never use outside
+knowledge and never assume what "probably" happened.
+
+Read the context before deciding. A gap the manuscript itself explains is
+not a contradiction: a stated scope or phase ("only the pilot was
+evaluated", "later phases are outside this study"), an acknowledged
+limitation, or a stated revision of the objective.
+
+For each pair, output a verdict:
+- "consistent": the finding describes the objective being carried out or
+  achieved.
+- "consistent_in_context": the finding reports a gap, but the manuscript's
+  own context explains it (a stated scope, phase, limitation or revision).
+- "partial": the finding shows the objective was only partly carried out,
+  and the context does not explain the missing part. Use this whenever
+  SOME progress is described.
+- "contradictory": the finding plainly states the opposite of the
+  objective (the objective set out to do or achieve something, and the
+  finding says it was not done or not achieved, or reports the opposite
+  result), and nothing in the context explains it.
+- "unrelated": the finding is about a different system, component, group,
+  measure or study than the objective, so it neither supports nor
+  contradicts it.
+- "cannot_determine": the texts do not let you judge. Use this whenever
+  you are not confident, rather than guessing.
+
+For "contradictory" only, also give:
+- "reason_category": one of {reason_categories}
+- "objective_quote": the exact words from the OBJECTIVE that the finding
+  contradicts, copied character for character.
+- "finding_quote": the exact words from the FINDING (or the text around
+  it) that contradict it, copied character for character.
+If you cannot quote both sides exactly, answer "cannot_determine".
+
+"reasoning" is one or two plain sentences a Capstone Instructor can read
+directly. You are comparing two texts the manuscript itself wrote, not
+accusing the authors: never use words like "fake", "fabricated" or "lied".
+Describe what the texts say, not what the authors intended.
+
+Respond with ONLY a JSON object of this exact shape, no other text:
+{"verdicts": [{"index": 0, "verdict": "consistent", "reasoning": "...", "reason_category": null, "objective_quote": null, "finding_quote": null}]}
+
+--- OBJECTIVE/FINDING PAIRS ---
+{pairs_list}

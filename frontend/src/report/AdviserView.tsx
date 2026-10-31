@@ -19,6 +19,7 @@ import { SharedEvidencePacket, useSharedEvidenceManifest } from "./SharedEvidenc
 import { IntegrityModuleNavigation, IntegrityModuleSummary, selectedIntegrityModule } from "./IntegrityModules";
 import { CitationSourceLinks } from "../flags/CitationSourceLinks";
 import { CitationComparison } from "../flags/CitationComparison";
+import { isLegacyUndecided } from "../domain/undecidedPairs";
 import { selectedCriterionId } from "./criterionReviewNavigation";
 import { criterionRecordId } from "./savedJudgment";
 import { clusterFlagFindings } from "./flagClusters";
@@ -108,7 +109,11 @@ export function AdviserViewPage() {
     return <SharedChrome reportAvailable={false}><div className="signal-shared-route signal-page-flow signal-shared-error"><header className="signal-route-header"><div><p className="signal-eyebrow">Shared faculty review</p><h1 ref={errorRef} tabIndex={-1}>{title}</h1></div></header><Alert title={message} tone="error" role="alert">{notFound || gone ? "Contact the instructor who sent this link if you believe it should still be available." : <Button variant="secondary" onClick={() => window.location.reload()}>Reload</Button>}</Alert></div></SharedChrome>;
   }
 
-  const { report, flags } = data;
+  const { report, flags: savedFlags } = data;
+  // Undecided agreement pairs make no claim; they are counted apart from findings.
+  const flags = savedFlags.filter(flag => !isLegacyUndecided(flag));
+  const undecidedCount = (report.integrity_modules?.find(module => module.check_kind === "internal_agreement")?.undetermined?.count ?? 0)
+    + savedFlags.filter(isLegacyUndecided).length;
   const manifest = !evidence.isError && evidence.fetchStatus === "idle"
     && evidence.data?.assessment_revision === report.assessment_revision
     && Number.isInteger(report.assessment_revision) ? evidence.data : undefined;
@@ -212,7 +217,8 @@ export function AdviserViewPage() {
             </nav>}
           </>}
           <div id="shared-selected-finding" key={`${token}:${report.assessment_revision}:${manifest?.snapshot_id}:${selectedFlag?.id}`}>
-          <SignalPublicFlags flags={moduleFlags} selectedRecordId={selectedFlag?.id} selectedModule={selectedModule} originalityScope={selectedModule === "originality_reuse" ? report.originality_scope : null} checkRunId={report.check_run_id} statisticalScope={selectedModule === "statistical_forensics" ? report.statistical_check_scope : null} />
+          {selectedModule === "internal_agreement" && undecidedCount > 0 && <p className="signal-field-hint">VERIDICAL could not decide on {undecidedCount} objective and result pair{undecidedCount === 1 ? "" : "s"}. These are not findings; the instructor's report lists them.</p>}
+        <SignalPublicFlags flags={moduleFlags} selectedRecordId={selectedFlag?.id} selectedModule={selectedModule} originalityScope={selectedModule === "originality_reuse" ? report.originality_scope : null} checkRunId={report.check_run_id} statisticalScope={selectedModule === "statistical_forensics" ? report.statistical_check_scope : null} />
           {(selectedFlag ? [selectedFlag] : []).map(flag => {
             const detail = details.find(saved => saved.id === flag.id);
             if (!detail && !manifest?.references.some(ref => ref.flag_id === flag.id)) return null;

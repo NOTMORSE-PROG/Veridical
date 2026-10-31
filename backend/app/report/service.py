@@ -41,7 +41,7 @@ from app.checks.reuse.source import passage_match_supported
 from app.checks.support import SOURCE_SCOPE_POLICY_VERSION
 from app.config import Settings, get_settings
 from app.errors import ConflictError, GoneError, NotFoundError
-from app.findings.policy import exclusion_reason, reuse_excerpt
+from app.findings.policy import exclusion_reason, problem_kind_of, reuse_excerpt
 from app.ingest.figures import saved_figure_readings
 from app.ingest.references import REFERENCE_LOCATION_UNKNOWN
 from app.ingest.regions import recover_region
@@ -177,7 +177,7 @@ async def _load_scorable_flags(session: AsyncSession, check_run_id: int) -> list
             ),
             id=flag.id,
             check_kind=result.kind.value,
-            problem_kind=(flag.detail or {}).get("kind"),
+            problem_kind=problem_kind_of(flag.detail),
             matched_ref=(flag.detail or {}).get("matched_manuscript_id"),
             criterion_text=(
                 criteria_by_id[result.criterion_id].text
@@ -1247,7 +1247,7 @@ async def flags_for_check_run(session: AsyncSession, check_run_id: int) -> list[
             is_passage_level=bool((flag.detail or {}).get("kind", "").endswith("_passage")),
             first_upload_context=bool((flag.detail or {}).get("first_upload_context")),
             confirmed_citation_source=flag.confirmed_citation_source,
-            problem_kind=(flag.detail or {}).get("kind"),
+            problem_kind=problem_kind_of(flag.detail),
             matched_ref=(flag.detail or {}).get("matched_manuscript_id"),
             finding_confirmed=bool(getattr(flag, "finding_confirmed", False)),
             **cited_work(flag.detail or {}, flag.evidence_excerpt),

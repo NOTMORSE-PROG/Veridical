@@ -1,8 +1,10 @@
 """F4–F7: saved execution state, independent of finding counts or severity."""
 
+from pydantic import ValidationError
+
 from app.models.enums import CheckKind, ResultOutcome
 from app.models.run import CheckResult
-from app.report.schemas import IntegrityModuleOut
+from app.report.schemas import IntegrityModuleOut, UndeterminedPairsOut
 from app.report.statistical_scope import statistical_check_scope
 
 MODULE_KINDS = (
@@ -68,5 +70,25 @@ def integrity_modules(
                 }
             ):
                 state = "incomplete"
-        output.append(IntegrityModuleOut(check_kind=kind.value, state=state))
+        undetermined = (
+            _undetermined(saved[0].detail)
+            if kind == CheckKind.internal_agreement and len(saved) == 1
+            else None
+        )
+        output.append(
+            IntegrityModuleOut(check_kind=kind.value, state=state, undetermined=undetermined)
+        )
     return output
+
+
+def _undetermined(detail) -> UndeterminedPairsOut | None:
+    """The saved list of pairs the agreement check could not decide, or None
+    when the run predates it or the record does not have the expected shape."""
+    raw = detail.get("undetermined") if isinstance(detail, dict) else None
+    if not isinstance(raw, dict):
+        return None
+    try:
+        value = UndeterminedPairsOut.model_validate(raw)
+    except ValidationError:
+        return None
+    return value if value.count == len(value.pairs) else None
