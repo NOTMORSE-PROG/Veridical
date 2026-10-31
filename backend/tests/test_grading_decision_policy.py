@@ -195,9 +195,10 @@ UNSUPPORTED = {"status": "unsupported", "reason": "The quote does not show the p
         (FakeCriterion(id=1, text="Introduction", levels=STRUCTURE_SCALE), "Acceptable", False),
         (FakeCriterion(id=2, text="Purpose is stated in a single sentence."), "pass", True),
         (
+            # The criterion-wide evidence request is not the claimed level.
             FakeCriterion(id=3, text="Ideas flow logically", evidence="Preview the structure"),
             "pass",
-            True,
+            False,
         ),
         (FakeCriterion(id=4, text="Organization is logical and easy to follow."), "pass", False),
         (FakeCriterion(id=5, text="The tone is professional throughout."), "pass", False),
@@ -207,6 +208,174 @@ def test_locatable_subclaims_come_from_the_criterion_wording(criterion, verdict,
     """Read from the criterion's text, its evidence request and the claimed
     level's descriptor, never from its name."""
     assert locatable_subclaim(criterion, {"verdict": verdict}) is expected
+
+
+# Rubric 6 wording, as printed on the official form.
+RUBRIC6_INTRODUCTION = [
+    {
+        "level": 1,
+        "name": "Beginner",
+        "descriptor": (
+            "There is no clear introduction of main topic and the structure of the paper "
+            "is missing."
+        ),
+        "points": 1,
+    },
+    {
+        "level": 2,
+        "name": "Acceptable",
+        "descriptor": (
+            "The introduction states the main topic but does not adequately preview the "
+            "structure of the paper."
+        ),
+        "points": 2,
+    },
+    {
+        "level": 3,
+        "name": "Proficient",
+        "descriptor": (
+            "The introduction states the main topic and previews the structure of the paper."
+        ),
+        "points": 3,
+    },
+    {
+        "level": 4,
+        "name": "Exemplary",
+        "descriptor": (
+            "The introduction is engaging, states the main topic and previews the "
+            "structure of the paper."
+        ),
+        "points": 4,
+    },
+]
+RUBRIC6_PURPOSE = [
+    {
+        "level": 1,
+        "name": "Beginner",
+        "descriptor": (
+            "The purpose or argument is generally unclear. Central purpose or argument is "
+            "not clearly identified."
+        ),
+        "points": 1,
+    },
+    {
+        "level": 2,
+        "name": "Acceptable",
+        "descriptor": (
+            "The paper's purpose is clearly stated in a single sentence. The central "
+            "purpose or argument is not consistently clear throughout the paper."
+        ),
+        "points": 2,
+    },
+    {
+        "level": 3,
+        "name": "Proficient",
+        "descriptor": "The paper's purpose is clearly stated.",
+        "points": 3,
+    },
+    {
+        "level": 4,
+        "name": "Exemplary",
+        "descriptor": (
+            "The paper's purpose is clearly and concisely stated in a single sentence, "
+            "which is engaging, and thought provoking."
+        ),
+        "points": 4,
+    },
+]
+INTRODUCTION_REQUEST = (
+    "A reader evaluates how clearly the introduction states the main topic and previews "
+    "the structure of the paper."
+)
+
+
+@pytest.mark.parametrize(
+    "levels,verdict,expected",
+    [
+        (RUBRIC6_INTRODUCTION, "Beginner", False),
+        (RUBRIC6_INTRODUCTION, "Acceptable", False),  # "does not adequately preview"
+        (RUBRIC6_INTRODUCTION, "Proficient", True),
+        (RUBRIC6_INTRODUCTION, "Exemplary", True),
+        (RUBRIC6_PURPOSE, "Acceptable", True),
+        (RUBRIC6_PURPOSE, "Proficient", False),
+        (RUBRIC6_PURPOSE, "Exemplary", True),
+    ],
+)
+def test_only_the_claimed_level_that_asserts_the_subclaim_is_strict(levels, verdict, expected):
+    criterion = FakeCriterion(
+        id=1, text="Introduction", evidence=INTRODUCTION_REQUEST, levels=levels
+    )
+    assert locatable_subclaim(criterion, {"verdict": verdict}) is expected
+
+
+@pytest.mark.parametrize(
+    "wording",
+    [
+        "Minor errors appear in one sentence only.",
+        "There are no more than two errors in a single sentence.",
+        "Ideas are not crammed in one sentence.",
+        "The overall structure is logical and headings preview each section's content.",
+        "Organization of figures is clear; each figure has a preview caption.",
+        "The prototype previews the organization's data.",
+    ],
+)
+def test_wording_that_is_not_a_findable_part_of_the_paper_stays_lenient(wording):
+    assert locatable_subclaim(FakeCriterion(id=9, text=wording), {"verdict": "pass"}) is False
+
+
+def test_a_rating_that_also_needs_a_whole_document_assessment_keeps_its_caution(decide):
+    """Purpose at Acceptable claims the single sentence but also "not consistently
+    clear throughout the paper", which no quote can confirm either way."""
+    criterion = FakeCriterion(id=1, text="Purpose", levels=RUBRIC6_PURPOSE)
+    detail = {"verdict": "Acceptable", "level": {"name": "Acceptable"}, "reasoning": "r"}
+    support = {
+        "status": "unsupported",
+        "reason": "The rating requires an itemized assessment of the whole paper.",
+        "caution": "Check the whole paper yourself.",
+        "scope_guard": "independent_assessment_required",
+    }
+    outcome, updated = apply_support(
+        ResultOutcome.passed,
+        detail,
+        support,
+        decide=True,
+        strict=locatable_subclaim(criterion, detail),
+    )
+    assert outcome == ResultOutcome.passed
+    assert updated["support_caution"] == "Check the whole paper yourself."
+    assert "support_gate" not in updated
+
+
+@pytest.mark.parametrize(
+    "decide_flag,outcome_in,support",
+    [
+        (False, ResultOutcome.passed, UNSUPPORTED),
+        (True, ResultOutcome.failed, UNSUPPORTED),
+        (
+            True,
+            ResultOutcome.passed,
+            {
+                "status": "unavailable",
+                "reason": "The support service was unavailable.",
+                "failure_outcome": ResultOutcome.api_down.value,
+                "failure_phase": "support",
+            },
+        ),
+    ],
+)
+def test_the_gate_marker_is_only_recorded_where_the_gate_changed_the_result(
+    decide_flag, outcome_in, support
+):
+    detail = {"verdict": "Proficient", "level": {"name": "Proficient"}, "reasoning": "r"}
+    _, updated = apply_support(
+        outcome_in,
+        detail,
+        support,
+        decide=decide_flag,
+        adverse=outcome_in == ResultOutcome.failed,
+        strict=True,
+    )
+    assert "support_gate" not in updated
 
 
 def test_an_unshown_locatable_subclaim_goes_to_the_instructor(decide):

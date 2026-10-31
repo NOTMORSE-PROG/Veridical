@@ -347,23 +347,36 @@ def adverse_rating(criterion: Any, outcome: ResultOutcome, detail: dict[str, Any
 
 
 def locatable_subclaim(criterion: Any, detail: dict[str, Any], patterns_file: Any = None) -> bool:
-    """Whether the rating claims a specific part of the paper that a passage
-    either shows or does not, such as an introduction that previews the
-    structure or a purpose stated in a single sentence.
+    """Whether the claimed rating asserts a specific part of the paper that a
+    passage either shows or does not, such as an introduction that previews
+    the structure or a purpose stated in a single sentence.
 
-    For these the support check really can tell, so a failed check means the
-    rating is not shown in the paper, not merely that one quote is too little.
-    The descriptor patterns are data, read from the criterion's own wording.
+    Only the claimed level's own descriptor counts (the criterion's text when
+    it has no levels), and a mention the descriptor negates in the same
+    clause ("does not preview the structure") is not a claim. The patterns
+    are data. For these ratings the support check can genuinely tell.
     """
-    patterns = _scope_patterns(patterns_file).get("locatable_subclaim", [])
-    texts = [criterion.text, getattr(criterion, "evidence", None) or ""]
-    verdict = detail.get("verdict")
-    level = match_level(criterion, verdict) if verdict else None
-    if level is not None:
-        texts += [
+    patterns = _scope_patterns(patterns_file)
+    claims = patterns.get("locatable_subclaim", [])
+    negations = patterns.get("locatable_subclaim_negation", [])
+    if getattr(criterion, "levels", None):
+        verdict = detail.get("verdict")
+        level = match_level(criterion, verdict) if verdict else None
+        if level is None:
+            return False
+        texts = [
             item["descriptor"] for item in criterion.levels if int(item["level"]) == level.ordinal
         ]
-    return any(pattern.search(" ".join(text.split())) for text in texts for pattern in patterns)
+    else:
+        texts = [criterion.text]
+    for text in texts:
+        flat = " ".join(text.split())
+        for pattern in claims:
+            for match in pattern.finditer(flat):
+                clause = re.split(r"[.;:]", flat[: match.start()])[-1]
+                if not any(negation.search(clause) for negation in negations):
+                    return True
+    return False
 
 
 def apply_support(
@@ -383,23 +396,26 @@ def apply_support(
     claim of weakness needs evidence of the weakness), evidence that cannot
     show the criterion at all, and any rating during a support outage.
 
-    `strict` (see `locatable_subclaim`): the rating names something a passage
-    can show, so an unconfirmed check sends it to the instructor rather than
-    keeping it with a caution."""
+    `strict` (see `locatable_subclaim`): the rating asserts something a
+    passage can show, so an unconfirmed check sends it to the instructor
+    rather than keeping it with a caution. A rating that also depends on a
+    whole-document or external assessment keeps the caution, because no quote
+    could confirm it either way."""
     updated = {**detail, "support_check": support}
     if support["status"] == "supported":
         updated["support_basis"] = support["reason"]
         updated["grading_reasoning"] = updated.get("reasoning")
         updated["reasoning"] = support["reason"]
         return outcome, updated
-    if (
+    keepable = (
         decide
-        and not strict
         and not adverse
         and support.get("scope_guard") != "required_body_evidence_unconfirmed"
         and support.get("failure_outcome") != ResultOutcome.api_down.value
         and outcome in (ResultOutcome.passed, ResultOutcome.failed)
-    ):
+    )
+    gated = keepable and strict and support.get("scope_guard") != "independent_assessment_required"
+    if keepable and not gated:
         updated["support_caution"] = support.get("caution") or support["reason"]
         return outcome, updated
     if "verdict" in updated:
@@ -411,7 +427,8 @@ def apply_support(
     updated.pop("score", None)
     updated["reason"] = support["reason"]
     updated["support_withheld"] = True
-    if strict:
+    if gated:
+        # Recorded only where the gate changed the result.
         updated["support_gate"] = "locatable_subclaim"
     if support.get("failure_outcome") == ResultOutcome.api_down.value:
         updated["failure_phase"] = support["failure_phase"]

@@ -18,8 +18,12 @@
     "\\b(?:all|every|each)\\s+(?:one\\s+)?(?:of\\s+)?(?:(?:the|these|those|our)\\s+)?(?:references?|sources?|citations?|entr(?:y|ies)|items?|sections?|figures?|tables?|requirements?|components?|devices?|participants?|records?)\\b"
   ],
   "locatable_subclaim": [
-    "\\bpreview(?:s|ing|ed)?\\b.{0,40}\\b(?:structure|organi[sz]ation|outline)\\b",
-    "\\b(?:structure|organi[sz]ation|outline)\\b.{0,40}\\bpreview(?:s|ing|ed)?\\b",
-    "\\b(?:in|as)\\s+(?:a\\s+)?(?:single|one)\\s+sentence\\b"
+    "\\bpreview(?:s|ing|ed)?\\s+(?:the\\s+)?(?:overall\\s+)?(?:structure|organi[sz]ation)\\s+of\\s+the\\s+(?:paper|thesis|study|manuscript|document|report|dissertation)\\b",
+    "\\b(?:structure|organi[sz]ation)\\s+of\\s+the\\s+(?:paper|thesis|study|manuscript|document|report|dissertation)\\b[^.;:]{0,30}\\bpreview(?:s|ed)?\\b",
+    "\\b(?:purpose|thesis\\s+statement|objective|aim|argument)\\b[^.;:]{0,60}\\b(?:in|as)\\s+(?:a\\s+)?(?:single|one)\\s+sentence\\b",
+    "\\b(?:single|one)[\\s-]sentence\\s+(?:purpose|thesis\\s+statement|objective|aim|argument)\\b"
+  ],
+  "locatable_subclaim_negation": [
+    "\\b(?:not|no|never|neither|nor|without|lacks?|fails?\\s+to|missing)\\b"
   ]
 }
