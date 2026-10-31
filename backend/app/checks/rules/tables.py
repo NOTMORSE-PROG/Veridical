@@ -3,6 +3,9 @@ carry a caption. Pure function over `ctx.tables` (V-004/V-007's native +
 vision-recovered table inventory).
 """
 
+import json
+from pathlib import Path
+
 from app.checks.rules import RuleContext, RuleOutcome, RuleSpec, register_rule
 from app.checks.rules.keywords import contains_any, full_text, load_keywords
 from app.ingest.schemas import TableBlock
@@ -11,6 +14,7 @@ from app.models.enums import ResultOutcome
 _KEYWORDS = load_keywords()
 
 RULE_ID = "table_formatting_presence"
+_COPY = json.loads((Path(__file__).parent / "data" / "table_rule_copy.json").read_text("utf-8"))
 
 
 def _matches(criterion) -> bool:
@@ -60,24 +64,23 @@ def _run(criterion, ctx: RuleContext) -> RuleOutcome:
         # a bad day -- silently losing this criterion's ability to ever
         # fail a DOCX manuscript at all. DOCX keeps the old, correct,
         # native-table-only `failed` path unconditionally.
+        #
+        # When those images were not read for tables, the rule cannot tell a
+        # manuscript without tables from one whose tables are pictures. It
+        # escalates to the instructor rather than failing the criterion, and
+        # never drops out as not applicable: a criterion left out of the
+        # composite would quietly raise the readiness band of a thesis whose
+        # tables are uncaptioned screenshots.
         if ctx.anchor_kind == "page" and ctx.has_images and ctx.vision_status != "done":
             return RuleOutcome(
-                outcome=ResultOutcome.not_applicable,
+                outcome=ResultOutcome.escalated,
                 anchor="document",
-                detail={
-                    "reason": (
-                        "This manuscript contains embedded images that were not "
-                        "read for tables (no recognised table caption beside them, "
-                        "AI capacity, connectivity, or the reading limit), so whether "
-                        "it contains "
-                        "tables embedded as images could not be fully verified."
-                    )
-                },
+                detail={"reason": _COPY["images_not_read"]},
             )
         return RuleOutcome(
             outcome=ResultOutcome.failed,
             anchor="document",
-            detail={"reason": "No tables were found in the manuscript."},
+            detail={"reason": _COPY["no_tables"]},
         )
     captioned = [t for t in ctx.tables if t.caption]
     ratio = len(captioned) / len(ctx.tables)
@@ -92,7 +95,7 @@ def _run(criterion, ctx: RuleContext) -> RuleOutcome:
         outcome=ResultOutcome.failed,
         anchor=_anchor(uncaptioned),
         detail={
-            "reason": "Fewer than the expected share of tables carry a caption.",
+            "reason": _COPY["too_few_captions"],
             "total_tables": len(ctx.tables),
             "captioned": len(captioned),
             "ratio": ratio,

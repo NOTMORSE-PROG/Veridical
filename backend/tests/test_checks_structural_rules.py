@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from app.checks.escalation import NEEDS_REVIEW_OUTCOMES
 from app.checks.rules import ReferenceInventory, RuleContext, get_rule, registered_rules
 from app.checks.rules.bounds import extract_bound, to_points
 from app.checks.rules.claim_scope import WORD_COUNT_RULE_ID
@@ -506,7 +507,7 @@ def test_table_formatting_still_fails_when_vision_ran_and_genuinely_found_none()
 
 
 @pytest.mark.parametrize("vision_status", ["unavailable", "none"])
-def test_table_formatting_is_not_applicable_when_images_exist_but_were_never_confirmed_read(
+def test_table_formatting_escalates_when_images_exist_but_were_never_confirmed_read(
     vision_status,
 ):
     """BUG-175, live-reproduced against real production data:
@@ -530,9 +531,24 @@ def test_table_formatting_is_not_applicable_when_images_exist_but_were_never_con
     spec = get_rule(TABLE_FORMAT_RULE_ID)
     criterion = FakeCriterion(text="Tables must be properly formatted with captions")
     outcome = spec.run(criterion, _ctx(tables=[], vision_status=vision_status, has_images=True))
-    assert outcome.outcome == ResultOutcome.not_applicable
-    assert "were not read for tables" in outcome.detail["reason"]
+    # Escalated, not left out of the composite as not applicable: dropping
+    # the criterion would raise the band of a thesis whose tables are
+    # uncaptioned screenshots. Not failed either: no table absence was shown.
+    assert outcome.outcome == ResultOutcome.escalated
+    assert outcome.outcome in NEEDS_REVIEW_OUTCOMES
+    assert outcome.detail["reason"].startswith(
+        "Tables could not be verified: images were not read for tables."
+    )
     assert "no recognised table caption" in outcome.detail["reason"]
+
+
+def test_table_formatting_without_images_keeps_failing_when_no_table_is_found():
+    spec = get_rule(TABLE_FORMAT_RULE_ID)
+    criterion = FakeCriterion(text="Tables must be properly formatted with captions")
+    for status in ("none", "unavailable"):
+        outcome = spec.run(criterion, _ctx(tables=[], vision_status=status, has_images=False))
+        assert outcome.outcome == ResultOutcome.failed
+        assert outcome.detail["reason"] == "No tables were found in the manuscript."
 
 
 def test_table_formatting_still_fails_for_docx_even_with_images_and_unresolved_vision():

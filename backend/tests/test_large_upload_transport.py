@@ -350,6 +350,8 @@ def test_many_crops_hash_the_source_once(tmp_path, monkeypatch):
         for row in range(3):
             pix = pymupdf.Pixmap(pymupdf.csRGB, (0, 0, 120, 120), False)
             pix.clear_with(60 + row * 50)
+            # A table caption above each image, so each one is read.
+            page.insert_text((50, 76 + row * 230), f"Table 4.{row + 1} Results")
             page.insert_image(pymupdf.Rect(50, 80 + row * 230, 260, 290 + row * 230), pixmap=pix)
         doc.save(source)
     settings = Settings(
@@ -661,8 +663,9 @@ def _noise_pdf(megabytes):
     with pymupdf.open() as doc:
         page = doc.new_page()
         page.insert_text((40, 40), "Chapter 1 Introduction", fontsize=18)
-        page.insert_text((40, 70), "A capstone manuscript with one large figure.")
+        page.insert_text((40, 70), "A capstone manuscript with one large table image.")
         page.insert_image(pymupdf.Rect(40, 90, 560, 610), pixmap=pix)
+        page.insert_text((40, 628), "Table 1.1 Survey results")
         return doc.tobytes(deflate=False)
 
 

@@ -710,7 +710,14 @@ def test_a_dashboard_upload_is_not_added_to_the_library(client):
     _login(client, OWNER)
     ingested = client.post(
         "/manuscripts/ingest",
-        files={"file": ("native.pdf", _pdf(), "application/octet-stream")},
+        # A captioned table image, so the dashboard path has one to read.
+        files={
+            "file": (
+                "image_table.pdf",
+                (FIXTURES / "image_table.pdf").read_bytes(),
+                "application/octet-stream",
+            )
+        },
     )
     assert ingested.status_code == 200, ingested.text
     manuscript_id = ingested.json()["manuscript_id"]
