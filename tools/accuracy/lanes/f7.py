@@ -703,6 +703,12 @@ async def _admin(url: str, sql: str) -> None:
         await conn.close()
 
 
+def database_name(config: dict) -> str:
+    """This run's scratch database: the configured name and the process id,
+    so two runs on one server never drop each other's database."""
+    return f"{config['database_name']}_{os.getpid()}"
+
+
 def _prepare_database(config: dict) -> tuple[str, str]:
     """A fresh database for this run on the server named by the lane's
     environment variable (never a live-testing or production database)."""
@@ -717,7 +723,7 @@ def _prepare_database(config: dict) -> tuple[str, str]:
             f"Set {config['database_url_env']} to a scratch Postgres server with pgvector "
             "(for example postgresql://veridical@127.0.0.1:5571/postgres)."
         )
-    name = config["database_name"]
+    name = database_name(config)
     asyncio.run(_admin(server, f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)'))
     asyncio.run(_admin(server, f'CREATE DATABASE "{name}"'))
     url = _swap_db(server, name)
@@ -1410,7 +1416,7 @@ def run(ctx: Context) -> tuple[list[MetricRow], dict]:
             asyncio.run(
                 _admin(
                     server,
-                    f'DROP DATABASE IF EXISTS "{config["database_name"]}" WITH (FORCE)',
+                    f'DROP DATABASE IF EXISTS "{database_name(config)}" WITH (FORCE)',
                 )
             )
         for key, value in previous.items():
