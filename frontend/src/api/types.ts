@@ -525,6 +525,7 @@ export interface CriterionResultOut extends ResultRowCommon {
    * "evidence_already_used" (the quote is in the source but was another criterion's evidence). */
   reason_codes?: string[] | null;
   support_caution?: string | null;
+  support_caution_scope?: boolean;
   agreeing_passes?: number | null;
   grading_passes?: number | null;
   /** V-087: each grading pass's choice, in pass order, for AI-decided grades;
@@ -543,6 +544,7 @@ export interface PublicCriterionResultOut extends ResultRowCommon {
    * the instructor set the grade; absent from older shared reports. */
   decision_basis?: CriterionResultOut["decision_basis"];
   support_caution?: string | null;
+  support_caution_scope?: boolean;
   agreeing_passes?: number | null;
   grading_passes?: number | null;
 }

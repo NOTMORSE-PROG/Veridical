@@ -16,7 +16,7 @@
     "lines": [
       "Graded automatically: the three grading passes disagreed, so the middle level was used."
     ],
-    "caution": "Evidence check not confirmed: The quote shows the topic but not the preview."
+    "caution": "The quote check did not support this grade: The quote shows the topic but not the preview."
   },
   {
     "name": "an old caution never says no grade was assigned beside a kept grade",
@@ -26,7 +26,7 @@
       "support_caution": "Review the criterion and its performance level directly; no automatic grade was assigned."
     },
     "lines": ["Graded automatically: 3 of 3 grading passes chose this grade."],
-    "caution": "Evidence check not confirmed: Review the criterion and its performance level directly."
+    "caution": "The quote check did not support this grade: Review the criterion and its performance level directly."
   },
   {
     "name": "a caution without a full stop gets one",
@@ -37,7 +37,7 @@
     "lines": [
       "Graded automatically: two grading passes disagreed and no third pass settled it with quotes VERIDICAL could check, so the lower of the two grades was used."
     ],
-    "caution": "Evidence check not confirmed: The quote shows the method, not the results."
+    "caution": "The quote check did not support this grade: The quote shows the method, not the results."
   },
   {
     "name": "a caution with no automatic grade prints nothing",

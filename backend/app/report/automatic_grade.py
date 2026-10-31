@@ -21,6 +21,7 @@ _STALE_NO_GRADE = re.compile(r"[\s;,.]*no automatic grade was assigned\.?\s*$", 
 class AutomaticGradeRow(Protocol):
     decision_basis: str | None
     support_caution: str | None
+    support_caution_scope: bool
     agreeing_passes: int | None
     grading_passes: int | None
 
@@ -59,4 +60,7 @@ def automatic_grade_caution(row: AutomaticGradeRow) -> str | None:
     reason = clean_caution(row.support_caution)
     if reason is None or not automatic_grade_lines(row):
         return None
-    return _copy()["caution"].format(reason=reason)
+    # A level quoted passages cannot show at all: say what the grade is about,
+    # not that a check failed.
+    template = "scope_caution" if getattr(row, "support_caution_scope", False) else "caution"
+    return _copy()[template].format(reason=reason)

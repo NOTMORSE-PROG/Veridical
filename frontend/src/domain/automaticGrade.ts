@@ -7,14 +7,17 @@ export const AUTOMATIC_GRADE_COPY = {
   middle_of_three: "Graded automatically: the three grading passes disagreed, so the middle level was used.",
   lower_of_two: "Graded automatically: two grading passes disagreed and no third pass settled it with quotes VERIDICAL could check, so the lower of the two grades was used.",
   single_verified_pass: "Graded automatically: only one grading pass settled on a grade with quotes VERIDICAL could check, so its grade was used.",
-  caution: "Evidence check not confirmed: {reason}",
+  caution: "The quote check did not support this grade: {reason}",
+  scope_caution: "{reason}",
+  chip_caution: "evidence not confirmed",
+  chip_scope_caution: "quotes cannot confirm",
   allRecorded: "Every criterion has a recorded outcome. Automatic grades are listed under Read saved grades, where Change grade sets a different level. Continue to the integrity signals.",
   confirmUnchanged: "Recording this decision also confirms the {count} automatic grade(s) you did not change.",
   change: "Change grade",
   changeAgain: "Change grade again",
 } as const;
 
-type AutomaticGradeRow = Pick<CriterionResultOut, "decision_basis" | "support_caution" | "agreeing_passes" | "grading_passes">;
+type AutomaticGradeRow = Pick<CriterionResultOut, "decision_basis" | "support_caution" | "support_caution_scope" | "agreeing_passes" | "grading_passes">;
 
 const fill = (template: string, values: Record<string, string | number>) =>
   template.replace(/\{(\w+)\}/g, (_match, key: string) => String(values[key]));
@@ -66,7 +69,16 @@ const STALE_NO_GRADE = /[\s;,.]*no automatic grade was assigned\.?\s*$/i;
 export function automaticGradeCaution(row: AutomaticGradeRow): string | null {
   const reason = row.support_caution?.replace(STALE_NO_GRADE, "").trim();
   if (!reason || automaticGradeLines(row).length === 0) return null;
-  return fill(AUTOMATIC_GRADE_COPY.caution, { reason: /[.!?]$/.test(reason) ? reason : `${reason}.` });
+  // A level quoted passages cannot show at all: the caution says what the
+  // grade is about, not that a check failed.
+  const template = row.support_caution_scope ? AUTOMATIC_GRADE_COPY.scope_caution : AUTOMATIC_GRADE_COPY.caution;
+  return fill(template, { reason: /[.!?]$/.test(reason) ? reason : `${reason}.` });
+}
+
+// The short label beside the grade, in the same terms as the caution below it.
+export function automaticGradeChip(row: AutomaticGradeRow): string | null {
+  if (!automaticGradeCaution(row)) return null;
+  return row.support_caution_scope ? AUTOMATIC_GRADE_COPY.chip_scope_caution : AUTOMATIC_GRADE_COPY.chip_caution;
 }
 
 export function fillAutomaticConfirmation(count: number): string {

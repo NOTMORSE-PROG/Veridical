@@ -76,51 +76,81 @@ def _scope_patterns(path):
     }
 
 
-def _capability_failure(batch, criterion, detail):
-    patterns = _scope_patterns(getattr(batch, "scope_patterns_file", None))
+_SCOPE_WORDING = Path(__file__).parent / "data" / "support_scope_wording.json"
+SCOPE_CAPABILITIES = (
+    "external_verification_required",
+    "collection_assessment_required",
+    "whole_paper_assessment_required",
+)
+
+
+@lru_cache
+def _scope_wording_data() -> dict:
+    return json.loads(_SCOPE_WORDING.read_text(encoding="utf-8"))
+
+
+def scope_wording(missing: list[str]) -> tuple[str, str]:
+    """(reason, caution) for a grade whose level quoted passages cannot show:
+    the reason when no grade was assigned, the caution beside a kept grade.
+    Worded per capability from data, so a tone or an error rate is never
+    described as a collection."""
+    data = _scope_wording_data()
+    known = data["capabilities"]
+    named = [capability for capability in known if capability in missing]
+    for capability in list(named):
+        for narrower in known[capability].get("subsumes", []):
+            if narrower in named:
+                named.remove(narrower)
+    about = " and ".join(known[capability]["about"] for capability in named)
+    check = known[named[0]]["check"] if len(named) == 1 else data["joined_check"]
+    return (
+        data["reason"].format(about=about, check=check),
+        data["caution"].format(about=about, check=check),
+    )
+
+
+def scope_obligations(criterion, verdict: str, patterns_file=None) -> list[dict]:
+    """Which of the criterion's texts (its own text, its evidence request, the
+    claimed level's descriptor) need an assessment quotes cannot give, and
+    which kind."""
+    patterns = _scope_patterns(patterns_file)
     obligations = {"criterion": criterion.text}
     if getattr(criterion, "evidence", None):
         obligations["evidence_request"] = criterion.evidence
-    level = match_level(criterion, detail["verdict"])
+    level = match_level(criterion, verdict) if verdict else None
     if level is not None:
         obligations["level_descriptor"] = next(
             item["descriptor"] for item in criterion.levels if int(item["level"]) == level.ordinal
         )
-    guarded = [
+    return [
         {"key": key, "capabilities": needed}
         for key, text in obligations.items()
         if (
             needed := [
                 capability
-                for capability in (
-                    "external_verification_required",
-                    "collection_assessment_required",
+                for capability in SCOPE_CAPABILITIES
+                if any(
+                    pattern.search(" ".join(text.split()))
+                    for pattern in patterns.get(capability, [])
                 )
-                if any(pattern.search(" ".join(text.split())) for pattern in patterns[capability])
             ]
         )
     ]
+
+
+def _capability_failure(batch, criterion, detail):
+    guarded = scope_obligations(
+        criterion, detail["verdict"], getattr(batch, "scope_patterns_file", None)
+    )
     if not guarded:
         return None
     missing = sorted({item for obligation in guarded for item in obligation["capabilities"]})
-    requirements = []
-    if "external_verification_required" in missing:
-        requirements.append("independent verification of external properties")
-    if "collection_assessment_required" in missing:
-        requirements.append("an itemized assessment of the relevant complete collection")
+    reason, caution = scope_wording(missing)
     return {
         "status": "unsupported",
-        "reason": (
-            "The proposed rating requires " + " and ".join(requirements) + ". "
-            "The saved manuscript quotations do not provide these assessment records. "
-            "Review the criterion and its performance level directly; no automatic grade "
-            "was assigned."
-        ),
+        "reason": reason,
         # Shown beside a grade the "decide" policy keeps.
-        "caution": (
-            "The rating also depends on " + " and ".join(requirements) + ", which quoted "
-            "passages cannot show. Check that yourself before relying on this grade."
-        ),
+        "caution": caution,
         "scope_guard": "independent_assessment_required",
         "missing_capabilities": missing,
         "guarded_obligations": guarded,

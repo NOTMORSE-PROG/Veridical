@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AUTOMATIC_GRADE_COPY, automaticGradeCaution, automaticGradeLines, automaticGradePasses } from "./automaticGrade";
+import { AUTOMATIC_GRADE_COPY, automaticGradeCaution, automaticGradeChip, automaticGradeLines, automaticGradePasses } from "./automaticGrade";
 
 describe("automaticGradeLines", () => {
   it("states how many grading passes chose the grade", () => {
@@ -12,13 +12,28 @@ describe("automaticGradeLines", () => {
     const row = { decision_basis: "middle_of_three" as const, agreeing_passes: 1, grading_passes: 3,
       support_caution: "The quote shows the topic but not the preview." };
     expect(automaticGradeLines(row)).toEqual([AUTOMATIC_GRADE_COPY.middle_of_three]);
-    expect(automaticGradeCaution(row)).toBe("Evidence check not confirmed: The quote shows the topic but not the preview.");
+    expect(automaticGradeCaution(row)).toBe("The quote check did not support this grade: The quote shows the topic but not the preview.");
   });
 
   it("never says no grade was assigned beside a grade that was kept", () => {
     expect(automaticGradeCaution({ agreeing_passes: 2, grading_passes: 2,
       support_caution: "Review the criterion and its performance level directly; no automatic grade was assigned." }))
-      .toBe("Evidence check not confirmed: Review the criterion and its performance level directly.");
+      .toBe("The quote check did not support this grade: Review the criterion and its performance level directly.");
+  });
+
+  it("does not call a whole-paper grade's caution a failed evidence check", () => {
+    const caution = "This grade is about the whole paper, such as its tone, which a few quoted passages cannot show.";
+    expect(automaticGradeCaution({ agreeing_passes: 2, grading_passes: 2, support_caution: caution, support_caution_scope: true }))
+      .toBe(caution);
+    expect(automaticGradeCaution({ agreeing_passes: 2, grading_passes: 2, support_caution: caution }))
+      .toBe(`The quote check did not support this grade: ${caution}`);
+  });
+
+  it("labels the grade the same way as its caution", () => {
+    const base = { agreeing_passes: 2, grading_passes: 2, support_caution: "Quotes cannot confirm this grade." };
+    expect(automaticGradeChip({ ...base, support_caution_scope: true })).toBe(AUTOMATIC_GRADE_COPY.chip_scope_caution);
+    expect(automaticGradeChip(base)).toBe(AUTOMATIC_GRADE_COPY.chip_caution);
+    expect(automaticGradeChip({ agreeing_passes: 2, grading_passes: 2 })).toBeNull();
   });
 
   it("says nothing for rows the AI did not grade", () => {

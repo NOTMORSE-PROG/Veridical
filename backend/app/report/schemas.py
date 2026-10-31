@@ -118,6 +118,9 @@ class CriterionResultOut(BaseModel):
     # ("evidence_not_located", "evidence_already_used"); None when not recorded.
     reason_codes: list[str] | None = None
     support_caution: str | None = None
+    # The evidence check could not apply to this kind of level (BUG-608), so
+    # the caution is shown without "not confirmed".
+    support_caution_scope: bool = False
     agreeing_passes: int | None = None
     grading_passes: int | None = None
     # What each grading pass chose, in pass order, so the instructor can see
@@ -463,6 +466,9 @@ class PublicCriterionResultOut(BaseModel):
     # private reasoning, and are empty once the instructor sets the grade.
     decision_basis: Literal["single_verified_pass", "lower_of_two", "middle_of_three"] | None = None
     support_caution: str | None = None
+    # The evidence check could not apply to this kind of level (BUG-608), so
+    # the caution is shown without "not confirmed".
+    support_caution_scope: bool = False
     agreeing_passes: int | None = None
     grading_passes: int | None = None
     # V-069 AC5: the adviser view carries the level too, same as the

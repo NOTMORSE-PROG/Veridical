@@ -38,7 +38,7 @@ from app.checks.reuse.query import (
 )
 from app.checks.reuse.service import NO_TEXT_NOTE
 from app.checks.reuse.source import passage_match_supported
-from app.checks.support import SOURCE_SCOPE_POLICY_VERSION
+from app.checks.support import SOURCE_SCOPE_POLICY_VERSION, scope_obligations, scope_wording
 from app.config import Settings, get_settings
 from app.errors import ConflictError, GoneError, NotFoundError
 from app.findings.policy import exclusion_reason, problem_kind_of, reuse_excerpt
@@ -338,6 +338,7 @@ def _to_criterion_result(
         if resolution_detail
         else None
     )
+    scope = scope_capabilities(criterion, detail) if result.kind == CheckKind.semantic else None
     return CriterionResultOut(
         rule_scope_unconfirmed=project_rule_scope_unconfirmed(
             detail, criterion=criterion, kind=result.kind.value, outcome=result.outcome.value
@@ -362,14 +363,16 @@ def _to_criterion_result(
         basis=detail.get("basis"),
         anchor=detail.get("anchor"),
         reasoning=detail.get("reasoning"),
-        reason=detail.get("reason"),
+        reason=scope_wording(scope)[0]
+        if scope and detail.get("support_withheld")
+        else detail.get("reason"),
         evidence=evidence,
         resolution=resolution,
         # V-069 AC2: `detail["level"]` is set by `checks/semantic.py`,
         # `checks/consistency.py`, and `checks/escalation.resolve_escalation`
         # for a levelled criterion's decided result — `None` otherwise.
         level=CriterionLevelOut(**detail["level"]) if detail.get("level") else None,
-        **_automatic_grade(result, detail, resolution_detail),
+        **_automatic_grade(result, detail, resolution_detail, scope),
         reason_codes=[code for code in detail.get("reason_codes") or [] if isinstance(code, str)]
         or None,
     )
@@ -378,7 +381,26 @@ def _to_criterion_result(
 _DECISION_BASES = frozenset({"single_verified_pass", "lower_of_two", "middle_of_three"})
 
 
-def _automatic_grade(result: CheckResult, detail: dict, resolution: object) -> dict:
+def scope_capabilities(criterion: Criterion, detail: dict) -> list[str] | None:
+    """What kind of assessment a scope-guarded grade needs, or None if the
+    evidence check was not scope-guarded. Worked out again from the criterion
+    with today's patterns, so a grade saved under older wording is described
+    the same way as a new one; the stored list is the fallback."""
+    support = detail.get("support_check") or {}
+    if support.get("scope_guard") != "independent_assessment_required":
+        return None
+    verdict = detail.get("verdict") or detail.get("proposed_verdict")
+    obligations = scope_obligations(
+        criterion, verdict, get_settings().semantic_evidence_scope_patterns_file
+    )
+    current = sorted({item for obligation in obligations for item in obligation["capabilities"]})
+    stored = [item for item in support.get("missing_capabilities") or [] if isinstance(item, str)]
+    return current or stored or None
+
+
+def _automatic_grade(
+    result: CheckResult, detail: dict, resolution: object, scope: list[str] | None = None
+) -> dict:
     """How an AI-decided grade was chosen; nothing once an instructor judged."""
     if (
         resolution
@@ -391,9 +413,14 @@ def _automatic_grade(result: CheckResult, detail: dict, resolution: object) -> d
     real = [vote for vote in votes if isinstance(vote, str)] if isinstance(votes, list) else []
     basis = detail.get("decision_basis")
     caution = detail.get("support_caution")
+    if scope and caution:
+        # The evidence check could not apply to this kind of level at all, so
+        # the caution says what the grade is about rather than "not confirmed".
+        caution = scope_wording(scope)[1]
     return {
         "decision_basis": basis if basis in _DECISION_BASES else None,
         "support_caution": clean_caution(caution),
+        "support_caution_scope": bool(scope and caution),
         "agreeing_passes": sum(
             normalize_verdict(vote) == normalize_verdict(verdict) for vote in real
         )

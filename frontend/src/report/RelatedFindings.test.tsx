@@ -66,7 +66,7 @@ describe("grades beside findings on the same pages", () => {
       graded({ criterion_id: 8, text: "Tone", agreeing_passes: null, grading_passes: null, decision_basis: null }),
     ]} />, { route: "/shared/abc" });
     expect(screen.getByText(/the lower of the two grades was used/)).toBeInTheDocument();
-    expect(screen.getByText("Evidence check not confirmed: One quote only.")).toBeInTheDocument();
+    expect(screen.getByText("The quote check did not support this grade: One quote only.")).toBeInTheDocument();
     expect(screen.getAllByText(/Graded automatically/)).toHaveLength(1);
   });
 

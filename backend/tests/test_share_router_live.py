@@ -629,6 +629,7 @@ def test_shared_report_public_schema_is_an_exact_allow_list(
         # the system's grading, never the instructor's private reasoning.
         "decision_basis",
         "support_caution",
+        "support_caution_scope",
         "agreeing_passes",
         "grading_passes",
     }

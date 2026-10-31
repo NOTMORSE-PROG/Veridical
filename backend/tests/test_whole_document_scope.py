@@ -121,7 +121,7 @@ def test_a_whole_paper_level_needs_more_than_a_quote(item, level):
     failure = guard(item, level)
     assert failure is not None
     assert failure["scope_guard"] == "independent_assessment_required"
-    assert "collection_assessment_required" in failure["missing_capabilities"]
+    assert "whole_paper_assessment_required" in failure["missing_capabilities"]
     # Under the decide policy the grade is kept with this caution, never "supported".
     assert failure["status"] == "unsupported" and failure["caution"]
 
@@ -129,7 +129,7 @@ def test_a_whole_paper_level_needs_more_than_a_quote(item, level):
 @pytest.mark.parametrize("level", NAMES)
 def test_every_grammar_level_is_whole_paper_because_of_the_criterion_itself(level):
     failure = guard(GRAMMAR, level)
-    assert {"key": "criterion", "capabilities": ["collection_assessment_required"]} in failure[
+    assert {"key": "criterion", "capabilities": ["whole_paper_assessment_required"]} in failure[
         "guarded_obligations"
     ]
 

@@ -55,7 +55,7 @@ def test_the_pdf_export_shows_how_an_automatic_grade_was_chosen():
     data = _with_first_result(decision_basis="single_verified_pass", support_caution=CAUTION)
     text = _text(build_report_pdf(data))
     assert _copy()["single_verified_pass"] in text
-    assert f"Evidence check not confirmed: {CAUTION}" in text
+    assert f"The quote check did not support this grade: {CAUTION}" in text
 
 
 def test_the_pdf_export_never_says_no_grade_was_assigned_beside_a_kept_grade():
@@ -66,7 +66,7 @@ def test_the_pdf_export_never_says_no_grade_was_assigned_beside_a_kept_grade():
     )
     text = " ".join(_text(build_report_pdf(data)).split())
     assert "Graded automatically: 3 of 3 grading passes chose this grade." in text
-    assert "Evidence check not confirmed: Review the criterion directly." in text
+    assert "The quote check did not support this grade: Review the criterion directly." in text
     assert "no automatic grade was assigned" not in text
 
 
