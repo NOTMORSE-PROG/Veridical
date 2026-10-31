@@ -15,7 +15,14 @@
   "collection_assessment_required": [
     "\\b(?:most|primarily|throughout|comprehensive(?:ly)?|completeness)\\b|\\bmajority\\b(?![\\s\\u002d\\u2010-\\u2015\\u2212]*vote\\b)|\\bfew\\b(?![\\s\\u002d\\u2010-\\u2015\\u2212]*shot\\b)",
     "\\bcomplete\\s+(?:documentation|coverage|inventory|assessment)\\b",
-    "\\b(?:all|every|each)\\s+(?:one\\s+)?(?:of\\s+)?(?:(?:the|these|those|our)\\s+)?(?:references?|sources?|citations?|entr(?:y|ies)|items?|sections?|figures?|tables?|requirements?|components?|devices?|participants?|records?)\\b"
+    "\\b(?:all|every|each)\\s+(?:one\\s+)?(?:of\\s+)?(?:(?:the|these|those|our)\\s+)?(?:references?|sources?|citations?|entr(?:y|ies)|items?|sections?|figures?|tables?|requirements?|components?|devices?|participants?|records?)\\b",
+    "\\bconsistent(?:ly)?\\b",
+    "\\bgenerally\\b",
+    "\\bfor\\s+the\\s+most\\s+part\\b",
+    "\\b(?:no|few|some|many|occasional|so\\s+many)\\s+(?:\\w+\\s+)?errors\\b",
+    "\\bfree\\b[^.;:]{0,30}\\berrors?\\b",
+    "\\babsence\\s+of\\b[^.;:]{0,60}\\berrors?\\b",
+    "\\breader\\s+(?:gains|can|cannot|is|doubts|seriously|stops|loses|follows?)\\b"
   ],
   "locatable_subclaim": [
     "\\bpreview(?:s|ing|ed)?\\s+(?:the\\s+)?(?:overall\\s+)?(?:structure|organi[sz]ation)\\s+of\\s+the\\s+(?:paper|thesis|study|manuscript|document|report|dissertation)\\b",
