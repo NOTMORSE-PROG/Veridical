@@ -5,7 +5,6 @@ against its own scratch database.
 
 import os
 import uuid
-from pathlib import Path
 from typing import Any
 
 import pytest
@@ -717,39 +716,26 @@ async def test_a_grid_upload_stores_cell_provenance_and_structured_issues(
     assert reworded.value.details["revision"] == kept.revision
 
 
-RUBRIC_PDF = Path(__file__).resolve().parents[2] / "Rubric-for-Oral-Presentation.pdf"
-
-
-@pytest.mark.skipif(not RUBRIC_PDF.exists(), reason="the reproduction rubric is local-only (D-007)")
 async def test_a_locked_version_is_annotated_without_touching_its_criteria(
     session_factory, tmp_path, monkeypatch
 ):
     """The production repair (BUG-566): a version stored with the shifted
     levels, pinned by a check, gets parse issues for exactly the affected
     criteria; its criteria and levels stay byte-for-byte as they were."""
-    import shutil
-
-    from app.ingest import pdf as pdf_ingest
     from app.models.enums import CriterionType
     from app.rubric.annotate import annotate_rubric
-    from app.rubric.source import build_decomposition_source
+    from tests.rubric_grid_pdf import ROWS, grid_pdf
 
     monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
     get_settings.cache_clear()
     settings = get_settings()
-    source = build_decomposition_source(
-        pdf_ingest.extract_document(str(RUBRIC_PDF), settings), settings
-    )
-    by_row: dict[int, list[str]] = {}
-    for cell in source.cells:
-        by_row.setdefault(cell.row, []).append(cell.text)
-    rows = [cells for cells in by_row.values() if len(cells) == 5]
+    rows = [row[:5] for row in ROWS]
     names = ["Beginner", "Acceptable", "Proficient", "Exemplary"]
     stored = []
     for label, *cells in rows:
         levels = list(cells)
-        if label == "Purpose":  # the shape production stored
-            levels = [f"{cells[0]} {rows[2][1].split('. ')[0]}.", cells[2], "Invented.", cells[3]]
+        if label == "Thesis":  # the shape production stored for its Purpose row
+            levels = [f"{cells[0]} {rows[1][1].split('. ')[0]}.", cells[2], "Invented.", cells[3]]
         stored.append((label, levels))
 
     instructor_id = await _seed_instructor(session_factory)
@@ -759,7 +745,7 @@ async def test_a_locked_version_is_annotated_without_touching_its_criteria(
         await session.flush()
         dest = settings.data_dir / settings.rubric_upload_subdir / f"{rubric.id}.pdf"
         dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(RUBRIC_PDF, dest)
+        grid_pdf(dest)
         rubric.source_file = str(dest)
         for position, (label, levels) in enumerate(stored):
             session.add(
@@ -789,7 +775,7 @@ async def test_a_locked_version_is_annotated_without_touching_its_criteria(
     async with session_factory() as session:
         preview = await annotate_rubric(session, settings, rubric_id, apply=False)
     assert not preview.applied and preview.issues
-    assert {i["criterion_id"] for i in preview.issues} == {before[1][0]}
+    assert {i["criterion_id"] for i in preview.issues} == {before[0][0]}
     assert preview.copy_pages == [1, 2, 3] and preview.withheld_count > 0
     async with session_factory() as session:
         assert (await session.get(Rubric, rubric_id)).parse_issue_details is None

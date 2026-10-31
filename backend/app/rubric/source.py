@@ -273,7 +273,16 @@ def _merge_page_copies(
             matcher = SequenceMatcher(
                 None, [line.key for line in earlier], [line.key for line in current], autojunk=False
             )
-            if (earlier or current) and matcher.ratio() < settings.rubric_copy_min_line_ratio:
+            # Compared as text, not as whole lines: on a short header a name
+            # filled into one line would otherwise make the copy look unlike
+            # its original.
+            text_ratio = SequenceMatcher(
+                None,
+                "\n".join(line.key for line in earlier),
+                "\n".join(line.key for line in current),
+                autojunk=False,
+            ).ratio()
+            if (earlier or current) and text_ratio < settings.rubric_copy_min_line_ratio:
                 continue
             dropped.update(id(line) for line in current)
             for tag, i1, i2, j1, j2 in matcher.get_opcodes():

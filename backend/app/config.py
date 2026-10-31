@@ -467,7 +467,7 @@ class Settings(BaseSettings):
     rubric_copy_min_identical_cell_ratio: float = Field(default=0.9, gt=0.0, le=1.0)
     # A later page is a repeated copy when every table on it repeats one on an
     # earlier page and its other text matches that page's at least this
-    # closely (difflib ratio over lines). The table condition is the strong
+    # closely (difflib ratio over its text). The table condition is the strong
     # signal; this only stops a page that merely shares a letterhead.
     rubric_copy_min_line_ratio: float = Field(default=0.6, gt=0.0, le=1.0)
     # Words shorter than this are ignored when checking that a criterion names

@@ -16,6 +16,8 @@ from app.rubric.schemas import ParsedCriterion, ParsedLevel
 from app.rubric.source import DecompositionSource, build_decomposition_source
 from app.rubric.validate import attempt_decomposition
 from app.rubric.verbatim import match_form, verify_against_source
+from tests.rubric_grid_pdf import HEADER, STUDENTS, grid_pdf
+from tests.rubric_grid_pdf import ROWS as PDF_ROWS
 from tests.test_rubric_validate import ScriptedLLM, _SpySession
 
 SETTINGS = get_settings()
@@ -660,23 +662,6 @@ def test_a_passage_must_be_whole_words_and_end_at_a_boundary():
     assert ("not_one_row", 0, None) in _codes(shuffled, source)
 
 
-@rubric_pdf_only
-def test_without_a_detected_table_the_invented_production_level_is_still_caught():
-    """A borderless or undetected grid reaches the check as flattened text."""
-    from app.ingest import pdf as pdf_ingest
-
-    extraction = pdf_ingest.extract_document(str(RUBRIC_PDF), SETTINGS)
-    rows = _real_rows(_real_source())
-    flat = extraction.model_copy(update={"tables": []})
-    source = build_decomposition_source(flat, SETTINGS)
-    assert source.cells == ()
-    response = _response(rows)
-    purpose = next(c for c in response["criteria"] if c["text"].startswith("Purpose"))
-    purpose["levels"][2]["descriptor"] = "The paper's purpose is clearly stated."
-    codes = _codes(_criteria(response), source)
-    assert ("not_in_source", response["criteria"].index(purpose), 3) in codes
-
-
 def test_an_unlabelled_name_line_on_a_copy_is_withheld():
     header_a = ["Panel rating sheet", "Juana Dela Cruz", "Section A1"]
     header_b = ["Panel rating sheet", "Pedro Santos", "Section A1"]
@@ -690,11 +675,14 @@ def test_an_unlabelled_name_line_on_a_copy_is_withheld():
 
 
 async def test_text_found_only_on_a_copy_is_reported_as_unread():
-    first, first_blocks = _pdf_grid(GRID, page=1, header=["Rating sheet", "Section A1"])
+    header = [
+        "Rating sheet for the written paper and its oral defense",
+        "Section A1, second semester",
+        "Panel members sign below after the defense",
+    ]
+    first, first_blocks = _pdf_grid(GRID, page=1, header=header)
     second, second_blocks = _pdf_grid(
-        GRID,
-        page=2,
-        header=["Rating sheet", "Section A1", "The defense lasts at most 40 minutes."],
+        GRID, page=2, header=[*header, "Speaks for at most 40 minutes."]
     )
     source = build_decomposition_source(
         _extraction([first, second], first_blocks + second_blocks), SETTINGS
@@ -850,15 +838,62 @@ async def test_the_retry_is_told_which_descriptor_failed():
     assert "level 'Proficient'" in llm.prompts[1]
 
 
-# --- the real rubric that exposed this (local-only, D-007) --------------------
+# --- a real PDF grid, drawn in the test ------------------------------------
 
 
-def _real_source():
+def _pdf_source(tmp_path, students=STUDENTS):
     from app.ingest import pdf as pdf_ingest
 
-    return build_decomposition_source(
-        pdf_ingest.extract_document(str(RUBRIC_PDF), SETTINGS), SETTINGS
+    path = grid_pdf(tmp_path / "grid.pdf", students)
+    extraction = pdf_ingest.extract_document(str(path), SETTINGS)
+    return extraction, build_decomposition_source(extraction, SETTINGS)
+
+
+PDF_GRID = [HEADER[:5], *(row[:5] for row in PDF_ROWS)]
+
+
+def test_a_drawn_pdf_grid_is_read_once_as_cells_without_the_names(tmp_path):
+    extraction, source = _pdf_source(tmp_path)
+    assert len(extraction.tables) == 3
+    assert source.prompt_text.count("[TABLE ") == 1
+    assert source.copies_merged == 2 and source.copy_pages == (1, 2, 3)
+    assert "Dela Cruz" not in source.prompt_text and "Santos" not in source.prompt_text
+    assert all(value not in source.prompt_text for value in source.withheld)
+    assert "T1.R2.C2: The thesis is unclear." in source.prompt_text
+
+
+def test_a_drawn_pdf_grid_stores_every_descriptor_as_its_cell(tmp_path):
+    _, source = _pdf_source(tmp_path)
+    retyped = _response(PDF_GRID, retype=lambda s: s.replace(",", " ,").upper())
+    criteria, issues = _verify(_criteria(retyped), source, SETTINGS)
+    assert issues == []
+    stored = [level.descriptor for c in criteria for level in c.levels]
+    assert stored == [cell for row in PDF_GRID[1:] for cell in row[1:]]
+    assert {lv.source.page for c in criteria for lv in c.levels} == {1}
+
+
+async def test_a_drawn_pdf_grid_with_the_production_shift_is_not_parsed(tmp_path):
+    _, source = _pdf_source(tmp_path)
+    llm = ScriptedLLM([_shifted(PDF_GRID, "The thesis is clearly stated.")])
+    outcome = await attempt_decomposition(
+        _SpySession(), 1, source.gate_blocks, source.prompt_text, llm, SETTINGS, source=source
     )
+    assert outcome.needs_review
+    codes = {(d["code"], d["criterion"], d["level"]) for d in outcome.issue_details}
+    assert ("joins_cells", 0, 1) in codes and ("wrong_column", 0, 2) in codes
+
+
+def test_a_drawn_pdf_grid_read_without_its_table_still_catches_an_invented_level(tmp_path):
+    """A borderless or undetected grid reaches the check as flattened text."""
+    extraction, _ = _pdf_source(tmp_path)
+    source = build_decomposition_source(extraction.model_copy(update={"tables": []}), SETTINGS)
+    assert source.cells == ()
+    response = _response(PDF_GRID)
+    response["criteria"][0]["levels"][2]["descriptor"] = "The thesis is stated."
+    assert ("not_in_source", 0, 3) in _codes(_criteria(response), source)
+
+
+# --- the real rubric that exposed this (local-only, D-007) --------------------
 
 
 def _real_rows(source: DecompositionSource) -> list[list[str]]:
@@ -872,82 +907,68 @@ def _real_rows(source: DecompositionSource) -> list[list[str]]:
 
 
 @rubric_pdf_only
-def test_the_real_rubric_is_one_grid_of_nine_rows_with_no_names_sent():
-    source = _real_source()
-    assert source.prompt_text.count("[TABLE ") == 1
-    assert source.copies_merged == 2
-    assert len(_real_rows(source)) - 1 == 9
-    assert source.withheld, "the copies carry filled-in names"
-    for value in source.withheld:
-        assert value not in source.prompt_text
+async def test_the_real_rubric_that_exposed_this():
+    """One test, so the local-only file costs CI a single skip."""
+    from app.ingest import pdf as pdf_ingest
 
-
-@rubric_pdf_only
-def test_all_36_real_descriptors_are_stored_byte_for_byte_as_their_cells():
-    source = _real_source()
+    extraction = pdf_ingest.extract_document(str(RUBRIC_PDF), SETTINGS)
+    source = build_decomposition_source(extraction, SETTINGS)
     rows = _real_rows(source)
 
+    # One grid of nine rows, read once, with no student name sent.
+    assert source.prompt_text.count("[TABLE ") == 1
+    assert source.copies_merged == 2
+    assert len(rows) - 1 == 9
+    assert source.withheld, "the copies carry filled-in names"
+    assert all(value not in source.prompt_text for value in source.withheld)
+
+    # All 36 descriptors stored byte for byte as their cells, from the way the
+    # model actually retyped them (straight apostrophes, a split word joined).
     def retype(text: str) -> str:
-        # How the model actually retyped them: straight apostrophes and a
-        # word the extractor split rejoined.
-        return re.sub(r"\ba n\b", "an", text.replace("’", "'"))
+        return re.sub(r"\ba n\b", "an", text.replace("\u2019", "'"))
 
     criteria, issues = _verify(_criteria(_response(rows, retype=retype)), source, SETTINGS)
     assert issues == []
     stored = [level.descriptor for c in criteria for level in c.levels]
-    expected = [cell for row in rows[1:] for cell in row[1:]]
     assert len(stored) == 36
-    assert stored == expected
+    assert stored == [cell for row in rows[1:] for cell in row[1:]]
 
+    # The production Purpose row: traced cells keep their place, each
+    # misplaced or untraced level carries its own issue.
+    response = _response(rows)
+    purpose = response["criteria"][1]["levels"]
+    purpose[0]["descriptor"] = f"{rows[2][1]} {rows[3][1].split('. ')[0]}."
+    purpose[1]["descriptor"] = rows[2][3]
+    purpose[2]["descriptor"] = "The paper's purpose is clearly stated."
+    checked, found = verify_against_source(_criteria(response), source, SETTINGS)
+    _assert_no_orphan_levels(checked, found)
+    levels = checked[1].levels
+    assert [lv.source.match for lv in levels] == ["unmatched", "exact", "unmatched", "exact"]
+    assert levels[1].source.page == 1 and levels[1].source.cell_text == rows[2][3]
+    codes = {(i.code, i.level) for i in found if i.criterion == 1}
+    # The invented level 3 is the start of the Proficient cell, cut short.
+    assert codes == {("joins_cells", 1), ("wrong_column", 2), ("partial_cell", 3)}
 
-@rubric_pdf_only
-async def test_the_real_rubric_shift_seen_in_production_is_not_parsed():
-    source = _real_source()
-    rows = _real_rows(source)
-    shifted = _shifted(rows, "The introduction is clearly stated.")
-    llm = ScriptedLLM([shifted])
+    # Through the retry loop, the shift is never stored as parsed.
+    llm = ScriptedLLM([_shifted(rows, "The introduction is clearly stated.")])
     outcome = await attempt_decomposition(
         _SpySession(), 1, source.gate_blocks, source.prompt_text, llm, SETTINGS, source=source
     )
     assert outcome.needs_review
-    assert any("not in the original document" in issue for issue in outcome.issues)
 
-
-@rubric_pdf_only
-def test_the_real_rubric_with_one_row_reversed_or_two_rows_swapped_is_not_parsed():
-    source = _real_source()
-    rows = _real_rows(source)
+    # A reversed row, and two similarly named rows swapped.
     response = _response(rows)
-    purpose = response["criteria"][1]
-    for level, cell in zip(purpose["levels"], reversed(rows[2][1:]), strict=True):
+    for level, cell in zip(response["criteria"][1]["levels"], reversed(rows[2][1:]), strict=True):
         level["descriptor"] = cell
     assert ("wrong_column", 1, 1) in _codes(_criteria(response), source)
-
     response = _response(rows)
     use, quality = response["criteria"][6], response["criteria"][7]
     use["text"], quality["text"] = quality["text"], use["text"]
     codes = _codes(_criteria(response), source)
     assert ("wrong_row", 6, None) in codes and ("wrong_row", 7, None) in codes
 
-
-@rubric_pdf_only
-def test_the_production_purpose_row_keeps_the_cells_it_did_match():
-    """Production stored Purpose as: Beginner+Content's first sentence,
-    the real Proficient cell as level 2, an invented level 3, the real
-    Exemplary. The traced cells keep their page and place; the misplaced one
-    and the untraced ones each carry their own issue."""
-    source = _real_source()
-    rows = _real_rows(source)
+    # Read without its table, production's invented level 3 is still caught.
+    flat = build_decomposition_source(extraction.model_copy(update={"tables": []}), SETTINGS)
     response = _response(rows)
-    purpose = response["criteria"][1]["levels"]
-    purpose[0]["descriptor"] = f"{rows[2][1]} {rows[3][1].split('. ')[0]}."
-    purpose[1]["descriptor"] = rows[2][3]
-    purpose[2]["descriptor"] = "The paper's purpose is clearly stated."
-    criteria, issues = verify_against_source(_criteria(response), source, SETTINGS)
-    _assert_no_orphan_levels(criteria, issues)
-    levels = criteria[1].levels
-    assert [lv.source.match for lv in levels] == ["unmatched", "exact", "unmatched", "exact"]
-    assert levels[1].source.page == 1 and levels[1].source.cell_text == rows[2][3]
-    codes = {(i.code, i.level) for i in issues if i.criterion == 1}
-    # The invented level 3 is the start of the Proficient cell, cut short.
-    assert codes == {("joins_cells", 1), ("wrong_column", 2), ("partial_cell", 3)}
+    response["criteria"][1]["levels"][2]["descriptor"] = "The paper's purpose is clearly stated."
+    assert ("not_in_source", 1, 3) in _codes(_criteria(response), flat)

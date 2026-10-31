@@ -76,7 +76,11 @@ jobs:
           # execute; 7 need local-only D-007 files (4 owner proposal PDF,
           # 1 oral-presentation rubric, 1 golden rubric decomposition, 1 demo
           # PDF with golden labels); 3 need a real Gemini key.
-          VERIDICAL_MAX_SKIPS: "26"
+          # Raised 26 -> 27 (BUG-566, 2026-10-31): one more D-007 local-only
+          # test, the real oral-presentation rubric read end to end, kept as a
+          # single test so it costs one skip. The same grid shape is drawn as
+          # a PDF in tests/rubric_grid_pdf.py and runs here.
+          VERIDICAL_MAX_SKIPS: "27"
       - name: Retain default pytest failure and acceptance receipts
         if: always()
         uses: actions/upload-artifact@v4
