@@ -131,6 +131,21 @@ function CoachMarkCard({
     };
   }, [anchorEl]);
 
+  // BUG-581: the scrim lets the pointer through to the page, which is inert
+  // while the tour is open, so a press there used to move focus to the page
+  // body. Focus stays in the tour instead.
+  useEffect(() => {
+    if (!ready) return;
+    function onMouseDown(event: MouseEvent) {
+      const card = cardRef.current;
+      if (!card || (event.target instanceof Node && card.contains(event.target))) return;
+      event.preventDefault();
+      if (!card.contains(document.activeElement)) (getFocusable(card)[0] ?? card).focus();
+    }
+    document.addEventListener("mousedown", onMouseDown, true);
+    return () => document.removeEventListener("mousedown", onMouseDown, true);
+  }, [ready]);
+
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
