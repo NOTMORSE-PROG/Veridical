@@ -62,7 +62,8 @@ def split_by_unread_pages(
     settings: Settings,
 ) -> tuple[list[ReferenceLike], list[Withheld]]:
     """The candidates no unread page could be citing, and the rest with the
-    pages that could, why ("named" or "within_citing_text"), and the name or
+    pages that could, why ("named", "unreadable_mark" or "within_citing_text"),
+    and the name or
     number found."""
     unread = sorted(extraction.unread_pages or [])
     if not unread:
@@ -79,6 +80,7 @@ def split_by_unread_pages(
             )
             for page, text in texts.items()
         }
+    unreadable_pages = [p for p in unread if numbered and marks[p][1]]
     released, withheld = [], []
     for ref in candidates:
         found: str | None = None
@@ -86,7 +88,7 @@ def split_by_unread_pages(
             number = _number(ref)
             named = [p for p in unread if number is not None and number in marks[p][0]]
             found = str(number) if named else None
-            usable = number is not None and not any(unreadable for _, unreadable in marks.values())
+            usable = number is not None
         else:
             named = []
             for page in unread:
@@ -97,6 +99,10 @@ def split_by_unread_pages(
             usable = has_name_keys(ref, settings)
         if named:
             withheld.append((ref, named, "named", found))
+        elif numbered and unreadable_pages:
+            # On a readable page an unreadable citation mark leaves every entry
+            # possibly cited; an unread page is given no more trust than that.
+            withheld.append((ref, unreadable_pages, "unreadable_mark", None))
         elif not usable and inside:
             withheld.append((ref, inside, "within_citing_text", None))
         else:
@@ -140,6 +146,8 @@ def unread_page_leads(
         phrase = _pages_phrase(pages, policy)
         if why == "named":
             template = policy["lead_named_number" if numbered else "lead_named_name"]
+        elif why == "unreadable_mark":
+            template = policy["lead_unreadable_mark"]
         else:
             template = policy["lead_within_citing_text"]
         reason = template.format(

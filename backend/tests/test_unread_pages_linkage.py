@@ -124,7 +124,7 @@ def test_an_unreadable_bracket_mark_falls_back_to_the_citing_pages():
     # A list too long to read could hide any number.
     marks = "[" + ", ".join(str(n) for n in range(30, 80)) + "]"
     released, withheld = _split([ref], {5: marks}, numbered=True)
-    assert released == [] and withheld[0][2] == "within_citing_text"
+    assert released == [] and withheld[0][2] == "unreadable_mark"
 
 
 def test_the_lead_names_the_pages_and_what_was_found_and_does_not_count():
@@ -167,4 +167,20 @@ def test_an_unreadable_glued_mark_falls_back_to_the_citing_pages():
     # A range past the limit cannot be read, so any entry might be in it.
     refs = [_numbered(n) for n in (7, 8)]
     released, withheld = _split(refs, {5: "compared[7-40] across clinics."}, numbered=True)
-    assert released == [] and {why for _r, _p, why, _f in withheld} == {"within_citing_text"}
+    assert released == [] and {why for _r, _p, why, _f in withheld} == {"unreadable_mark"}
+
+
+def test_an_unreadable_mark_withholds_even_outside_the_citing_pages():
+    # On a readable page this mark leaves every entry possibly cited; an
+    # unread page outside the citing pages must not be trusted more.
+    refs = [_numbered(n) for n in (7, 8)]
+    released, withheld = _split(
+        refs, {18: "Systems were compared[7-40] across clinics."}, numbered=True
+    )
+    assert released == [] and [pages for _r, pages, _w, _f in withheld] == [[18], [18]]
+
+
+def test_an_unreadable_mark_in_a_table_context_does_not_withhold():
+    ref = _numbered(7)
+    released, withheld = _split([ref], {18: "See Table[1-99] for the values."}, numbered=True)
+    assert released == [ref] and withheld == []
