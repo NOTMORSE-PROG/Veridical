@@ -76,9 +76,10 @@ export function SharedPageButton({ token, snapshot, reference, accessibleName, t
   const [dialog, setDialog] = useState(false);
   const query = useSharedSourcePage(token, snapshot, reference.reference_id, dialog);
   return <>
-    <Button variant="quiet" className={className} aria-label={accessibleName} onClick={() => setDialog(true)}>{label}</Button>
-    {dialog && <Dialog title={title} wide className="signal-dialog--source-context" onClose={() => setDialog(false)}>
-      <EvidenceSourceLayout source={<SharedPageImage query={query} reference={reference} large />} context={context} />
+    <Button variant="quiet" className={className} aria-label={accessibleName} aria-haspopup="dialog" onClick={() => setDialog(true)}>{label}</Button>
+    {dialog && <Dialog title={title} wide className="signal-dialog--source-context signal-dialog--statement-page" onClose={() => setDialog(false)}>
+      {/* Focusable so the page can be scrolled from the keyboard. */}
+      <EvidenceSourceLayout source={<div className="signal-statement-page" tabIndex={0} role="region" aria-label={`Original page, ${instructorAnchor(reference.anchor ?? "")}`}><SharedPageImage query={query} reference={reference} large /></div>} context={context} />
     </Dialog>}
   </>;
 }

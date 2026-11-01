@@ -194,7 +194,7 @@ function SharedPairs({ listId, items, open, shown, onToggle, onMore, evidence }:
           {group.results.length > 0
             ? <div className="signal-pair-card__results">
               <p className="signal-pair-card__tag">Compared with {group.results.length} {group.results.length === 1 ? "result" : "results"}</p>
-              <ul>{group.results.map((result, place) => <li key={`${result.text}|${result.anchor}`}><span>“{result.text}”</span>
+              <ul data-columns={resultColumns(group.results.length)}>{group.results.map((result, place) => <li key={`${result.text}|${result.anchor}`}><span>“{result.text}”</span>
                 <PairSource evidence={evidence} side="result" text={result.text} anchor={result.anchor}
                   accessibleName={`Open ${instructorAnchor(result.anchor)}, result ${place + 1} of ${group.results.length} for objective ${index + 1}`}
                   title={`Result compared with objective ${index + 1}${result.anchor.trim() ? `, ${instructorAnchor(result.anchor)}` : ""}`}
@@ -242,4 +242,9 @@ function PairSource({ evidence, side, text, anchor, accessibleName, title, count
         <p>VERIDICAL could not decide whether this result answers this objective. This is not a finding and does not change readiness. The statement roles have not been verified as this study's objective and result.</p>
       </section>} />}
   </span>;
+}
+
+/** Results a row: never one cell left alone on a row of its own. */
+function resultColumns(count: number): 1 | 2 | 3 {
+  return count === 1 ? 1 : count === 2 || count === 4 ? 2 : 3;
 }
