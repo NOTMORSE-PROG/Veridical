@@ -399,9 +399,11 @@ def _grader_result(row: CheckResult) -> dict:
         "agreement",
         "decision_basis",
     )
+    # A stored row's score is a Decimal, which a JSON column cannot hold.
+    score = float(row.score) if row.score is not None else None
     return {
         "outcome": row.outcome.value,
-        "score": row.score,
+        "score": score,
         **{key: detail[key] for key in keep if key in detail},
     }
 

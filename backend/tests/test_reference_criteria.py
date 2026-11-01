@@ -405,3 +405,18 @@ def test_quality_never_calls_a_model(data):
 def test_quality_level_checks_follow_the_levels_own_words(data, level, counts, fits):
     ordinal = next(int(lv["level"]) for lv in QUALITY.levels if lv["name"] == level)
     assert rc.quality_level_fits(QUALITY, ordinal, profile(**counts), data)["fits"] is fits
+
+
+@pytest.mark.parametrize("decided", [True, False])
+def test_a_stored_rows_decimal_score_can_be_saved_with_the_record(data, decided):
+    # Rows read from the database carry a Decimal score; the record kept on
+    # the row and in the audit event is JSON, which cannot hold one.
+    import json
+    from decimal import Decimal
+
+    row = graded_row("EXEMPLARY")
+    row.score = Decimal("3.00")
+    counts = profile(peer_reviewed=4) if decided else profile(peer_reviewed=30, web=9)
+    rc.decide_inventory(row, BIBLIOGRAPHY, counts, data)
+    json.dumps(row.detail)
+    assert row.detail["reference_strategy"]["grader"]["score"] == 3.0
