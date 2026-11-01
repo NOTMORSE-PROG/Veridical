@@ -21,6 +21,12 @@ def exclusion_reason(kind: str, detail: dict[str, Any] | None = None) -> str | N
         # The format keeps recency as a note for the instructor, not a
         # readiness finding. The evidence itself was read.
         return "recency_note_not_counted"
+    if kind == "citation_integrity" and (detail or {}).get("kind") in (
+        "possible_retraction_unconfirmed",
+        "retraction_notice_cited",
+    ):
+        # OpenAlex's retraction flag is a lead; only Crossref's record counts.
+        return "retraction_lead_not_counted"
     if (detail or {}).get("affects_readiness") is False:
         return "unassessed_evidence"
     return None

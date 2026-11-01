@@ -1,6 +1,8 @@
 {
   "agreement_unmatched_intent": "Possible objective-to-outcome gap",
   "retracted_source": "Possibly retracted source",
+  "possible_retraction_unconfirmed": "Possible retraction, please verify",
+  "retraction_notice_cited": "Reference matches a retraction notice",
   "corrected_source": "Correction on record for this source",
   "unverifiable_api_down": "Source lookup not completed",
   "unverifiable_not_found": "Source not found in the databases checked",
