@@ -25,15 +25,15 @@ export function OriginalitySetAside({ scope }: { scope: OriginalityScope }) {
     {!recorded.length ? <p>Not recorded for this run.</p>
       : !shown.length ? <p>None were set aside.</p>
         : <>
-          <p>These were set aside. They are not findings and not evidence of originality.</p>
+          <p>These were set aside. They are not findings and not evidence of originality. Only the counts were saved; the passages are not listed.</p>
           <dl className="signal-fact-rows">
             {shown.map(row => <div key={row.key}><dt>{row.label}</dt><dd>
               <span className="signal-originality-set-aside__count">{row.count}</span>
-              <span>{row.count === 1 ? row.unit[0] : row.unit[1]}. {row.text}
+              <div>{row.count === 1 ? row.unit[0] : row.unit[1]}. {row.text}
                 {row.key === "standard" && (names.length
                   ? <ul className="signal-originality-set-aside__names">{names.map(name => <li key={name}>{name}</li>)}</ul>
                   : <span className="signal-field-hint"> Not named in this record.</span>)}
-              </span>
+              </div>
             </dd></div>)}
           </dl>
           {bothKinds && <p className="signal-field-hint">One passage can count under both Cited quotation and Standard wording.</p>}
@@ -42,11 +42,12 @@ export function OriginalitySetAside({ scope }: { scope: OriginalityScope }) {
   </section>;
 }
 
-/** On a raised originality finding: standard wording taken out before it was judged. */
+/** On a raised originality finding, right under the shading legend it
+ * qualifies: standard wording the check did not count when judging it. */
 export function StandardWordingLeftOut({ names }: { names?: string[] }) {
   if (!names?.length) return null;
   return <dl className="signal-fact-rows signal-standard-wording-left-out"><div><dt>Standard wording not counted</dt><dd>
     <ul>{names.map(name => <li key={name}>{name}</li>)}</ul>
-    <span className="signal-field-hint">It was removed before this finding was judged. Shading in the excerpts may still mark it.</span>
+    <span className="signal-field-hint">Shading shows all shared wording, including this standard wording. VERIDICAL did not count the standard wording.</span>
   </dd></div></dl>;
 }

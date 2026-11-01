@@ -11,7 +11,6 @@ import { claimFocusContinuation, type FocusContinuation } from "../routing/focus
 import type { FlagOut } from "../api/types";
 import { useMe } from "../auth/useAuth";
 import { PassagePairPanel } from "../document/PassagePairPanel";
-import { StandardWordingLeftOut } from "../report/OriginalitySetAside";
 import { FindingSourceComparison } from "../document/FindingSourceComparison";
 import { checkKindMeta, findingVerificationPrompt, humanize, isPValueFinding } from "../domain/checkKind";
 import { evidenceDisplayState } from "../domain/evidenceDisplay";
@@ -116,9 +115,8 @@ function EvidenceSection({
           Same component, same props, same "flag" variant already
           shipped on SignalDocumentViewer.tsx -- no new design here. */}
       {flag.passage_pair && !pairedSources && (
-        <PassagePairPanel pair={flag.passage_pair} ownAnchor={instructorAnchor(flag.page_anchor)} wholeManuscript={!flag.is_passage_level} variant="flag" />
+        <PassagePairPanel pair={flag.passage_pair} ownAnchor={instructorAnchor(flag.page_anchor)} wholeManuscript={!flag.is_passage_level} variant="flag" standardWordingLeftOut={flag.standard_wording_left_out} />
       )}
-      <StandardWordingLeftOut names={flag.standard_wording_left_out} />
       {/* BUG-170: a reuse flag with no manuscript-sourced content at
           all (no quote, no passage panel) still needs an honest reason
           why -- "resubmission" never had a passage to compare (nothing

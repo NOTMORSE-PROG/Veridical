@@ -12,7 +12,7 @@ it("lists the passages not raised by reason, wording first, with the standards n
     n_set_aside_weak_section_evidence: 0, n_set_aside_no_shared_wording: 3,
     standard_texts_set_aside: ["ISO/IEC 25010 usability definition", "Approval sheet statement"] }} />);
   expect(screen.getByRole("heading", { name: "Similar passages not raised" })).toBeInTheDocument();
-  expect(screen.getByText("These were set aside. They are not findings and not evidence of originality.")).toBeInTheDocument();
+  expect(screen.getByText("These were set aside. They are not findings and not evidence of originality. Only the counts were saved; the passages are not listed.")).toBeInTheDocument();
   const labels = screen.getAllByRole("term").map(term => term.textContent);
   expect(labels).toEqual(["Cited quotation", "Standard wording", "No shared wording"]);
   expect(screen.getByText(/^passage\. The only shared wording was a marked, cited quotation\./)).toBeInTheDocument();
@@ -40,7 +40,7 @@ it("says some reasons were not recorded, and when a standard count has no names"
 it("names the standard wording left out of a raised finding, never its text", () => {
   const { container, rerender } = render(<StandardWordingLeftOut names={["ISO/IEC 25010 usability definition"]} />);
   expect(screen.getByText("Standard wording not counted")).toBeInTheDocument();
-  expect(screen.getByText("It was removed before this finding was judged. Shading in the excerpts may still mark it.")).toBeInTheDocument();
+  expect(screen.getByText("Shading shows all shared wording, including this standard wording. VERIDICAL did not count the standard wording.")).toBeInTheDocument();
   rerender(<StandardWordingLeftOut names={[]} />);
   expect(container).toBeEmptyDOMElement();
 });
