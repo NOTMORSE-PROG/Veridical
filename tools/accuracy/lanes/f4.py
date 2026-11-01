@@ -395,6 +395,10 @@ def run(ctx: Context) -> tuple[list[MetricRow], dict]:
     if config.get("pairs_per_call"):
         # A stability arm (BUG-635) can judge each pair in a call of its own.
         overrides["agreement_pairing_max_pairs_per_call"] = int(config["pairs_per_call"])
+    # Either part of the batching remedy can be turned off for an arm.
+    for key in ("stable_batch_order", "flagged_pairs_judged_alone"):
+        if key in config:
+            overrides[f"agreement_{key}"] = bool(config[key])
     settings = Settings(
         _env_file=None,
         gemini_api_key=key,
@@ -529,6 +533,8 @@ def run(ctx: Context) -> tuple[list[MetricRow], dict]:
         "pairs_per_call": settings.agreement_pairing_max_pairs_per_call,
         "plant_sample": config.get("plant_sample"),
         "responses_dir": config.get("responses_dir", "responses"),
+        "stable_batch_order": settings.agreement_stable_batch_order,
+        "flagged_pairs_judged_alone": settings.agreement_flagged_pairs_judged_alone,
         "attempts_sent": client.attempts if client else 0,
         "cache_hits": client.cache_hits if client else 0,
         "failed_calls": client.failed_calls if client else 0,
