@@ -959,29 +959,14 @@ def prepare(extraction, unread: list[int]):
 
 
 def compared_pages(extraction, settings) -> set[int]:
-    """Pages of the analysis copy that passage matching can reach: none when
-    the passage inventory is refused; otherwise pages with a body block
-    outside the reference-list and indented-quotation tags. A passage is
-    tagged when any block in it is, so this can overstate slightly."""
+    """Pages of the analysis copy whose text passage matching actually used:
+    the product's own count (BUG-687), from passages that are neither
+    reference list nor indented quotation. Empty when the passage inventory
+    is refused."""
+    from app.checks.reuse.embed import compared_pages as product_compared_pages
     from app.checks.reuse.embed import compute_passage_embeddings
-    from app.ingest.blockquotes import block_quote_block_ids
-    from app.ingest.patterns import load_patterns
-    from app.ingest.references import non_reference_blocks
 
-    if not compute_passage_embeddings(extraction, settings):
-        return set()
-    patterns = load_patterns(settings.ingest_patterns_file)
-    body = {id(b) for b in non_reference_blocks(extraction, patterns, ambiguous_entries_ok=True)}
-    quotes = block_quote_block_ids(extraction, settings)
-    return {
-        b.page
-        for b in extraction.blocks
-        if not b.is_furniture
-        and b.page is not None
-        and b.text.strip()
-        and id(b) in body
-        and id(b) not in quotes
-    }
+    return set(product_compared_pages(compute_passage_embeddings(extraction, settings)))
 
 
 def _excluded_pages(extraction, settings) -> set[int]:
@@ -1510,8 +1495,9 @@ def metric_rows(measured: dict, config: dict) -> list[MetricRow]:
             note=(
                 "A page is compared when passage matching can reach it: not left unread by the "
                 "integrity stage (a host with too many unread pages is not compared at all and "
-                "gets no plants), the thesis has a passage inventory, and a body block on it is "
-                "outside the reference-list and indented-quotation tags. Plants on pages a "
+                "gets no plants), the thesis has a passage inventory, and text on it is in a "
+                "passage that is neither reference list nor indented quotation (the product's "
+                "own pages_compared, BUG-687). Plants on pages a "
                 "version does not compare count as misses in the recall rows and are left out "
                 "of the comparable rows. "
                 "Not compared, by host: "

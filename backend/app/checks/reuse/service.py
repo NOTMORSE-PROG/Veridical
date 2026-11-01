@@ -17,7 +17,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.service import write_audit_event
-from app.checks.reuse.embed import compute_document_embeddings, compute_passage_embeddings
+from app.checks.reuse.embed import (
+    compared_pages,
+    compute_document_embeddings,
+    compute_passage_embeddings,
+)
 from app.checks.reuse.lexical import wording_evidence
 from app.checks.reuse.query import (
     PassageMatch,
@@ -747,6 +751,20 @@ async def run_originality_reuse_check(
             ),
             "first_upload_context": first_upload,
             "passages_found": len(passages),
+            # BUG-687: how much of the manuscript was compared, counted from
+            # the passages actually matched, so no surface has to estimate
+            # it: out of the pages with text this check read, and of the
+            # whole manuscript. Not recorded when the Library held nothing
+            # to compare against, and a Word file has no pages to count.
+            **(
+                {
+                    "pages_compared": len(compared_pages(passages)),
+                    "pages_with_text": len(_text_pages(extraction)),
+                    "page_count": extraction.page_count,
+                }
+                if extraction.anchor_kind == "page" and not no_comparisons
+                else {}
+            ),
         },
     )
     session.add(result)

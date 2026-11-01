@@ -305,6 +305,9 @@ class PassageEmbedding:
     is_reference_list: bool
     is_block_quote: bool
     embedding: list[float]
+    # Every page this passage's blocks are on (BUG-687): a passage can run
+    # over a page break, and `page` names only where it starts.
+    pages: tuple[int, ...] = ()
 
 
 def _word_spans(text: str) -> list[tuple[int, int]]:
@@ -421,6 +424,7 @@ def _build_passages(
                 "paragraph": anchor_block.paragraph,
                 "is_reference_list": any(id(b) in ref_ids for b in buffer_blocks),
                 "is_block_quote": any(id(b) in quote_ids for b in buffer_blocks),
+                "pages": tuple(sorted({b.page for b in buffer_blocks if b.page is not None})),
             }
         )
 
@@ -443,6 +447,7 @@ def _build_passages(
                         "paragraph": b.paragraph,
                         "is_reference_list": id(b) in ref_ids,
                         "is_block_quote": id(b) in quote_ids,
+                        "pages": (b.page,) if b.page is not None else (),
                     }
                 )
             continue
@@ -629,6 +634,7 @@ def _embed_passage_drafts(
                     is_reference_list=draft["is_reference_list"],
                     is_block_quote=draft["is_block_quote"],
                     embedding=vector,
+                    pages=draft["pages"],
                 )
             )
     return passages
@@ -672,3 +678,17 @@ def compute_library_passage_embeddings(
         return LibraryPassageEmbeddings([], None, limit, "unavailable")
     passages = _embed_passage_drafts(drafts[:limit], extraction, settings)
     return LibraryPassageEmbeddings(passages, len(drafts), limit, "measured")
+
+
+def compared_pages(passages: list[PassageEmbedding]) -> list[int]:
+    """Pages holding text the passage comparison actually used (BUG-687):
+    on a passage that is neither reference list nor indented quotation, the
+    two kinds left out of matching. Pages left unread never reach here."""
+    return sorted(
+        {
+            page
+            for passage in passages
+            if not passage.is_reference_list and not passage.is_block_quote
+            for page in passage.pages
+        }
+    )

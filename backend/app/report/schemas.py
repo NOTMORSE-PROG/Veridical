@@ -211,6 +211,14 @@ class IntegrityCheckStatusOut(BaseModel):
     # or the body could not be told apart from the list (every page with
     # text). Word files have no pages; `not_compared_from` names the start.
     pages_not_compared: list[int] | None = None
+    # F7 (BUG-687): pages whose text the comparison actually used. None on
+    # older results, Word files, and checks with nothing in the Library to
+    # compare against; never estimate it from the other fields.
+    pages_compared: int | None = None
+    # Pages with text the check read (unread pages excluded): the honest
+    # denominator for `pages_compared`. `page_count` is the whole manuscript.
+    pages_with_text: int | None = None
+    page_count: int | None = None
     # Where text left out because the list's end is unclear starts, as cited
     # elsewhere in the report ("p. 157", "¶212").
     not_compared_from: str | None = None
