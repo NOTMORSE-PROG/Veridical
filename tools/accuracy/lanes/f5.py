@@ -47,7 +47,12 @@ from app.checks.source_quality import (
 )
 from app.config import Settings
 from app.ingest.patterns import load_patterns
-from app.ingest.references import extract_references, non_reference_blocks, select_references
+from app.ingest.references import (
+    extract_references,
+    non_reference_blocks,
+    parse_reference,
+    select_references,
+)
 from app.ingest.schemas import SourceLineSpan, TextBlock
 from app.ingest.source_slices import line_inventory_valid
 from app.models.citation import Citation
@@ -62,6 +67,10 @@ SCOPE = (
 )
 LINKAGE_TYPES = ("orphan_citation", "uncited_reference")
 EXISTENCE_TYPES = ("nonexistent_doi", "retracted_doi")
+# Derived from the valid controls (BUG-664): another entry's DOI, so the DOI
+# leads to a different work; and two kinds of drift the registry record
+# still matches, the second a borderline case (only the subtitle is cited).
+METADATA_TYPES = ("doi_other_work", "metadata_drift_year", "metadata_drift_subtitle_only")
 CONTROL_TYPES = ("intact_entry", "valid_doi")
 
 # Every value here can be overridden in <golden>/f5/config.json.
@@ -1015,6 +1024,7 @@ async def _part_b(ctx, config, patterns, settings, client, cache_stats):
             json.dumps({"built_on": today, "candidates": candidates}, indent=1),
             encoding="utf-8",
         )
+    candidates = {**candidates, **_metadata_plants(candidates["valid_doi"][: config["per_type"]])}
     drafts_by_type = {}
     outcomes = []
     extras = [
@@ -1054,6 +1064,9 @@ async def _part_b(ctx, config, patterns, settings, client, cache_stats):
                         "flag_kind": flag.detail.get("kind") if flag else None,
                         "flag_severity": str(flag.severity) if flag else None,
                         "flag_reason": reason or None,
+                        "different_work": bool(
+                            flag and flag.detail.get("leads_to_different_work")
+                        ),
                         "accusation_wording": bool(
                             re.search(config["accusation_words"], reason, re.IGNORECASE)
                         ),
@@ -1061,6 +1074,89 @@ async def _part_b(ctx, config, patterns, settings, client, cache_stats):
                 )
         drafts_by_type[plant_type] = len(items)
     return outcomes, notes, drafts_by_type
+
+
+def _metadata_plants(valid):
+    """Entries whose DOI exists but whose metadata the registry does not match,
+    labelled by construction from the valid controls. Their DOIs are the
+    controls' own, so their lookups are the controls' cached answers."""
+    plants = {kind: [] for kind in METADATA_TYPES}
+    for i, item in enumerate(valid):
+        other = valid[(i + 1) % len(valid)]
+        if other["doi"] != item["doi"]:
+            plants["doi_other_work"].append(
+                {
+                    **item,
+                    "doi": other["doi"],
+                    "entry": item["entry"].replace(item["doi"], other["doi"]),
+                }
+            )
+        year = re.search(r"\((\d{4})\)", item["entry"])
+        if year:
+            later = f"({int(year.group(1)) + 1})"
+            plants["metadata_drift_year"].append(
+                {**item, "entry": item["entry"].replace(year.group(0), later, 1)}
+            )
+        title = parse_reference(item["entry"], order_index=0).title
+        if title and ":" in title and title in item["entry"]:
+            subtitle = title.split(":", 1)[1].strip()
+            if len(subtitle.split()) >= 4:
+                plants["metadata_drift_subtitle_only"].append(
+                    {
+                        **item,
+                        "entry": item["entry"].replace(
+                            title, subtitle[:1].upper() + subtitle[1:], 1
+                        ),
+                    }
+                )
+    return plants
+
+
+def _metadata_rows(outcomes):
+    rows = []
+    expected = {
+        "doi_other_work": (True, "med", "DOI leading to another paper named as a different work"),
+        "metadata_drift_year": (False, "low", "year drift kept a Low mismatch"),
+        "metadata_drift_subtitle_only": (
+            False,
+            "low",
+            "subtitle-only title kept a Low mismatch (borderline)",
+        ),
+    }
+    for kind, (different, severity, name) in expected.items():
+        group = [o for o in outcomes if o["type"] == kind and o["parsed_with_doi_intact"]]
+        if not group:
+            continue
+        hit = [
+            o
+            for o in group
+            if o["flag_kind"] == "possible_metadata_mismatch"
+            and o["different_work"] is different
+            and o["flag_severity"] == severity
+        ]
+        rows.append(
+            rate_row(
+                LANE,
+                name,
+                "derived entry",
+                len(hit),
+                len(group),
+                note="Derived from the valid controls, labelled by construction (BUG-664); "
+                "dev and holdout together.",
+            )
+        )
+    named = [o for o in outcomes if o["type"] == "doi_other_work" and o["flag_kind"]]
+    rows.append(
+        rate_row(
+            LANE,
+            "wording check doi_other_work",
+            "finding",
+            sum(not o["accusation_wording"] for o in named),
+            len(named),
+            note="Findings with no accusation word in their text.",
+        )
+    )
+    return rows
 
 
 def _part_b_rows(outcomes):
@@ -1351,6 +1447,7 @@ def run(ctx: Context) -> tuple[list[MetricRow], dict]:
         details["linkage_coverage"] = part_a
     rows += _unread_page_rows(unread_cases)
     rows += _part_b_rows(outcomes)
+    rows += _metadata_rows(outcomes)
     rows += real_precision_rows(ctx.golden, LANE)
     details.update(
         {
