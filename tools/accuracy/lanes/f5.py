@@ -1071,7 +1071,9 @@ async def _part_b(ctx, config, patterns, settings, client, cache_stats):
                         "flag_kind": flag.detail.get("kind") if flag else None,
                         "flag_severity": str(flag.severity) if flag else None,
                         "flag_reason": reason or None,
-                        "different_work": bool(flag and flag.detail.get("leads_to_different_work")),
+                        "different_work": bool(
+                            flag and flag.detail.get("leads_to_different_work")
+                        ),
                         "accusation_wording": bool(
                             re.search(config["accusation_words"], reason, re.IGNORECASE)
                         ),

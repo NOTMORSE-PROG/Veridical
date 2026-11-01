@@ -132,7 +132,7 @@ def test_no_lead_without_openalex_s_own_retraction_signal(result):
 
 def test_crossref_that_was_not_searched_is_not_said_to_have_missed_it():
     lead = draft(openalex("Kiosk queues in clinics", attempted=("openalex",)))
-    assert "Crossref could not be searched for it this time" in lead.detail["reason"]
+    assert "Crossref was not searched for it" in lead.detail["reason"]
     assert "did not find" not in lead.detail["reason"]
 
 
@@ -196,6 +196,8 @@ def test_wording_notice_patterns_and_severity_are_data(tmp_path):
         {"notice_reason": "Matches {notice_title}."},
         {"link_doi": "{address}"},
         {"notice_title_patterns": ["("]},
+        {"notice_reason": "Matches {title.foo}."},
+        {"retracted_work_reason": "Check {title[0]} at {link}."},
     ],
 )
 def test_a_policy_file_that_cannot_fill_its_wording_raises_no_lead(tmp_path, changes):
