@@ -23,7 +23,7 @@ export function reconstructionScopeCopy(value?: ReconstructionScopeOut | null): 
     incomplete: true,
   };
   if (value.state === "not_applicable" && considered === 0) return {
-    detail: "No supported candidate rows were recorded for SPRITE reconstruction. This does not establish that the manuscript contains no statistics." + recordedCounts,
+    detail: "Score reconstruction (SPRITE) found no table rows with the details it needs, so it did not run. This does not establish that the manuscript contains no statistics.",
     incomplete: false,
   };
   return unrecorded;

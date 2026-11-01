@@ -9225,6 +9225,9 @@
      and every line keeps the same measure. */
   .signal-review-item .signal-grade-caution { font-weight: var(--signal-weight-medium); }
   .signal-review-item > :is(p, .signal-grade-caution) { max-inline-size: var(--signal-review-detail-measure); }
+  /* Adviser view: what the selected check's result means, said once. */
+  .signal-shared-module-status { padding: var(--signal-space-4); border-inline-start: var(--signal-border-emphasis) solid var(--color-signal-border-strong); background: var(--color-signal-surface-muted); }
+  .signal-shared-module-status p { margin: 0; max-inline-size: var(--signal-review-detail-measure); }
   /* Adviser finding page: the picker is a full-size control, the finding one item. */
   .signal-shared-finding-picker select { min-block-size: var(--signal-control-height); }
   .signal-shared-finding { display: grid; gap: var(--signal-item-section-gap); padding-block-start: var(--signal-space-5); border-block-start: var(--signal-border-hairline) solid var(--color-signal-border); }

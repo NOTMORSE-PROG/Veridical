@@ -16,7 +16,8 @@ import { RuleScopeSummary } from "./RuleScopeNotice";
 import { unconfirmedAutomaticRuleRows } from "../domain/ruleScope";
 import { SharedAssessmentContext } from "./SharedAssessmentContext";
 import { SharedEvidencePacket, useSharedEvidenceManifest } from "./SharedEvidencePacket";
-import { IntegrityModuleNavigation, IntegrityModuleSummary, selectedIntegrityModule } from "./IntegrityModules";
+import { INTEGRITY_MODULES, IntegrityModuleNavigation, IntegrityModuleSummary, selectedIntegrityModule } from "./IntegrityModules";
+import { sharedCountLabel, sharedModuleStatus } from "./sharedModuleStatus";
 import { AgreementScopeSummary } from "./AgreementCheckScope";
 import { countInconsistencies, isInterrupted } from "../domain/agreementScope";
 import { CitationSourceLinks } from "../flags/CitationSourceLinks";
@@ -201,22 +202,39 @@ export function AdviserViewPage() {
           </> : <p>No criterion records were shared.</p>}
         </section> : <section className="signal-review-section signal-shared-findings-panel" aria-labelledby="shared-findings-heading">
         <header className="signal-review-section__heading"><div><p className="signal-section-kicker">Integrity record</p><h2 id="shared-findings-heading" tabIndex={-1}>Findings</h2></div><span>{flags.length} saved records</span></header>
-        <p className="signal-review-section__intro">Choose one check module, then read each finding with its explanation and saved evidence. These are possible inconsistencies to review, not separate grades.</p>
-        <IntegrityModuleNavigation selected={selectedModule} controls="shared-selected-module" modules={report.integrity_modules}
+        <p className="signal-review-section__intro">Choose a check to see what it covered and any possible inconsistencies it recorded. These are not grades.</p>
+        <IntegrityModuleNavigation selected={selectedModule} controls="shared-selected-module" modules={report.integrity_modules} hint={null}
+          countLabels={Object.fromEntries(["internal_agreement", "citation_integrity", "statistical_forensics", "originality_reuse"].map(kind => {
+            const groups = clusterFlagFindings(flags.filter(flag => flag.check_kind === kind));
+            const leads = groups.filter(group => isOptionalComparisonLead(group.flags[0])).length;
+            return [kind, sharedCountLabel(groups.length - leads, leads)];
+          }))}
           counts={new Map(["internal_agreement", "citation_integrity", "statistical_forensics", "originality_reuse"].map(kind => [kind, flags.filter(flag => flag.check_kind === kind).length]))}
           onSelect={kind => {
             if (document.activeElement instanceof HTMLElement) follow(document.activeElement, "shared-findings-heading");
             const next = new URLSearchParams(params); next.set("module", kind); next.delete("finding"); setParams(next);
           }} />
         <div id="shared-selected-module">
-          <IntegrityModuleSummary kind={selectedModule} />
+          {(() => {
+            const module = report.integrity_modules?.find(saved => saved.check_kind === selectedModule);
+            const leads = findingGroups.filter(group => isOptionalComparisonLead(group.flags[0])).length;
+            const status = sharedModuleStatus({ kind: selectedModule, state: module?.state ?? "not_recorded", findings: findingGroups.length - leads, leads,
+              coverageReason: module?.coverage_reason,
+              coverageShownElsewhere: Boolean(module?.agreement_scope) || (selectedModule === "originality_reuse" && Boolean(report.originality_scope)) || (selectedModule === "statistical_forensics" && Boolean(report.statistical_check_scope)),
+              detailSnapshot: data.detail_snapshot });
+            return <>
+              {/* What to verify is said only when there is something to verify. */}
+              {findingGroups.length > 0 ? <IntegrityModuleSummary kind={selectedModule} /> : <h3>{INTEGRITY_MODULES.find(item => item.kind === selectedModule)?.label}</h3>}
+              <div className="signal-shared-module-status" role="note"><p><strong>{status.lead}</strong>{status.detail.map(line => ` ${line}`).join("")}</p></div>
+            </>;
+          })()}
           {selectedModule === "internal_agreement" && agreementModule?.agreement_scope && <AgreementScopeSummary scope={agreementModule.agreement_scope}
             findings={countInconsistencies(moduleFlags)} undecided={undecidedCount}
             compared={agreementModule.undetermined?.compared_count ?? null}
             interrupted={isInterrupted(agreementModule.agreement_scope, agreementModule.state)} />}
           {params.has("finding") && requestedGroupIndex < 0 && <p role="status">Requested finding is unavailable in this module. Showing its first shared finding.</p>}
-          <SignalPublicFlags framingOnly flags={moduleFlags} selectedRecordId={selectedFlag?.id} selectedModule={selectedModule} originalityScope={selectedModule === "originality_reuse" ? report.originality_scope : null} checkRunId={report.check_run_id} statisticalScope={selectedModule === "statistical_forensics" ? report.statistical_check_scope : null} />
-          {selectedModule === "internal_agreement" && undecidedCount > 0 && !agreementModule?.agreement_scope && <p className="signal-field-hint">VERIDICAL could not decide on {undecidedCount} objective and result pair{undecidedCount === 1 ? "" : "s"}. These are not findings; the instructor's report lists them.</p>}
+          <SignalPublicFlags framingOnly detailSnapshot={data.detail_snapshot} flags={moduleFlags} selectedRecordId={selectedFlag?.id} selectedModule={selectedModule} originalityScope={selectedModule === "originality_reuse" ? report.originality_scope : null} checkRunId={report.check_run_id} statisticalScope={selectedModule === "statistical_forensics" ? report.statistical_check_scope : null} />
+          {selectedModule === "internal_agreement" && undecidedCount > 0 && !agreementModule?.agreement_scope && <p className="signal-field-hint">VERIDICAL could not decide on {undecidedCount} objective and result pair{undecidedCount === 1 ? "" : "s"}. These are not findings and do not change readiness.</p>}
           {findingGroups.length > 0 && selectedGroup && selectedFlag && (() => {
             const lead = isOptionalComparisonLead(selectedFlag);
             const noun = findingGroups.some(group => isOptionalComparisonLead(group.flags[0])) ? "Item" : "Finding";
@@ -282,7 +300,6 @@ export function AdviserViewPage() {
               </article>
             </>;
           })()}
-          {findingGroups.length === 0 && <p>No shared integrity signals are shown in this module.</p>}
         </div>
         </section>}
 

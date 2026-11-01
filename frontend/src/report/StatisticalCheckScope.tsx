@@ -11,8 +11,8 @@ const SCOPE_COPY = {
     "This is the saved applicability result for the extracted content the check supports. It does not establish that the manuscript contains no statistics.",
   ],
   incomplete: [
-    "Statistical checks: Not fully assessed.",
-    "The saved statistical assessment is incomplete. Unassessed content is not treated as passed.",
+    "Statistical checks: Ran only in part.",
+    "Some statistics could not be checked. Anything not checked is not treated as correct.",
   ],
   not_recorded: [
     "Statistical checks: Not recorded.",

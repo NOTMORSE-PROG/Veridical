@@ -35,7 +35,7 @@ export const AGREEMENT_SCOPE_COPY = {
   interruptedTail: "Pairs it did not compare are not treated as passed.",
   notIdentified: "The results section could not be found, so possible results were taken from every part of the paper. Some of them may describe other studies.",
   olderNoScope: "This report was made before VERIDICAL recorded what this check compared.",
-  adviserSetAside: "The instructor's report lists the results set aside.",
+  adviserSetAside: "This link counts these statements but does not quote them.",
   matchingHeading: "About these pairs",
   matchingCaveat: "VERIDICAL matches each objective with the results most like it. Some matched pairs may not belong together, and this matching is being improved. A matched pair is not proof that both statements are about the same thing.",
 } as const;
@@ -132,7 +132,7 @@ function findingsSentence(findings: number, surface: OutcomeInput["surface"]): s
 
 function undecidedSentence(undecided: number, afterFindings: boolean, surface: OutcomeInput["surface"]): string {
   const one = undecided === 1;
-  if (surface === "adviser") return one ? "It is not a finding; the instructor's report lists it." : "They are not findings; the instructor's report lists them.";
+  if (surface === "adviser") return one ? "It is not a finding and does not change readiness." : "They are not findings and do not change readiness.";
   if (surface === "document") return one ? "Read it on the readiness report." : "Read them on the readiness report.";
   const where = afterFindings ? "after the findings" : "below for you to read";
   return one ? `It is listed ${where}.` : `They are listed ${where}.`;

@@ -1250,7 +1250,9 @@ export function SignalPublicFlags({
   selectedModule,
   selectedRecordId,
   framingOnly = false,
+  detailSnapshot,
 }: {
+  detailSnapshot?: "current" | "stale" | "not_recorded";
   /** The page shows one finding as its own item: give only the honest
    * framing and the check's scope, no list or filters. */
   framingOnly?: boolean;
@@ -1273,7 +1275,7 @@ export function SignalPublicFlags({
   return (
     <section id="integrity-signals" tabIndex={-1} className="signal-review-section" aria-labelledby="flags-heading">
       <div className="signal-review-section__heading"><div><p className="signal-section-kicker">Integrity record</p><h2 id="flags-heading">Possible inconsistencies</h2></div>{!onlyOptional && <span>{findingCount} {hasOptional ? "other " : ""}finding{findingCount === 1 ? "" : "s"}{sourceAgeNotes > 0 && ` · ${sourceAgeNotesLabel(sourceAgeNotes)}`}</span>}</div>
-      {!onlyOptional && <p className="signal-review-section__intro">These are possible inconsistencies, not accusations. This shared view shows the bounded evidence the instructor chose to share; it does not expose the private Audit trail.</p>}
+      {!onlyOptional && <p className="signal-review-section__intro">These are possible inconsistencies, not accusations. This link shows every finding the checks saved, as the report stands now. {detailSnapshot === "stale" ? "Explanations are not shown, because the report changed after the link was made." : detailSnapshot === "not_recorded" ? "No explanations were saved with this link." : "Explanations and quotations are shown as they were when the link was made."} It does not include the instructor's reasons for changing a grade or the private record of changes.</p>}
       {(!selectedModule || selectedModule === "statistical_forensics") && <StatisticalCheckScope scope={statisticalScope} />}
       {(!selectedModule || selectedModule === "originality_reuse") && <OriginalityScope scope={originalityScope} />}
       {framingOnly ? null : visibleOtherFlags.length
@@ -1453,7 +1455,7 @@ export function SignalCriteriaResults({ results, checkRunId, publicView = false,
         const SectionTitle = publicSelection ? "h4" : "h3";
         const dialogBody = <div className="signal-result-card__evidence signal-criterion-details">
           {assessment.relationship && <p>{assessment.relationship}</p>}
-          {unresolvedAi && <section className="signal-item-section"><SectionTitle className="signal-item-section__title">No grade accepted</SectionTitle><p>{RECORDED_GRADE_BASIS.review}</p>{assessment.hasLocations && <p>{RECORDED_GRADE_BASIS.qualification}</p>}</section>}
+          {unresolvedAi && <section className="signal-item-section"><SectionTitle className="signal-item-section__title">{publicView ? "Not graded yet" : "No grade accepted"}</SectionTitle><p>{publicView ? RECORDED_GRADE_BASIS.reviewShared : RECORDED_GRADE_BASIS.review}</p>{assessment.hasLocations && <p>{RECORDED_GRADE_BASIS.qualification}</p>}</section>}
           {!assessment.hasDetails ? <p>No assessment details are available in this record.</p> : <>
             <section className="signal-item-section"><SectionTitle className="signal-item-section__title">Why this grade</SectionTitle>
               {assessment.ruleFacts && <RuleFactsDetails facts={assessment.ruleFacts} earlier={assessment.instructorRecorded} />}

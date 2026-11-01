@@ -820,7 +820,7 @@ describe("SignalReportPage", () => {
     expect(await screen.findByRole("link", { name: /^Review evidence for Comparison lead 1 of 1\. Record #2\./ })).toBeVisible();
     expect(screen.getByText("L1")).toBeVisible();
     expect(screen.getByText("Record #2")).toBeVisible();
-expect(screen.getByText("Not scored. Does not affect readiness or block your decision.")).toBeVisible();
+expect(screen.getByText("Not scored. It does not affect readiness or the final decision.")).toBeVisible();
     expect(screen.queryByText("High severity", { exact: true })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Open high-severity findings counted for readiness: 1\./ })).toHaveTextContent("1");
     expect(screen.queryByText(/makes a report Not Ready by itself/)).not.toBeInTheDocument();
