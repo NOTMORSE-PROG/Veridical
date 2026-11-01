@@ -427,6 +427,11 @@ def run(ctx: Context) -> tuple[list[MetricRow], dict]:
     # Confirmation calls are bounded by the same batching over the pairs judged
     # contradictory, at most every pair once per confirmation round.
     planned = batches * (1 + settings.agreement_contradiction_confirmations)
+    alone = settings.agreement_flagged_pairs_judged_alone
+    if alone and settings.agreement_pairing_max_pairs_per_call > 1:
+        # A pair raised as a finding in a shared call is asked again on its
+        # own, so at worst every reached pair costs one more call.
+        planned += len(reached)
     if planned > config["max_calls"]:
         raise SystemExit(
             f"Up to {planned} calls planned, over the cap of {config['max_calls']}; "
