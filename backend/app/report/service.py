@@ -344,6 +344,7 @@ def _to_criterion_result(
         else None
     )
     scope = scope_capabilities(criterion, detail) if result.kind == CheckKind.semantic else None
+    note = later_note(result, criterion, detail)
     return CriterionResultOut(
         rule_scope_unconfirmed=project_rule_scope_unconfirmed(
             detail, criterion=criterion, kind=result.kind.value, outcome=result.outcome.value
@@ -367,7 +368,10 @@ def _to_criterion_result(
         score=float(result.score) if result.score is not None else None,
         basis=detail.get("basis"),
         anchor=detail.get("anchor"),
-        reasoning=detail.get("reasoning"),
+        # Under a later note, the quote check's "supported" sentence would sit
+        # right above the note disowning it, so the grader's own reasoning is
+        # shown instead, as it is for grades checked under today's rule.
+        reasoning=(note and detail.get("grading_reasoning")) or detail.get("reasoning"),
         reason=scope_wording(scope)[0]
         if scope and detail.get("support_withheld")
         else detail.get("reason"),
@@ -378,7 +382,7 @@ def _to_criterion_result(
         # for a levelled criterion's decided result — `None` otherwise.
         level=CriterionLevelOut(**detail["level"]) if detail.get("level") else None,
         **_automatic_grade(result, detail, resolution_detail, scope),
-        later_note=later_note(result, criterion, detail),
+        later_note=note,
         reason_codes=[code for code in detail.get("reason_codes") or [] if isinstance(code, str)]
         or None,
     )

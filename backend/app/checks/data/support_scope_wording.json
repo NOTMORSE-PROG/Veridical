@@ -21,5 +21,5 @@
   "caution": "Quotes cannot confirm this grade. It is about {about}. {check} before relying on it.",
   "reason": "Quotes cannot confirm this rating, so VERIDICAL did not assign it. It is about {about}. {check}, then choose the level.",
   "_later_note": "BUG-611: shown at report time on a grade whose stored evidence check said supported before the rule above existed. It never changes the stored decision, score or band, and says it was added after the check.",
-  "later_note": "Added later by a newer VERIDICAL rule, not by the original check. The recorded grade and readiness band are unchanged, but quotes cannot confirm this grade. It is about {about}. {check} before relying on it."
+  "later_note": "This note was added later by a newer VERIDICAL rule, not by the original check. The recorded grade and readiness band are unchanged, but quotes cannot confirm this grade. It is about {about}. {check} before relying on it."
 }
