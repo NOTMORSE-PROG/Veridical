@@ -59,6 +59,7 @@ import { EmptyState } from "../ui/EmptyState";
 import { clampPage, Pagination, pageOf } from "../ui/Pagination";
 import { moduleEmptyState } from "../report/moduleEmptyState";
 import { AGREEMENT_SCOPE_COPY, foundLine, interruptedLine, isInterrupted, matchedLine, outcomeLines } from "../domain/agreementScope";
+import { isLegacyUndecided } from "../domain/undecidedPairs";
 import { useReviewWorkspaceCapacity } from "./useReviewWorkspaceCapacity";
 import { ReadinessBand } from "../ui/ReadinessBand";
 import { useSelectedSourceReveal } from "./useSelectedSourceReveal";
@@ -135,10 +136,12 @@ function regionForFinding(finding: ReviewFinding, regions: FlagRegionOut[]): Fla
     ?? null;
 }
 
-function ReviewQueue({ findings, regions, sourceAvailability, report, collection, viewedIds, filter, invalidSelection, onFilter, onSelect, onExplore, onRetry, showComparisons = true, moduleKind, onClose }: {
+function ReviewQueue({ findings, legacyUndecided = 0, regions, sourceAvailability, report, collection, viewedIds, filter, invalidSelection, onFilter, onSelect, onExplore, onRetry, showComparisons = true, moduleKind, onClose }: {
   onClose?: () => void;
   moduleKind: string;
   findings: ReviewFinding[];
+  /** Older runs' undecided agreement rows, kept out of the findings. */
+  legacyUndecided?: number;
   regions: FlagRegionOut[];
   sourceAvailability?: SourceAvailability;
   report: ReportOut;
@@ -179,9 +182,11 @@ function ReviewQueue({ findings, regions, sourceAvailability, report, collection
           const found = [foundLine(scope), matchedLine(scope)].filter(Boolean).join(" ");
           const compared = agreement?.undetermined?.compared_count ?? null;
           const interrupted = isInterrupted(scope, agreement?.state);
-          const outcome = outcomeLines(scope, { findings: 0, undecided: agreement?.undetermined?.count ?? 0, compared, interrupted, surface: "document" });
+          const undecided = (agreement?.undetermined?.count ?? 0) + legacyUndecided;
+          const outcome = outcomeLines(scope, { findings: 0, undecided, compared, interrupted, surface: "document" });
           const stopped = interruptedLine(scope, { compared, interrupted, outcomeShown: outcome.length > 0 });
-          const destination = `/report/${report.check_run_id}?module=internal_agreement&review_step=findings`;
+          // Pairs to read open on arrival, so the instructor lands on them, not a closed list.
+          const destination = `/report/${report.check_run_id}?module=internal_agreement&review_step=findings${undecided > 0 ? "&undecided=open" : ""}`;
           return <EmptyState id="workspace-module-empty" title={AGREEMENT_SCOPE_COPY.heading}
             action={<ActionLink to={destination} variant="secondary"
               // Arrive on the card itself, not at the top of the report.
@@ -192,7 +197,10 @@ function ReviewQueue({ findings, regions, sourceAvailability, report, collection
         }
         const empty = moduleEmptyState(report, moduleKind);
         return <EmptyState id="workspace-module-empty" title={empty.title} action={empty.limits
-          ? <ActionLink to={`/report/${report.check_run_id}?section=limits`} variant="secondary">Open assessment limits</ActionLink> : undefined}><p>{empty.description}</p></EmptyState>;
+          ? <ActionLink to={`/report/${report.check_run_id}?section=limits`} variant="secondary">Open assessment limits</ActionLink> : undefined}><p>{empty.description}</p>
+          {moduleKind === "internal_agreement" && legacyUndecided > 0 && <p>{legacyUndecided === 1
+            ? "1 objective and result pair could not be decided. It is not a finding; read it on the readiness report."
+            : `${legacyUndecided} objective and result pairs could not be decided. They are not findings; read them on the readiness report.`}</p>}</EmptyState>;
       })()}
       {findings.length > 0 && (
         <div className="signal-document-inspector__heading"><h2>{collection.lastLoaded ? "Last loaded integrity findings" : "Integrity findings"}</h2>
@@ -501,7 +509,7 @@ function ReadinessDecision({ checkRunId, step, report: loadedReport, pending, er
   );
 }
 
-function ReviewHome({ onClose, moduleKind, showComparisons = true, checkRunId, report, reportPending, reportRetrying, reportError, onReportRetry, findings, regions, sourceAvailability, collection, viewedIds, onFlagsRetry, filter, invalidSelection, onFilter, onSelect, onExplore }: {
+function ReviewHome({ onClose, moduleKind, showComparisons = true, checkRunId, report, reportPending, reportRetrying, reportError, onReportRetry, findings, legacyUndecided = 0, regions, sourceAvailability, collection, viewedIds, onFlagsRetry, filter, invalidSelection, onFilter, onSelect, onExplore }: {
   showComparisons?: boolean;
   moduleKind: string;
   checkRunId: number;
@@ -511,6 +519,7 @@ function ReviewHome({ onClose, moduleKind, showComparisons = true, checkRunId, r
   reportError: unknown;
   onReportRetry: () => void;
   findings: ReviewFinding[];
+  legacyUndecided?: number;
   regions: FlagRegionOut[];
   sourceAvailability?: SourceAvailability;
   collection: ComparisonLeadCollection;
@@ -526,7 +535,7 @@ function ReviewHome({ onClose, moduleKind, showComparisons = true, checkRunId, r
   if (reportPending) return <div role="status" aria-live="polite" aria-busy="true" className="signal-desk-loading"><span>Loading review queue.</span><i /><i /></div>;
   const availableReport = usableReport(report, checkRunId, reportError);
   if (!availableReport) return <ReportUnavailable checkRunId={checkRunId} error={reportError} onRetry={onReportRetry} />;
-  return <>{Boolean(reportError) && <ReportReadNotice retrying={reportRetrying} onRetry={onReportRetry} />}<ReviewQueue onClose={onClose} moduleKind={moduleKind} showComparisons={showComparisons} findings={findings} regions={regions} sourceAvailability={sourceAvailability} report={availableReport} collection={collection} viewedIds={viewedIds} onRetry={onFlagsRetry} filter={filter} invalidSelection={invalidSelection} onFilter={onFilter} onSelect={onSelect} onExplore={onExplore} /></>;
+  return <>{Boolean(reportError) && <ReportReadNotice retrying={reportRetrying} onRetry={onReportRetry} />}<ReviewQueue onClose={onClose} moduleKind={moduleKind} showComparisons={showComparisons} findings={findings} legacyUndecided={legacyUndecided} regions={regions} sourceAvailability={sourceAvailability} report={availableReport} collection={collection} viewedIds={viewedIds} onRetry={onFlagsRetry} filter={filter} invalidSelection={invalidSelection} onFilter={onFilter} onSelect={onSelect} onExplore={onExplore} /></>;
 }
 
 export function SignalDocumentViewerPage() {
@@ -584,7 +593,12 @@ export function SignalDocumentViewerPage() {
     ? pendingReviewQuery.data.filter(row => row.check_result_id === reportOrigin.checkResultId) : [];
   const pendingOriginText = pendingOriginRows.length === 1 ? pendingOriginRows[0].criterion_text : undefined;
   const flagsQuery = useFlags(id);
-  const flags = recoverableReadError(flagsQuery.error) ? flagsQuery.data : undefined;
+  const savedFlags = recoverableReadError(flagsQuery.error) ? flagsQuery.data : undefined;
+  // Saved "could not determine" agreement rows from older runs make no
+  // claim: as on the readiness report, they are never listed or counted as
+  // findings here, only named with the agreement check's undecided pairs.
+  const flags = useMemo(() => savedFlags?.filter((flag) => !isLegacyUndecided(flag)), [savedFlags]);
+  const legacyUndecided = savedFlags?.filter(isLegacyUndecided).length ?? 0;
   const pendingReturnId = pendingRouteReturnElement(location.pathname + location.search);
   const returningToPendingCriterion = pendingReturnId?.startsWith("signal-resolution-");
   const localSourceReturn = useMemo(() => criterionSource?.run === id && criterionSource.ownedReturn ? {
@@ -1244,7 +1258,7 @@ export function SignalDocumentViewerPage() {
                   : isDecision ? <ReadinessDecision checkRunId={id} step={step} report={reportQuery.data} pending={reportQuery.isPending} error={reportQuery.error} retrying={reportQuery.fetchStatus === "fetching"} onRetry={() => reportQuery.refetch()} sourceTarget={criterionSourceTarget} onOpenSource={openCriterionSource} onOpenEvidenceSource={openRecordedCriterionSource}
                     returnNotice={criterionReturnNotice?.run === id && criterionReturnNotice.search === sourceQuery ? criterionReturnNotice.message : undefined} />
                     : selectedFinding && selectedLocationId ? <SelectedFinding comparisonHost={comparisonHost} comparisonVisible={workspace.split || activeTab === "manuscript"} onRevealSource={selectedRegion?.kind === "paragraph_only" ? revealRecordedLocation : undefined} activeStatement={statementTarget?.run === id && statementTarget.flag === selectedLocationId ? statementTarget.role : undefined} onRecordReady={setSelectedRecord} onStatementSource={showStatementSource} fullWidth={fullWidthReading} singlePane={singlePaneLayout} onReadingChange={changeReading} finding={selectedFinding} total={otherFindings.filter((finding) => !finding.isSourceAgeNote).length} locationFlagId={selectedLocationId} region={selectedRegion} sourceAvailability={sourceAvailability} sourceAnchor={recordedAnchor} previous={previousFinding} next={nextFinding} collection={optional} outsideFilter={selectedComparison && selectedNavigationIndex < 0 && optional.snapshot !== undefined} filterPosition={selectedNavigationIndex + 1} filterTotal={navigationFindings.length} onAll={() => update((next) => { next.delete("lead_view"); next.delete("lead_visible"); next.delete("lead_return"); next.set("lead_page", String(Math.floor((optional.snapshot?.records.findIndex((record) => record.id === selectedLocationId) ?? 0) / COMPARISON_LEAD_PAGE_SIZE) + 1)); }, true)} onBack={showQueue} onPrevious={() => previousFinding && selectFinding(previousFinding.representative.id, true)} onNext={() => nextFinding && selectFinding(nextFinding.representative.id, true)} onLocation={selectLocation} onExplore={openExplore} />
-                      : findingsListClosed ? null : <ReviewHome onClose={closeFindingsList} moduleKind={selectedModule} showComparisons={selectedModule === "originality_reuse"} checkRunId={id} report={reportQuery.data} reportPending={reportQuery.isPending} reportRetrying={reportQuery.fetchStatus === "fetching"} reportError={reportQuery.error} onReportRetry={() => reportQuery.refetch()} findings={moduleFindings} regions={viewer?.regions ?? []} sourceAvailability={sourceAvailability} collection={optional} viewedIds={viewedIds} onFlagsRetry={() => { void flagsQuery.refetch(); }} filter={filter} invalidSelection={invalidSelection} onFilter={setFilter} onSelect={selectFinding} onExplore={openExplore} />}
+                      : findingsListClosed ? null : <ReviewHome onClose={closeFindingsList} moduleKind={selectedModule} showComparisons={selectedModule === "originality_reuse"} checkRunId={id} report={reportQuery.data} reportPending={reportQuery.isPending} reportRetrying={reportQuery.fetchStatus === "fetching"} reportError={reportQuery.error} onReportRetry={() => reportQuery.refetch()} findings={moduleFindings} legacyUndecided={legacyUndecided} regions={viewer?.regions ?? []} sourceAvailability={sourceAvailability} collection={optional} viewedIds={viewedIds} onFlagsRetry={() => { void flagsQuery.refetch(); }} filter={filter} invalidSelection={invalidSelection} onFilter={setFilter} onSelect={selectFinding} onExplore={openExplore} />}
                 </div>
                 {step && !isExploring && !selectedFinding && !searchParams.has("criterion") && <WorkspaceStepFooter current={step} onSelect={goToStep} />}
               </aside>

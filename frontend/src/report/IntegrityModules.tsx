@@ -24,11 +24,12 @@ export function IntegrityModuleNavigation({ selected, onSelect, modules, counts,
   // A more exact label for a check's state, e.g. originality's "Some text not compared".
   stateLabels?: Partial<Record<IntegrityKind, string>>;
 }) {
+  const savedRecords = (n: number) => `${n} saved ${n === 1 ? "record" : "records"}`;
   return <nav className="signal-integrity-modules" aria-label="Manuscript check modules"><p className="signal-field-hint">Choose a check to review its findings and source evidence.</p><div role="group" aria-label="Integrity check modules">
     {INTEGRITY_MODULES.map(module => <Button key={module.kind} variant="secondary"
       aria-pressed={selected === module.kind} aria-controls={controls} onClick={() => onSelect(module.kind)}>
       <span>{module.label}</span><small>{stateLabels?.[module.kind] ?? STATE_LABEL[modules?.find(saved => saved.check_kind === module.kind)?.state ?? "not_recorded"]}</small>
-      <small>{counts.get(module.kind) ?? 0} saved records</small>
+      <small>{savedRecords(counts.get(module.kind) ?? 0)}</small>
     </Button>)}
   </div></nav>;
 }
