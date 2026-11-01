@@ -118,10 +118,11 @@ LIMITATIONS = (
     "silent for free. It is reported in the coverage details instead.",
     "Real-manuscript precision covers the 9 missing-reference flags production raises on "
     "DESTAMP, which name only 6 distinct citations (Yochum 3 times, Young twice), so the "
-    "interval rests on fewer independent judgments than n suggests. Two uncited-reference "
-    "flags judged correct when the reading-order refusal was lifted are not counted: "
-    "production withholds them (f5/real_judgments_withheld.json). LensMatch, AugmentedRL and "
-    "MIT raised none.",
+    "interval rests on fewer independent judgments than n suggests. This code also raises "
+    "DESTAMP's two uncited-reference flags (Black 2017; Schmitt, Delbosc & Currie 2018), "
+    "which both raters judged correct; they sit in f5/real_judgments_withheld.json and join "
+    "the counted set once this rule is live, so until then the row covers 9 of the 11 flags "
+    "this code raises there. LensMatch, AugmentedRL and MIT raised none.",
     "The existence case set is frozen in f5/existence_cases.json on first build; registry "
     "answers come from the cache, with the fetch dates listed in the details.",
 )
@@ -1189,10 +1190,11 @@ def _linkage_rows(tally, new_counts, unmatched):
 async def _unread_page_cases(ctx, config, patterns, settings):
     """Adversarial cases for the unread-pages rule (BUG-619), on every host whose
     readable copy leaves pages out and whose list is author-year. For each entry
-    that can be made uncited, three copies: the plant alone (it must be
-    reported), the plant with the entry's surname and year written on an unread
-    page (it must stay withheld), and with the surname and another year (it
-    must also stay withheld: the rule looks for the name, not the year)."""
+    that can be made uncited: the plant alone (it must be reported), and the
+    plant with the entry cited on an unread page in forms the readable text is
+    read in (it must stay withheld, as a lead for that entry): the first
+    author's surname with the year, with another year, in capitals, split by a
+    hyphen at a line break, and by the second author when there is one."""
     records = []
     for name, path in ctx.hosts().items():
         twin = await _host_twin(path, patterns, settings, config)
@@ -1207,11 +1209,23 @@ async def _unread_page_cases(ctx, config, patterns, settings):
             year = _year(pick["year"])
             if not surname or not year:
                 continue
-            variants = (
+            variants = [
                 ("plant_only", None),
                 ("named_on_unread_page", f"{surname} ({year})"),
                 ("same_surname_other_year", f"{surname} ({int(year) + 3})"),
-            )
+                ("surname_in_capitals", f"{surname.upper()} ({year})"),
+            ]
+            if len(surname) >= 6:
+                cut = len(surname) // 2
+                variants.append(
+                    (
+                        "surname_hyphenated_at_line_break",
+                        f"{surname[:cut]}-\n{surname[cut:]} ({year})",
+                    )
+                )
+            if len(entry.authors or []) > 1:
+                second = entry.authors[1].split(",", 1)[0].strip()
+                variants.append(("second_author", f"{second} et al. ({year})"))
             for variant, mention in variants:
                 full = load_extraction(path)
                 full.reading_order = None
@@ -1237,7 +1251,11 @@ async def _unread_page_cases(ctx, config, patterns, settings):
                         "entry": entry.raw_text[:80],
                         "variant": variant,
                         "reported_uncited": ("uncited", "ay", entry.raw_text) in found,
-                        "leads": result.detail.get("n_uncited_withheld_by_unread_pages"),
+                        # A lead counts only when it is for this entry.
+                        "lead_for_entry": any(
+                            item["reference_order_index"] == entry.order_index
+                            for item in result.detail.get("uncited_withheld_by_unread_pages") or []
+                        ),
                     }
                 )
     return records
@@ -1281,7 +1299,7 @@ def _unread_page_rows(records):
             LANE,
             "unread pages: lead naming the page shown for such an entry",
             "plant",
-            sum(not r["reported_uncited"] and (r["leads"] or 0) > 0 for r in owed),
+            sum(not r["reported_uncited"] and r["lead_for_entry"] for r in owed),
             len(owed),
             note="Counted only where the plant alone is reported uncited.",
         )

@@ -1032,7 +1032,7 @@ async def _run_citation_integrity_check(
         partial_source = True
     native_absence_unassessed = (
         {ref.order_index for ref in absence_candidates} if partial_source else set()
-    ) | {ref.order_index for ref, _pages, _why in unread_withheld}
+    ) | {item[0].order_index for item in unread_withheld}
     # No supported body style or a partial scan cannot prove a reference unused.
     if (
         metadata_only
@@ -1504,6 +1504,10 @@ async def _run_citation_integrity_check(
             "n_uncited": len(absence_candidates),
             # Entries a page left unread could be citing: shown as leads (BUG-619).
             "n_uncited_withheld_by_unread_pages": len(unread_withheld),
+            "uncited_withheld_by_unread_pages": [
+                {"reference_order_index": ref.order_index, "pages": pages, "because": why}
+                for ref, pages, why, _found in unread_withheld
+            ],
             "coverage_reason": coverage_reason,
             "n_metadata_skipped_insufficient": len(metadata_unassessed),
             "n_linkage_unassessed": linkage_unassessed,

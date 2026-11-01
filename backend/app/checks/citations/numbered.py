@@ -194,6 +194,33 @@ def _numbers_in_mark(
     return tuple(dict.fromkeys(numbers)) if numbers else None
 
 
+def bracket_numbers_in_text(
+    text: str, *, max_range_span: int, context: NumericContext
+) -> tuple[set[int], bool]:
+    """Every reference number a bracket mark in `text` could cite, read the way
+    the body scan reads them: lists, ranges ("[7-10]" is 7 to 10) and IEEE
+    bridges ("[3]-[6]" is 3 to 6). Also says whether some mark could not be
+    read, so a caller that only withholds can treat that text as citing
+    anything (BUG-619)."""
+    numbers: set[int] = set()
+    unreadable = False
+    prior: tuple[int, ...] | None = None
+    prior_end = -1
+    for match in _BODY_BRACKET.finditer(text):
+        found = _numbers_in_mark(match.group(0), max_range_span=max_range_span, context=context)
+        if found is None:
+            unreadable = True
+            prior = None
+            continue
+        if prior and _BETWEEN_RANGE_MARKS.fullmatch(text[prior_end : match.start()]):
+            low, high = prior[-1], found[0]
+            if low < high and high - low <= max_range_span:
+                numbers.update(range(low + 1, high))
+        numbers.update(found)
+        prior, prior_end = found, match.end()
+    return numbers, unreadable
+
+
 def _sentence_at(
     text: str,
     start: int,
