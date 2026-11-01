@@ -413,11 +413,16 @@
     font-size: var(--signal-type-label);
   }
 
+  /* The footer mirrors the header: same dark ground, same gutter, same
+     muted light text, with a hairline above, so the page is framed rather
+     than trailing off into a white strip. */
   .signal-public-footer {
+    border-block-start: var(--signal-border-hairline) solid var(--color-signal-border-on-dark);
     padding: var(--signal-space-5) var(--signal-page-gutter-fluid);
-    background: var(--color-signal-surface);
-    color: var(--color-signal-ink-secondary);
+    background: var(--color-signal-foundation);
+    color: var(--color-signal-surface-muted);
     font-size: var(--signal-type-label);
+    line-height: var(--signal-line-label);
   }
 
   .signal-public-footer p {
