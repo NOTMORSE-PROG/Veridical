@@ -104,3 +104,31 @@ def test_plain_operation_results_keep_source_and_section_boundaries(result):
     for heading in ("Proposed Design", "Prior Results", "References"):
         out = extract_statements(source([heading, result]), settings=settings)
         assert out.outcomes == []
+
+
+def test_a_result_sentence_wrapped_over_line_blocks_is_read_whole():
+    # A PDF can give every printed line as its own block; the sentence must
+    # not be cut at the line ends.
+    lines = [
+        "Results and Discussion",
+        "The staff portal achieved a weighted mean of 4.70. The staff member strongly",
+        "agreed that the portal allowed patient records to be searched and managed,",
+        "supported the review and processing of customer reservations, and made",
+        "frame information easy to manage.",
+    ]
+    out = extract_statements(source(lines), settings=Settings(_env_file=None))
+    texts = [s.text for s in out.outcomes]
+    assert "The staff portal achieved a weighted mean of 4.70." in texts
+    assert (
+        "The staff member strongly agreed that the portal allowed patient records to be "
+        "searched and managed, supported the review and processing of customer "
+        "reservations, and made frame information easy to manage."
+    ) in texts
+    assert not any(t.startswith("supported the review") for t in texts)
+
+
+def test_a_result_fragment_that_never_finishes_is_not_offered():
+    # The run is cut off by the next heading before the sentence ends.
+    lines = ["Results", "The kiosk reduced the average queue in the second week by", "Discussion"]
+    out = extract_statements(source(lines), settings=Settings(_env_file=None))
+    assert out.outcomes == []
