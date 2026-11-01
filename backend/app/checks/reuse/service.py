@@ -28,8 +28,8 @@ from app.checks.reuse.query import (
     is_first_upload_for_instructor,
     query_similar_manuscripts,
     query_similar_passages,
-    same_instructor_hash_duplicate,
 )
+from app.checks.reuse.same_work import SameWork, find_same_work, name_rules_fingerprint
 from app.checks.reuse.source import coarse_candidate_supported, passage_match_supported
 from app.checks.source_quality import persist_source_limitation
 from app.config import Settings
@@ -101,20 +101,14 @@ HIGH_SIMILARITY_PASSAGE_WORDING = (
     "#{ref}: possible reuse of this passage. Please verify manually."
 )
 
-# BUG-140 (owner ruling, 2026-09-03): a whole-document exact duplicate
-# against the SAME instructor's own earlier upload is a resubmission
-# question, never a plagiarism verdict -- collapsed into this one
-# low-severity confirmation flag instead of the whole-doc/chapter/passage
-# flood a re-upload otherwise produces (measured: 82 flags from one
-# re-upload, ticket's own evidence). Deliberately distinct wording from the
-# EXACT_DUPLICATE_* templates above: "your own earlier upload", never
-# "possible reuse" -- this is not the same finding softened, it names a
-# different, non-accusatory situation (charter ground rule 3).
-SAME_INSTRUCTOR_RESUBMISSION_WORDING = (
-    "This manuscript appears to be the same document as Library record #{ref}, "
-    "which is in your own Library records. This is most likely a resubmission "
-    "or revision, not reuse. Please confirm this is intentional."
-)
+# BUG-140 (owner ruling, 2026-09-03), widened by BUG-662: another upload of
+# the same work in the SAME instructor's Library (a re-upload, a revision, a
+# legacy copy under another group label) is a resubmission question, never a
+# plagiarism verdict. Every such record is left out of the comparison and
+# reported in one low lead instead of the whole-doc/chapter/passage flood it
+# otherwise produces (measured: 82 flags from one re-upload; 41 high leads per
+# run on production runs 11, 12, 17 and 18). The sentence shown comes from
+# `app.findings.policy.reuse_reason`.
 
 # BUG-097 (presentation-only remedy, owner ruling 2026-08-24): drives
 # `detail["first_upload_context"]` below, which surfaces as the report's
@@ -242,17 +236,29 @@ def _supporting_passage_detail(supporting: PassageMatch) -> dict:
     }
 
 
-def _resubmission_flag_draft(matched_manuscript_id: int) -> tuple[FlagSeverity, str, dict]:
-    reason = SAME_INSTRUCTOR_RESUBMISSION_WORDING.format(ref=matched_manuscript_id)
+def _same_work_flag_draft(same_work: SameWork) -> tuple[FlagSeverity, str, dict]:
     detail = {
+        # Kept under the BUG-140 kind so earlier reports and the report's
+        # labels read it the same way.
         "kind": "reuse_same_instructor_resubmission",
         "affects_readiness": False,
-        "reason": reason,
-        "matched_manuscript_id": matched_manuscript_id,
+        "matched_manuscript_id": same_work.sources[0].manuscript_id,
+        "matched_manuscript_ids": [s.manuscript_id for s in same_work.sources],
+        "same_work": [
+            {
+                "manuscript_id": s.manuscript_id,
+                "basis": s.basis,
+                "similarity": round(s.similarity, 3) if s.similarity is not None else None,
+            }
+            for s in same_work.sources
+        ],
     }
     reason = reuse_reason(detail)
     detail["reason"] = reason
-    return FlagSeverity.low, reason, detail
+    # Raised a step when a record's own title, team or authors differ: the
+    # instructor has to confirm it, so it should not read as routine.
+    needs_confirming = any(s.basis == "near_identical_text_names_differ" for s in same_work.sources)
+    return (FlagSeverity.med if needs_confirming else FlagSeverity.low), reason, detail
 
 
 def _passage_match_to_flag_draft(
@@ -326,6 +332,31 @@ def _withheld_lead(granularity: str, match, level, own: str, other: str, setting
     }
 
 
+async def _same_work_audit(session: AsyncSession, same_work: SameWork, settings) -> dict:
+    """What BUG-662 left out of the comparison and why, so a past result can
+    be rebuilt after the Library or the name rules change. Opaque ids only."""
+    cache = {}
+    unreadable = [
+        s.manuscript_id
+        for s in same_work.sources
+        if not await coarse_candidate_supported(session, s.manuscript_id, settings, cache)
+    ]
+    return {
+        "same_work_source_ids": [s.manuscript_id for s in same_work.sources],
+        "same_work": [
+            {"manuscript_id": s.manuscript_id, "basis": s.basis, "similarity": s.similarity}
+            for s in same_work.sources
+        ],
+        # Includes other instructors' byte-identical copies of those records.
+        "same_work_excluded_ids": sorted(same_work.excluded_ids),
+        # Records whose own source could not be read; the decision used their
+        # stored whole-document vector (see `app.checks.reuse.same_work`).
+        "same_work_source_unreadable_ids": unreadable,
+        "same_work_similarity_threshold": settings.reuse_same_work_similarity_threshold,
+        "same_work_name_rules": name_rules_fingerprint(settings),
+    }
+
+
 def _has_text(extraction: ExtractionResult) -> bool:
     return any(not block.is_furniture and block.text.strip() for block in extraction.blocks)
 
@@ -376,18 +407,26 @@ async def run_originality_reuse_check(
         None, compute_document_embeddings, extraction, settings
     )
 
-    # BUG-140: checked before anything else -- a content-hash match is a
-    # CERTAIN "this is the same file" signal, unlike embedding similarity,
-    # and it still works when there is no embeddable content to compare at
-    # all (the branch immediately below, e.g. an image-only re-scan).
-    hash_duplicate_id = (
-        await same_instructor_hash_duplicate(session, manuscript_id, instructor_id, content_hash)
-        if instructor_id is not None
-        else None
+    # BUG-662: the instructor's own Library records of this same work are
+    # found before any comparison and left out of it, so a copy of the thesis
+    # can neither flag as reuse nor hide a real source behind itself in a
+    # nearest-match query. The same-file test needs no text, so it still
+    # works when nothing could be embedded (the branch below, e.g. an
+    # image-only re-scan).
+    exclusions = await comparison_exclusions(session, manuscript_id)
+    same_work = await find_same_work(
+        session,
+        manuscript_id,
+        instructor_id=instructor_id,
+        content_hash=content_hash,
+        whole_document=embeddings.whole_document,
+        exclude_manuscript_ids=exclusions,
+        settings=settings,
     )
+    has_resubmission = bool(same_work.sources)
+    same_work_audit = await _same_work_audit(session, same_work, settings)
 
     if embeddings.whole_document is None:
-        has_resubmission = hash_duplicate_id is not None
         # Text that could not be told apart from an unclear reference list was
         # not compared at all, which is not the same as a file with no text.
         body_refused = (
@@ -434,12 +473,13 @@ async def run_originality_reuse_check(
                 # embed), but the hash lookup DID find one real comparable
                 # entry, and cold-start disclosure exists precisely to be
                 # honest about what was actually compared against.
-                "archive_size_n": 1 if has_resubmission else 0,
+                "archive_size_n": len(same_work.sources),
                 "corpus": "library",
                 # V-077 (backend review): no text means no comparison ran; the
                 # zero above must never read as "the Library was empty".
                 "comparison_ran": False,
                 "n_flags": 1 if has_resubmission else 0,
+                "n_same_work_sources": len(same_work.sources),
                 "note": "The body could not be told apart from the reference list, so no "
                 "text was compared."
                 if body_refused
@@ -449,7 +489,7 @@ async def run_originality_reuse_check(
         session.add(result)
         await session.flush()
         if has_resubmission:
-            severity, reason, detail = _resubmission_flag_draft(hash_duplicate_id)
+            severity, reason, detail = _same_work_flag_draft(same_work)
             session.add(
                 Flag(
                     check_result_id=result.id,
@@ -476,13 +516,20 @@ async def run_originality_reuse_check(
             payload={
                 **result.detail,
                 "outcome": result.outcome.value,
-                "matched_manuscript_ids": [hash_duplicate_id] if has_resubmission else [],
+                "matched_manuscript_ids": sorted(s.manuscript_id for s in same_work.sources),
+                **same_work_audit,
             },
         )
         await session.commit()
         return result
 
-    query_result = await query_similar_manuscripts(session, manuscript_id, embeddings, settings)
+    query_result = await query_similar_manuscripts(
+        session,
+        manuscript_id,
+        embeddings,
+        settings,
+        exclude_manuscript_ids=same_work.excluded_ids,
+    )
     # F7.4 (V-072): passage-level candidates alongside the whole-doc/chapter
     # ones above -- a genuinely different chunker (`compute_passage_embeddings`),
     # queried separately (`query_similar_passages` excludes reference-list/
@@ -503,6 +550,7 @@ async def run_originality_reuse_check(
         # nearest few candidates so a topic match cannot hide the real source.
         confirm=lambda m: wording_evidence(m.own_text, m.matched_text, settings)["confirmed"],
         candidates=settings.reuse_confirm_candidates,
+        exclude_manuscript_ids=same_work.excluded_ids,
     )
     # V-077: byte-identical Library copies (two instructors adding the same
     # file) are reported against ONE representative, so a single source can
@@ -512,7 +560,7 @@ async def run_originality_reuse_check(
         {m.matched_manuscript_id for m in query_result.matches}
         | {p.matched_manuscript_id for p in passage_query_result.matches},
         instructor_id,
-        exclude_manuscript_ids=await comparison_exclusions(session, manuscript_id),
+        exclude_manuscript_ids=exclusions | same_work.excluded_ids,
     )
     if remapped:
         query_result = dataclasses.replace(
@@ -555,37 +603,8 @@ async def run_originality_reuse_check(
     # docstring for why this changes wording/context only, never severity.
     first_upload = await is_first_upload_for_instructor(session, manuscript_id)
 
-    # BUG-140: a same-instructor WHOLE-DOCUMENT exact duplicate (by hash
-    # above, or by embedding similarity here if the hash check didn't
-    # already find one -- e.g. a hash-less legacy row) is a resubmission
-    # question, not a plagiarism verdict. Collapse it, and every chapter/
-    # passage match against that SAME archived manuscript (the identical
-    # finding restated at finer grain), into one low-severity confirmation
-    # flag instead of the flood a re-upload otherwise produces (measured:
-    # 82 high-severity flags from one re-upload, ticket's own evidence).
-    resubmission_source_id = hash_duplicate_id
-    if resubmission_source_id is None and instructor_id is not None:
-        for match in query_result.matches:
-            if (
-                match.matched_chapter_title is None  # whole-document match only
-                and match.level == "exact_duplicate"
-                and match.matched_instructor_id == instructor_id
-            ):
-                resubmission_source_id = match.matched_manuscript_id
-                break
-
-    if resubmission_source_id is not None:
-        whole_and_chapter_matches = [
-            m for m in query_result.matches if m.matched_manuscript_id != resubmission_source_id
-        ]
-        passage_matches = [
-            p
-            for p in passage_query_result.matches
-            if p.matched_manuscript_id != resubmission_source_id
-        ]
-    else:
-        whole_and_chapter_matches = query_result.matches
-        passage_matches = passage_query_result.matches
+    whole_and_chapter_matches = query_result.matches
+    passage_matches = passage_query_result.matches
 
     # BUG-620: a similarity match is a finding only when the two passages
     # also share wording. Same-genre text (two requirements lists, two
@@ -594,7 +613,6 @@ async def run_originality_reuse_check(
     withheld_leads = [
         _withheld_lead("passage", m, m.level, m.own_text, m.matched_text, settings)
         for m in passage_query_result.unconfirmed
-        if m.matched_manuscript_id != resubmission_source_id
     ]
 
     coarse_drafts = []
@@ -667,9 +685,7 @@ async def run_originality_reuse_check(
             detail["evidence_unavailable"] = True
         coarse_drafts.append((severity, reason, anchor, detail))
 
-    n_flags = (
-        len(coarse_drafts) + len(passage_matches) + (1 if resubmission_source_id is not None else 0)
-    )
+    n_flags = len(coarse_drafts) + len(passage_matches) + (1 if has_resubmission else 0)
     no_comparisons = (
         query_result.archive_size_n == 0
         and passage_query_result.passage_archive_size_n == 0
@@ -703,7 +719,11 @@ async def run_originality_reuse_check(
             "pages_not_compared": not_compared.pages if not_compared else [],
             "not_compared_from": not_compared.start if not_compared else None,
             "comparison_ran": True,
-            "archive_size_n": query_result.archive_size_n,
+            # BUG-662: own records of the same work were compared too (by
+            # file hash and whole text) before being left out of the queries;
+            # counting them keeps "compared against 0" from sitting beside a
+            # lead that names one.
+            "archive_size_n": query_result.archive_size_n + len(same_work.sources),
             # V-077: what this count measured. Results written before D-028
             # have no "corpus" key; they counted the pre-Library archive.
             "corpus": "library",
@@ -712,6 +732,9 @@ async def run_originality_reuse_check(
             # Later Library mutations must not rewrite this report's scope.
             "library_passage_indexing": query_result.library_passage_indexing,
             "n_flags": n_flags,
+            # BUG-662: own Library records of this same work, left out of
+            # the counts above and named in one low lead.
+            "n_same_work_sources": len(same_work.sources),
             # BUG-620: matches not raised. Kept apart because they mean
             # different things: passages that share no wording (topic or
             # layout only), and sections whose only evidence is a passage too
@@ -728,8 +751,8 @@ async def run_originality_reuse_check(
     )
     session.add(result)
     await session.flush()  # need result.id before attaching flags
-    if resubmission_source_id is not None:
-        severity, reason, detail = _resubmission_flag_draft(resubmission_source_id)
+    if has_resubmission:
+        severity, reason, detail = _same_work_flag_draft(same_work)
         session.add(
             Flag(
                 check_result_id=result.id,
@@ -780,7 +803,7 @@ async def run_originality_reuse_check(
     matched_manuscript_ids = sorted(
         {d["matched_manuscript_id"] for *_, d in coarse_drafts}
         | {p.matched_manuscript_id for p in passage_matches}
-        | ({resubmission_source_id} if resubmission_source_id is not None else set())
+        | {s.manuscript_id for s in same_work.sources}
     )
     await write_audit_event(
         session,
@@ -804,7 +827,10 @@ async def run_originality_reuse_check(
             "withheld_leads": withheld_leads[: settings.reuse_confirm_audit_limit],
             "n_withheld_leads": len(withheld_leads),
             "matched_manuscript_ids": matched_manuscript_ids,
-            "resubmission_source_id": resubmission_source_id,
+            "resubmission_source_id": same_work.sources[0].manuscript_id
+            if has_resubmission
+            else None,
+            **same_work_audit,
         },
     )
     await session.commit()
