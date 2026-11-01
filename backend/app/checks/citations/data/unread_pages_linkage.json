@@ -1,6 +1,6 @@
 {
   "_comment": "BUG-619: which uncited-reference claims a page left unread could change, and how the lead for those is worded. A page whose reading order is unresolved is left out of the checks, but its text is still there, out of order. An entry is called uncited only when no unread page could be citing it, judged with the same name and bracket-number rules the readable text is read with. What stays withheld is shown as a lead naming the pages and what was found on them; it does not change readiness. Kept as data so the wording can change without code changes.",
-  "version": "unread-pages-uncited-v3",
+  "version": "unread-pages-uncited-v4",
   "entry_author_year": "Reference list entry '{first_author}' ({year})",
   "entry_numbered": "Reference list entry [{number}]",
   "author_unknown": "Unknown",
@@ -8,6 +8,7 @@
   "year_unavailable": "date unavailable",
   "lead_named_name": "{entry} is not cited on any page that was read. The text of {pages} could not be read in order and contains a form of the name \"{found}\" from this entry, so it may be cited there. Please check {pages} before treating the entry as unused. This lead does not change readiness.",
   "lead_named_number": "{entry} is not cited on any page that was read. The text of {pages} could not be read in order and contains a citation mark that covers number {found}, so it may be cited there. Please check {pages} before treating the entry as unused. This lead does not change readiness.",
+  "lead_unreadable_mark": "{entry} is not cited on any page that was read. The text of {pages} could not be read in order and contains a citation mark whose numbers could not be read, so it may be cited there. Please check {pages} before treating the entry as unused. This lead does not change readiness.",
   "lead_within_citing_text": "{entry} is not cited on any page that was read. {Pages} could not be read in order and {lies} among the pages that cite sources, so it may be cited there. Please check {pages} before treating the entry as unused. This lead does not change readiness.",
   "page_one": "page {page}",
   "page_many": "pages {pages}",

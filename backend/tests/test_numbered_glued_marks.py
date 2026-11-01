@@ -46,3 +46,20 @@ def test_an_unreadable_glued_mark_leaves_every_entry_possibly_cited():
 
 def test_a_control_without_the_glued_marks_still_finds_the_unused_entries():
     assert _uncited("The kiosk was compared across clinics.") == [7, 8, 9, 10, 12]
+
+
+def test_an_unreadable_locator_mark_leaves_every_entry_possibly_cited():
+    # A number too long to be a reference number cannot be read.
+    assert _uncited("The kiosk was compared [1234567890, p. 3] across clinics.") == []
+
+
+def test_an_unreadable_glued_or_body_mark_in_a_table_context_withholds_nothing_new():
+    # Not a citation the scan missed, so the unused entries are still found.
+    assert _uncited("See Table[1-99] for the values.") == [7, 8, 9, 10, 12]
+    assert _uncited("See Table [1-99] for the values.") == [7, 8, 9, 10, 12]
+
+
+def test_a_bridge_never_spans_further_than_the_range_limit():
+    # [7] and [60] are 53 apart, past the limit of 20, so 8 to 59 are not
+    # covered; 7 is still cited by its own mark.
+    assert _uncited("The kiosk was compared[7]-[60] across clinics.") == [8, 9, 10, 12]

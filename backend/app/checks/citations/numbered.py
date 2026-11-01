@@ -227,7 +227,11 @@ def _read_marks(
     for start, end, raw, kind in sorted(marks):
         found = _numbers_in_mark(raw, max_range_span=max_range_span, context=context)
         if found is None:
-            unreadable.add(kind)
+            # An unreadable mark in a non-citation context ("Table[1-99]") is
+            # not a citation the scan missed, as for a body mark.
+            prefix = text[max(0, start - context.lookback_chars) : start]
+            if not any(p.search(prefix) for p in context.noncitation_prefix_patterns):
+                unreadable.add(kind)
             prior = None
             continue
         if prior and _BETWEEN_RANGE_MARKS.fullmatch(text[prior_end:start]):
@@ -419,8 +423,9 @@ def _possibly_cited_numbers(
     """Numbers a mark may cite outside the main scan's reading, bounded like
     it: glued and locator marks, and the bridges any mark starts
     ("compared[7]-[10]" also covers 8 and 9). Also whether a glued or locator
-    mark could not be read, which leaves every entry possibly cited, as an
-    unreadable body mark does (BUG-654)."""
+    mark in a citation context could not be read, which leaves every entry
+    possibly cited, as an unreadable body mark in a citation context does
+    (BUG-654)."""
     numbers: set[int] = set()
     unreadable = False
     remaining = context.max_body_scan_chars
