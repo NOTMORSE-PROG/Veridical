@@ -17,9 +17,11 @@ named sources is the one actually listed. Precision over recall (charter
 judgment #1): when a citation shape is ambiguous, don't flag.
 """
 
+import json
 import re
 from bisect import bisect_right
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Protocol
 
 from app.checks.citations.numbered import reference_anchor
@@ -275,18 +277,12 @@ def numbered_style_coverage(
     )
 
 
-ORPHAN_WORDING = (
-    "In-text citation to '{authors}, {year}' has no matching entry in the "
-    "reference list. Possible missing reference, a typo in the author name "
-    "or year, or a citation style this checker didn't recognize — please "
-    "check manually."
+# How a linkage finding is worded is data (BUG-651), read once at import.
+_WORDING = json.loads(
+    (Path(__file__).parent / "data" / "linkage_wording.json").read_text(encoding="utf-8")
 )
-UNCITED_WORDING = (
-    "Reference list entry '{first_author}' ({year}) does not appear to be "
-    "cited anywhere in the body text. Possible unused reference, or an "
-    "in-text citation style this checker didn't recognize — please check "
-    "manually."
-)
+ORPHAN_WORDING = _WORDING["orphan"]
+UNCITED_WORDING = _WORDING["uncited"]
 
 
 # --- extraction --------------------------------------------------------------
@@ -961,16 +957,8 @@ def orphan_flags(orphans: list[InTextCitation]) -> list[CitationFlagDraft]:
     ]
 
 
-NUMERIC_ORPHAN_WORDING = (
-    "In-text citation {mark} points to source [{number}], but the numbered "
-    "reference list ends at [{last}]. Possible missing reference or a numbering "
-    "error. Please check manually."
-)
-NUMERIC_UNCITED_WORDING = (
-    "Reference list entry [{number}] does not appear to be cited anywhere in "
-    "the body text. Possible unused reference, or a citation form this checker "
-    "did not recognize. Please check manually."
-)
+NUMERIC_ORPHAN_WORDING = _WORDING["numeric_orphan"]
+NUMERIC_UNCITED_WORDING = _WORDING["numeric_uncited"]
 
 
 def numeric_linkage_flags(

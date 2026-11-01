@@ -1,0 +1,7 @@
+{
+  "_comment": "How a citation-linkage finding is worded (F5.3): an in-text citation with no matching reference entry, and a reference entry no citation names. Honest wording: a possible inconsistency for the instructor to check, never an accusation. Kept as data so it can change without code changes (BUG-651). No em or en dashes in any of it: the dash gate checks these strings too.",
+  "orphan": "In-text citation to '{authors}, {year}' has no matching entry in the reference list. Possible missing reference, a typo in the author name or year, or a citation style this checker didn't recognize. Please check manually.",
+  "uncited": "Reference list entry '{first_author}' ({year}) does not appear to be cited anywhere in the body text. Possible unused reference, or an in-text citation style this checker didn't recognize. Please check manually.",
+  "numeric_orphan": "In-text citation {mark} points to source [{number}], but the numbered reference list ends at [{last}]. Possible missing reference or a numbering error. Please check manually.",
+  "numeric_uncited": "Reference list entry [{number}] does not appear to be cited anywhere in the body text. Possible unused reference, or a citation form this checker did not recognize. Please check manually."
+}
