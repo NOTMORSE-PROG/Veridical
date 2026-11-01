@@ -7,23 +7,25 @@ export function descriptiveAssumptionLimit(scope?: StatisticalCheckScopeOut | nu
 }
 
 export function reconstructionScopeCopy(value?: ReconstructionScopeOut | null): { detail: string; incomplete: boolean } {
-  const unrecorded = { detail: "No SPRITE reconstruction status was recorded. Do not infer that this check ran.", incomplete: true };
+  // Score reconstruction tries to find whole-number answers that give a
+  // table's reported average and spread; said here in an instructor's terms.
+  const unrecorded = { detail: "No record of whether this step ran was saved, so do not assume it did.", incomplete: true };
   if (!value || value.state === "not_recorded") return unrecorded;
   const counts = [value.considered_rows, value.attempted_rows, value.compatible_rows, value.unassessed_rows];
   if (counts.some(count => !Number.isSafeInteger(count) || count === null || count < 0)) return unrecorded;
   const [considered, attempted, compatible, unassessed] = counts as number[];
   if (compatible + unassessed !== considered || compatible > attempted || attempted > considered) return unrecorded;
-  const recordedCounts = ` Rows considered: ${considered}; search attempted: ${attempted}; compatible candidates: ${compatible}; not assessed: ${unassessed}.`;
+  const rows = (n: number) => `${n} table ${n === 1 ? "row" : "rows"}`;
   if (value.state === "candidate_found" && considered > 0 && unassessed === 0) return {
-    detail: `SPRITE found compatible candidate distributions for ${compatible} declared rows. These are possible reconstructions under the reported assumptions, not recovered or verified original data.${recordedCounts}`,
+    detail: `For ${rows(compatible)}, it found at least one set of whole-number answers that gives the reported average and spread. That shows the numbers are possible, not that they are the real data.`,
     incomplete: false,
   };
   if (value.state === "incomplete" && unassessed > 0) return {
-    detail: `SPRITE reconstruction remains unassessed for ${unassessed} rows. Required scale assumptions may be missing or a bounded search did not produce a verified candidate. Search failure is not proof of inconsistency.${recordedCounts}`,
+    detail: `It could not check ${rows(unassessed)}, usually because the score scale was not stated. Not finding a match is not proof of an error.${compatible > 0 ? ` For ${rows(compatible)}, it found at least one possible set of answers.` : ""}`,
     incomplete: true,
   };
   if (value.state === "not_applicable" && considered === 0) return {
-    detail: "Score reconstruction (SPRITE) found no table rows with the details it needs, so it did not run. This does not establish that the manuscript contains no statistics.",
+    detail: "It did not run, because no table gave what it needs: an average with its score scale. This does not mean the paper has no statistics.",
     incomplete: false,
   };
   return unrecorded;

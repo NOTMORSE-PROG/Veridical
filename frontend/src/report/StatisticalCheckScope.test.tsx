@@ -39,22 +39,23 @@ describe("separate saved reconstruction scope", () => {
       reconstruction: { state: "candidate_found", considered_rows: 3, attempted_rows: 3, compatible_rows: 3, unassessed_rows: 0 } }} />);
     expect(screen.getByText("Statistical checks: Ran only in part.")).toBeVisible();
     expect(screen.getByText(/2 descriptive rows were not assessed by GRIM/)).toBeVisible();
-    expect(screen.getByText(/SPRITE found compatible candidate distributions for 3 declared rows/)).toHaveTextContent("not recovered or verified original data");
-    expect(screen.getByText(/Rows considered: 3; search attempted: 3; compatible candidates: 3; not assessed: 0/)).toBeVisible();
+    // A possible set of answers is never presented as the real data.
+    expect(screen.getByText(/For 3 table rows, it found at least one set of whole-number answers/)).toHaveTextContent("not that they are the real data");
+    expect(screen.queryByText(/Rows considered/)).not.toBeInTheDocument();
   });
   it("does not turn a bounded search failure into inconsistency or completion", () => {
     render(<StatisticalCheckScope scope={{ state: "completed", reconstruction: {
       state: "incomplete", considered_rows: 4, attempted_rows: 2, compatible_rows: 1, unassessed_rows: 3,
     } }} />);
     expect(screen.getByText("Statistical checks: Ran only in part.")).toBeVisible();
-    expect(screen.getByText(/SPRITE reconstruction remains unassessed for 3 rows/)).toHaveTextContent("Search failure is not proof of inconsistency.");
+    expect(screen.getByText(/It could not check 3 table rows/)).toHaveTextContent("Not finding a match is not proof of an error.");
     expect(screen.queryByText(/GRIM\/GRIMMER/)).not.toBeInTheDocument();
   });
   it("retains applicability limits for zero supported reconstruction rows", () => {
     render(<StatisticalCheckScope scope={{ state: "not_applicable", reconstruction: {
       state: "not_applicable", considered_rows: 0, attempted_rows: 0, compatible_rows: 0, unassessed_rows: 0,
     } }} />);
-    expect(screen.getByText(/found no table rows with the details it needs/)).toHaveTextContent("does not establish that the manuscript contains no statistics");
+    expect(screen.getByText(/It did not run, because no table gave what it needs/)).toHaveTextContent("This does not mean the paper has no statistics.");
   });
   it.each([
     { state: "candidate_found", considered_rows: 2, attempted_rows: 1, compatible_rows: 2, unassessed_rows: 0 },
@@ -66,7 +67,7 @@ describe("separate saved reconstruction scope", () => {
   ])("does not display success from an unusable receipt (%j)", reconstruction => {
     render(<StatisticalCheckScope scope={{ state: "completed", reconstruction: reconstruction as unknown as NonNullable<StatisticalCheckScopeOut["reconstruction"]> }} />);
     expect(screen.getByText("Statistical checks: Ran only in part.")).toBeVisible();
-    expect(screen.getByText(/No SPRITE reconstruction status was recorded/)).toBeVisible();
-    expect(screen.queryByText(/SPRITE found compatible/)).not.toBeInTheDocument();
+    expect(screen.getByText(/No record of whether this step ran was saved/)).toBeVisible();
+    expect(screen.queryByText(/found at least one set of whole-number answers/)).not.toBeInTheDocument();
   });
 });

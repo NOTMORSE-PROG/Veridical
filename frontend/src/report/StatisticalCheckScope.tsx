@@ -26,5 +26,5 @@ export function StatisticalCheckScope({ scope }: { scope?: StatisticalCheckScope
   const state = limitation || (scope?.reconstruction && reconstruction.incomplete) ? "incomplete" : scope?.state;
   const [label, detail] = state === "completed" || state === "not_applicable" || state === "incomplete"
     ? SCOPE_COPY[state] : SCOPE_COPY.not_recorded;
-  return <p className="signal-review-section__intro signal-statistical-scope"><strong>{label}</strong>{" "}<span>{detail}</span>{limitation && <> <span>{limitation}</span></>} <span><strong>Data reconstruction (SPRITE):</strong> {reconstruction.detail}</span></p>;
+  return <p className="signal-review-section__intro signal-statistical-scope"><strong>{label}</strong>{" "}<span>{detail}</span>{limitation && <> <span>{limitation}</span></>} <span><strong>Score reconstruction:</strong> {reconstruction.detail}</span></p>;
 }
