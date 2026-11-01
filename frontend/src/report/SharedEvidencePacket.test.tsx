@@ -15,7 +15,7 @@ describe("source availability actions", () => {
   it("does not offer or fetch an original page when neither a passage nor location was saved", () => {
     const fetch = vi.fn(); vi.stubGlobal("fetch", fetch);
     renderWithProviders(<SharedEvidencePacket token="test-link" manifest={manifest} references={[reference]} />);
-    expect(screen.getByText("No source location was saved for this item.")).toBeVisible();
+    expect(screen.getByText("No quotation or location was saved for this item.")).toBeVisible();
     expect(screen.queryByRole("button", { name: /Open original|Open saved source|original-page preview/ })).not.toBeInTheDocument();
     expect(fetch).not.toHaveBeenCalled();
   });

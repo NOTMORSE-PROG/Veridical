@@ -180,6 +180,8 @@ export function AdviserViewPage() {
           {params.has("criterion") && requestedIndex < 0 && <p role="status">Requested criterion is unavailable. Showing the first shared criterion.</p>}
           <nav aria-label="Choose a shared criterion" className="signal-shared-criterion-choices">{report.results.map((row, index) => <Button key={row.criterion_id} variant="secondary" aria-pressed={index === selectedIndex} aria-controls="shared-selected-criterion" onClick={event => selectCriterion(event.currentTarget, index)}><strong>{row.text}</strong><span>{resultDisplay(row).label}</span></Button>)}</nav>
           {selectedCriterion ? <>
+            {/* Announced from here, outside the item that is replaced on each move. */}
+            <p role="status" className="sr-only">Criterion {selectedIndex + 1} of {report.results.length}: {selectedCriterion.text}</p>
             <div id="shared-selected-criterion" key={`${token}:${report.assessment_revision}:${manifest?.snapshot_id}:${selectedCriterion.criterion_id}`}>
               <SignalCriteriaResults results={[selectedCriterion]} checkRunId={report.check_run_id} publicView publicSelection={{ position: selectedIndex + 1, total: report.results.length, nav: <nav aria-label="Shared criterion navigation" className="signal-item-head__nav">
                 <Button variant="secondary" disabled={selectedIndex === 0} onClick={event => selectCriterion(event.currentTarget, selectedIndex - 1)}>Previous criterion</Button>

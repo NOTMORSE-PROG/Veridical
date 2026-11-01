@@ -96,7 +96,7 @@ export function SharedEvidencePacket({ token, manifest, references, fallback = [
     {!manifest && <p>Original-page associations could not be loaded. Saved quotations remain available.</p>}
     {references.length ? references.map((reference, index) => <EvidenceItem key={reference.reference_id}
       label={DEFAULT_ROLES.has(reference.role) ? undefined : ROLE_LABEL[reference.role]}
-      quote={reference.quote} missing="No quotation was saved for this location."
+      quote={reference.quote} missing={reference.anchor?.trim() ? "No quotation was saved for this location." : "No quotation or location was saved for this item."}
       anchor={instructorAnchor(reference.anchor ?? "") || undefined}
       notes={<>
         {reference.role.startsWith("agreement_") && <p>The selected statement roles have not been verified as this study's objective and result.</p>}
@@ -106,7 +106,7 @@ export function SharedEvidencePacket({ token, manifest, references, fallback = [
         ? <SharedSourcePage key={`${token}:${manifest.snapshot_id}:${reference.reference_id}`} token={token} snapshot={manifest.snapshot_id} reference={reference} context={context} references={references}
           initialPreview={index === references.findIndex(item => item.source_scope === "own_manuscript" && Boolean(item.anchor?.trim() || item.quote.trim()))} />
         : undefined}
-      result={manifest && reference.source_scope === "own_manuscript" && !(reference.anchor?.trim() || reference.quote.trim())
+      result={manifest && reference.source_scope === "own_manuscript" && reference.quote.trim() && !reference.anchor?.trim()
         ? <p>No source location was saved for this item.</p> : undefined} />)
       : fallback.map((entry, index) => <EvidenceItem key={index} quote={entry.quote} anchor={instructorAnchor(entry.anchor) || undefined} />)}
     {!references.length && !fallback.length && <p>No source passages were saved for this item.</p>}
