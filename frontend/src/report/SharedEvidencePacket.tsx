@@ -9,6 +9,7 @@ import { Dialog } from "../ui/Dialog";
 import type { EvidenceManifest, EvidencePage, EvidenceReference } from "./evidenceTypes";
 import { verifyEvidencePage } from "./RecordedEvidencePage";
 import { EvidenceSourceLayout } from "./EvidenceSourceLayout";
+import { EvidenceItem } from "./EvidenceItem";
 
 const ROLE_LABEL: Record<EvidenceReference["role"], string> = {
   criterion_evidence: "Recorded criterion passage", criterion_scope: "Recorded assessment scope",
@@ -33,19 +34,23 @@ export function useSharedEvidenceManifest(token: string, enabled: boolean) {
   });
 }
 
-function SharedSourcePage({ token, snapshot, reference, context, references }: {
+function SharedSourcePage({ token, snapshot, reference, context, references, initialPreview = false }: {
   token: string; snapshot: string; reference: EvidenceReference;
   context?: SharedEvidenceContext; references: readonly EvidenceReference[];
+  initialPreview?: boolean;
 }) {
   const location = useLocation();
-  return <SharedPageSession key={`${location.key}:${token}:${snapshot}:${reference.reference_id}`} token={token} snapshot={snapshot} reference={reference} context={context} references={references} />;
+  return <SharedPageSession key={`${location.key}:${token}:${snapshot}:${reference.reference_id}`} token={token} snapshot={snapshot} reference={reference} context={context} references={references} initialPreview={initialPreview} />;
 }
 
-function SharedPageSession({ token, snapshot, reference, context, references }: {
+function SharedPageSession({ token, snapshot, reference, context, references, initialPreview }: {
   token: string; snapshot: string; reference: EvidenceReference;
   context?: SharedEvidenceContext; references: readonly EvidenceReference[];
+  initialPreview: boolean;
 }) {
-  const [preview, setPreview] = useState(true);
+  // Only the first item's preview opens by itself: stacked items would
+  // otherwise each request a page at once.
+  const [preview, setPreview] = useState(initialPreview);
   const [dialog, setDialog] = useState(false);
   const query = useQuery({ queryKey: ["shared-source-page", token, snapshot, reference.reference_id],
     enabled: preview || dialog, gcTime: 0, retry: false,
@@ -66,7 +71,7 @@ function SharedPageSession({ token, snapshot, reference, context, references }: 
   </>;
   return <div className="signal-shared-packet__source">
     <Button variant="secondary" aria-label={reference.anchor?.trim() ? `Open original page: ${instructorAnchor(reference.anchor)}` : undefined} onClick={() => setDialog(true)}>{reference.anchor?.trim() ? "Open original page" : "Open saved source"}</Button>
-    <Button variant="secondary" aria-expanded={preview} onClick={() => setPreview(value => !value)}>{preview ? "Hide" : "Show"} original-page preview</Button>
+    <Button variant="secondary" aria-expanded={preview} onClick={() => setPreview(value => !value)}>{preview ? "Hide" : "Show"} page preview</Button>
     {preview && image(false)}
     {dialog && <Dialog title={context ? `Evidence and explanation: ${context.title}` : `Original source: ${instructorAnchor(reference.anchor ?? "") || "Saved source"}`} wide className={context ? "signal-dialog--source-context" : undefined} onClose={() => setDialog(false)}>
       {context ? <EvidenceSourceLayout source={image(true)} context={<section aria-label="Shared assessment"><h3>{context.title}</h3><h4>Assessment and explanation</h4><p>{context.explanation || "No assessment explanation was shared for this item."}</p>{context.recordedNote && <p><strong>Recorded system note:</strong> {context.recordedNote}</p>}
@@ -76,29 +81,39 @@ function SharedPageSession({ token, snapshot, reference, context, references }: 
   </div>;
 }
 
-export function SharedEvidencePacket({ token, manifest, references, fallback = [], context, comparison = false }: {
+// The default role of a section needs no label; others say what the passage is.
+const DEFAULT_ROLES = new Set<EvidenceReference["role"]>(["criterion_evidence", "finding_excerpt"]);
+
+export function SharedEvidencePacket({ token, manifest, references, fallback = [], context, embedded = false }: {
   token: string; manifest?: EvidenceManifest; references: EvidenceReference[];
   fallback?: { quote: string; anchor: string }[];
   context?: SharedEvidenceContext;
   comparison?: boolean;
+  /** Inside a section that already has its own heading. */
+  embedded?: boolean;
 }) {
-  const [selected, setSelected] = useState(0);
-  const entries = references.length ? references : fallback;
-  const paired = comparison || references.length > 1 && references.some(reference => reference.role.startsWith("agreement_") || reference.role.startsWith("reuse_"));
-  const currentIndex = Math.min(selected, Math.max(0, entries.length - 1));
-  return <section className="signal-shared-packet" aria-label="Saved evidence">
-    <div className="signal-shared-packet__heading"><h4>Evidence from the manuscript</h4>{entries.length > 0 && <span role="status">{paired ? `${entries.length} related passages` : `Evidence ${currentIndex + 1} of ${entries.length}`}</span>}</div>
-    {!paired && entries.length > 1 && <nav className="signal-shared-evidence-navigation" aria-label="Saved evidence navigation"><Button variant="secondary" disabled={currentIndex === 0} onClick={() => setSelected(currentIndex - 1)}>Previous evidence</Button><Button variant="quiet" disabled={currentIndex === entries.length - 1} onClick={() => setSelected(currentIndex + 1)}>Next evidence</Button></nav>}
+  const list = <div className="signal-evidence-list">
     {!manifest && <p>Original-page associations could not be loaded. Saved quotations remain available.</p>}
-    {references.length ? (paired ? references : references.slice(currentIndex, currentIndex + 1)).map(reference => <div className="signal-shared-packet__evidence" key={reference.reference_id}>
-      <div><strong>{ROLE_LABEL[reference.role]}</strong><blockquote>{reference.quote || "No quotation was saved for this location."}</blockquote><p>{instructorAnchor(reference.anchor ?? "")}</p>
+    {references.length ? references.map((reference, index) => <EvidenceItem key={reference.reference_id}
+      label={DEFAULT_ROLES.has(reference.role) ? undefined : ROLE_LABEL[reference.role]}
+      quote={reference.quote} missing="No quotation was saved for this location."
+      anchor={instructorAnchor(reference.anchor ?? "") || undefined}
+      notes={<>
         {reference.role.startsWith("agreement_") && <p>The selected statement roles have not been verified as this study's objective and result.</p>}
         {reference.source_scope === "bounded_comparison_excerpt" && <p>Only this saved comparison excerpt is shared. Its original source page is unavailable in this report.</p>}
-      </div>
-      {manifest && reference.source_scope === "own_manuscript" && (reference.anchor?.trim() || reference.quote.trim()
-        ? <SharedSourcePage key={`${token}:${manifest.snapshot_id}:${reference.reference_id}`} token={token} snapshot={manifest.snapshot_id} reference={reference} context={context} references={references} />
-        : <p>No source location was saved for this item.</p>)}
-    </div>) : (paired ? fallback : fallback.slice(currentIndex, currentIndex + 1)).map((entry, index) => <div key={index}><blockquote>{entry.quote}</blockquote><p>{instructorAnchor(entry.anchor)}</p></div>)}
+      </>}
+      actions={manifest && reference.source_scope === "own_manuscript" && (reference.anchor?.trim() || reference.quote.trim())
+        ? <SharedSourcePage key={`${token}:${manifest.snapshot_id}:${reference.reference_id}`} token={token} snapshot={manifest.snapshot_id} reference={reference} context={context} references={references}
+          initialPreview={index === references.findIndex(item => item.source_scope === "own_manuscript" && Boolean(item.anchor?.trim() || item.quote.trim()))} />
+        : undefined}
+      result={manifest && reference.source_scope === "own_manuscript" && !(reference.anchor?.trim() || reference.quote.trim())
+        ? <p>No source location was saved for this item.</p> : undefined} />)
+      : fallback.map((entry, index) => <EvidenceItem key={index} quote={entry.quote} anchor={instructorAnchor(entry.anchor) || undefined} />)}
     {!references.length && !fallback.length && <p>No source passages were saved for this item.</p>}
+  </div>;
+  if (embedded) return list;
+  return <section className="signal-shared-packet signal-item-section" aria-labelledby={undefined}>
+    <h4 className="signal-item-section__title">Quoted evidence</h4>
+    {list}
   </section>;
 }

@@ -396,14 +396,14 @@ describe("AdviserViewPage", () => {
     expect(await screen.findByText("2 review items in this module, across 40 saved records. Choose an item to read its explanation and evidence.")).toBeVisible();
     expect(within(screen.getByRole("combobox", { name: "Choose a finding or comparison lead" })).getAllByRole("option")).toHaveLength(2);
     expect(screen.getByText("Complete explanation 48")).toBeVisible();
-    expect(screen.getByText("Complete comparison quotation 48")).toBeVisible();
+    expect(screen.getByText(/Complete comparison quotation 48/)).toBeVisible();
     expect(screen.queryByText("Complete explanation 10")).not.toBeInTheDocument();
     expect(screen.getAllByRole("article", { name: /Saved finding detail/ })).toHaveLength(1);
     expect(screen.getByText(/Location 39 of 39/)).toBeVisible();
     expect(screen.getByRole("button", { name: "Next location" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "Previous location" }));
     expect(screen.getByText("Complete explanation 47")).toBeVisible();
-    expect(screen.queryByText("Complete comparison quotation 48")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Complete comparison quotation 48/)).not.toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Next item" }));
     expect(screen.getByText("Complete explanation 99")).toBeVisible();

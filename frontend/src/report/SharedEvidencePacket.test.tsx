@@ -36,8 +36,8 @@ describe("source availability actions", () => {
     vi.stubGlobal("fetch", fetch);
     renderWithProviders(<SharedEvidencePacket token="test-link" manifest={manifest} references={[own, foreign]} />);
     expect(await screen.findByText("This source is no longer available.")).toBeVisible();
-    expect(screen.getByText(own.quote)).toBeVisible();
-    expect(screen.getByText(foreign.quote)).toBeVisible();
+    expect(screen.getByText(new RegExp(own.quote))).toBeVisible();
+    expect(screen.getByText(new RegExp(foreign.quote))).toBeVisible();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(String(fetch.mock.calls[0][0])).toContain(own.reference_id);
@@ -68,7 +68,7 @@ describe("source availability actions", () => {
     } });
     vi.stubGlobal("fetch", fetch);
     renderWithProviders(<SharedEvidencePacket token="test-link" manifest={manifest} references={[quoted]} />);
-    expect(screen.getByText(quoted.quote)).toBeVisible();
+    expect(screen.getByText((_, el) => el?.tagName === "SPAN" && el.textContent === `“${quoted.quote}”`)).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Open saved source" }));
     expect(await screen.findByRole("dialog", { name: "Original source: Saved source" })).toBeVisible();
     expect(await within(screen.getByRole("dialog")).findByText("No original-page image is available for this evidence.")).toBeVisible();
