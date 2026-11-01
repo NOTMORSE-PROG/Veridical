@@ -27,6 +27,8 @@ class AgreementCues:
     objective_status_patterns: tuple[str, ...] = ()
     named_system_pattern: str | None = None
     named_system_ignore: frozenset[str] = frozenset()
+    caption_patterns: tuple[str, ...] = ()
+    leading_note_pattern: str | None = None
 
 
 def load_cues(path: Path | None = None) -> AgreementCues:
@@ -47,4 +49,6 @@ def load_cues(path: Path | None = None) -> AgreementCues:
         objective_status_patterns=tuple(raw.get("objective_status_patterns", ())),
         named_system_pattern=raw.get("named_system_pattern"),
         named_system_ignore=frozenset(raw.get("named_system_ignore", ())),
+        caption_patterns=tuple(raw.get("caption_patterns", ())),
+        leading_note_pattern=raw.get("leading_note_pattern"),
     )

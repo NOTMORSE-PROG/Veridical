@@ -230,5 +230,10 @@
     "RasPi",
     "FreeRTOS",
     "OpenAPI"
-  ]
+  ],
+  "_source_bug626": "BUG-626 (2026-11-01): result sentences are read across wrapped lines. A caption line is not prose, so a sentence never continues through one; and a short note in brackets that closes the previous sentence, such as '(Appendix 5)', is not part of the next one.",
+  "caption_patterns": [
+    "^\\s*(?:table|figure|fig\\.|chart|graph)\\s*\\d"
+  ],
+  "leading_note_pattern": "^\\([^()]{1,40}\\)\\s+(?=[A-Z])"
 }

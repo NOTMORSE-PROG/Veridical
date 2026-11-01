@@ -326,7 +326,11 @@ def _extract_modal_statements(
 
 
 def _extract_outcome_prose(
-    blocks: list[TextBlock], cues: AgreementCues, *, heading_max_words: int
+    blocks: list[TextBlock],
+    cues: AgreementCues,
+    *,
+    heading_max_words: int,
+    wrap_min_width_ratio: float,
 ) -> list[Statement]:
     """Recognize source-bound candidates, not verified roles or complete coverage."""
     if not cues.outcome_prose_enabled:
@@ -349,6 +353,11 @@ def _extract_outcome_prose(
         if block.is_furniture or not block.text.strip():
             continue
         text = block.text.strip()
+        if not _has_words(text) or any(re.search(p, text, re.I) for p in cues.caption_patterns):
+            # Table cells, a stray page number or a caption are not prose and
+            # do not open a new section; a sentence never continues through them.
+            _flush()
+            continue
         if _is_heading_like(text, max_words=heading_max_words):
             _flush()
             in_outcomes = _heading_section(text, cues) == "outcomes"
@@ -359,9 +368,38 @@ def _extract_outcome_prose(
         if parse_reference(text, order_index=0).parse_status == CitationParseStatus.parsed:
             _flush()
             continue
+        if run and not _continues(run, block, wrap_min_width_ratio):
+            _flush()
         run.append(block)
     _flush()
     return candidates
+
+
+_WORD_OF_LETTERS = re.compile(r"[^\W\d_]{2,}")
+_ENDS_CLAUSE = re.compile(r"[.!?:][\"'”’)\]]*$")
+
+
+def _has_words(text: str) -> bool:
+    return _WORD_OF_LETTERS.search(text) is not None
+
+
+def _continues(run: list[TextBlock], block: TextBlock, wrap_min_width_ratio: float) -> bool:
+    """Whether `block` is the next printed line of the sentence in `run`, not
+    a new paragraph. A line that ends a sentence or a lead-in ("shown below:")
+    ends the paragraph. Otherwise a line that opens in lower case continues
+    it; one that opens in capitals continues it only when the line before
+    ran (nearly) the full width, as a wrapped line does: a short line with no
+    closing punctuation before a capital is a subheading or a caption."""
+    previous = run[-1]
+    if _ENDS_CLAUSE.search(previous.text.rstrip()):
+        return False
+    first = block.text.lstrip("\"'“‘([")[:1]
+    if first.islower():
+        return True
+    widths = [b.bbox[2] - b.bbox[0] for b in (*run, block) if b.bbox]
+    if not previous.bbox or not widths:
+        return False
+    return previous.bbox[2] - previous.bbox[0] >= wrap_min_width_ratio * max(widths)
 
 
 def _outcome_sentences(run: list[TextBlock], cues: AgreementCues) -> list[Statement]:
@@ -373,6 +411,9 @@ def _outcome_sentences(run: list[TextBlock], cues: AgreementCues) -> list[Statem
     out = []
     for start, end in _sentence_spans(joined):
         sentence = _normalize(joined[start:end])
+        if cues.leading_note_pattern:
+            # "(Appendix 5)" closing the previous sentence is not part of this one.
+            sentence = re.sub(cues.leading_note_pattern, "", sentence, count=1)
         if not sentence or not _is_whole_sentence(sentence):
             continue
         lowered = sentence.lower()
@@ -492,7 +533,10 @@ def extract_statements(
         )
         statements.extend(
             _extract_outcome_prose(
-                list(scope), cues, heading_max_words=settings.agreement_heading_max_words
+                list(scope),
+                cues,
+                heading_max_words=settings.agreement_heading_max_words,
+                wrap_min_width_ratio=settings.agreement_wrap_line_min_width_ratio,
             )
         )
     threshold = settings.agreement_dedup_similarity_threshold
