@@ -70,3 +70,12 @@ def test_the_scope_carries_the_counts_and_older_scopes_still_validate():
     assert scope.n_set_aside_no_shared_wording == 2
     older = OriginalityScopeOut(compared_count=4, corpus="library")
     assert older.n_set_aside_standard_text is None and older.standard_texts_set_aside == []
+
+
+def test_standard_names_are_clean_public_labels_cut_to_the_configured_length():
+    assert standard_names(["ISO/IEC\x00 25010\u200b usability\n definition"]) == [
+        "ISO/IEC 25010 usability definition"
+    ]
+    assert standard_names(["A" * 10], max_chars=6) == ["AAAAA\u2026"]
+    assert standard_names(["Short"], max_chars=6) == ["Short"]
+    assert standard_names(["\x07\x1b"]) == []

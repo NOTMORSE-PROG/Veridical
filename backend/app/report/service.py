@@ -8,6 +8,7 @@ an instructor resolves an escalation).
 import asyncio
 import dataclasses
 import logging
+import unicodedata
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Literal
@@ -732,14 +733,23 @@ async def _source_lock_holds(session: AsyncSession, manuscript_id: int) -> bool:
     return purged_at is None
 
 
-def standard_names(value) -> list[str]:
-    """Names of standard texts as the originality check saved them: strings
-    only, each once, in order. Never their wording."""
-    return (
-        sorted({name for name in value if isinstance(name, str) and name.strip()})
-        if isinstance(value, list)
-        else []
-    )
+def standard_names(value, max_chars: int | None = None) -> list[str]:
+    """Names of standard texts as the originality check saved them, as public
+    labels: strings only, control characters removed, spaces collapsed, cut
+    to the configured length, each once, in order. Never their wording."""
+    if not isinstance(value, list):
+        return []
+    limit = max_chars if max_chars is not None else get_settings().report_standard_name_max_chars
+    names = set()
+    for name in value:
+        if not isinstance(name, str):
+            continue
+        clean = " ".join(
+            "".join(" " if unicodedata.category(ch).startswith("C") else ch for ch in name).split()
+        )
+        if clean:
+            names.add(clean if len(clean) <= limit else clean[: limit - 1].rstrip() + "\u2026")
+    return sorted(names)
 
 
 def set_aside_counts(detail: dict) -> dict:
