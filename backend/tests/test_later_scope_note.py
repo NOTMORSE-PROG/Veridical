@@ -193,3 +193,15 @@ def test_the_note_reaches_the_report_row_and_leaves_the_grade_alone():
     unnoted = _to_criterion_result(result, criterion, importance="high")
     assert unnoted.later_note is None
     assert unnoted.reasoning == "The quoted sentence is free of errors."
+
+
+def test_no_note_when_only_the_parser_wording_mentions_the_whole_paper():
+    # BUG-609: "throughout the paper" in the evidence request is the parser's
+    # paraphrase; the single-sentence level itself can be shown by a quote.
+    item = SimpleNamespace(
+        text=PURPOSE.text,
+        evidence="A reader evaluates how consistently the purpose is stated throughout the paper.",
+        levels=PURPOSE.levels,
+    )
+    result, detail = saved()
+    assert later_note(result, item, detail) is None

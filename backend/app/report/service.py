@@ -408,7 +408,14 @@ def _current_scope(criterion: Criterion, verdict: str | None) -> list[str]:
     obligations = scope_obligations(
         criterion, verdict, get_settings().semantic_evidence_scope_patterns_file
     )
-    return sorted({item for obligation in obligations for item in obligation["capabilities"]})
+    return sorted(
+        {
+            item
+            for obligation in obligations
+            if obligation["decides"]
+            for item in obligation["capabilities"]
+        }
+    )
 
 
 def later_note(result: CheckResult, criterion: Criterion, detail: dict) -> str | None:

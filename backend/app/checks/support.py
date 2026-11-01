@@ -126,7 +126,13 @@ def scope_wording(missing: list[str]) -> tuple[str, str]:
 def scope_obligations(criterion, verdict: str, patterns_file=None) -> list[dict]:
     """Which of the criterion's texts (its own text, its evidence request, the
     claimed level's descriptor) need an assessment quotes cannot give, and
-    which kind."""
+    which kind.
+
+    Each match says whether it `decides` the guard. The criterion line and
+    the claimed level's descriptor do. The evidence request does not: it is
+    always the format parser's own paraphrase of what a reader would look
+    at, so two parses of the same format word it differently, and a match
+    there is recorded but never guards a grade on its own."""
     patterns = _scope_patterns(patterns_file)
     obligations = {"criterion": criterion.text}
     if getattr(criterion, "evidence", None):
@@ -137,7 +143,7 @@ def scope_obligations(criterion, verdict: str, patterns_file=None) -> list[dict]
             item["descriptor"] for item in criterion.levels if int(item["level"]) == level.ordinal
         )
     return [
-        {"key": key, "capabilities": needed}
+        {"key": key, "capabilities": needed, "decides": key != "evidence_request"}
         for key, text in obligations.items()
         if (
             needed := [
@@ -153,14 +159,15 @@ def scope_obligations(criterion, verdict: str, patterns_file=None) -> list[dict]
 
 
 def _capability_failure(batch, criterion, detail):
-    guarded = scope_obligations(
+    matched = scope_obligations(
         criterion, detail["verdict"], getattr(batch, "scope_patterns_file", None)
     )
+    guarded = [obligation for obligation in matched if obligation["decides"]]
     if not guarded:
         return None
     missing = sorted({item for obligation in guarded for item in obligation["capabilities"]})
     reason, caution = scope_wording(missing)
-    return {
+    failure = {
         "status": "unsupported",
         "reason": reason,
         # Shown beside a grade the "decide" policy keeps.
@@ -172,6 +179,11 @@ def _capability_failure(batch, criterion, detail):
         "source_scope": batch.label,
         "source_scope_policy": SOURCE_SCOPE_POLICY_VERSION,
     }
+    advisory = [obligation for obligation in matched if not obligation["decides"]]
+    if advisory:
+        # Kept for the audit trail: the parser's own wording also matched.
+        failure["advisory_obligations"] = advisory
+    return failure
 
 
 def _scope_failure(batch, criterion, detail):
