@@ -303,3 +303,45 @@ async def test_idempotent_rerun_does_not_duplicate_flags(session_factory):
         existing = await existing_internal_agreement_result(session, check_run_id)
     assert existing is not None
     assert existing.id == first.id
+
+
+async def test_an_aim_set_aside_from_the_literature_review_is_never_counted_as_matched(
+    session_factory,
+):
+    """The report says how many objectives were matched as objectives minus
+    unmatched ones, so an aim set aside before pairing must not be among the
+    objectives at all, or it would read as matched."""
+    check_run_id = await _seed_check_run(session_factory)
+    blocks = [
+        _block("Chapter 1 Introduction", page=1),
+        _block("Objectives of the Study", page=1),
+        _block("1. To build a biometric login module for the mobile app.", page=1),
+        _block("Chapter 2 Review of Related Literature", page=2),
+        _block("This research aims to create a face kiosk for campus libraries.", page=2),
+        _block("Chapter 4 Results and Discussion", page=3),
+        _block("The biometric login module was implemented and tested with 30 users.", page=3),
+    ]
+    extraction = _extraction(blocks).model_copy(update={"page_count": 3})
+    answer = {
+        "verdicts": [
+            {
+                "index": 0,
+                "verdict": "consistent",
+                "reasoning": "The module was built.",
+                "reason_category": None,
+                "objective_quote": "build a biometric login module",
+                "finding_quote": "The biometric login module was implemented",
+            }
+        ]
+    }
+    llm = ScriptedLLM([answer])
+    async with session_factory() as session:
+        result = await run_internal_agreement_check(
+            session, llm, check_run_id, extraction, get_settings()
+        )
+    detail = result.detail
+    assert detail["n_intents_extracted"] == 2
+    assert detail["n_intents"] == 1
+    assert detail["objective_sections"]["n_objectives_set_aside"] == 1
+    assert detail["objective_sections"]["set_aside"][0]["chapter_role"] == "literature"
+    assert detail["n_intents"] - detail["n_unmatched_intents"] <= 1
