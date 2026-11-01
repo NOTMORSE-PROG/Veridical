@@ -18,7 +18,9 @@ literature.
 
 The rule fails open: when no chapter of the document can be recognised,
 every candidate is kept and the run records that the section was not
-identified.
+identified. For objectives it also fails open when it would set aside every
+one: a thesis that states aims is never reported as having none. Chapter 1
+always keeps its objectives, whatever its title says.
 """
 
 from __future__ import annotations
@@ -29,7 +31,9 @@ from app.checks.agreement.extract import Statement
 from app.checks.section_roles import SectionMap
 
 NOT_IDENTIFIED_NOTE = "results section not identified, all sections used"
-OBJECTIVES_NOT_IDENTIFIED_NOTE = "chapters not identified, objectives from all sections used"
+OBJECTIVES_NOT_IDENTIFIED_NOTE = (
+    "objectives section not identified, objectives from all sections used"
+)
 # Roles whose text is not this study's own results. Results, conclusion,
 # abstract and unrecognised chapters ("3 AirSpecs ...") are kept.
 NOT_OWN_RESULTS = frozenset(
@@ -148,7 +152,10 @@ def gate_objectives(intents: list[Statement], sections: SectionMap) -> Objective
     kept, set_aside = [], []
     for intent in intents:
         where = sections.locate(intent.text, intent.anchor, intent.page)
-        if where.chapter_role in NOT_OWN_OBJECTIVES:
+        # Chapter 1 is where a thesis states its objectives, whatever its title:
+        # "The Problem and Its Background" reads as literature by its words.
+        first_chapter = where.chapter_number == 1
+        if where.chapter_role in NOT_OWN_OBJECTIVES and not first_chapter:
             set_aside.append(
                 {
                     "text": intent.text,
@@ -159,4 +166,9 @@ def gate_objectives(intents: list[Statement], sections: SectionMap) -> Objective
             )
         else:
             kept.append(intent)
+    if intents and not kept:
+        # Setting aside every aim would report "no objectives found" for a
+        # thesis that states some; the chapter map is less likely right than
+        # that, so nothing is set aside and the run says so.
+        return ObjectiveGate(kept=list(intents), identified=False)
     return ObjectiveGate(kept=kept, set_aside=set_aside)

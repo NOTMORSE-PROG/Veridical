@@ -6,7 +6,7 @@ from app.checks.agreement.extract import Statement
 from app.checks.agreement.sections import OBJECTIVES_NOT_IDENTIFIED_NOTE, gate_objectives
 from app.checks.section_roles import SectionMap, load_section_roles
 from app.config import get_settings
-from app.ingest.schemas import ExtractionResult, SectionTree, TextBlock
+from app.ingest.schemas import ExtractionResult, SectionNode, SectionTree, TextBlock
 
 SETTINGS = get_settings()
 
@@ -21,13 +21,13 @@ def _block(text, page):
     return TextBlock(text=text, page=page, paragraph=None, max_font_size=11.0, bold_ratio=0.0)
 
 
-def _extraction(blocks):
+def _extraction(blocks, nodes=()):
     return ExtractionResult(
         page_count=40,
         anchor_kind="page",
         image_only=False,
         text_chars=0,
-        section_tree=SectionTree(source="none", nodes=[]),
+        section_tree=SectionTree(source="heuristics" if nodes else "none", nodes=list(nodes)),
         blocks=blocks,
         images=[],
     )
@@ -37,9 +37,9 @@ def _intent(text, page):
     return Statement("intent", text, f"p. {page}", page, None, "aims to")
 
 
-def _gate(blocks, intents):
+def _gate(blocks, intents, nodes=()):
     sections = SectionMap(
-        _extraction(blocks),
+        _extraction(blocks, nodes),
         load_section_roles(),
         heading_max_words=SETTINGS.agreement_heading_max_words,
         locate_chars=SETTINGS.agreement_context_locate_chars,
@@ -87,4 +87,60 @@ def test_when_no_chapter_can_be_classified_every_objective_is_kept_and_said_so()
     blocks = [_block(OWN, 4), _block(OTHER_PAPER, 9)]
     gate = _gate(blocks, [_intent(OWN, 4), _intent(OTHER_PAPER, 9)])
     assert len(gate.kept) == 2
+    assert gate.detail()["note"] == OBJECTIVES_NOT_IDENTIFIED_NOTE
+
+
+def test_chapter_one_keeps_its_objectives_whatever_its_title_says():
+    # "The Problem and Its Background" reads as literature by its words, and
+    # "Research Design and Objectives" as methodology; both are Chapter 1.
+    for title in ("Chapter 1 The Problem and Its Background", "Chapter 1 Research Design"):
+        blocks = [
+            _block(title, 2),
+            _block(OWN, 4),
+            _block("Chapter 2 Review of Related Literature", 8),
+            _block(OTHER_PAPER, 9),
+        ]
+        gate = _gate(blocks, [_intent(OWN, 4), _intent(OTHER_PAPER, 9)])
+        assert [s.text for s in gate.kept] == [OWN], title
+        assert [item["chapter_role"] for item in gate.set_aside] == ["literature"]
+
+
+def test_steps_in_results_conclusion_and_appendix_chapters_are_set_aside():
+    blocks = [
+        _block("Chapter 1 Introduction", 2),
+        _block(OWN, 4),
+        _block("Chapter 4 Results and Discussion", 20),
+        _block(PROCESS_STEP, 21),
+        _block("Chapter 5 Summary, Conclusions and Recommendations", 30),
+        _block("The system aims to shorten clinic queues for every patient.", 31),
+        _block("Appendices", 36),
+        _block("The project aims to explore clinic booking in three cities.", 37),
+    ]
+    intents = [
+        _intent(OWN, 4),
+        _intent(PROCESS_STEP, 21),
+        _intent("The system aims to shorten clinic queues for every patient.", 31),
+        _intent("The project aims to explore clinic booking in three cities.", 37),
+    ]
+    nodes = [
+        SectionNode(title="CHAPTER 1 INTRODUCTION", level=1, page=2, children=[]),
+        SectionNode(title="CHAPTER 4 RESULTS AND DISCUSSION", level=1, page=20, children=[]),
+        SectionNode(title="CHAPTER 5 SUMMARY AND CONCLUSIONS", level=1, page=30, children=[]),
+        SectionNode(title="APPENDICES", level=1, page=36, children=[]),
+    ]
+    gate = _gate(blocks, intents, nodes)
+    assert [s.text for s in gate.kept] == [OWN]
+    assert [item["chapter_role"] for item in gate.set_aside] == [
+        "results",
+        "conclusion",
+        "appendix",
+    ]
+
+
+def test_a_thesis_whose_every_aim_would_be_set_aside_keeps_them_and_says_so():
+    # Better to compare a possible non-objective than to report that a thesis
+    # stating aims has none.
+    blocks = [_block("Chapter 2 Background and Related Work", 8), _block(OTHER_PAPER, 9)]
+    gate = _gate(blocks, [_intent(OTHER_PAPER, 9)])
+    assert [s.text for s in gate.kept] == [OTHER_PAPER] and gate.set_aside == []
     assert gate.detail()["note"] == OBJECTIVES_NOT_IDENTIFIED_NOTE
