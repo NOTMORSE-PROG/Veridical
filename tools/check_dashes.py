@@ -56,7 +56,17 @@ TS_ROOTS = ("frontend/src",)
 # for that once hid real flag wording in a regex-heavy file (BUG-651), so only
 # the pattern argument itself is exempt: the first argument of a `re` call, and
 # the character set given to a string's strip, split or replace.
-RE_CALLS = {"compile", "search", "match", "fullmatch", "sub", "subn", "split", "finditer", "findall"}
+RE_CALLS = {
+    "compile",
+    "search",
+    "match",
+    "fullmatch",
+    "sub",
+    "subn",
+    "split",
+    "finditer",
+    "findall",
+}
 STR_PATTERN_METHODS = {"strip", "lstrip", "rstrip", "split", "rsplit", "replace"}
 # TypeScript has no parser here; a file listed would be skipped as a whole.
 ALLOW_REGEX_FILES: set[str] = set()
@@ -72,8 +82,11 @@ def _pattern_arguments(tree: ast.AST) -> set[int]:
         func = node.func
         is_re = isinstance(func.value, ast.Name) and func.value.id == "re" and func.attr in RE_CALLS
         if is_re or func.attr in STR_PATTERN_METHODS:
-            exempt.update(id(sub) for sub in ast.walk(node.args[0]) if isinstance(sub, ast.Constant))
+            exempt.update(
+                id(sub) for sub in ast.walk(node.args[0]) if isinstance(sub, ast.Constant)
+            )
     return exempt
+
 
 # Paths whose strings never reach a user.
 SKIP_PARTS = {"tests", "fixtures", "__pycache__", "node_modules", ".venv"}
@@ -102,9 +115,7 @@ def scan_python(path: pathlib.Path) -> list[tuple[int, str]]:
 
     docstrings: set[int] = set()
     for node in ast.walk(tree):
-        if isinstance(
-            node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
-        ):
+        if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             body = getattr(node, "body", None)
             if (
                 body
