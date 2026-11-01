@@ -28,7 +28,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from app.checks.agreement.extract import Statement
-from app.checks.section_roles import SectionMap
+from app.checks.section_roles import SectionMap, load_section_roles
 
 NOT_IDENTIFIED_NOTE = "results section not identified, all sections used"
 OBJECTIVES_ALL_SET_ASIDE_NOTE = (
@@ -37,40 +37,11 @@ OBJECTIVES_ALL_SET_ASIDE_NOTE = (
 OBJECTIVES_NOT_IDENTIFIED_NOTE = (
     "objectives section not identified, objectives from all sections used"
 )
-# Roles whose text is not this study's own results. Results, conclusion,
-# abstract and unrecognised chapters ("3 AirSpecs ...") are kept.
-NOT_OWN_RESULTS = frozenset(
-    {
-        "table_of_contents",
-        "front_matter",
-        "biography",
-        "references",
-        "appendix",
-        "introduction",
-        "literature",
-        "methodology",
-        "future_work",
-    }
-)
-
-
-# Chapters whose "aims" are not this study's objectives. The introduction, the
-# abstract and unrecognised chapters ("3 AirSpecs ...", which state that
-# chapter's study objectives) are kept.
-NOT_OWN_OBJECTIVES = frozenset(
-    {
-        "table_of_contents",
-        "front_matter",
-        "biography",
-        "references",
-        "appendix",
-        "literature",
-        "methodology",
-        "results",
-        "conclusion",
-        "future_work",
-    }
-)
+# The packaged rules, for code that labels a set-aside entry without a
+# section map at hand. The gates read the rules from the section map, so a
+# format's own roles file applies there (data/section_roles.json, "agreement").
+NOT_OWN_RESULTS = load_section_roles().results_excluded
+NOT_OWN_OBJECTIVES = load_section_roles().objectives_excluded
 
 
 @dataclass(frozen=True)
@@ -108,7 +79,7 @@ def gate_results(outcomes: list[Statement], sections: SectionMap) -> SectionGate
     kept, set_aside, kept_chapters = [], [], []
     for outcome in outcomes:
         where = sections.locate(outcome.text, outcome.anchor, outcome.page)
-        if {where.chapter_role, where.heading_role} & NOT_OWN_RESULTS:
+        if {where.chapter_role, where.heading_role} & sections.roles.results_excluded:
             set_aside.append(
                 {
                     "text": outcome.text,
@@ -163,8 +134,8 @@ def gate_objectives(intents: list[Statement], sections: SectionMap) -> Objective
         where = sections.locate(intent.text, intent.anchor, intent.page)
         # Chapter 1 is where a thesis states its objectives, whatever its title:
         # "The Problem and Its Background" reads as literature by its words.
-        first_chapter = where.chapter_number == 1
-        if where.chapter_role in NOT_OWN_OBJECTIVES and not first_chapter:
+        always_kept = where.chapter_number in sections.roles.objectives_kept_chapters
+        if where.chapter_role in sections.roles.objectives_excluded and not always_kept:
             set_aside.append(
                 {
                     "text": intent.text,

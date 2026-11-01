@@ -186,3 +186,47 @@ def test_a_background_heading_outside_chapter_one_does_not_set_an_aim_aside():
     ]
     gate = _gate(blocks, [_intent(OWN, 4), _intent(CHAPTER_AIM, 21)])
     assert [s.text for s in gate.kept] == [OWN, CHAPTER_AIM]
+
+
+def test_the_rules_are_data_and_a_format_can_change_them(tmp_path):
+    import json
+
+    from app.checks.section_roles import _DEFAULT_FILE
+
+    roles = load_section_roles()
+    # The packaged data holds the rules the check used to carry in code.
+    assert roles.objectives_kept_chapters == frozenset({1})
+    assert "literature" in roles.objectives_excluded
+    assert "introduction" not in roles.objectives_excluded
+    assert "introduction" in roles.results_excluded
+    # A format whose first chapter is a literature review can say so.
+    custom = json.loads(_DEFAULT_FILE.read_text(encoding="utf-8"))
+    custom["agreement"]["objectives_always_kept_chapters"] = []
+    path = tmp_path / "roles.json"
+    path.write_text(json.dumps(custom), encoding="utf-8")
+    blocks = [
+        _block("Chapter 1 Background of the Study", 2),
+        _block(OTHER_PAPER, 3),
+        _block("Chapter 2 Introduction", 8),
+        _block(OWN, 9),
+    ]
+    sections = SectionMap(
+        _extraction(blocks),
+        load_section_roles(path),
+        heading_max_words=SETTINGS.agreement_heading_max_words,
+        locate_chars=SETTINGS.agreement_context_locate_chars,
+    )
+    gate = gate_objectives([_intent(OTHER_PAPER, 3), _intent(OWN, 9)], sections)
+    assert [s.text for s in gate.kept] == [OWN]
+
+
+def test_a_roles_file_without_the_agreement_rules_keeps_the_packaged_ones(tmp_path):
+    import json
+
+    from app.checks.section_roles import _DEFAULT_FILE
+
+    custom = json.loads(_DEFAULT_FILE.read_text(encoding="utf-8"))
+    del custom["agreement"]
+    path = tmp_path / "roles.json"
+    path.write_text(json.dumps(custom), encoding="utf-8")
+    assert load_section_roles(path).objectives_excluded == load_section_roles().objectives_excluded
