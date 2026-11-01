@@ -32,6 +32,8 @@ export interface SharedModuleStatusInput {
   /** The check says what it left out elsewhere on the page (agreement scope,
    * originality scope), so no generic "not covered" line is needed. */
   coverageShownElsewhere?: boolean;
+  /** What the check left out is listed under the points, reason included. */
+  coverageListed?: boolean;
   detailSnapshot?: "current" | "stale" | "not_recorded";
 }
 
@@ -40,9 +42,9 @@ export function sharedModuleTone(state: State): "done" | "partial" | "unknown" {
   return state === "partial" || state === "incomplete" ? "partial" : state === "not_recorded" ? "unknown" : "done";
 }
 
-export function sharedModuleStatus({ kind, state, findings, leads, coverageReason, coverageShownElsewhere, detailSnapshot }: SharedModuleStatusInput): { title: string; points: string[] } {
+export function sharedModuleStatus({ kind, state, findings, leads, coverageReason, coverageShownElsewhere, coverageListed, detailSnapshot }: SharedModuleStatusInput): { title: string; points: string[] } {
   const found = plural(findings, "possible inconsistency", "possible inconsistencies");
-  const notCovered = coverageReason && coverageCopy(coverageReason)
+  const notCovered = coverageListed ? [] : coverageReason && coverageCopy(coverageReason)
     ? [`Not covered: ${coverageCopy(coverageReason)}`]
     : coverageShownElsewhere ? [] : ["This link does not record what this check did not cover."];
   const leadLine = leads > 0 ? [`${plural(leads, "comparison lead", "comparison leads")}: a lead is a passage to compare yourself. It is not a finding and is not scored.`] : [];
