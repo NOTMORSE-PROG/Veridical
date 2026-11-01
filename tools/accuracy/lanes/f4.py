@@ -94,11 +94,13 @@ LIMITATIONS = (
     "the thesis, are counted as misses ('objective set aside'). A plant whose objective is "
     "a restatement set aside this way counts as reached when the result is paired with the "
     "thesis's original statement of the same objective.",
-    "Verdicts on identical pairs differ between runs when the batches differ (BUG-635): on "
-    "the dev half 30 of 97 identical pairs got a different verdict once a code change "
-    "regrouped the batches. Whether that comes from the other pairs in a call or from "
-    "run-to-run variation of the model is not yet separated. A difference between two runs "
-    "is only attributable to a change where the change decides it without the model.",
+    "Verdicts on identical pairs differ between runs (BUG-635). Measured on the dev half with "
+    "identical code and pairs: asking the same batches again changed about 1 verdict in 10; "
+    "regrouping the pairs into other batches changed 2 to 3 times as many. Recall (judged "
+    "contradictory) came out at 29 to 45 of 60 (48% to 75%) across those runs, so any single "
+    "F4 recall figure stands for that band until BUG-635 ships. Specificity on restatement "
+    "controls was 25 of 25 in every run. A difference between two runs is only attributable "
+    "to a change where the change decides it without the model.",
 )
 # Shorter pieces of a planted context frame are heading words, not content.
 CONTEXT_SENTENCE_MIN = 25
