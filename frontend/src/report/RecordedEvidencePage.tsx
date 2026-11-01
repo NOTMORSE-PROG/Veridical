@@ -12,6 +12,11 @@ import { useEvidenceManifest } from "./useEvidenceSource";
 import type { FlagOut } from "../api/types";
 import { CriterionEvidenceDialog, type CriterionEvidenceContext } from "./CriterionEvidenceDialog";
 
+/** 404, 409 and 410 do not change on a retry; a busy or failed server may. */
+export function isPermanentSourceError(error: unknown): boolean {
+  return error instanceof ApiError && [404, 409, 410].includes(error.status);
+}
+
 export async function verifyEvidencePage(page: EvidencePage, snapshot: string, reference: string) {
   if (page.snapshot_id !== snapshot || page.placement.reference_id !== reference) {
     throw new ApiError(409, "conflict", "This evidence changed. Reload its recorded source links.");
@@ -86,8 +91,10 @@ function RecordedPageSession({ checkRunId, snapshot, reference, cachedPage, cont
   const wholeDocument = /^whole (?:document|manuscript)$/i.test(instructorAnchor(reference.anchor ?? "").trim());
   const content = (enlarged: boolean) => <>
     {query.isFetching && <p role="status">Loading the recorded original page.</p>}
-    {query.isError && <div role="alert"><p>{query.error instanceof ApiError ? query.error.message : "The original page could not be loaded."}</p>
-      <Button variant="secondary" disabled={query.isFetching} onClick={() => { void query.refetch(); }}>Retry original page</Button></div>}
+    {query.isError && (isPermanentSourceError(query.error)
+      ? <p role="status">{query.error instanceof ApiError ? query.error.message : "The original page could not be loaded."}</p>
+      : <div role="alert"><p>{query.error instanceof ApiError ? query.error.message : "The original page could not be loaded."}</p>
+        <Button variant="secondary" disabled={query.isFetching} onClick={() => { void query.refetch(); }}>Retry original page</Button></div>)}
     {current && wholeDocument && <p className="signal-field-hint">This comparison covers the whole document, so no single page image applies. Read the passage in the manuscript beside this review.</p>}
     {current && !wholeDocument && <figure className={enlarged ? "signal-evidence-dialog__page" : "signal-criterion-packet__preview"}>
       {current.image_data_url ? <img src={current.image_data_url} alt={`Original source, ${instructorAnchor(reference.anchor ?? "")}`} /> : <p>No original-page image is available for this saved evidence.</p>}

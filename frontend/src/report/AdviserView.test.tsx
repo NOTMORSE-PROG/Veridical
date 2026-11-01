@@ -370,7 +370,7 @@ describe("AdviserViewPage", () => {
     fireEvent.click(pending);
     expect(screen.getByRole("heading", { name: "States the research problem" })).toBeVisible();
     expect(screen.queryByRole("heading", { name: "Has an abstract" })).not.toBeInTheDocument();
-    expect(within(chooser).getByRole("button", { name: /States the research problem/ })).toHaveTextContent(/Awaiting review/i);
+    expect(within(chooser).getByRole("button", { name: /States the research problem/ })).toHaveTextContent(/Needs review/i);
     expect(document.querySelectorAll(".signal-result-card")).toHaveLength(1);
     expect(screen.getByRole("button", { name: "Next criterion" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "Previous criterion" }));
@@ -393,12 +393,13 @@ describe("AdviserViewPage", () => {
       })),
     }) }));
     renderWithProviders(<AdviserViewPage />, { route: "/shared/tok123?section=findings&module=originality_reuse&finding=48&reader=faculty", path: "/shared/:token" });
-    expect(await screen.findByText("2 review items in this module, across 40 saved records. Choose an item to read its explanation and evidence.")).toBeVisible();
+    expect(await screen.findByText("2 review items in this check, from 40 saved records.")).toBeVisible();
     expect(within(screen.getByRole("combobox", { name: "Choose a finding or comparison lead" })).getAllByRole("option")).toHaveLength(2);
     expect(screen.getByText("Complete explanation 48")).toBeVisible();
     expect(screen.getByText(/Complete comparison quotation 48/)).toBeVisible();
     expect(screen.queryByText("Complete explanation 10")).not.toBeInTheDocument();
-    expect(screen.getAllByRole("article", { name: /Saved finding detail/ })).toHaveLength(1);
+    // One finding at a time, as one item.
+    expect(document.querySelectorAll("#shared-selected-finding")).toHaveLength(1);
     expect(screen.getByText(/Location 39 of 39/)).toBeVisible();
     expect(screen.getByRole("button", { name: "Next location" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "Previous location" }));
@@ -411,7 +412,7 @@ describe("AdviserViewPage", () => {
     expect(screen.getByRole("link", { name: "Read final decision" })).toHaveAttribute("href", "/shared/tok123?section=findings&module=originality_reuse&finding=99&reader=faculty#shared-decision-heading");
     fireEvent.click(screen.getByRole("button", { name: /Citation integrity/ }));
     expect(screen.getByText("No shared integrity signals are shown in this module.")).toBeVisible();
-    expect(screen.queryByRole("article", { name: /Saved finding detail/ })).not.toBeInTheDocument();
+    expect(document.querySelector("#shared-selected-finding")).toBeNull();
     expect(screen.queryByText(/Requested finding is unavailable/)).not.toBeInTheDocument();
   });
 
@@ -420,16 +421,15 @@ describe("AdviserViewPage", () => {
       affects_readiness: false, is_passage_level: true, evidence_excerpt: `COMPLETE_LEAD_QUOTE_${id}` }));
     vi.stubGlobal("fetch", stubFetchByPath({ "/shared/tok123/report": shared({ flags: leads }) }));
     renderWithProviders(<AdviserViewPage />, { route: "/shared/tok123?section=findings&module=originality_reuse&finding=20&lead_view=resolved", path: "/shared/:token" });
-    const summary = await screen.findByLabelText(/Evidence for Comparison lead 2 of 3\. Record #20/);
-    expect(summary).toBeVisible();
-    expect(document.querySelectorAll(".signal-comparison-list > li")).toHaveLength(1);
-    expect(screen.getByText("Selected record; 3 comparison leads in this check")).toBeVisible();
-    expect(screen.queryByText("COMPLETE_LEAD_QUOTE_10", { selector: "blockquote" })).not.toBeInTheDocument();
-    expect(screen.queryByLabelText(/Comparison lead 1 of 1/)).not.toBeInTheDocument();
-    fireEvent.click(summary);
-    expect(screen.getByText(/COMPLETE_LEAD_QUOTE_20/, { selector: "blockquote" })).toBeVisible();
+    // The selected lead is one item, numbered the way the chooser numbers it.
+    expect(await screen.findByRole("heading", { name: "Comparison lead", level: 3 })).toBeVisible();
+    expect(screen.getByText("Item 3 of 3", { selector: ".signal-item-head__bar span" })).toBeVisible();
+    expect(document.querySelectorAll("#shared-selected-finding")).toHaveLength(1);
+    expect(screen.getByText(/COMPLETE_LEAD_QUOTE_20/)).toBeVisible();
+    expect(screen.queryByText(/COMPLETE_LEAD_QUOTE_10/)).not.toBeInTheDocument();
     expect(screen.getByText("Not scored. Does not affect readiness or block your decision.")).toBeVisible();
     expect(screen.queryByRole("group", { name: "Filter comparison leads" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Filter integrity signals" })).not.toBeInTheDocument();
   });
 
   it("falls back visibly for a finding outside the selected module without showing another module's detail", async () => {

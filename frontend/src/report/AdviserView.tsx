@@ -26,7 +26,11 @@ import { selectedCriterionId } from "./criterionReviewNavigation";
 import { criterionRecordId } from "./savedJudgment";
 import { clusterFlagFindings } from "./flagClusters";
 import { problemLabel } from "../domain/problemLabel";
-import { isOptionalComparisonLead } from "../domain/comparisonLeadIdentity";
+import { COMPARISON_LEAD_COPY, isOptionalComparisonLead } from "../domain/comparisonLeadIdentity";
+import { notCountedLabel } from "../domain/findingSummary";
+import { readinessExclusionLine } from "../domain/readinessExclusion";
+import { severityLabel } from "../domain/severity";
+import { CITATION_HISTORY_TITLE } from "../domain/citationHistory";
 import { instructorAnchor } from "../domain/sourceAnchor";
 import { resultDisplay } from "./ResultsTable";
 import { claimFocusContinuation, type FocusContinuation } from "../routing/focusContinuation";
@@ -205,37 +209,56 @@ export function AdviserViewPage() {
             compared={agreementModule.undetermined?.compared_count ?? null}
             interrupted={isInterrupted(agreementModule.agreement_scope, agreementModule.state)} />}
           {params.has("finding") && requestedGroupIndex < 0 && <p role="status">Requested finding is unavailable in this module. Showing its first shared finding.</p>}
-          {findingGroups.length > 0 && <>
-            <p>{findingGroups.length} review item{findingGroups.length === 1 ? "" : "s"} in this module, across {moduleFlags.length} saved record{moduleFlags.length === 1 ? "" : "s"}. Choose an item to read its explanation and evidence.</p>
-            <label className="signal-field"><span>Choose a finding or comparison lead</span><select aria-controls="shared-selected-finding" value={selectedGroup?.key ?? ""} onChange={event => {
-              const group = findingGroups.find(item => item.key === event.target.value);
-              if (group) selectFinding(event.currentTarget, group.flags[0].id);
-            }}>{findingGroups.map((group, index) => <option key={group.key} value={group.key}>{index + 1}. {isOptionalComparisonLead(group.flags[0]) ? "Comparison lead" : problemLabel(group.flags[0].problem_kind) ?? group.flags[0].criterion_text ?? "Possible inconsistency"} - {group.flags.length} saved location{group.flags.length === 1 ? "" : "s"}</option>)}</select></label>
-            <nav aria-label="Shared finding navigation" className="signal-control-cluster">
-              <Button variant="secondary" disabled={selectedGroupIndex === 0} onClick={event => selectFinding(event.currentTarget, findingGroups[selectedGroupIndex - 1].flags[0].id)}>Previous item</Button>
-              <span role="status">Item {selectedGroupIndex + 1} of {findingGroups.length}</span>
-              <Button variant="secondary" disabled={selectedGroupIndex >= findingGroups.length - 1} onClick={event => selectFinding(event.currentTarget, findingGroups[selectedGroupIndex + 1].flags[0].id)}>Next item</Button>
-            </nav>
-            <h3 id="shared-selected-finding-heading" tabIndex={-1}>Selected {selectedFlag && isOptionalComparisonLead(selectedFlag) ? "comparison lead" : "finding"}</h3>
-            {selectedGroup && selectedGroup.flags.length > 1 && <nav aria-label="Shared finding locations" className="signal-control-cluster">
-              <Button variant="secondary" disabled={selectedLocationIndex === 0} onClick={event => selectFinding(event.currentTarget, selectedGroup.flags[selectedLocationIndex - 1].id)}>Previous location</Button>
-              <span role="status">Location {selectedLocationIndex + 1} of {selectedGroup.flags.length}: {instructorAnchor(selectedFlag?.page_anchor ?? "")}</span>
-              <Button variant="secondary" disabled={selectedLocationIndex >= selectedGroup.flags.length - 1} onClick={event => selectFinding(event.currentTarget, selectedGroup.flags[selectedLocationIndex + 1].id)}>Next location</Button>
-            </nav>}
-          </>}
-          <div id="shared-selected-finding" key={`${token}:${report.assessment_revision}:${manifest?.snapshot_id}:${selectedFlag?.id}`}>
+          <SignalPublicFlags framingOnly flags={moduleFlags} selectedRecordId={selectedFlag?.id} selectedModule={selectedModule} originalityScope={selectedModule === "originality_reuse" ? report.originality_scope : null} checkRunId={report.check_run_id} statisticalScope={selectedModule === "statistical_forensics" ? report.statistical_check_scope : null} />
           {selectedModule === "internal_agreement" && undecidedCount > 0 && !agreementModule?.agreement_scope && <p className="signal-field-hint">VERIDICAL could not decide on {undecidedCount} objective and result pair{undecidedCount === 1 ? "" : "s"}. These are not findings; the instructor's report lists them.</p>}
-        <SignalPublicFlags flags={moduleFlags} selectedRecordId={selectedFlag?.id} selectedModule={selectedModule} originalityScope={selectedModule === "originality_reuse" ? report.originality_scope : null} checkRunId={report.check_run_id} statisticalScope={selectedModule === "statistical_forensics" ? report.statistical_check_scope : null} />
-          {(selectedFlag ? [selectedFlag] : []).map(flag => {
-            const detail = details.find(saved => saved.id === flag.id);
-            if (!detail && !manifest?.references.some(ref => ref.flag_id === flag.id)) return null;
-            return <article className="signal-shared-packet" key={flag.id} aria-label={`Saved finding detail ${flag.id}`}>
-              <h3>Saved finding record #{flag.id}</h3>
-              <div className="signal-shared-packet__explanation"><p>{detail?.ai_reasoning ?? "No additional system explanation was saved with this link."}</p></div>
+          {findingGroups.length > 0 && selectedGroup && selectedFlag && (() => {
+            const lead = isOptionalComparisonLead(selectedFlag);
+            const noun = findingGroups.some(group => isOptionalComparisonLead(group.flags[0])) ? "Item" : "Finding";
+            const title = lead ? "Comparison lead" : problemLabel(selectedFlag.problem_kind) ?? selectedFlag.criterion_text ?? "Possible inconsistency";
+            const detail = details.find(saved => saved.id === selectedFlag.id);
+            const flag = selectedFlag;
+            return <>
+              <div className="signal-field signal-shared-finding-picker"><label htmlFor="shared-finding-choice">Choose a finding or comparison lead</label>
+                <select id="shared-finding-choice" aria-controls="shared-selected-finding" aria-describedby="shared-finding-count" value={selectedGroup.key} onChange={event => {
+                  const group = findingGroups.find(item => item.key === event.target.value);
+                  if (group) selectFinding(event.currentTarget, group.flags[0].id);
+                }}>{findingGroups.map((group, index) => <option key={group.key} value={group.key}>{index + 1}. {isOptionalComparisonLead(group.flags[0]) ? "Comparison lead" : problemLabel(group.flags[0].problem_kind) ?? group.flags[0].criterion_text ?? "Possible inconsistency"} - {group.flags.length} saved location{group.flags.length === 1 ? "" : "s"}</option>)}</select>
+                <span id="shared-finding-count" className="signal-field-hint">{findingGroups.length} review item{findingGroups.length === 1 ? "" : "s"} in this check, from {moduleFlags.length} saved record{moduleFlags.length === 1 ? "" : "s"}.</span>
+              </div>
+              {/* Announced from here, outside the item that is replaced on each move. */}
+              <p role="status" className="sr-only">{noun} {selectedGroupIndex + 1} of {findingGroups.length}: {title}</p>
+              <article id="shared-selected-finding" className="signal-review-item signal-shared-finding" aria-labelledby="shared-selected-finding-heading" key={`${token}:${report.assessment_revision}:${manifest?.snapshot_id}:${selectedFlag.id}`}>
+                <div className="signal-item-head">
+                  <div className="signal-item-head__bar"><span className="signal-section-kicker">{noun} {selectedGroupIndex + 1} of {findingGroups.length}</span>
+                    <nav aria-label="Shared finding navigation" className="signal-item-head__nav">
+                      <Button variant="secondary" disabled={selectedGroupIndex === 0} onClick={event => selectFinding(event.currentTarget, findingGroups[selectedGroupIndex - 1].flags[0].id)}>Previous item</Button>
+                      <Button variant="secondary" disabled={selectedGroupIndex >= findingGroups.length - 1} onClick={event => selectFinding(event.currentTarget, findingGroups[selectedGroupIndex + 1].flags[0].id)}>Next item</Button>
+                    </nav></div>
+                  <h3 id="shared-selected-finding-heading" tabIndex={-1} className="signal-item-head__title">{title}</h3>
+                  <div className="signal-item-head__chips">
+                    <span className={`signal-severity signal-severity--${flag.affects_readiness === false ? "low" : flag.severity}`}>{lead ? COMPARISON_LEAD_COPY.badge : flag.affects_readiness === false ? notCountedLabel(flag) : severityLabel(flag.severity)}</span>
+                    {flag.overridden && <span className="signal-resolution-state">Resolved by instructor</span>}
+                  </div>
+                  {lead ? <p className="signal-field-hint">{COMPARISON_LEAD_COPY.qualification}</p>
+                    : readinessExclusionLine(flag) && <p className="signal-field-hint">{readinessExclusionLine(flag)}</p>}
+                  {flag.citation_metadata_review_warning && <p className="signal-field-hint"><strong>{CITATION_HISTORY_TITLE}</strong></p>}
+                  {flag.check_kind === "originality_reuse" && flag.matched_ref != null && <p>Possible match with archived manuscript #{flag.matched_ref}</p>}
+                  {flag.first_upload_context && <p className="signal-field-hint">First-upload context: the comparison archive was limited when this signal was created.</p>}
+                </div>
+                <section className="signal-item-section"><h4 className="signal-item-section__title">What the check found</h4>
+              <p>{detail?.ai_reasoning ?? "No additional system explanation was saved with this link."}</p>
               {detail?.p_value_comparison && <dl><div><dt>Reported in manuscript</dt><dd>{detail.p_value_comparison.reported}</dd></div><div><dt>Recalculated by the check</dt><dd>{detail.p_value_comparison.recalculated}</dd></div></dl>}
               {detail?.citation_source_locator && <CitationSourceLinks flag={{ check_kind: flag.check_kind, ai_verdict_summary: detail.ai_verdict_summary, citation_source_locator: detail.citation_source_locator }} />}
               {detail && <CitationComparison flag={{ check_kind: flag.check_kind, ai_verdict_summary: detail.ai_verdict_summary, citation_metadata_comparison: detail.citation_metadata_comparison, citation_metadata_review_warning: detail.citation_metadata_review_warning }} />}
-              <SharedEvidencePacket token={token ?? ""} manifest={manifest} comparison={Boolean(detail?.agreement_pair || detail?.passage_pair)} references={manifest?.references.filter(ref => ref.flag_id === flag.id) ?? []}
+                </section>
+                <section className="signal-item-section"><h4 className="signal-item-section__title">Quoted evidence</h4>
+                  {selectedGroup.flags.length > 1 && <div className="signal-item-head__bar">
+                    <span>Location {selectedLocationIndex + 1} of {selectedGroup.flags.length}: {instructorAnchor(selectedFlag.page_anchor ?? "")}</span>
+                    <nav aria-label="Shared finding locations" className="signal-item-head__nav">
+                      <Button variant="secondary" disabled={selectedLocationIndex === 0} onClick={event => selectFinding(event.currentTarget, selectedGroup.flags[selectedLocationIndex - 1].id)}>Previous location</Button>
+                      <Button variant="secondary" disabled={selectedLocationIndex >= selectedGroup.flags.length - 1} onClick={event => selectFinding(event.currentTarget, selectedGroup.flags[selectedLocationIndex + 1].id)}>Next location</Button>
+                    </nav></div>}
+              <SharedEvidencePacket embedded token={token ?? ""} manifest={manifest} comparison={Boolean(detail?.agreement_pair || detail?.passage_pair)} references={manifest?.references.filter(ref => ref.flag_id === flag.id) ?? []}
                 context={{ title: problemLabel(flag.problem_kind) ?? flag.criterion_text ?? "Possible inconsistency", explanation: detail?.ai_reasoning ?? null, recordedNote: null }}
                 fallback={detail?.agreement_pair ? [{ quote: detail.agreement_pair.intent_text, anchor: detail.agreement_pair.intent_anchor ?? "" }, { quote: detail.agreement_pair.outcome_text, anchor: detail.agreement_pair.outcome_anchor ?? "" }]
                   : detail?.passage_pair ? [{ quote: detail.passage_pair.own_excerpt, anchor: flag.page_anchor }, { quote: detail.passage_pair.matched_excerpt, anchor: "Saved comparison excerpt" }]
@@ -246,9 +269,11 @@ export function AdviserViewPage() {
                 {detail.passage_pair.matched_context_before && <p>Context before the comparison excerpt: {detail.passage_pair.matched_context_before}</p>}
                 {detail.passage_pair.matched_context_after && <p>Context after the comparison excerpt: {detail.passage_pair.matched_context_after}</p>}
               </section>}
-            </article>;
-          })}
-          </div>
+                </section>
+              </article>
+            </>;
+          })()}
+          {findingGroups.length === 0 && <p>No shared integrity signals are shown in this module.</p>}
         </div>
         </section>}
 

@@ -7,9 +7,12 @@ import { instructorAnchor } from "../domain/sourceAnchor";
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import type { EvidenceManifest, EvidencePage, EvidenceReference } from "./evidenceTypes";
-import { verifyEvidencePage } from "./RecordedEvidencePage";
+import { isPermanentSourceError, verifyEvidencePage } from "./RecordedEvidencePage";
 import { EvidenceSourceLayout } from "./EvidenceSourceLayout";
 import { EvidenceItem } from "./EvidenceItem";
+
+// An adviser cannot upload anything, so the shared view says what remains.
+const SHARED_PAGE_GONE = "The original page is not available in this shared report. The saved quotation above is what VERIDICAL recorded.";
 
 const ROLE_LABEL: Record<EvidenceReference["role"], string> = {
   criterion_evidence: "Recorded criterion passage", criterion_scope: "Recorded assessment scope",
@@ -63,12 +66,16 @@ function SharedPageSession({ token, snapshot, reference, context, references, in
   const page = !query.isError && query.fetchStatus === "idle" ? query.data : undefined;
   const image = (large: boolean) => <>
     {query.isFetching && <p role="status">Loading original page.</p>}
-    {query.isError && <div role="alert"><p>{query.error instanceof ApiError ? query.error.message : "The original page could not be loaded."}</p><Button disabled={query.isFetching} variant="secondary" onClick={() => { void query.refetch(); }}>Retry original page</Button></div>}
+    {query.isError && (isPermanentSourceError(query.error)
+      ? <p role="status">{SHARED_PAGE_GONE}</p>
+      : <div role="alert"><p>{query.error instanceof ApiError ? query.error.message : "The original page could not be loaded."}</p><Button disabled={query.isFetching} variant="secondary" onClick={() => { void query.refetch(); }}>Retry original page</Button></div>)}
     {page && <figure className={large ? "signal-evidence-dialog__page" : "signal-criterion-packet__preview"}>
       {page.image_data_url ? <img src={page.image_data_url} alt={`Original source, ${instructorAnchor(reference.anchor ?? "")}`} /> : <p>No original-page image is available for this evidence.</p>}
       <figcaption>{page.caption}</figcaption>
     </figure>}
   </>;
+  // Once the page is known to be gone, its buttons go too: only the message stays.
+  if (isPermanentSourceError(query.error)) return <div className="signal-shared-packet__source"><p role="status">{SHARED_PAGE_GONE}</p></div>;
   return <div className="signal-shared-packet__source">
     <Button variant="secondary" aria-label={reference.anchor?.trim() ? `Open original page: ${instructorAnchor(reference.anchor)}` : undefined} onClick={() => setDialog(true)}>{reference.anchor?.trim() ? "Open original page" : "Open saved source"}</Button>
     <Button variant="secondary" aria-expanded={preview} onClick={() => setPreview(value => !value)}>{preview ? "Hide" : "Show"} page preview</Button>
