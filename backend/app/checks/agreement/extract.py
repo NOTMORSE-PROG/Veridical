@@ -326,45 +326,144 @@ def _extract_modal_statements(
 
 
 def _extract_outcome_prose(
-    blocks: list[TextBlock], cues: AgreementCues, *, heading_max_words: int
+    blocks: list[TextBlock],
+    cues: AgreementCues,
+    *,
+    heading_max_words: int,
+    wrap_min_width_ratio: float,
 ) -> list[Statement]:
     """Recognize source-bound candidates, not verified roles or complete coverage."""
     if not cues.outcome_prose_enabled:
         return []
-    candidates = []
+    candidates: list[Statement] = []
     in_outcomes = False
-    for block in blocks:
-        if block.is_furniture or not block.text.strip():
-            continue
+    # A sentence wraps across lines, and a PDF often gives each printed line
+    # as its own block. Sentences are therefore read from the run of prose
+    # blocks between headings and list items, not from one block at a time,
+    # which cut a result in the middle ("allowed patient records to be
+    # searched and managed, supported the review and processing of").
+    run: list[TextBlock] = []
+
+    def _flush() -> None:
+        if run:
+            candidates.extend(_outcome_sentences(run, cues))
+            run.clear()
+
+    content = [b for b in blocks if not b.is_furniture and b.text.strip()]
+    for index, block in enumerate(content):
         text = block.text.strip()
+        if not _has_words(text) and not _ENDS_CLAUSE.search(text):
+            # A lone page number at a page break is skipped and the sentence
+            # carries on across it. Any other number line is a table cell:
+            # it is not prose and ends the sentence, so two table rows are
+            # never read as one. A number line that ends a sentence ("4.52.")
+            # is the sentence's last line and is read as prose.
+            following = content[index + 1] if index + 1 < len(content) else None
+            at_page_break = (following is None or following.page != block.page) or (
+                bool(run) and run[-1].page != block.page
+            )
+            if not (_PAGE_NUMBER.fullmatch(text) and at_page_break):
+                _flush()
+            continue
+        if any(re.search(p, text, re.I) for p in cues.caption_patterns):
+            # A caption is not prose and does not open a new section; a
+            # sentence never continues through it. "Table 4.2 shows that ..."
+            # is prose: the patterns leave out a reporting verb after the number.
+            _flush()
+            continue
         if _is_heading_like(text, max_words=heading_max_words):
+            _flush()
             in_outcomes = _heading_section(text, cues) == "outcomes"
             continue
         if not in_outcomes or _LIST_MARKER.match(text):
+            _flush()
             continue
         if parse_reference(text, order_index=0).parse_status == CitationParseStatus.parsed:
+            _flush()
             continue
-        for start, end in _sentence_spans(text):
-            sentence = _normalize(text[start:end])
-            lowered = sentence.lower()
-            if not any(re.search(pattern, lowered) for pattern in cues.outcome_prose_patterns):
-                continue
-            if not sentence or any(
-                phrase in lowered
-                for phrase in (*cues.future_work_guard_phrases, *cues.scope_negation_phrases)
-            ):
-                continue
-            candidates.append(
-                Statement(
-                    kind="outcome",
-                    text=sentence,
-                    anchor=_anchor_for(block),
-                    page=block.page,
-                    paragraph=block.paragraph,
-                    cue="outcome_section_prose",
-                )
-            )
+        if run and not _continues(run, block, wrap_min_width_ratio):
+            _flush()
+        run.append(block)
+    _flush()
     return candidates
+
+
+_WORD_OF_LETTERS = re.compile(r"[^\W\d_]{2,}")
+_PAGE_NUMBER = re.compile(r"\d{1,4}")
+_ENDS_CLAUSE = re.compile(r"[.!?:][\"'”’)\]]*$")
+
+
+def _has_words(text: str) -> bool:
+    return _WORD_OF_LETTERS.search(text) is not None
+
+
+def _continues(run: list[TextBlock], block: TextBlock, wrap_min_width_ratio: float) -> bool:
+    """Whether `block` is the next printed line of the sentence in `run`, not
+    a new paragraph. A line that ends a sentence or a lead-in ("shown below:")
+    ends the paragraph. Otherwise a line that opens in lower case continues
+    it; one that opens in capitals continues it only when the line before
+    ran (nearly) the full width, as a wrapped line does: a short line with no
+    closing punctuation before a capital is a subheading or a caption."""
+    previous = run[-1]
+    if _ENDS_CLAUSE.search(previous.text.rstrip()):
+        return False
+    first = block.text.lstrip("\"'“‘([")[:1]
+    if first.islower():
+        return True
+    widths = [b.bbox[2] - b.bbox[0] for b in (*run, block) if b.bbox]
+    if not previous.bbox or not widths:
+        return False
+    return previous.bbox[2] - previous.bbox[0] >= wrap_min_width_ratio * max(widths)
+
+
+def _outcome_sentences(run: list[TextBlock], cues: AgreementCues) -> list[Statement]:
+    """Result sentences in one run of prose blocks, each anchored to the block
+    it starts in. A sentence that still lacks its start (it opens in lower
+    case) or its end (no closing punctuation) after the run is joined is a
+    fragment: the comparison cannot read it, so it is not offered."""
+    joined, ranges = _joined_with_offsets(run)
+    out = []
+    for start, end in _sentence_spans(joined):
+        span = joined[start:end]
+        if cues.leading_note_pattern:
+            # "(Appendix 5)" closing the previous sentence is not part of this
+            # one, and the sentence is anchored where it starts after the note.
+            note = re.match(cues.leading_note_pattern, span.lstrip())
+            if note:
+                start += len(span) - len(span.lstrip()) + note.end()
+                span = joined[start:end]
+        sentence = _normalize(span)
+        if not sentence or not _is_whole_sentence(sentence):
+            continue
+        lowered = sentence.lower()
+        if not any(re.search(pattern, lowered) for pattern in cues.outcome_prose_patterns):
+            continue
+        if any(
+            phrase in lowered
+            for phrase in (*cues.future_work_guard_phrases, *cues.scope_negation_phrases)
+        ):
+            continue
+        offset = start + (len(joined[start:end]) - len(joined[start:end].lstrip()))
+        block = next((b for s, e, b in ranges if s <= offset < e), ranges[0][2])
+        out.append(
+            Statement(
+                kind="outcome",
+                text=sentence,
+                anchor=_anchor_for(block),
+                page=block.page,
+                paragraph=block.paragraph,
+                cue="outcome_section_prose",
+            )
+        )
+    return out
+
+
+_SENTENCE_END = re.compile(r"[.!?][\"'”’)\]]*$")
+
+
+def _is_whole_sentence(sentence: str) -> bool:
+    first = sentence.lstrip("\"'“‘([")[:1]
+    return bool(first) and not first.islower() and _SENTENCE_END.search(sentence) is not None
 
 
 # --- dedup --------------------------------------------------------------------
@@ -453,7 +552,10 @@ def extract_statements(
         )
         statements.extend(
             _extract_outcome_prose(
-                list(scope), cues, heading_max_words=settings.agreement_heading_max_words
+                list(scope),
+                cues,
+                heading_max_words=settings.agreement_heading_max_words,
+                wrap_min_width_ratio=settings.agreement_wrap_line_min_width_ratio,
             )
         )
     threshold = settings.agreement_dedup_similarity_threshold
