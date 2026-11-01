@@ -98,3 +98,29 @@ def test_a_table_of_contents_page_is_table_of_contents():
     assert where.chapter_role == "table_of_contents"
     # The contents entry for chapter 4 on p. 5 is not taken for the chapter.
     assert sections.page_roles([6])[6] == "table_of_contents"
+
+
+def test_a_bare_chapter_heading_joins_only_a_title_on_its_own_page():
+    from app.checks.section_roles import tree_chapters
+
+    nodes = [
+        SectionNode(title="CHAPTER 1", level=1, page=2, children=[]),
+        SectionNode(title="CHAPTER 2", level=1, page=8, children=[]),
+        SectionNode(title="REVIEW OF RELATED LITERATURE", level=1, page=8, children=[]),
+        SectionNode(title="REFERENCES", level=1, page=30, children=[]),
+    ]
+    extraction = ExtractionResult(
+        page_count=40,
+        anchor_kind="page",
+        image_only=False,
+        text_chars=0,
+        section_tree=SectionTree(source="heuristics", nodes=nodes),
+        blocks=[],
+        images=[],
+    )
+    # Chapter 1's title was not read as a node; it must not borrow a later one.
+    assert tree_chapters(extraction, load_section_roles()) == [
+        (2, "CHAPTER 1"),
+        (8, "CHAPTER 2 REVIEW OF RELATED LITERATURE"),
+        (30, "REFERENCES"),
+    ]
