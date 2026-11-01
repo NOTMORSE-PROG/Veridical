@@ -344,4 +344,8 @@ async def test_an_aim_set_aside_from_the_literature_review_is_never_counted_as_m
     assert detail["n_intents"] == 1
     assert detail["objective_sections"]["n_objectives_set_aside"] == 1
     assert detail["objective_sections"]["set_aside"][0]["chapter_role"] == "literature"
-    assert detail["n_intents"] - detail["n_unmatched_intents"] <= 1
+    # "Matched" on the report is objectives minus unmatched ones, both over the
+    # objectives kept: here the one kept objective, which has a pair.
+    assert detail["n_unmatched_intents"] == 0
+    assert detail["n_intents"] - detail["n_unmatched_intents"] == 1
+    assert detail["undetermined"]["compared_count"] == 1
