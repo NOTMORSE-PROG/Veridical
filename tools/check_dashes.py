@@ -25,8 +25,9 @@ So this parses instead of grepping:
                been clean, and the residual risk is a dash inside a string
                on a line that also opens a block comment).
 
-Regex literals are exempt: an en dash inside a character class is
-pattern-matching input, not output. See ALLOW_REGEX_FILES.
+Pattern literals are exempt: an en dash inside a character class is
+pattern-matching input, not output. Only the pattern argument is exempt, never
+a whole file (BUG-651).
 
 Usage:
     python tools/check_dashes.py            # whole repo
@@ -51,19 +52,41 @@ DASHES = ("—", "–")  # em, en
 PY_ROOTS = ("backend/app", "backend/scripts")
 TS_ROOTS = ("frontend/src",)
 
-# Files where a dash inside a string is legitimately pattern-matching
-# input rather than output. Keep this list SHORT and justify every entry.
-ALLOW_REGEX_FILES = {
-    # citation page-range patterns match en-dashed ranges ("pp. 12–14")
-    "backend/app/checks/citations/extract.py",
-    # Numbered citation input may use printed en/em dashes for ranges.
-    "backend/app/checks/citations/numbered.py",
-    "backend/app/checks/citations/cross_match.py",
-    # Bibliography metadata input includes en-dashed journal page ranges.
-    "backend/app/ingest/references.py",
-    # Scale-name input cleanup strips printed dash separators; not output copy.
-    "backend/app/rubric/decompose.py",
+# A dash inside a pattern is input to match, not output. Exempting whole files
+# for that once hid real flag wording in a regex-heavy file (BUG-651), so only
+# the pattern argument itself is exempt: the first argument of a `re` call, and
+# the character set given to a string's strip, split or replace.
+RE_CALLS = {
+    "compile",
+    "search",
+    "match",
+    "fullmatch",
+    "sub",
+    "subn",
+    "split",
+    "finditer",
+    "findall",
 }
+STR_PATTERN_METHODS = {"strip", "lstrip", "rstrip", "split", "rsplit", "replace"}
+# TypeScript has no parser here; a file listed would be skipped as a whole.
+ALLOW_REGEX_FILES: set[str] = set()
+
+
+def _pattern_arguments(tree: ast.AST) -> set[int]:
+    exempt: set[int] = set()
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
+            continue
+        if not node.args:
+            continue
+        func = node.func
+        is_re = isinstance(func.value, ast.Name) and func.value.id == "re" and func.attr in RE_CALLS
+        if is_re or func.attr in STR_PATTERN_METHODS:
+            exempt.update(
+                id(sub) for sub in ast.walk(node.args[0]) if isinstance(sub, ast.Constant)
+            )
+    return exempt
+
 
 # Paths whose strings never reach a user.
 SKIP_PARTS = {"tests", "fixtures", "__pycache__", "node_modules", ".venv"}
@@ -92,9 +115,7 @@ def scan_python(path: pathlib.Path) -> list[tuple[int, str]]:
 
     docstrings: set[int] = set()
     for node in ast.walk(tree):
-        if isinstance(
-            node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
-        ):
+        if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             body = getattr(node, "body", None)
             if (
                 body
@@ -104,12 +125,14 @@ def scan_python(path: pathlib.Path) -> list[tuple[int, str]]:
             ):
                 docstrings.add(id(body[0].value))
 
+    patterns = _pattern_arguments(tree)
     hits: list[tuple[int, str]] = []
     for node in ast.walk(tree):
         if (
             isinstance(node, ast.Constant)
             and isinstance(node.value, str)
             and id(node) not in docstrings
+            and id(node) not in patterns
             and any(d in node.value for d in DASHES)
         ):
             excerpt = " ".join(node.value.split())[:90]
@@ -199,8 +222,8 @@ def main() -> int:
     for line in findings:
         print("  " + line)
     print(
-        f"\n{len(findings)} occurrence(s). If one is genuinely a regex literal, "
-        "add its file to ALLOW_REGEX_FILES in tools/check_dashes.py with a reason."
+        f"\n{len(findings)} occurrence(s). A pattern is exempt only as the first "
+        "argument of a re call or of a string's strip, split or replace."
     )
     return 1
 

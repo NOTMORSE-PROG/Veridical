@@ -34,6 +34,11 @@ _STARTS_WITH_NUMBER = re.compile(r"^\d")
 class SectionRoles:
     roles: tuple[tuple[str, tuple[re.Pattern, ...]], ...]
     chapter_patterns: tuple[str, ...]
+    # Internal agreement: which roles are not this study's own results or
+    # objectives, and which chapters keep their objectives whatever their title.
+    results_excluded: frozenset[str] = frozenset()
+    objectives_excluded: frozenset[str] = frozenset()
+    objectives_kept_chapters: frozenset[int] = frozenset()
 
     def role_of(self, title: str | None) -> str | None:
         """The role a title names, "other" when it names none, None for no title."""
@@ -49,11 +54,18 @@ class SectionRoles:
 @lru_cache(maxsize=4)
 def load_section_roles(path: Path | None = None) -> SectionRoles:
     raw = json.loads((path or _DEFAULT_FILE).read_text(encoding="utf-8"))
+    # A custom file written before these rules existed keeps the packaged ones.
+    agreement = (
+        raw.get("agreement") or json.loads(_DEFAULT_FILE.read_text(encoding="utf-8"))["agreement"]
+    )
     return SectionRoles(
         roles=tuple(
             (item["role"], tuple(re.compile(p) for p in item["patterns"])) for item in raw["roles"]
         ),
         chapter_patterns=tuple(raw["chapter_heading_patterns"]),
+        results_excluded=frozenset(agreement["results_excluded_roles"]),
+        objectives_excluded=frozenset(agreement["objectives_excluded_roles"]),
+        objectives_kept_chapters=frozenset(agreement["objectives_always_kept_chapters"]),
     )
 
 

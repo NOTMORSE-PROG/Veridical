@@ -21,6 +21,7 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.checks.citations.extract import current_linkage_wording
 from app.checks.citations.history_review import citation_metadata_review_warning
 from app.checks.citations.source_locator import citation_source_locator
 from app.checks.reuse.embed import split_context
@@ -163,6 +164,15 @@ def _distinct_reasoning(detail: dict, evidence_excerpt: str) -> str | None:
     return reasoning
 
 
+def _shown_reasoning(check_kind: str, detail: dict, evidence_excerpt: str) -> str | None:
+    """The explanation shown for a saved finding. Citation findings saved
+    before a wording change are shown in today's wording (BUG-651)."""
+    reasoning = _distinct_reasoning(detail, evidence_excerpt)
+    if check_kind == "citation_integrity" and reasoning:
+        return current_linkage_wording(reasoning)
+    return reasoning
+
+
 def _p_value_comparison(check_kind: str, detail: dict) -> PValueComparisonOut | None:
     if check_kind != "statistical_forensics" or detail.get("kind") not in (
         "p_value_mismatch",
@@ -269,7 +279,7 @@ async def _to_flag_out(
         ai_reasoning=(
             reuse_reasoning(detail, flag.evidence_excerpt)
             if result.kind.value == "originality_reuse"
-            else _distinct_reasoning(detail, flag.evidence_excerpt)
+            else _shown_reasoning(result.kind.value, detail, flag.evidence_excerpt)
         ),
         p_value_comparison=_p_value_comparison(result.kind.value, detail),
         agreement_pair=_agreement_pair(result.kind.value, detail),

@@ -16,5 +16,11 @@
     {"role": "introduction", "patterns": ["\\bintroduction\\b"]},
     {"role": "literature", "patterns": ["\\bliterature\\b", "\\brelated (works?|studies|systems|literature)\\b", "\\bbackground\\b"]},
     {"role": "future_work", "patterns": ["\\bfuture (work|research|directions)\\b"]}
-  ]
+  ],
+  "agreement": {
+    "_comment": "Internal agreement (F4) compares a thesis's own objectives with its own results. A candidate result is set aside when its chapter or nearest heading has one of the results roles; an objective when its chapter has one of the objectives roles. Chapters numbered in objectives_always_kept_chapters keep their objectives whatever their title says: 'Chapter 1 The Problem and Its Background' reads as literature by its words (BUG-625, BUG-650).",
+    "results_excluded_roles": ["table_of_contents", "front_matter", "biography", "references", "appendix", "introduction", "literature", "methodology", "future_work"],
+    "objectives_excluded_roles": ["table_of_contents", "front_matter", "biography", "references", "appendix", "literature", "methodology", "results", "conclusion", "future_work"],
+    "objectives_always_kept_chapters": [1]
+  }
 }
