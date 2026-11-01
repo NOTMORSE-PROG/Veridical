@@ -132,3 +132,109 @@ def test_a_result_fragment_that_never_finishes_is_not_offered():
     lines = ["Results", "The kiosk reduced the average queue in the second week by", "Discussion"]
     out = extract_statements(source(lines), settings=Settings(_env_file=None))
     assert out.outcomes == []
+
+
+def lines_on_pages(rows):
+    """Blocks with real line geometry: (page, text, width)."""
+    blocks = [
+        TextBlock(
+            page=page,
+            text=text,
+            max_font_size=12,
+            bold_ratio=0,
+            bbox=(72.0, 100.0, 72.0 + width, 112.0),
+        )
+        for page, text, width in rows
+    ]
+    return ExtractionResult(
+        page_count=3,
+        anchor_kind="page",
+        image_only=False,
+        text_chars=sum(len(t) for _p, t, _w in rows),
+        blocks=blocks,
+        section_tree=SectionTree(source="none", nodes=[]),
+        images=[],
+    )
+
+
+def _outcomes(extraction):
+    return [
+        (s.anchor, s.text)
+        for s in extract_statements(extraction, settings=Settings(_env_file=None)).outcomes
+    ]
+
+
+def test_a_sentence_running_onto_the_next_page_is_anchored_where_it_starts():
+    rows = [
+        (1, "Results", 60),
+        (1, "The kiosk reduced the average queue time for walk-in patients across", 460),
+        (2, "all three clinics during the second week of testing.", 300),
+    ]
+    assert _outcomes(lines_on_pages(rows)) == [
+        (
+            "p. 1",
+            "The kiosk reduced the average queue time for walk-in patients across all three "
+            "clinics during the second week of testing.",
+        )
+    ]
+
+
+def test_a_run_that_starts_mid_sentence_is_not_offered():
+    rows = [(1, "Results", 60), (1, "reduced the average queue time in every clinic.", 300)]
+    assert _outcomes(lines_on_pages(rows)) == []
+
+
+def test_a_heading_or_list_item_ends_the_sentence_before_it():
+    # Joined across the break, each would read as a whole result sentence that
+    # the manuscript never wrote.
+    after_heading = [
+        (1, "Results", 60),
+        (1, "The kiosk reduced the average queue time by", 460),
+        (1, "Conclusions", 80),
+        (1, "patients waiting in every clinic.", 300),
+    ]
+    assert _outcomes(lines_on_pages(after_heading)) == []
+    around_list = [
+        (1, "Results", 60),
+        (1, "The portal was used by", 460),
+        (1, "1. The kiosk improved booking accuracy.", 300),
+        (1, "staff who also improved booking accuracy.", 300),
+    ]
+    assert all(
+        not text.startswith("The portal was used by")
+        for _a, text in _outcomes(lines_on_pages(around_list))
+    )
+
+
+def test_lead_ins_captions_table_numbers_and_subheadings_are_not_glued_onto_a_result():
+    result = "The kiosk achieved a weighted mean of 4.52 from the respondents."
+    for before in (
+        (1, "The results of the evaluation are shown below:", 400),
+        (1, "Table 4.3 weighted mean of the respondents' evaluation", 460),
+        (1, "4.56 4.44", 60),
+        (1, "Evaluation of the kiosk by the clinic staff and the patients", 300),
+    ):
+        rows = [(1, "Results", 60), before, (1, result, 460)]
+        assert ("p. 1", result) in _outcomes(lines_on_pages(rows)), before[1]
+
+
+def test_a_stray_page_number_does_not_enter_a_result():
+    rows = [
+        (1, "Results", 60),
+        (1, "The kiosk achieved a weighted mean of", 460),
+        (1, "45", 20),
+        (2, "4.52 from the respondents.", 200),
+    ]
+    assert all("45 4.52" not in text for _a, text in _outcomes(lines_on_pages(rows)))
+
+
+def test_a_note_closing_the_previous_sentence_is_not_part_of_the_next():
+    rows = [
+        (1, "Results", 60),
+        (1, "The database was read with a crafted command. (Appendix 5) The path", 460),
+        (1, "traversal attack yielded the confirmation that the file was accessible.", 460),
+    ]
+    texts = [text for _a, text in _outcomes(lines_on_pages(rows))]
+    assert (
+        "The path traversal attack yielded the confirmation that the file was accessible." in texts
+    )

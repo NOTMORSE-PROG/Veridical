@@ -937,6 +937,10 @@ class Settings(BaseSettings):
     # the owner's own proposal top out at 6 words ("General Objective of the
     # Study"); generous headroom above that.
     agreement_heading_max_words: int = 12
+    # A printed line that opens in capitals continues the sentence before it
+    # only when that line ran at least this share of the widest line in the
+    # paragraph, as a wrapped line does (BUG-626).
+    agreement_wrap_line_min_width_ratio: float = Field(default=0.8, gt=0, le=1)
     # difflib.SequenceMatcher ratio above which two statements are treated as
     # the same restated objective/finding (ticket edge case: Ch1 vs Ch3
     # wording drift) rather than two distinct ones.

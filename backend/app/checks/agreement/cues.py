@@ -35,6 +35,8 @@ class AgreementCues:
     objective_prose_enabled: bool = False
     objective_prose_patterns: tuple[str, ...] = ()
     objective_heading_exclusion_patterns: tuple[str, ...] = ()
+    caption_patterns: tuple[str, ...] = ()
+    leading_note_pattern: str | None = None
 
 
 def load_cues(path: Path | None = None) -> AgreementCues:
@@ -65,4 +67,6 @@ def load_cues(path: Path | None = None) -> AgreementCues:
         objective_heading_exclusion_patterns=tuple(
             raw.get("objective_heading_exclusion_patterns", ())
         ),
+        caption_patterns=tuple(raw.get("caption_patterns", ())),
+        leading_note_pattern=raw.get("leading_note_pattern"),
     )
