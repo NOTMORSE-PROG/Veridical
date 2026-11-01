@@ -34,8 +34,11 @@ _SINGLE_BRACKET = re.compile(r"\[\s*[1-9]\d*\s*\]")
 # them ("software[25]", "GPT Codex[4]"), or carrying a locator
 # ("[13, Introduction]", "[7, p. 12]"). Their numbers are never "unused".
 _GLUED_BRACKET = re.compile(r"(?<=[\w)])\[\s*[1-9]\d*(?:\s*[,;\-–]\s*[1-9]\d*)*\s*\]")
+# The numbers before a locator may be a list or a range ("[7-10, pp. 3-9]").
 _LOCATOR_BRACKET = re.compile(
-    r"\[\s*(?P<numbers>[1-9]\d*(?:\s*[,;]\s*[1-9]\d*)*)\s*[,;]\s*[^\]\d\s][^\]]{0,80}\]"
+    r"\[\s*(?P<numbers>[1-9]\d*(?:\s*[-–]\s*[1-9]\d*)?"
+    r"(?:\s*[,;]\s*[1-9]\d*(?:\s*[-–]\s*[1-9]\d*)?)*)"
+    r"\s*[,;]\s*[^\]\d\s][^\]]{0,80}\]"
 )
 _BETWEEN_RANGE_MARKS = re.compile(r"\s*[-–—]\s*")
 _RANGE = re.compile(r"([1-9]\d*)\s*[-\u2013]\s*([1-9]\d*)")

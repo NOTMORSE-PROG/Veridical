@@ -63,3 +63,8 @@ def test_a_bridge_never_spans_further_than_the_range_limit():
     # [7] and [60] are 53 apart, past the limit of 20, so 8 to 59 are not
     # covered; 7 is still cited by its own mark.
     assert _uncited("The kiosk was compared[7]-[60] across clinics.") == [8, 9, 10, 12]
+
+
+def test_a_range_before_a_page_locator_is_read():
+    for mark in ("[7-10, pp. 3-9]", "[7-10; p. 3]", "[7, 8-10, p. 12]"):
+        assert _uncited(f"The kiosk was compared {mark} across clinics.") == [12], mark
