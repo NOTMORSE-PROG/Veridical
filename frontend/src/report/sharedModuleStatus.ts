@@ -48,13 +48,19 @@ export function sharedModuleStatus({ kind, state, findings, leads, coverageReaso
   const leadLine = leads > 0 ? [`${plural(leads, "comparison lead", "comparison leads")}: a lead is a passage to compare yourself. It is not a finding and is not scored.`] : [];
   if (state === "completed") {
     return findings > 0
-      ? { title: "Completed", points: [`${found} recorded. All of them are shown here.`, ...leadLine] }
+      ? { title: "Completed", points: [`${found} recorded.`, ...leadLine] }
       : { title: "Completed", points: ["No possible inconsistencies were recorded.", `This covers only what this check looks at: ${SCOPE[kind]}.`, ...leadLine] };
   }
-  if (state === "partial" || state === "incomplete") {
+  if (state === "partial") {
     return findings > 0
-      ? { title: "Ran only in part", points: [`${found} recorded. All of them are shown here.`, "Parts the check did not cover may have others.", ...notCovered, ...leadLine] }
+      ? { title: "Ran only in part", points: [`${found} recorded.`, "Parts the check did not cover may have others.", ...notCovered, ...leadLine] }
       : { title: "Ran only in part", points: ["No possible inconsistencies were recorded in the part it checked.", "That does not mean there are none.", ...notCovered, ...leadLine] };
+  }
+  if (state === "incomplete") {
+    // It may have checked little or nothing, so no claim about a checked part.
+    return findings > 0
+      ? { title: "Not fully run", points: [`${found} recorded.`, "What it did not check may have others.", ...notCovered, ...leadLine] }
+      : { title: "Not fully run", points: ["No possible inconsistencies were recorded.", "The check did not run on everything, so that does not mean there are none.", ...notCovered, ...leadLine] };
   }
   if (state === "not_applicable") {
     return { title: "Not applicable", points: [`The check found no ${NOUN[kind]} to check in the text it could read, so it did not run.`, "This does not mean the paper has none."] };

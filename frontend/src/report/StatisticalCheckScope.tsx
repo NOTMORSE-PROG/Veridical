@@ -7,7 +7,7 @@ import { descriptiveAssumptionLimit, reconstructionScopeCopy } from "./statistic
 const SCOPE_COPY = {
   completed: ["Completed", "The check ran on the statistics it could read. This does not mean every reported value is correct, and it does not check the raw data."],
   not_applicable: ["Not applicable", "The check found no statistics it could test in the text it could read. This does not mean the paper has no statistics."],
-  incomplete: ["Ran only in part", "Some statistics could not be checked. Anything not checked is not treated as correct."],
+  incomplete: ["Not fully run", "Some statistics could not be checked. Anything not checked is not treated as correct."],
   not_recorded: ["Not recorded", "No usable status was saved for this check, so do not assume it ran or that it did not apply."],
 } as const;
 

@@ -86,7 +86,7 @@ describe("shared statistical applicability", () => {
   it.each([
     ["completed", "Completed"],
     ["not_applicable", "Not applicable"],
-    ["incomplete", "Ran only in part"],
+    ["incomplete", "Not fully run"],
   ] as const)("shows safe %s status alongside the existing shared warning", async (state, label) => {
     const payload = shared({ report: { ...BASE_REPORT, statistical_check_scope: { state }, historical_native_math_unverified: true } });
     vi.stubGlobal("fetch", stubFetchByPath({ "/shared/scope-control/report": payload }));

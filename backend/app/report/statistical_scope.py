@@ -46,7 +46,7 @@ STATISTICAL_SCOPE_COPY = {
         "This does not mean the paper has no statistics.",
     ),
     "incomplete": (
-        "Statistical checks: Ran only in part.",
+        "Statistical checks: Not fully run.",
         "Some statistics could not be checked. Anything not checked is not treated as correct.",
     ),
     "not_recorded": (

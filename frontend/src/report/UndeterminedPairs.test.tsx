@@ -73,3 +73,16 @@ it("recognises only agreement rows that could not be decided as legacy undecided
   expect(isLegacyUndecided(legacy(1))).toBe(true);
   expect(isLegacyUndecided({ ...legacy(2), problem_kind: "agreement_contradictory" })).toBe(false);
 });
+
+it("shows the adviser's objective cards four more at a time until every objective is shown", () => {
+  render(<MemoryRouter><UndeterminedPairs shared checkRunId={7} undetermined={pairs(9)} legacy={[]} /></MemoryRouter>);
+  fireEvent.click(screen.getByRole("button", { name: "Show the objectives" }));
+  const cards = () => screen.getAllByRole("listitem").filter(item => item.classList.contains("signal-pair-card"));
+  expect(cards()).toHaveLength(4);
+  fireEvent.click(screen.getByRole("button", { name: "Show 4 more" }));
+  expect(cards()).toHaveLength(8);
+  expect(document.activeElement).toBe(cards()[4]);
+  fireEvent.click(screen.getByRole("button", { name: "Show 1 more" }));
+  expect(cards()).toHaveLength(9);
+  expect(screen.queryByRole("button", { name: /more$/ })).not.toBeInTheDocument();
+});

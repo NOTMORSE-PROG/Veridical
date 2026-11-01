@@ -10,6 +10,8 @@ import { Button } from "../ui/Button";
 
 const OPEN_PARAM = "undecided";
 const SHOWN_PARAM = "undecided_shown";
+// The adviser's cards count objectives, not pairs, so they keep their own count.
+const GROUPS_PARAM = "undecided_objectives_shown";
 
 type Item =
   | { kind: "pair"; key: string; intentText: string; intentAnchor: string; outcomeText: string; outcomeAnchor: string; reason: string | null }
@@ -82,9 +84,15 @@ export function UndeterminedPairs({ checkRunId, undetermined, legacy, incomplete
     update((next) => next.set(SHOWN_PARAM, String(shown + FLAG_LIST_INITIAL_COUNT)));
   }
 
-  if (shared) return <SharedPairs listId={listId} items={items} open={open} shown={shown}
-    onToggle={() => update((next) => { if (open) { next.delete(OPEN_PARAM); next.delete(SHOWN_PARAM); } else next.set(OPEN_PARAM, "open"); })}
-    onMore={(count) => update((next) => next.set(SHOWN_PARAM, String(shown + count)))} />;
+  if (shared) {
+    const groupsShown = Math.max(SHARED_GROUPS_SHOWN, Number(params.get(GROUPS_PARAM)) || SHARED_GROUPS_SHOWN);
+    return <SharedPairs listId={listId} items={items} open={open} shown={groupsShown}
+      onToggle={() => update((next) => { if (open) { next.delete(OPEN_PARAM); next.delete(GROUPS_PARAM); } else next.set(OPEN_PARAM, "open"); })}
+      onMore={() => {
+        focusKey.current = `objective-${groupsShown}`;
+        update((next) => next.set(GROUPS_PARAM, String(groupsShown + SHARED_GROUPS_SHOWN)));
+      }} />;
+  }
   const visible = items.slice(0, shown);
   return <section className="signal-copy-flow signal-undecided-pairs" aria-labelledby={`${listId}-title`}>
     <p id={`${listId}-title`}>{compared === null
@@ -147,7 +155,7 @@ const SHARED_GROUPS_SHOWN = 4;
  * with under it, as compact cards a few at a time. Read-only. */
 function SharedPairs({ listId, items, open, shown, onToggle, onMore }: {
   listId: string; items: Item[]; open: boolean; shown: number;
-  onToggle: () => void; onMore: (count: number) => void;
+  onToggle: () => void; onMore: () => void;
 }) {
   const groups = new Map<string, { text: string; anchor: string; results: { text: string; anchor: string }[] }>();
   for (const item of items) {
@@ -157,8 +165,7 @@ function SharedPairs({ listId, items, open, shown, onToggle, onMore }: {
     groups.set(key, group);
   }
   const all = [...groups.values()];
-  const limit = Math.max(SHARED_GROUPS_SHOWN, shown === FLAG_LIST_INITIAL_COUNT ? SHARED_GROUPS_SHOWN : shown);
-  const visible = all.slice(0, limit);
+  const visible = all.slice(0, shown);
   const count = items.length;
   return <section className="signal-shared-pairs" aria-labelledby={`${listId}-title`}>
     <div className="signal-shared-pairs__head">
@@ -170,7 +177,7 @@ function SharedPairs({ listId, items, open, shown, onToggle, onMore }: {
     </div>
     <div id={listId} hidden={!open}>
       {open && <>
-        <ol className="signal-shared-pairs__grid">{visible.map((group, index) => <li key={`${group.text}|${group.anchor}`} className="signal-pair-card">
+        <ol className="signal-shared-pairs__grid">{visible.map((group, index) => <li key={`${group.text}|${group.anchor}`} id={`${listId}-objective-${index}`} tabIndex={-1} className="signal-pair-card">
           <p className="signal-pair-card__tag">Objective {index + 1}{group.anchor.trim() && <span> · {instructorAnchor(group.anchor)}</span>}</p>
           <blockquote className="signal-pair-card__quote">“{group.text}”</blockquote>
           {group.results.length > 0
@@ -180,7 +187,7 @@ function SharedPairs({ listId, items, open, shown, onToggle, onMore }: {
             </div>
             : <p className="signal-field-hint">The result it was compared with was not saved with this link.</p>}
         </li>)}</ol>
-        {visible.length < all.length && <Button variant="secondary" onClick={() => onMore(Math.max(SHARED_GROUPS_SHOWN, limit) + SHARED_GROUPS_SHOWN - shown)}>Show {Math.min(SHARED_GROUPS_SHOWN, all.length - visible.length)} more</Button>}
+        {visible.length < all.length && <Button variant="secondary" onClick={onMore}>Show {Math.min(SHARED_GROUPS_SHOWN, all.length - visible.length)} more</Button>}
       </>}
     </div>
   </section>;

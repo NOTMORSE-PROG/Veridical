@@ -9260,7 +9260,8 @@
   .signal-shared-pairs__head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--signal-space-3); }
   .signal-shared-pairs__title { font-weight: var(--signal-weight-semibold); }
   .signal-shared-pairs > div[id] { display: grid; gap: var(--signal-space-3); }
-  .signal-shared-pairs__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--signal-pair-card-min), 1fr)); gap: var(--signal-space-3); margin: 0; padding: 0; list-style: none; }
+  /* Two cards a row: four shown fill two rows, and no card stretches to its neighbour's height. */
+  .signal-shared-pairs__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: var(--signal-space-3); margin: 0; padding: 0; list-style: none; }
   .signal-pair-card { display: grid; align-content: start; gap: var(--signal-space-2); padding: var(--signal-space-4); border: var(--signal-border-hairline) solid var(--color-signal-border); border-radius: var(--signal-radius-control); background: var(--color-signal-surface); min-inline-size: 0; }
   .signal-pair-card__tag { font-size: var(--signal-type-label); font-weight: var(--signal-weight-semibold); color: var(--color-signal-ink-secondary); }
   .signal-pair-card__tag span { font-weight: var(--signal-weight-medium); }
@@ -9271,6 +9272,11 @@
   .signal-pair-card__results cite { font-style: normal; color: var(--color-signal-ink-secondary); }
   /* Counts as tiles to scan: the number large, its label small under it. */
   .signal-fact-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(var(--signal-fact-tile-min), 1fr)); gap: var(--signal-space-3); margin: 0; }
+  .signal-shared-module-status__headline::before { outline: var(--signal-border-hairline) solid var(--color-signal-ink-secondary); }
+  @media (max-width: 1023px) {
+    .signal-shared-pairs__grid { grid-template-columns: minmax(0, 1fr); }
+    .signal-fact-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
   .signal-fact-tiles > div { display: flex; flex-direction: column-reverse; gap: var(--signal-space-1); padding: var(--signal-space-3) var(--signal-space-4); border: var(--signal-border-hairline) solid var(--color-signal-border); border-radius: var(--signal-radius-control); background: var(--color-signal-surface); }
   .signal-fact-tiles dt { font-size: var(--signal-type-label); color: var(--color-signal-ink-secondary); }
   .signal-fact-tiles dd { margin: 0; font-family: var(--font-signal-display); font-size: var(--signal-type-subhead); font-weight: var(--signal-weight-semibold); }

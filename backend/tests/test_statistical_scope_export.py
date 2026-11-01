@@ -13,7 +13,7 @@ from tests.test_statistical_scope_surfaces import scope_report
     [
         ("completed", "Statistical checks: Completed.", "does not check the raw data"),
         ("not_applicable", "Statistical checks: Not applicable.", "has no statistics"),
-        ("incomplete", "Statistical checks: Ran only in part.", "not treated as correct"),
+        ("incomplete", "Statistical checks: Not fully run.", "not treated as correct"),
         ("not_recorded", "Statistical checks: Not recorded.", "do not assume it ran"),
     ],
 )

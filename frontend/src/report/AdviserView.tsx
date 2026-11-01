@@ -4,7 +4,7 @@ import { type MouseEvent, type ReactNode, useEffect, useLayoutEffect, useRef } f
 import { Link, useLocation, useParams, useSearchParams } from "react-router";
 import { ApiError } from "../api/client";
 import { DECISION_LABEL } from "../domain/decisionTone";
-import { manuscriptIdentity } from "../domain/manuscriptLabel";
+import { UNGROUPED_LABEL, manuscriptIdentity } from "../domain/manuscriptLabel";
 import { isUnresolvedSharedCriterion } from "../domain/sharedCriterionReview";
 import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
@@ -176,7 +176,7 @@ export function AdviserViewPage() {
           <dl className="signal-shared-report-facts">
             {report.subject?.basis === "confirmed_assignment_at_check"
               ? <div><dt>Group members</dt><dd>{report.subject.member_names.join(", ") || "Not recorded"} <span className="signal-field-hint">(recorded when this check began)</span></dd></div>
-              : <div><dt>Group</dt><dd>{identity.primary}</dd></div>}
+              : <div><dt>{report.manuscript_group_label === UNGROUPED_LABEL && report.manuscript_original_filename ? "Manuscript" : "Group"}</dt><dd>{identity.primary}</dd></div>}
             <div><dt>Required format</dt><dd>{report.rubric_title}</dd></div>
           </dl>
         </div></header>

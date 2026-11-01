@@ -136,7 +136,7 @@ export function AgreementScopeSummary({ scope, findings, undecided, compared, in
   const facts: [string, string][] = [
     ...(scope.n_objectives != null ? [["Objectives found", String(scope.n_objectives)] as [string, string]] : []),
     ...(scope.n_results != null ? [["Results found", String(scope.n_results)] as [string, string]] : []),
-    ["Pairs compared", compared == null ? "Not recorded" : String(compared)],
+    ...(compared != null ? [["Pairs compared", String(compared)] as [string, string]] : []),
     ...(undecided > 0 ? [["Pairs not decided", String(undecided)] as [string, string]] : []),
   ];
   return <section className="signal-agreement-scope" aria-labelledby="shared-agreement-scope-title">
