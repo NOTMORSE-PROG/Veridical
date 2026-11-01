@@ -145,6 +145,11 @@ async def run_internal_agreement_check(
     else:
         outcome = ResultOutcome.escalated
 
+    # Objectives are what the check treated as this study's objectives, so
+    # "matched" (objectives minus unmatched ones) never counts an aim it set
+    # aside as matched. Every statement extracted is kept beside it.
+    objective_sections = pairing.objective_sections or {}
+    n_objectives = objective_sections.get("n_objectives_kept", len(intents))
     result = CheckResult(
         check_run_id=check_run_id,
         criterion_id=None,
@@ -153,7 +158,8 @@ async def run_internal_agreement_check(
         detail={
             **source.detail(),
             "absence_leads_withheld": True,
-            "n_intents": len(intents),
+            "n_intents": n_objectives,
+            "n_intents_extracted": len(intents),
             "coverage_reason": "statement_roles_unverified",
             "reason": (
                 "Statement roles have not been verified as this study's own "
@@ -184,6 +190,8 @@ async def run_internal_agreement_check(
             # needs survey, ...), or the note that no results section could be
             # identified and every section was used.
             "results_sections": pairing.results_sections,
+            # Objectives set aside the same way (BUG-625).
+            "objective_sections": pairing.objective_sections,
         },
     )
     session.add(result)

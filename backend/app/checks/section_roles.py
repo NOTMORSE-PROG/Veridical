@@ -57,6 +57,38 @@ def load_section_roles(path: Path | None = None) -> SectionRoles:
     )
 
 
+def _joined_chapter_titles(nodes: list[tuple[int, str]]) -> list[tuple[int, str]]:
+    """A heading printed as "CHAPTER 1" over "THE PROBLEM AND ITS BACKGROUND"
+    can reach the tree as two nodes on one page. Joined, the chapter keeps both
+    its number and its title; apart, the title would stand as an unnumbered
+    chapter of its own."""
+    joined, used = [], set()
+    for i, (page, title) in enumerate(nodes):
+        if i in used:
+            continue
+        bare = chapter_number(title) is not None and not re.search(
+            r"[^\W\d_]", _CHAPTER_NUMBER.sub("", title.strip() + " ", count=1)
+        )
+        partner = next(
+            (
+                j
+                for j, (other_page, other) in enumerate(nodes)
+                if j > i
+                and j not in used
+                and other_page == page
+                and chapter_number(other) is None
+                and not _STARTS_WITH_NUMBER.match(other)
+            ),
+            None,
+        )
+        if bare and partner is not None:
+            used.add(partner)
+            joined.append((page, f"{title.strip()} {nodes[partner][1].strip()}"))
+        else:
+            joined.append((page, title))
+    return joined
+
+
 def tree_chapters(extraction: ExtractionResult, roles: SectionRoles) -> list[tuple[int, str]]:
     """(first page, title) of the document's chapters from its section tree,
     or nothing when the tree has no chapter structure.
@@ -68,7 +100,9 @@ def tree_chapters(extraction: ExtractionResult, roles: SectionRoles) -> list[tup
     abstract, a biography, the references) count beside them, but a tree of
     front and back matter alone is not a chapter structure: everything
     between would look like one long "Definition of Terms"."""
-    nodes = [(n.page, n.title) for n in extraction.section_tree.nodes if n.page is not None]
+    nodes = _joined_chapter_titles(
+        [(n.page, n.title) for n in extraction.section_tree.nodes if n.page is not None]
+    )
     patterns = [re.compile(p) for p in roles.chapter_patterns]
     chapter_like = [(p, t) for p, t in nodes if any(r.search(t.lower()) for r in patterns)]
     numbered = [(p, t) for p, t in nodes if _NUMBERED_CHAPTER.match(t)]
