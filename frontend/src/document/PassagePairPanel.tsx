@@ -8,6 +8,7 @@ import { type ReactNode, useLayoutEffect, useRef } from "react";
 import type { PassagePairOut } from "../api/types";
 import type { TextRange } from "./sharedPassage";
 import { sharedPassageRanges } from "./sharedPassage";
+import { StandardWordingLeftOut } from "../report/OriginalitySetAside";
 
 export function HighlightedText({ text, ranges }: { text: string; ranges: TextRange[] }) {
   if (ranges.length === 0) return <>{text}</>;
@@ -67,7 +68,10 @@ export function PassagePairPanel({
   excludedReason = [],
   placement = "full-page",
   wholeManuscript = false,
+  standardWordingLeftOut,
 }: {
+  /** Standard texts not counted in this finding's shared wording, by name. */
+  standardWordingLeftOut?: string[];
   pair: PassagePairOut;
   ownAnchor: string | null;
   variant: "flag" | "excluded";
@@ -101,6 +105,7 @@ export function PassagePairPanel({
           <li>{hasExactSharedWording ? "Shaded wording appears in both stored passages." : "No stable exact phrase was found to highlight. Compare both passages manually."}</li>
           <li>These are stored excerpts, not complete source documents.</li>
         </ul>
+        <StandardWordingLeftOut names={standardWordingLeftOut} />
         {ownAnchor && <p className="signal-reading-note__meta"><strong>Recorded {wholeManuscript ? "scope" : "location"}</strong> {ownAnchor}</p>}
       </div>
       <div className="passage-pair__columns">

@@ -1215,6 +1215,9 @@ class Settings(BaseSettings):
         Path(__file__).parent / "checks" / "reuse" / "data" / "standard_texts.json"
     )
     reuse_standard_texts_file: Path | None = None
+    # BUG-677: a standard's name is shown on the report and on shared adviser
+    # links; longer names are cut to this many characters.
+    report_standard_name_max_chars: int = Field(default=120, ge=1)
 
     # --- Library (V-066, F7.1/F7.2 surfaces) -----------------------------------
     # How many chapters' worth of passage excerpt the library shows for a

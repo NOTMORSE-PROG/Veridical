@@ -9285,6 +9285,24 @@
   .signal-fact-rows > div { display: grid; grid-template-columns: minmax(var(--signal-fact-row-label-min), var(--signal-fact-row-label-max)) minmax(0, 1fr); gap: var(--signal-space-4); padding-block: var(--signal-space-3); border-block-start: var(--signal-border-hairline) solid var(--color-signal-border); }
   .signal-fact-rows > div:first-child { border-block-start: 0; padding-block-start: var(--signal-space-1); }
   .signal-fact-rows dt { font-weight: var(--signal-weight-semibold); }
+  /* BUG-677: matches not raised, with a fixed count column so the reasons line up. */
+  .signal-originality-set-aside { max-width: none; display: grid; gap: var(--signal-space-2); }
+  /* Its own block, headed like the comparison leads beside it. */
+  .signal-originality-set-aside { margin-block-start: var(--signal-space-5); }
+  .signal-originality-set-aside h3 { margin: 0; font: var(--signal-weight-semibold) var(--signal-type-subhead) / var(--signal-line-section) var(--font-signal-display); color: var(--color-signal-ink); }
+  /* The rows end where their text ends, and the label column fits its labels. */
+  .signal-originality-set-aside .signal-fact-rows { max-inline-size: var(--signal-fact-rows-measure); }
+  .signal-originality-set-aside .signal-fact-rows > div { grid-template-columns: var(--signal-fact-row-label-min) minmax(0, 1fr); }
+  .signal-originality-set-aside dd { display: grid; grid-template-columns: var(--signal-fact-count-col) minmax(0, 1fr); gap: var(--signal-space-2); }
+  .signal-originality-set-aside__count { font-weight: var(--signal-weight-semibold); font-variant-numeric: tabular-nums; text-align: end; }
+  /* The names start where the explanation starts. */
+  /* Names read as a list of names: bulleted, in body ink, bullets on the text's edge. */
+  .signal-originality-set-aside__names { display: grid; gap: var(--signal-space-1); margin: var(--signal-space-1) 0 0; padding: 0; list-style: disc inside; color: var(--color-signal-ink); }
+  .signal-originality-set-aside__names li { overflow-wrap: anywhere; }
+  .signal-standard-wording-left-out ul { display: grid; gap: var(--signal-space-1); margin: 0; padding: 0; list-style: none; }
+  .signal-standard-wording-left-out dd { display: grid; gap: var(--signal-space-1); }
+  /* Often shown in the narrow finding panel: the label above the names, not beside them. */
+  .signal-standard-wording-left-out > div { grid-template-columns: minmax(0, 1fr); gap: var(--signal-space-1); }
   .signal-fact-rows dd { margin: 0; max-inline-size: var(--signal-review-detail-measure); }
   @media (max-width: 1023px) {
     .signal-fact-rows > div { grid-template-columns: minmax(0, 1fr); gap: var(--signal-space-1); }

@@ -790,3 +790,66 @@ def test_public_projection_rechecks_token_after_inflight_database_change(
     assert response.status_code == 410
     assert response.json()["error"]["code"] == "gone"
     assert "finding_details" not in response.text
+
+
+def test_a_shared_link_names_the_standards_set_aside_and_never_their_wording(
+    logged_in_with_a_done_run, api_scratch_url
+):
+    import asyncio
+
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.db import sqlalchemy_url
+    from app.models.enums import CheckKind, ResultOutcome
+    from app.models.run import CheckResult
+
+    client, run_id = logged_in_with_a_done_run
+
+    async def save():
+        engine = create_async_engine(sqlalchemy_url(api_scratch_url))
+        try:
+            async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                row = await session.scalar(
+                    select(CheckResult).where(
+                        CheckResult.check_run_id == run_id,
+                        CheckResult.kind == CheckKind.originality_reuse,
+                    )
+                )
+                detail = {
+                    "archive_size_n": 3,
+                    "corpus": "library",
+                    "n_similar_without_shared_wording": 2,
+                    "n_shared_wording_only_in_cited_quotations": 1,
+                    "n_shared_wording_only_in_standard_texts": 1,
+                    "standard_texts_set_aside": ["ISO/IEC 25010 usability definition"],
+                    "standard_text_wording": "PRIVATE_STANDARD_WORDING_NEVER_SHARED",
+                }
+                if row is None:
+                    session.add(
+                        CheckResult(
+                            check_run_id=run_id,
+                            criterion_id=None,
+                            kind=CheckKind.originality_reuse,
+                            outcome=ResultOutcome.passed,
+                            score=None,
+                            detail=detail,
+                        )
+                    )
+                else:
+                    row.detail = {**(row.detail or {}), **detail}
+                await session.commit()
+        finally:
+            await engine.dispose()
+
+    asyncio.run(save())
+    token = client.post(f"/check-runs/{run_id}/share", json={}).json()["token"]
+    response = client.get(f"/shared/{token}/report")
+    assert response.status_code == 200
+    scope = response.json()["report"]["originality_scope"]
+    assert scope["n_set_aside_no_shared_wording"] == 2
+    assert scope["n_set_aside_cited_quotation"] == 1
+    assert scope["n_set_aside_standard_text"] == 1
+    assert scope["n_set_aside_weak_section_evidence"] is None
+    assert scope["standard_texts_set_aside"] == ["ISO/IEC 25010 usability definition"]
+    assert "PRIVATE_" not in response.text

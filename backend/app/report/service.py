@@ -8,6 +8,7 @@ an instructor resolves an escalation).
 import asyncio
 import dataclasses
 import logging
+import unicodedata
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Literal
@@ -732,6 +733,43 @@ async def _source_lock_holds(session: AsyncSession, manuscript_id: int) -> bool:
     return purged_at is None
 
 
+def standard_names(value, max_chars: int | None = None) -> list[str]:
+    """Names of standard texts as the originality check saved them, as public
+    labels: strings only, control characters removed, spaces collapsed, cut
+    to the configured length, each once, in order. Never their wording."""
+    if not isinstance(value, list):
+        return []
+    limit = max_chars if max_chars is not None else get_settings().report_standard_name_max_chars
+    names = set()
+    for name in value:
+        if not isinstance(name, str):
+            continue
+        clean = " ".join(
+            "".join(" " if unicodedata.category(ch).startswith("C") else ch for ch in name).split()
+        )
+        if clean:
+            names.add(clean if len(clean) <= limit else clean[: limit - 1].rstrip() + "\u2026")
+    return sorted(names)
+
+
+def set_aside_counts(detail: dict) -> dict:
+    """BUG-677: what the originality check decided not to raise, by reason,
+    read from its own saved counts. A count saved in any other shape than a
+    whole number of zero or more is unknown, not zero."""
+
+    def count(key):
+        value = detail.get(key)
+        return value if type(value) is int and value >= 0 else None
+
+    return {
+        "n_set_aside_no_shared_wording": count("n_similar_without_shared_wording"),
+        "n_set_aside_weak_section_evidence": count("n_sections_evidence_below_passage_bar"),
+        "n_set_aside_cited_quotation": count("n_shared_wording_only_in_cited_quotations"),
+        "n_set_aside_standard_text": count("n_shared_wording_only_in_standard_texts"),
+        "standard_texts_set_aside": standard_names(detail.get("standard_texts_set_aside")),
+    }
+
+
 async def report_out_for_check_run(
     session: AsyncSession, check_run: CheckRun, settings: Settings | None = None
 ) -> ReportOut:
@@ -1085,6 +1123,7 @@ async def report_out_for_check_run(
                 )
                 or "no_text"
             ),
+            **set_aside_counts(originality_detail),
         )
 
     # V-069 AC2: `None` whenever no criterion in `rows` is levelled (AC3 —

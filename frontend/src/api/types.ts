@@ -652,6 +652,9 @@ export interface IntegrityCheckStatusOut {
   // reference list's limits were unclear. Pages for PDFs (empty for Word),
   // and where the left-out text starts, as a report anchor.
   pages_not_compared?: number[] | null;
+  /** BUG-687: pages whose text the originality comparison used, and pages with text it read. Null on older runs. */
+  pages_compared?: number | null;
+  pages_with_text?: number | null;
   not_compared_from?: string | null;
   n_claim_support_unassessed?: number;
   reference_list_page?: number | null;
@@ -689,6 +692,13 @@ export interface OriginalityScope {
   corpus: "library" | "pre_library";
   /** "no_text": no readable text, so no comparison ran at all. */
   not_compared_reason?: "no_text" | "no_comparison_archive" | "source_unresolved" | "reference_boundary_unclear" | "reference_list_unconfirmed" | null;
+  /** BUG-677: similar passages not raised, by reason. Null when the run did not record it. */
+  n_set_aside_no_shared_wording?: number | null;
+  n_set_aside_weak_section_evidence?: number | null;
+  n_set_aside_cited_quotation?: number | null;
+  n_set_aside_standard_text?: number | null;
+  /** Standard texts behind that count, by name only. */
+  standard_texts_set_aside?: string[];
 }
 
 export interface ReportOut extends ReportCommon {
@@ -1013,6 +1023,8 @@ export interface FlagOut {
   // system-authored template sentence, never a quote.
   is_passage_level: boolean;
   passage_pair: PassagePairOut | null;
+  /** BUG-677: standard texts removed from this finding's shared wording, by name only. */
+  standard_wording_left_out?: string[];
   /** V-077: the matched Library record for an F7 finding, so it can be opened. */
   matched_ref?: number | null;
   /** BUG-517: the citation a citation-integrity finding is about, as written. */
