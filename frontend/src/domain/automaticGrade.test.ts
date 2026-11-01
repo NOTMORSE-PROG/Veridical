@@ -4,7 +4,7 @@ import { AUTOMATIC_GRADE_COPY, automaticGradeCaution, automaticGradeChip, automa
 describe("automaticGradeLines", () => {
   it("states how many grading passes chose the grade", () => {
     expect(automaticGradeLines({ agreeing_passes: 2, grading_passes: 3 })).toEqual([
-      "Graded automatically: 2 of 3 grading passes chose this grade.",
+      "Graded automatically: the AI chose this grade in 2 of 3 grading passes. Matching passes show consistency, not confirmation.",
     ]);
   });
 
@@ -44,7 +44,7 @@ describe("automaticGradeLines", () => {
 
   it("names each pass's grade in the card's words, only when the passes were not all the same", () => {
     expect(automaticGradePasses({ votes: ["Proficient", "Proficient", "Beginner"] }))
-      .toBe("What each grading pass chose: Pass 1 Proficient, Pass 2 Proficient, Pass 3 Beginner. A pass is one automatic grading attempt, not an independent reviewer.");
+      .toBe("What each grading pass chose: Pass 1 Proficient, Pass 2 Proficient, Pass 3 Beginner. Each pass is a separate run of the same AI, not an independent reviewer.");
     expect(automaticGradePasses({ votes: ["pass", "fail", "pass"] })).toContain("Pass 1 Meets criterion, Pass 2 Does not meet, Pass 3 Meets criterion.");
     // An abstaining "uncertain" pass reads the same as a pass with no grade.
     expect(automaticGradePasses({ votes: ["Exemplary", null, "uncertain"] })).toContain("Pass 2 no grade recorded, Pass 3 no grade recorded.");

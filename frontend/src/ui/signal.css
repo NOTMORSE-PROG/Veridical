@@ -9191,6 +9191,9 @@
   .signal-criterion-details p { margin: 0; }
   .signal-criterion-details__limits { padding-block-start: var(--signal-space-5); border-block-start: var(--signal-border-hairline) solid var(--color-signal-border); }
   .signal-criterion-details__limits summary { cursor: pointer; color: var(--color-signal-link); }
+  /* BUG-613: how much quoted evidence an automatic grade rests on. */
+  .signal-grade-evidence { margin: var(--signal-space-2) 0 0; color: var(--color-signal-ink); min-inline-size: 0; overflow-wrap: anywhere; }
+  .signal-grade-evidence strong { font-weight: var(--signal-weight-semibold); }
   .signal-dialog__subtitle { display: block; margin-block-start: var(--signal-space-1); font-size: var(--signal-type-body); font-weight: var(--signal-weight-medium); color: var(--color-signal-ink-secondary); }
   /* BUG-518: confirm a finding as a real issue (note optional). */
   .signal-finding-confirm,

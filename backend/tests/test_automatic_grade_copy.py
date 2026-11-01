@@ -65,7 +65,7 @@ def test_the_pdf_export_never_says_no_grade_was_assigned_beside_a_kept_grade():
         support_caution="Review the criterion directly; no automatic grade was assigned.",
     )
     text = " ".join(_text(build_report_pdf(data)).split())
-    assert "Graded automatically: 3 of 3 grading passes chose this grade." in text
+    assert "Graded automatically: the AI chose this grade in 3 of 3 grading passes." in text
     assert "The quote check did not support this grade: Review the criterion directly." in text
     assert "no automatic grade was assigned" not in text
 
