@@ -9,9 +9,11 @@ list instead:
 - reference inventory (the format counts major references and internet
   sites): the counts are worked out from F5's lookups, and the format's own
   descriptors say which counts each level allows. The grader's level still
-  speaks to the format errors; the counts can only lower it. Entries no
-  catalogue identified could be either kind, so the level is decided only
-  when it is the same however they turn out.
+  speaks to the format errors; the counts can only lower it. An entry no
+  catalogue confirmed is typed from its own citation details where they say
+  what it is (a journal with volume and pages, proceedings, a publisher, a
+  preprint server); the rest could be either kind, so the level is decided
+  only when it is the same however they turn out.
 - reference quality (the format asks how far sources are peer-reviewed):
   the same lookups give a profile of the list (journal and conference
   papers, books, other identified works, web sources, unidentified entries).
@@ -39,18 +41,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.service import write_audit_event
 from app.checks.levels import match_level, outcome_and_score
-from app.errors import ApiDownError, QuotaExhaustedError
-from app.llm.base import LLMClient, LLMError
 from app.models.enums import CheckKind, ResultOutcome
 from app.models.rubric import Criterion
 from app.models.run import CheckResult
 
 INVENTORY = "reference_inventory"
 QUALITY = "reference_quality"
-QUALITY_PROMPT_TYPE = "reference_quality"
-QUALITY_PROMPT_VERSION = "reference_quality_v1"
-_PROMPT = Path(__file__).parent / "prompts" / "reference_quality_v1.txt"
-CANNOT_DETERMINE = "cannot_determine"
 
 # Outcomes a reference strategy may replace. Rows the product already could
 # not assess (an outage, a source it could not read) keep their own reason.
@@ -73,7 +69,12 @@ class ReferenceData:
     major_classes: frozenset[str]
     confirmed_statuses: frozenset[str]
     web_cues: tuple[re.Pattern[str], ...]
-    quality_readings: int
+    # Typing an unconfirmed entry from its own citation text, in order.
+    text_types: tuple[tuple[str, tuple[re.Pattern[str], ...]], ...] = ()
+    web_scholarly_cues: tuple[re.Pattern[str], ...] = ()
+    web_address: re.Pattern[str] | None = None
+    # (pattern, min_share, max_share) a quality level's own words imply.
+    quality_quantifiers: tuple[tuple[re.Pattern[str], float | None, float | None], ...] = ()
 
 
 @lru_cache
@@ -96,7 +97,16 @@ def load_reference_data(path: Path) -> ReferenceData:
         major_classes=frozenset(raw["major_classes"]),
         confirmed_statuses=frozenset(raw["confirmed_statuses"]),
         web_cues=tuple(re.compile(p, re.I) for p in raw["web_entry_cues"]),
-        quality_readings=int(raw["quality_readings"]),
+        text_types=tuple(
+            (rule["class"], tuple(re.compile(p, re.I) for p in rule["patterns"]))
+            for rule in raw.get("entry_text_types", [])
+        ),
+        web_scholarly_cues=tuple(re.compile(p, re.I) for p in raw.get("web_scholarly_cues", [])),
+        web_address=re.compile(raw["web_address"], re.I) if raw.get("web_address") else None,
+        quality_quantifiers=tuple(
+            (re.compile(item["pattern"], re.I), item.get("min_share"), item.get("max_share"))
+            for item in raw.get("quality_quantifiers", [])
+        ),
     )
 
 
@@ -128,23 +138,33 @@ def strategy_for(criterion: Any, data: ReferenceData) -> str | None:
 
 @dataclass
 class Profile:
-    """Every entry of the list in one class. `unclassified` entries are ones
-    no catalogue identified and whose own text does not say what they are."""
+    """Every entry of the list in one class. Catalogue-confirmed classes come
+    first; an entry no catalogue confirmed is typed from its own citation text
+    where that text says what it is (`*_text`), and is `unclassified` where it
+    does not."""
 
     entries: int = 0
     peer_reviewed: int = 0
     book: int = 0
     other_identified: int = 0
+    journal_or_conference_text: int = 0
+    book_text: int = 0
+    repository_text: int = 0
     web: int = 0
     unclassified: int = 0
     unclassified_entries: list[int] = field(default_factory=list)
+    text_typed_entries: dict[str, list[int]] = field(default_factory=dict)
     # Unidentified because a catalogue could not be reached, not because none
     # knew the entry: said so, since a later check may identify them.
     lookup_unavailable: int = 0
 
     @property
     def major(self) -> int:
-        return self.peer_reviewed + self.book
+        return self.peer_reviewed + self.book + self.major_from_text
+
+    @property
+    def major_from_text(self) -> int:
+        return self.journal_or_conference_text + self.book_text
 
     def as_detail(self) -> dict:
         return {
@@ -152,14 +172,51 @@ class Profile:
             "journal_or_conference_papers": self.peer_reviewed,
             "books": self.book,
             "other_identified_works": self.other_identified,
+            "journal_or_conference_papers_by_citation_text": self.journal_or_conference_text,
+            "books_by_citation_text": self.book_text,
+            "preprints_repositories_or_theses_by_citation_text": self.repository_text,
             "web_sources": self.web,
             "unidentified": self.unclassified,
             "unidentified_entry_numbers": self.unclassified_entries,
+            "entry_numbers_typed_by_citation_text": self.text_typed_entries,
             "unidentified_because_a_catalogue_was_unreachable": self.lookup_unavailable,
         }
 
 
-def classify_entry(record: dict, raw_text: str, url: str | None, data: ReferenceData) -> str:
+def _text_type(raw_text: str, isbn: str | None, data: ReferenceData) -> str | None:
+    """What an unconfirmed entry's own citation text says it is, if anything.
+    The first class with a matching cue wins; a repository cue outranks an
+    ISBN, which outranks the journal and book cues."""
+    text = _flat(raw_text)
+    matched = [name for name, patterns in data.text_types if any(p.search(text) for p in patterns)]
+    if "repository_text" in matched:
+        return "repository_text"
+    if isbn:
+        return "book_text"
+    return matched[0] if matched else None
+
+
+def _web_entry(raw_text: str, url: str | None, data: ReferenceData) -> bool:
+    """A web source: the entry says it was retrieved or accessed online and
+    gives an address. The parser can lose an address that wraps across lines,
+    so the entry's own text counts as well. An entry with a DOI or a publisher
+    address may be a journal article retrieved online, so it is not called a
+    web source: counting it as one could lower a grade."""
+    text = _flat(raw_text)
+    if not any(cue.search(text) for cue in data.web_cues):
+        return False
+    if not (url or (data.web_address is not None and data.web_address.search(text))):
+        return False
+    return not any(cue.search(text) for cue in data.web_scholarly_cues)
+
+
+def classify_entry(
+    record: dict,
+    raw_text: str,
+    url: str | None,
+    data: ReferenceData,
+    isbn: str | None = None,
+) -> str:
     if record.get("status") in data.confirmed_statuses:
         tags = set(record.get("work_types") or [])
         for name in ("peer_reviewed", "book"):
@@ -167,7 +224,10 @@ def classify_entry(record: dict, raw_text: str, url: str | None, data: Reference
                 return name
         if tags:
             return "other_identified"
-    if url and any(cue.search(raw_text or "") for cue in data.web_cues):
+    by_text = _text_type(raw_text, isbn, data)
+    if by_text is not None:
+        return by_text
+    if _web_entry(raw_text, url, data):
         return "web"
     return "unclassified"
 
@@ -184,6 +244,7 @@ def reference_profile(
             getattr(citation, "raw_text", "") or "",
             getattr(citation, "url", None),
             data,
+            getattr(citation, "isbn", None),
         )
         profile.entries += 1
         if kind == "unclassified":
@@ -194,6 +255,8 @@ def reference_profile(
             profile.other_identified += 1
         else:
             setattr(profile, kind, getattr(profile, kind) + 1)
+            if kind.endswith("_text"):
+                profile.text_typed_entries.setdefault(kind, []).append(index + 1)
     return profile
 
 
@@ -257,7 +320,7 @@ def inventory_bounds(
     return worst, best
 
 
-# --- reference quality: two separate readings of the profile ------------------
+# --- reference quality: what the counts prove about the levels -----------------
 
 
 def quality_from_ranges(
@@ -269,8 +332,9 @@ def quality_from_ranges(
     either, so a level is decided only when both extremes fall in its range."""
     if not ranges or not profile.entries:
         return None
-    low_share = profile.peer_reviewed / profile.entries
-    high_share = (profile.peer_reviewed + profile.unclassified) / profile.entries
+    papers = profile.peer_reviewed + profile.journal_or_conference_text
+    low_share = papers / profile.entries
+    high_share = (papers + profile.unclassified) / profile.entries
 
     def level_for(share: float) -> int | None:
         for ordinal, bounds in ranges.items():
@@ -285,51 +349,38 @@ def quality_from_ranges(
     return None, "ranges_inconclusive"
 
 
-def _quality_prompt(criterion: Any, profile: Profile, reading: int, total: int) -> str:
-    task = {
-        "reading": f"{reading} of {total}",
-        "criterion": criterion.text,
-        "levels": [
-            {"name": level["name"], "descriptor": level["descriptor"]}
-            for level in _levels(criterion)
-        ],
-        "reference_list_profile": profile.as_detail(),
-    }
-    # One replacement keeps profile strings from being read as template slots.
-    return _PROMPT.read_text(encoding="utf-8").replace(
-        "{task_json}", json.dumps(task, ensure_ascii=False)
+def scholarly_share_bounds(profile: Profile) -> tuple[float, float]:
+    """The lowest and highest share of the list that can be journal or
+    conference papers or books: unidentified entries and other identified
+    works (datasets, reports, standards) could go either way."""
+    low = profile.major / profile.entries
+    high = (profile.major + profile.unclassified + profile.other_identified) / profile.entries
+    return low, high
+
+
+def quality_level_fits(criterion: Any, ordinal: int, profile: Profile, data: ReferenceData) -> dict:
+    """Whether the counts show a quality level, from its own words ("most
+    ... not peer-reviewed", "primarily peer-reviewed"), however the
+    unidentified entries turn out. A level whose words imply no share cannot
+    be checked, so it does not fit."""
+    descriptor = _flat(
+        next(lv["descriptor"] for lv in _levels(criterion) if int(lv["level"]) == ordinal)
     )
-
-
-async def quality_readings(
-    llm: LLMClient, criterion: Any, profile: Profile, data: ReferenceData, check_run_id: int
-) -> list[dict]:
-    """Separate, numbered readings, so no answer can be served from another's
-    cache entry. A reading that fails or cannot be read is kept as such."""
-    readings = []
-    total = data.quality_readings
-    for reading in range(1, total + 1):
-        try:
-            response = await llm.complete(
-                QUALITY_PROMPT_TYPE,
-                _quality_prompt(criterion, profile, reading, total),
-                prompt_version=QUALITY_PROMPT_VERSION,
-                check_run_id=check_run_id,
-                reference_reading=reading,
-            )
-        except (ApiDownError, QuotaExhaustedError, LLMError) as exc:
-            readings.append({"reading": reading, "level": None, "error": type(exc).__name__})
-            continue
-        level = response.get("level") if isinstance(response, dict) else None
-        reason = response.get("reason") if isinstance(response, dict) else None
-        readings.append(
-            {
-                "reading": reading,
-                "level": level if isinstance(level, str) else None,
-                "reason": reason if isinstance(reason, str) else None,
-            }
-        )
-    return readings
+    low, high = scholarly_share_bounds(profile)
+    implied = [
+        (min_share, max_share)
+        for pattern, min_share, max_share in data.quality_quantifiers
+        if pattern.search(descriptor)
+    ]
+    fits = bool(implied) and all(
+        (min_share is None or low > min_share) and (max_share is None or high < max_share)
+        for min_share, max_share in implied
+    )
+    return {
+        "fits": fits,
+        "share_bounds": [round(low, 3), round(high, 3)],
+        "implied_shares": implied,
+    }
 
 
 # --- applying a decision to the stored criterion row ---------------------------
@@ -397,11 +448,22 @@ def _grader_ordinal(criterion: Any, row: CheckResult) -> int | None:
 
 
 def _counts_sentence(profile: Profile) -> str:
+    from_text = (
+        f"; {profile.major_from_text} of them typed from the entry's own citation details "
+        "because no catalogue confirmed them"
+        if profile.major_from_text
+        else ""
+    )
+    repositories = (
+        f"{profile.repository_text} preprints, repository copies or theses, "
+        if profile.repository_text
+        else ""
+    )
     sentence = (
         f"The reference list has {profile.entries} entries: "
-        f"{profile.major} major references (journal or conference papers and books), "
-        f"{profile.web} web sources, {profile.other_identified} other identified works "
-        f"and {profile.unclassified} entries no catalogue identified."
+        f"{profile.major} major references (journal or conference papers and books{from_text}), "
+        f"{profile.web} web sources, {repositories}{profile.other_identified} other identified "
+        f"works and {profile.unclassified} entries that could not be identified."
     )
     if profile.lookup_unavailable:
         sentence += (
@@ -409,6 +471,20 @@ def _counts_sentence(profile: Profile) -> str:
             "catalogue was unreachable; a later check may identify them."
         )
     return sentence
+
+
+def _no_level_reason(conditions: dict[int, list[tuple[str, int]]], profile: Profile) -> str:
+    """Which of the format's own limits the list breaks at every level, even
+    counting every unidentified entry the way that helps the grade most."""
+    internet_limits = [
+        n for conds in conditions.values() for k, n in conds if k == "internet_at_most"
+    ]
+    if internet_limits and profile.web > max(internet_limits):
+        return (
+            f"Every level of this format allows at most {max(internet_limits)} internet "
+            f"sites, and {profile.web} entries are web sources,"
+        )
+    return "No level of this format allows these counts,"
 
 
 def decide_inventory(
@@ -427,8 +503,8 @@ def decide_inventory(
     if worst is None and best is None:
         _escalate(
             row,
-            f"{counts} No level of this format allows these counts, so VERIDICAL did not "
-            "choose one. Please check the reference list.",
+            f"{counts} {_no_level_reason(conditions, profile)} so VERIDICAL did not choose "
+            "one. Please check the reference list.",
             record,
         )
         return
@@ -469,13 +545,19 @@ def decide_inventory(
     _decide(row, criterion, final, reasoning, record)
 
 
-def decide_quality_from(
+def decide_quality(
     row: CheckResult,
     criterion: Any,
     profile: Profile,
-    readings: list[dict] | None,
     ranges_result: tuple[int | None, str] | None,
+    data: ReferenceData,
 ) -> None:
+    """Decide a quality level only where the counts prove it: the one level
+    whose own words ("most ... not peer-reviewed", "primarily peer-reviewed")
+    hold however the unidentified entries turn out. Where the counts fit
+    more than one level, what separates them ("a few are questionable",
+    "approved sources") is not something counts show, so the instructor
+    decides, told which levels fit."""
     record = {"strategy": QUALITY, "profile": profile.as_detail(), "grader": _grader_result(row)}
     counts = _counts_sentence(profile)
     if not profile.entries:
@@ -498,42 +580,34 @@ def decide_quality_from(
             row, criterion, ordinal, f"{counts} This share falls in this level's range.", record
         )
         return
-    record["readings"] = readings or []
-    names = {level["name"] for level in _levels(criterion)}
-    chosen = [reading.get("level") for reading in readings or []]
-    if any(r.get("error") for r in readings or []):
+    checks = {
+        int(level["level"]): quality_level_fits(criterion, int(level["level"]), profile, data)
+        for level in _levels(criterion)
+    }
+    record["level_checks"] = {str(ordinal): check for ordinal, check in checks.items()}
+    fitting = [ordinal for ordinal, check in checks.items() if check["fits"]]
+    names = {int(level["level"]): level["name"] for level in _levels(criterion)}
+    if len(fitting) != 1:
+        which = (
+            f"These counts fit more than one level ({' and '.join(names[o] for o in fitting)}); "
+            "what separates them is not something the counts show"
+            if fitting
+            else "These counts do not confirm any one level's wording however the "
+            "unidentified entries turn out"
+        )
         _escalate(
             row,
-            f"{counts} The reading of this profile could not be completed, so VERIDICAL did "
-            "not choose a level.",
+            f"{counts} {which}, so VERIDICAL did not choose one. Please check the reference list.",
             record,
         )
         return
-    if not chosen or any(level not in names for level in chosen):
-        _escalate(
-            row,
-            f"{counts} The unidentified entries could change which level fits, so VERIDICAL "
-            "did not choose one. Please check the reference list.",
-            record,
-        )
-        return
-    if len(set(chosen)) != 1:
-        _escalate(
-            row,
-            f"{counts} Two separate readings of this profile chose different levels "
-            f"({', '.join(chosen)}), so VERIDICAL did not choose one.",
-            record,
-        )
-        return
-    ordinal = next(int(lv["level"]) for lv in _levels(criterion) if lv["name"] == chosen[0])
     record["decision_basis"] = "reference_profile"
-    reason = next((r.get("reason") for r in readings if r.get("reason")), None)
     _decide(
         row,
         criterion,
-        ordinal,
-        f"{counts} Both readings of this profile chose this level."
-        + (f" {reason}" if reason else ""),
+        fitting[0],
+        f"{counts} Only this level's wording fits these counts, however the unidentified "
+        "entries turn out.",
         record,
     )
 
@@ -558,7 +632,6 @@ async def apply_reference_strategies(
     criteria: list[Criterion],
     citation_result: CheckResult | None,
     citations: list[Any],
-    llm: LLMClient,
     data: ReferenceData,
     *,
     quality_ranges: dict | None = None,
@@ -611,12 +684,7 @@ async def apply_reference_strategies(
             decide_inventory(row, criterion, profile, data)
         else:
             ranges = quality_from_ranges(criterion, profile, quality_ranges)
-            readings = (
-                None
-                if ranges is not None
-                else await quality_readings(llm, criterion, profile, data, check_run_id)
-            )
-            decide_quality_from(row, criterion, profile, readings, ranges)
+            decide_quality(row, criterion, profile, ranges, data)
         await write_audit_event(
             session,
             event_type="reference_criterion_decided",

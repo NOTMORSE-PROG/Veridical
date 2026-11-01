@@ -64,10 +64,10 @@
     "caution": null
   },
   {
-    "name": "two readings of the reference profile are named as such",
+    "name": "a quality level the counts prove is named as such",
     "row": {"decision_basis": "reference_profile"},
     "lines": [
-      "Graded automatically: two separate readings of the reference list's source types chose this level."
+      "Graded automatically: the reference list's counts fit only this level's wording."
     ],
     "caution": null
   }

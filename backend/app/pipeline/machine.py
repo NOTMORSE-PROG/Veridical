@@ -786,7 +786,6 @@ async def _apply_reference_criteria(
     check_run: CheckRun,
     manuscript: Manuscript,
     settings: Settings,
-    llm: LLMClient,
 ) -> None:
     data = load_reference_data(settings.reference_criteria_file)
     criteria = list(
@@ -809,7 +808,6 @@ async def _apply_reference_criteria(
         criteria,
         citation_result,
         citations,
-        llm,
         data,
         quality_ranges=getattr(rubric, "reference_quality_ranges", None),
     )
@@ -906,7 +904,7 @@ async def _run_integrity_stage(
     # V-098: criteria the format states about the reference list itself are
     # judged from the citation check's lookups, now that they exist. Rows
     # already judged this way are left alone, so a resumed stage is safe.
-    await _apply_reference_criteria(session, check_run, manuscript, settings, llm)
+    await _apply_reference_criteria(session, check_run, manuscript, settings)
     await cancellation_boundary()
 
     if forensics_existing is None:

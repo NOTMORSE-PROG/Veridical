@@ -8,7 +8,7 @@ export const AUTOMATIC_GRADE_COPY = {
   lower_of_two: "Graded automatically: two grading passes disagreed and no third pass settled it with quotes found in the manuscript, so the lower of the two grades was used.",
   single_verified_pass: "Graded automatically: only one grading pass gave a grade with quotes found in the manuscript, so its grade was used. The other pass's grade had no quotes found in the manuscript, so it was not used.",
   reference_counts: "Graded automatically: the reference list's counts of major references and internet sites allow no higher level than this; the grading passes judged the formatting.",
-  reference_profile: "Graded automatically: two separate readings of the reference list's source types chose this level.",
+  reference_profile: "Graded automatically: the reference list's counts fit only this level's wording.",
   reference_ranges: "Graded automatically: the share of journal and conference papers in the reference list falls in this format's range for this level.",
   caution: "The quote check did not support this grade: {reason}",
   scope_caution: "{reason}",

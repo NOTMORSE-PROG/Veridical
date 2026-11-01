@@ -31,9 +31,21 @@
     }
   ],
   "number_words": {
-    "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
-    "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11,
-    "twelve": 12, "fifteen": 15, "twenty": 20
+    "zero": 0,
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
+    "eleven": 11,
+    "twelve": 12,
+    "fifteen": 15,
+    "twenty": 20
   },
   "_types_note": "Provider type tags (app/external/work_type.py) grouped into classes. A tag in no class makes an identified work 'other': it counts neither as a major reference nor as an internet site.",
   "type_classes": {
@@ -60,16 +72,96 @@
       "gbooks:book"
     ]
   },
-  "major_classes": ["peer_reviewed", "book"],
+  "major_classes": [
+    "peer_reviewed",
+    "book"
+  ],
   "_confirmed_note": "Only a lookup whose identity was confirmed says what the entry is.",
-  "confirmed_statuses": ["existence_confirmed", "retracted", "corrected"],
+  "confirmed_statuses": [
+    "existence_confirmed",
+    "retracted",
+    "corrected"
+  ],
   "_web_note": "An entry no catalogue identified, that gives a web address and says it was retrieved or accessed online, is counted as an internet site.",
   "web_entry_cues": [
     "\\bretrieved\\s+(?:from|on)\\b",
+    "\\bretrieved\\b[^.]{0,40}?\\bfrom\\b",
     "\\baccessed\\b",
     "\\bavailable\\s+(?:at|from|online)\\b",
     "\\bonline\\s*\\]",
     "\\[\\s*online\\b"
   ],
-  "quality_readings": 2
+  "_text_types_note": "An entry no catalogue confirmed is typed from its own citation text, in this order; the first class with a matching pattern wins. Repository and preprint entries count neither as major references nor as internet sites. A wrong 'major' only keeps the counts from lowering a grade, so the journal, conference and book cues may be broad; the web typing is the one that can lower a grade, so it is kept narrow. An entry no rule types stays unidentified.",
+  "entry_text_types": [
+    {
+      "class": "repository_text",
+      "patterns": [
+        "\\barxiv\\b",
+        "\\bssrn\\b",
+        "\\bsocial\\s+science\\s+research\\s+network\\b",
+        "\\bzenodo\\b",
+        "\\bresearchgate\\b",
+        "\\b(?:med|bio|chem|psy|edu|tech)rxiv\\b",
+        "\\bpre[\\s\\u002d\\u2010-\\u2015]*print\\b",
+        "\\b10\\.5281/",
+        "\\b10\\.48550/",
+        "\\b(?:master'?s?|doctoral|phd|bachelor'?s?|undergraduate)\\s+(?:thesis|dissertation)\\b",
+        "\\b(?:unpublished|dissertation)\\b",
+        "\\b(?:scholarcommons|digitalcommons|scholarworks|eprints|dspace|handle\\.net|repository)\\b"
+      ]
+    },
+    {
+      "class": "journal_or_conference_text",
+      "patterns": [
+        "\\bproceedings\\b",
+        "\\bconference\\b",
+        "\\bsymposium\\b",
+        "\\bworkshop\\b",
+        "\\bjournal\\s+of\\b",
+        "\\bjurnal\\b",
+        "\\btransactions\\s+on\\b",
+        "\\b\\d{1,4}\\s*\\*?\\s*\\(\\s*[\\d\\u2010-\\u2015-]{0,9}\\s*\\)\\s*\\*?\\s*[,:]\\s*(?:pp\\.?\\s*)?(?:\\d|e\\d|article\\b)",
+        "\\bvol(?:ume)?\\.?\\s*\\d+\\s*,\\s*(?:no|issue)\\.?\\s*\\d+",
+        ",\\s*\\d{1,4}\\s*,\\s*(?:pp\\.?\\s*)?\\d+\\s*[\\u2010-\\u2015-]\\s*\\d+",
+        "\\(\\s*\\)\\s*,\\s*(?:[a-z]{3,4}\\.?\\s*)?(?:19|20)\\d{2}\\b"
+      ]
+    },
+    {
+      "class": "book_text",
+      "patterns": [
+        "\\buniversity\\s+press\\b",
+        "\\bpublish(?:ers?|ing)\\b",
+        "\\b\\d+(?:st|nd|rd|th)\\s+ed(?:ition|\\.)",
+        "\\(\\s*eds?\\.\\s*\\)"
+      ]
+    }
+  ],
+  "_isbn_note": "An unconfirmed entry whose parsed record carries an ISBN, and no repository cue, is a book.",
+  "_web_scholarly_note": "Web typing needs a web cue and an address in the entry, and none of these scholarly cues: an entry retrieved from a publisher or DOI address may be a journal article, so it stays unidentified.",
+  "web_scholarly_cues": [
+    "\\bdoi\\b",
+    "\\b10\\.\\d{4,9}/",
+    "\\b(?:sciencedirect|springer|ieeexplore|dl\\.acm|mdpi|wiley|tandfonline|jstor|sagepub|emerald|nature\\.com|ncbi|pubmed|scholar\\.google|semanticscholar)\\b",
+    "publish"
+  ],
+  "web_address": "https?\\s*:\\s*/\\s*/|\\bwww\\s*\\.",
+  "_quality_quantifiers_note": "What a quality level's own words say about the share of the list that is journal or conference papers or books (catalogue-confirmed or typed from the citation text). A reading's level is accepted only when the share holds however the unidentified and other entries turn out: above min_share at the lowest possible share, below max_share at the highest. A level whose words match none of these cannot be checked against the counts, so it is not accepted.",
+  "quality_quantifiers": [
+    {
+      "pattern": "\\bvirtually\\s+no\\b",
+      "max_share": 0.1
+    },
+    {
+      "pattern": "\\bmost\\b[^.;]{0,60}\\bnot\\s+peer",
+      "max_share": 0.5
+    },
+    {
+      "pattern": "\\bmost\\b[^.;]{0,60}\\blegitimate\\b",
+      "min_share": 0.5
+    },
+    {
+      "pattern": "\\bprimarily\\b[^.;]{0,20}\\bpeer",
+      "min_share": 0.5
+    }
+  ]
 }

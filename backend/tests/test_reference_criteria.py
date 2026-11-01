@@ -1,6 +1,5 @@
 """Criteria judged from the reference list after the citation check (V-098)."""
 
-import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -24,13 +23,15 @@ BIBLIOGRAPHY = SimpleNamespace(
     text="Bibliography",
     levels=levels(
         "The bibliography is done in the correct format but with many errors. (Includes three "
-        "major references e.g. science journal articles, books, but no more than two internet sites.)",
+        "major references e.g. science journal articles, books, but no more than two internet "
+        "sites.)",
         "The bibliography is done in the correct format with some errors. (Includes four major "
         "references e.g. science journal articles, books but no more than two internet sites.)",
         "The bibliography is done in the correct format with few errors. (Includes five major "
         "references e.g. science journal articles, books, but no more than two internet sites.)",
         "The bibliography is done in the correct format with no errors. (Includes more than five "
-        "major references e.g. science journal articles, books, but no more than two internet sites.)",
+        "major references e.g. science journal articles, books, but no more than two internet "
+        "sites.)",
     ),
 )
 QUALITY = SimpleNamespace(
@@ -149,6 +150,16 @@ def test_counts_no_level_allows_go_to_the_instructor_with_the_counts(data):
     assert "9 web sources" in row.detail["reason"]
     assert row.detail["proposed_verdict"] == "EXEMPLARY"
     assert "verdict" not in row.detail
+    # The reason names the format's own limit the list breaks.
+    assert "allows at most 2 internet sites, and 9 entries are web sources" in row.detail["reason"]
+
+
+def test_a_list_short_of_major_references_is_not_blamed_on_internet_sites(data):
+    row = graded_row("EXEMPLARY")
+    rc.decide_inventory(row, BIBLIOGRAPHY, profile(peer_reviewed=1, web=1), data)
+    assert row.outcome == ResultOutcome.escalated
+    assert "internet sites, and" not in row.detail["reason"]
+    assert "No level of this format allows these counts" in row.detail["reason"]
 
 
 def test_unidentified_entries_that_could_change_the_level_escalate(data):
@@ -161,43 +172,6 @@ def test_unidentified_entries_that_could_change_the_level_escalate(data):
 def test_an_ungraded_formatting_part_is_not_decided_by_counts_alone(data):
     row = graded_row("EXEMPLARY", outcome=ResultOutcome.escalated)
     rc.decide_inventory(row, BIBLIOGRAPHY, profile(peer_reviewed=20), data)
-    assert row.outcome == ResultOutcome.escalated
-
-
-def readings(*levels_chosen):
-    return [{"reading": i + 1, "level": level} for i, level in enumerate(levels_chosen)]
-
-
-def test_two_matching_readings_decide_quality():
-    row = graded_row("PROFICIENT")
-    rc.decide_quality_from(
-        row, QUALITY, profile(peer_reviewed=30, book=5), readings("EXEMPLARY", "EXEMPLARY"), None
-    )
-    assert row.outcome == ResultOutcome.passed
-    assert row.detail["verdict"] == "EXEMPLARY"
-    assert row.detail["decision_basis"] == "reference_profile"
-
-
-@pytest.mark.parametrize(
-    "chosen",
-    [
-        ("EXEMPLARY", "PROFICIENT"),
-        ("EXEMPLARY", rc.CANNOT_DETERMINE),
-        ("EXEMPLARY", "Excellent"),
-        (),
-    ],
-)
-def test_anything_but_two_matching_readings_escalates(chosen):
-    row = graded_row("PROFICIENT")
-    rc.decide_quality_from(row, QUALITY, profile(peer_reviewed=3), readings(*chosen), None)
-    assert row.outcome == ResultOutcome.escalated
-    assert row.score is None
-
-
-def test_a_failed_reading_escalates_rather_than_deciding_on_one():
-    row = graded_row("PROFICIENT")
-    failed = [{"reading": 1, "level": "EXEMPLARY"}, {"reading": 2, "level": None, "error": "x"}]
-    rc.decide_quality_from(row, QUALITY, profile(peer_reviewed=3), failed, None)
     assert row.outcome == ResultOutcome.escalated
 
 
@@ -225,9 +199,9 @@ def test_entries_are_classified_only_from_confirmed_lookups_or_their_own_text(da
     )
     web = "Smith (2020). Shop. Retrieved from https://example.com"
     assert kind({"status": "not_found"}, web, "https://example.com") == "web"
-    assert kind({"status": "not_found"}, "Smith (2020). A paper. https://x.org", "https://x.org") == (
-        "unclassified"
-    )
+    assert kind(
+        {"status": "not_found"}, "Smith (2020). A paper. https://x.org", "https://x.org"
+    ) == ("unclassified")
 
 
 def test_reference_list_problems_are_named():
@@ -237,21 +211,197 @@ def test_reference_list_problems_are_named():
     assert rc.reference_list_problem({"reference_metadata_coverage": [{}]}) is None
 
 
-class ScriptedLLM:
-    def __init__(self, *answers):
-        self.answers = list(answers)
-        self.calls = []
-
-    async def complete(self, prompt_type, prompt, **context):
-        self.calls.append((prompt_type, prompt, context))
-        return self.answers.pop(0)
+# --- unconfirmed entries typed from their own citation text ---------------------
 
 
-def test_quality_readings_are_separate_numbered_calls(data):
-    llm = ScriptedLLM({"level": "EXEMPLARY"}, {"level": "EXEMPLARY"})
-    result = asyncio.run(rc.quality_readings(llm, QUALITY, profile(peer_reviewed=3), data, 5))
-    assert [r["level"] for r in result] == ["EXEMPLARY", "EXEMPLARY"]
-    prompts = [call[1] for call in llm.calls]
-    assert len(set(prompts)) == 2, "identical prompts could be served from one cache entry"
-    assert [call[2]["reference_reading"] for call in llm.calls] == [1, 2]
-    assert all(call[0] == rc.QUALITY_PROMPT_TYPE for call in llm.calls)
+def text_kind(data, raw, url=None, isbn=None, status="not_found"):
+    return rc.classify_entry({"status": status}, raw, url, data, isbn)
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "Wang, R. Y., & Strong, D. M. (1996). Beyond accuracy. Journal of Management Information "
+        "Systems, 12(4), 5–33.",
+        "Marelli, D. (2022). Designing a try-on application. *Sensors, 22*(10), Article 3832.",
+        "Biggs, J. (1996). Enhancing teaching. Higher Education, 32, 347–364.",
+        "[11] J. F. Nicol. “Adaptive thermal comfort.” Energy and Buildings, 34(), 2002, "
+        "pp. 563–572.",
+        "[18] M. Schweiker. “Review of approaches.” Building and Environment, (), 2020.",
+        "Loukil, M. (2023). Face shape classification. 2023 IEEE Conference on Artificial "
+        "Intelligence, 1–7.",
+        "Li, J. (2024). ContraDoc. In Proceedings of the 2024 Annual Meeting, 6509–6523.",
+    ],
+)
+def test_a_journal_or_conference_citation_is_typed_from_its_details(data, raw):
+    assert text_kind(data, raw) == "journal_or_conference_text"
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "Chen, H. (2026). Rubrics across LLMs (arXiv:2606.08625). arXiv. https://arxiv.org/abs/2606",
+        # Looks like a journal volume, but it is a repository copy.
+        "Celestin, M. (2024). AR in retail. *Zenodo, 9*(2). https://doi.org/10.5281/zenodo.13879960",
+        "Codera, M. (2023). AR in history. Social Science Research Network. https://papers.ssrn.com",
+        "Mehta (2022). Face shape classification. ResearchGate. https://www.researchgate.net/x",
+        "Nguyen, A. (2019). Trippit. Retrieved July 30, 2023 from https://scholarcommons.scu.edu/x",
+        "Reyes, P. (2021). A study of apps. Unpublished master's thesis, Example University.",
+    ],
+)
+def test_a_preprint_repository_copy_or_thesis_is_never_a_major_reference(data, raw):
+    assert text_kind(data, raw) == "repository_text"
+
+
+def test_a_book_is_typed_from_its_isbn_or_edition(data):
+    assert text_kind(data, "Kendall, K. (2019). Systems analysis.", isbn="9780134785554") == (
+        "book_text"
+    )
+    assert text_kind(data, "[98] J. Bradbury. Animal Communication. 2nd ed. Sinauer, 2011.") == (
+        "book_text"
+    )
+    # A repository cue outranks an ISBN.
+    assert text_kind(data, "A thesis. Unpublished dissertation.", isbn="9780134785554") == (
+        "repository_text"
+    )
+
+
+def test_a_web_page_whose_address_the_parser_lost_is_still_a_web_source(data):
+    # The address wrapped across lines, so the parser recorded no URL.
+    raw = (
+        "Silva, S. (2018). 5 Reasons. Retrieved July 27, 2023 from "
+        "https://www.northsouthtrav el.com/x"
+    )
+    assert text_kind(data, raw, url=None) == "web"
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        # A journal article retrieved from its publisher or DOI address: counting it as an
+        # internet site could lower a grade, so it stays unidentified.
+        "Coves, A. (2023). Travel-app use. Retrieved July 27, 2023 from https://www.sciencedirect.com/x",
+        "Ho, R. (2019). Smart travel apps. Retrieved July 28, 2023 from https://knepublishing.com/x",
+        "Sia, P. (2022). Travel apps review. Retrieved July 26, 2023 from https://doi.org/10.1108/JHTI",
+        # No address at all.
+        "Smith (2020). A report. Retrieved July 2, 2023 from the company office.",
+    ],
+)
+def test_web_typing_stays_narrow_because_it_can_lower_a_grade(data, raw):
+    assert text_kind(data, raw) == "unclassified"
+
+
+def test_a_catalogue_confirmation_outranks_the_citation_text(data):
+    record = {"status": "existence_confirmed", "work_types": ["crossref:dataset"]}
+    raw = "Smith (2020). A dataset. Journal of Data, 3(1), 1–2."
+    assert rc.classify_entry(record, raw, None, data) == "other_identified"
+
+
+def test_the_profile_and_counts_say_which_entries_were_typed_from_their_text(data):
+    records = [{"reference_order_index": i, "status": "not_found"} for i in range(4)]
+    citations = {
+        0: SimpleNamespace(raw_text="A. Journal of Things, 3(1), 1–9.", url=None, isbn=None),
+        1: SimpleNamespace(raw_text="B. arXiv preprint.", url=None, isbn=None),
+        2: SimpleNamespace(
+            raw_text="C. Retrieved May 1, 2023 from https://shop.example", url=None, isbn=None
+        ),
+        3: SimpleNamespace(raw_text="D. Untitled note.", url=None, isbn=None),
+    }
+    profile = rc.reference_profile(records, citations, data)
+    assert (profile.major, profile.major_from_text, profile.repository_text) == (1, 1, 1)
+    assert (profile.web, profile.unclassified, profile.unclassified_entries) == (1, 1, [4])
+    detail = profile.as_detail()
+    assert detail["journal_or_conference_papers_by_citation_text"] == 1
+    assert detail["entry_numbers_typed_by_citation_text"] == {
+        "journal_or_conference_text": [1],
+        "repository_text": [2],
+    }
+    sentence = rc._counts_sentence(profile)
+    assert "1 of them typed from the entry's own citation details" in sentence
+    assert "1 preprints, repository copies or theses" in sentence
+    assert "1 entries that could not be identified" in sentence
+
+
+def test_majors_read_from_citation_text_count_toward_the_inventory(data):
+    conditions = rc.count_conditions(BIBLIOGRAPHY, data)
+    typed = profile(journal_or_conference_text=4, book_text=2, web=1)
+    assert rc.inventory_bounds(conditions, typed) == (4, 4)
+
+
+# --- quality: decided only where the counts prove one level --------------------
+
+
+def test_counts_that_fit_only_one_level_decide_quality(data):
+    # 2 papers, 11 web pages, 2 repository copies, 4 unidentified: at most 6 of 19
+    # can be papers or books, so only "most ... not peer-reviewed" holds.
+    row = graded_row("PROFICIENT")
+    typed = profile(journal_or_conference_text=2, web=11, repository_text=2, unclassified=4)
+    rc.decide_quality(row, QUALITY, typed, None, data)
+    assert row.outcome == ResultOutcome.passed
+    assert row.detail["verdict"] == "ACCEPTABLE"
+    assert row.detail["decision_basis"] == "reference_profile"
+    assert row.detail["reference_strategy"]["strategy"] == rc.QUALITY
+    assert "Only this level's wording fits these counts" in row.detail["reasoning"]
+
+
+def test_counts_that_fit_two_levels_go_to_the_instructor_naming_both(data):
+    # A list that is mostly papers fits "most are legitimate" and "primarily
+    # peer-reviewed" alike; what separates them is not in the counts.
+    row = graded_row("EXEMPLARY")
+    rc.decide_quality(row, QUALITY, profile(peer_reviewed=103, web=3, unclassified=24), None, data)
+    assert row.outcome == ResultOutcome.escalated and row.score is None
+    assert "PROFICIENT and EXEMPLARY" in row.detail["reason"]
+    checks = row.detail["reference_strategy"]["level_checks"]
+    assert [ordinal for ordinal, check in checks.items() if check["fits"]] == ["3", "4"]
+
+
+def test_a_half_paper_list_with_unidentified_entries_is_not_called_mostly_unreviewed(data):
+    # 11 of 21 are journal papers typed from their citation details: "most are not
+    # peer-reviewed" cannot hold, whatever the 7 unidentified entries are.
+    row = graded_row("PROFICIENT")
+    typed = profile(journal_or_conference_text=11, repository_text=3, unclassified=7)
+    rc.decide_quality(row, QUALITY, typed, None, data)
+    assert row.outcome == ResultOutcome.escalated
+    assert row.detail.get("verdict") != "ACCEPTABLE"
+
+
+def test_counts_that_confirm_no_level_go_to_the_instructor(data):
+    row = graded_row("PROFICIENT")
+    rc.decide_quality(row, QUALITY, profile(peer_reviewed=4, web=4, unclassified=12), None, data)
+    assert row.outcome == ResultOutcome.escalated
+    assert "do not confirm any one level" in row.detail["reason"]
+
+
+def test_a_scale_whose_words_imply_no_share_is_never_decided(data):
+    vague = SimpleNamespace(
+        id=11,
+        text="Sources",
+        levels=levels("Weak sources.", "Fair sources.", "Good sources.", "Excellent sources."),
+    )
+    row = graded_row("PROFICIENT")
+    rc.decide_quality(row, vague, profile(peer_reviewed=30), None, data)
+    assert row.outcome == ResultOutcome.escalated
+
+
+def test_quality_never_calls_a_model(data):
+    # No model client reaches this strategy: it decides from counts alone.
+    import inspect
+
+    assert "llm" not in inspect.signature(rc.apply_reference_strategies).parameters
+    assert not hasattr(rc, "quality_readings")
+
+
+@pytest.mark.parametrize(
+    ("level", "counts", "fits"),
+    [
+        ("BEGINNER", {"web": 19, "journal_or_conference_text": 1}, True),
+        ("BEGINNER", {"web": 17, "journal_or_conference_text": 3}, False),
+        ("EXEMPLARY", {"peer_reviewed": 15, "unclassified": 5}, True),
+        ("EXEMPLARY", {"peer_reviewed": 8, "unclassified": 12}, False),
+        # Other identified works (datasets, standards) could go either way.
+        ("ACCEPTABLE", {"web": 8, "other_identified": 4, "peer_reviewed": 8}, False),
+    ],
+)
+def test_quality_level_checks_follow_the_levels_own_words(data, level, counts, fits):
+    ordinal = next(int(lv["level"]) for lv in QUALITY.levels if lv["name"] == level)
+    assert rc.quality_level_fits(QUALITY, ordinal, profile(**counts), data)["fits"] is fits
