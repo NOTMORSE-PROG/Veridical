@@ -557,3 +557,24 @@ describe("AdviserViewPage", () => {
     expect(screen.getByText(/not indexed by search engines/)).toBeInTheDocument();
   });
 });
+
+describe("choosing a check on the shared findings tab", () => {
+  it("keeps focus on the chosen check and says what the panel now shows", async () => {
+    const report = { ...BASE_REPORT, integrity_modules: [
+      { check_kind: "internal_agreement", state: "completed" },
+      { check_kind: "citation_integrity", state: "partial" },
+      { check_kind: "statistical_forensics", state: "completed" },
+      { check_kind: "originality_reuse", state: "completed" },
+    ] } as unknown as ReportOut;
+    vi.stubGlobal("fetch", stubFetchByPath({ "/shared/focus-check/report": shared({ report }) }));
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => { callback(0); return 0; });
+    renderWithProviders(<AdviserViewPage />, { route: "/shared/focus-check?section=findings&module=internal_agreement", path: "/shared/:token" });
+    const button = await screen.findByRole("button", { name: /Citation integrity/ });
+    button.focus();
+    fireEvent.click(button);
+    await waitFor(() => expect(button).toHaveAttribute("aria-pressed", "true"));
+    expect(document.activeElement).toBe(button);
+    expect(screen.getByRole("heading", { name: "Findings" })).not.toHaveFocus();
+    await waitFor(() => expect(screen.getByText("Showing Citation integrity: Ran only in part.")).toBeInTheDocument());
+  });
+});
