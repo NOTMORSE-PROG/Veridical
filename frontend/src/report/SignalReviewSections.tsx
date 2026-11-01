@@ -1249,7 +1249,11 @@ export function SignalPublicFlags({
   statisticalScope,
   selectedModule,
   selectedRecordId,
+  framingOnly = false,
 }: {
+  /** The page shows one finding as its own item: give only the honest
+   * framing and the check's scope, no list or filters. */
+  framingOnly?: boolean;
   flags: FlagSummaryOut[];
   originalityScope?: OriginalityScopeValue | null;
   checkRunId: number;
@@ -1272,11 +1276,11 @@ export function SignalPublicFlags({
       {!onlyOptional && <p className="signal-review-section__intro">These are possible inconsistencies, not accusations. This shared view shows the bounded evidence the instructor chose to share; it does not expose the private Audit trail.</p>}
       {(!selectedModule || selectedModule === "statistical_forensics") && <StatisticalCheckScope scope={statisticalScope} />}
       {(!selectedModule || selectedModule === "originality_reuse") && <OriginalityScope scope={originalityScope} />}
-      {visibleOtherFlags.length
+      {framingOnly ? null : visibleOtherFlags.length
         ? <SignalFlagList flags={visibleOtherFlags} showActions={false} initialView="all" />
         : onlyOptional || selectedRecordId !== undefined ? null : <p>{selectedModule ? "No shared integrity signals are shown in this module." : "This run produced no shared integrity signals."}</p>}
       {(!selectedModule || selectedModule === "citation_integrity") && selectedRecordId === undefined && sharedNoteFlags.length > 0 && <SourceAgeNotes flags={sharedNoteFlags} showActions={false} />}
-      {(!selectedModule || selectedModule === "originality_reuse") && selectedOptional && <ComparisonLeadList collection={optional} showActions={false} selectedRecordId={selectedRecordId} />}
+      {!framingOnly && (!selectedModule || selectedModule === "originality_reuse") && selectedOptional && <ComparisonLeadList collection={optional} showActions={false} selectedRecordId={selectedRecordId} />}
     </section>
   );
 }

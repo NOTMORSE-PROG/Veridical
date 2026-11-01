@@ -9225,6 +9225,13 @@
      and every line keeps the same measure. */
   .signal-review-item .signal-grade-caution { font-weight: var(--signal-weight-medium); }
   .signal-review-item > :is(p, .signal-grade-caution) { max-inline-size: var(--signal-review-detail-measure); }
+  /* Adviser finding page: the picker is a full-size control, the finding one item. */
+  .signal-shared-finding-picker select { min-block-size: var(--signal-control-height); }
+  .signal-shared-finding { display: grid; gap: var(--signal-item-section-gap); padding-block-start: var(--signal-space-5); border-block-start: var(--signal-border-hairline) solid var(--color-signal-border); }
+  .signal-shared-finding .signal-item-head__title { margin: 0; }
+  /* Navigation ends where the text column ends, not at the far edge. */
+  :is(.signal-shared-finding, #shared-selected-criterion) .signal-item-head__bar { max-inline-size: var(--signal-review-detail-measure); }
+  .signal-shared-finding > .signal-item-head > p { max-inline-size: var(--signal-review-detail-measure); }
   /* A page that could not load: its message, then Retry, with room between. */
   .signal-evidence-item__actions :is(.signal-recorded-page-actions, .signal-shared-packet__source) > [role=alert] { display: grid; gap: var(--signal-rhythm-control); justify-items: start; }
   .signal-evidence-item__result { display: grid; gap: var(--signal-rhythm-control); min-inline-size: 0; }
