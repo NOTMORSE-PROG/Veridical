@@ -6,14 +6,20 @@ import type { OriginalityScope as Scope } from "../api/types";
 import { ActionLink } from "../ui/ActionLink";
 import { Alert } from "../ui/Alert";
 import { LibraryPassageScope } from "./LibraryPassageScope";
+import { OriginalitySetAside } from "./OriginalitySetAside";
 import { ORIGINALITY_NOT_COMPARED } from "./originalityCoverage";
+
+/** Pages the comparison used, from the run's own record; absent on older runs. */
+export interface OriginalityPages { compared: number; withText: number; unread?: number | null }
 
 export function OriginalityScope({
   scope,
   showAddAction = false,
+  pages,
 }: {
   scope: Scope | null | undefined;
   showAddAction?: boolean;
+  pages?: OriginalityPages | null;
 }) {
   if (!scope) return null;
   if (scope.not_compared_reason === "source_unresolved") {
@@ -62,7 +68,14 @@ export function OriginalityScope({
         ? `Originality and reuse: compared against ${count} Library ${noun} when this check ran. Manuscripts that are not in the Library were not compared.`
         : `Originality and reuse: compared against ${count} stored ${noun} when this check ran, before the Library became a separate collection.`}
     </p>
+    {pages && <p className="signal-originality-scope">
+      {pages.compared === pages.withText
+        ? `Originality compared all ${pages.withText} pages it could read.`
+        : `Originality compared ${pages.compared} of the ${pages.withText} pages it could read.`}
+      {pages.unread ? ` ${pages.unread} ${pages.unread === 1 ? "page" : "pages"} could not be read reliably.` : ""}
+    </p>}
     <LibraryPassageScope summary={scope.library_passage_indexing} />
+    <OriginalitySetAside scope={scope} />
     </>
   );
 }

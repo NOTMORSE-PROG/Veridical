@@ -13,6 +13,7 @@ import { Alert } from "../ui/Alert";
 import { HighlightedText } from "./PassagePairPanel";
 import { sharedPassageRanges } from "./sharedPassage";
 import { RecordedEvidencePage } from "../report/RecordedEvidencePage";
+import { StandardWordingLeftOut } from "../report/OriginalitySetAside";
 
 export function FindingSourceComparison({ flag, current, onSource, pageHost, sourceVisible = false, onReadManuscript }: {
   pageHost?: HTMLElement | null;
@@ -63,7 +64,8 @@ export function FindingSourceComparison({ flag, current, onSource, pageHost, sou
     <h3>{agreement ? "Statements selected for comparison" : "Stored passages for comparison"}</h3>
     {agreement ? <p>These statements were selected for comparison. Their roles as this study's objective and result have not been verified.</p>
       : <><p>Similar wording does not establish copying, authorship or which document came first. The comparison excerpt is not a complete source document.</p>
-        <p>{shared?.left.length ? "Text shading identifies shared wording between the stored excerpts. Page boxes locate the saved quotation; they do not establish copying." : "No stable exact phrase was found to shade. Compare both passages manually. Page boxes locate the saved quotation."}</p></>}
+        <p>{shared?.left.length ? "Text shading identifies shared wording between the stored excerpts. Page boxes locate the saved quotation; they do not establish copying." : "No stable exact phrase was found to shade. Compare both passages manually. Page boxes locate the saved quotation."}</p>
+        <StandardWordingLeftOut names={flag.standard_wording_left_out} /></>}
     {agreement && flag.affects_readiness === false && <p>This review lead does not change readiness.</p>}
     {retired && <Alert title="Recorded source references unavailable" tone="warning" role="status"><p>{reloading ? "Reloading the finding and its recorded source references..." : "This comparison's current source references are unavailable. Reload the finding before comparing source pages. The saved text below is retained for manual review."}</p><Button variant="secondary" busy={reloading} onClick={reload}>Reload recorded evidence</Button></Alert>}
     {!pageHost && <Button variant="secondary" aria-expanded={preview} onClick={() => setPreview(value => !value)}>{preview ? "Hide" : "Show"} original-page previews</Button>}

@@ -86,6 +86,7 @@ import { OriginalityCoverageNotice } from "../report/OriginalityCoverageNotice";
 import { originalityCoverageNote } from "../report/originalityCoverage";
 import { CitationRecencySummary } from "../report/CitationRecencySummary";
 import { isUncountedRecencyNote, notCountedLabel } from "../domain/findingSummary";
+import { StandardWordingLeftOut } from "../report/OriginalitySetAside";
 
 type ReviewFilter = "open" | "resolved" | "all";
 const FINDINGS_PAGE_PARAM = "findings_page";
@@ -401,6 +402,7 @@ function SelectedFindingEvidence({ comparisonHost, comparisonVisible, finding, f
         {canExpand && !fullWidth && <Button id={`comparison-reading-expand-${locationFlagId}`} variant="secondary" onClick={onExpand}>{flag.agreement_pair ? "Compare statements" : "Compare passages"}</Button>}
         {fullWidth && canExpand && <FindingSourceComparison flag={flag} current={current} onSource={onStatementSource} pageHost={comparisonHost} sourceVisible={comparisonVisible} onReadManuscript={onReadManuscript} />}
         {flag.passage_pair && !(fullWidth && canExpand) && <PassagePairPanel pair={flag.passage_pair} ownAnchor={instructorAnchor(flag.page_anchor)} wholeManuscript={!flag.is_passage_level} variant="flag" placement="inspector" />}
+        {!(fullWidth && canExpand) && <StandardWordingLeftOut names={flag.standard_wording_left_out} />}
         {!flag.passage_pair && showsManuscriptQuote && flag.check_kind !== "internal_agreement" && <blockquote><span>“{systemFindingCopy(flag.evidence_excerpt, flag.ai_verdict_summary, "evidence")}”</span><cite>{instructorAnchor(flag.page_anchor)}</cite></blockquote>}
         <PValueComparison flag={flag} />
         {!(fullWidth && canExpand) && <AgreementComparison flag={flag} findingNumber={finding.number} onSource={onStatementSource} activeRole={activeStatement} />}

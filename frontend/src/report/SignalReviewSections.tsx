@@ -43,7 +43,8 @@ import { RECORDED_GRADE_BASIS } from "../domain/semanticSupport";
 import { systemFindingCopy } from "../domain/systemFindingCopy";
 import { rememberRouteReturnFocus } from "../routing/useRouteFocus";
 import { ActionLink } from "../ui/ActionLink";
-import { OriginalityScope } from "./OriginalityScope";
+import { OriginalityScope, type OriginalityPages } from "./OriginalityScope";
+import type { IntegrityCheckStatusOut } from "../api/types";
 import { StatisticalCheckScope } from "./StatisticalCheckScope";
 import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
@@ -1204,7 +1205,7 @@ export function SignalFlagsPanel({
         onDone={(message) => { setBulkAction(null); setSelectedIds(new Set()); setBulkDrafts({ confirm: "", dismiss: "" }); setBulkMessage(message); }} />}
       {selectedModule === "statistical_forensics" && <StatisticalCheckScope scope={statisticalScope} />}
       {selectedModule === "citation_integrity" && <CitationRecencySummary recency={review?.assessment?.citation_recency} />}
-      {selectedModule === "originality_reuse" && <OriginalityScope scope={originalityScope} showAddAction />}
+      {selectedModule === "originality_reuse" && <OriginalityScope scope={originalityScope} showAddAction pages={originalityPages(review?.assessment?.integrity_check_status)} />}
       {selectedModule === "originality_reuse" && <OriginalityCoverageNotice report={review?.assessment} />}
       {agreementScope && <AgreementCheckScope checkRunId={checkRunId} scope={agreementScope}
         findings={optional.state === "success" ? countInconsistencies(otherFlags ?? []) : null}
@@ -1491,4 +1492,13 @@ export function SignalCriteriaResults({ results, checkRunId, publicView = false,
       })}</ol> : updating ? <p>Recorded results are updating.</p> : <div className="signal-desk-empty"><h3>No criterion records in this section</h3><p>No criterion records are shown here. Review the other report sections for unresolved criteria and assessment limits.</p></div>}
     </section>
   );
+}
+
+/** The pages the originality comparison used, only when the run recorded both
+ * numbers; nothing is worked out from the other fields. */
+function originalityPages(statuses?: IntegrityCheckStatusOut[] | null): OriginalityPages | null {
+  const status = statuses?.find(item => item.check_kind === "originality_reuse");
+  const compared = status?.pages_compared, withText = status?.pages_with_text;
+  return typeof compared === "number" && typeof withText === "number" && withText > 0
+    ? { compared, withText, unread: status?.n_source_pages_unassessed } : null;
 }

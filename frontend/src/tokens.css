@@ -497,6 +497,8 @@
   --signal-comparison-page-gap: var(--signal-space-2);
   --signal-review-selected-ring-width: var(--signal-focus-ring-width);
   --signal-review-detail-measure: 42rem;
+  /* A short count beside its explanation, so explanations start on one line. */
+  --signal-fact-count-col: 4ch;
   /* Adviser check panel: pair cards, count tiles, labelled fact rows. */
   --signal-pair-card-min: 18rem;
   --signal-fact-tile-min: 9rem;
