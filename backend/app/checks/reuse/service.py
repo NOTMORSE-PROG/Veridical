@@ -18,7 +18,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.service import write_audit_event
 from app.checks.reuse.embed import compute_document_embeddings, compute_passage_embeddings
-from app.checks.reuse.lexical import wording_evidence
 from app.checks.reuse.query import (
     PassageMatch,
     SimilarityMatch,
@@ -29,7 +28,7 @@ from app.checks.reuse.query import (
     query_similar_manuscripts,
     query_similar_passages,
 )
-from app.checks.reuse.quotations import cited_quotations_in_passage, load_quotation_rules
+from app.checks.reuse.quotations import pair_wording
 from app.checks.reuse.same_work import SameWork, find_same_work, name_rules_fingerprint
 from app.checks.reuse.source import coarse_candidate_supported, passage_match_supported
 from app.checks.source_quality import persist_source_limitation
@@ -320,21 +319,11 @@ def _wording(evidence: dict) -> dict:
 
 
 def _pair_wording(pair, settings) -> dict:
-    """Shared wording between a passage pair, leaving out quotations marked
-    and cited in either passage (BUG-632). `cited_quotation_only` says the
-    pair shares wording only inside such quotations."""
-    rules = load_quotation_rules(settings.reuse_cited_quotation_rules_file)
-    own_out = cited_quotations_in_passage(pair.own_text, pair.own_context_text, rules)
-    other_out = cited_quotations_in_passage(pair.matched_text, pair.matched_context_text, rules)
-    evidence = wording_evidence(
-        pair.own_text, pair.matched_text, settings, a_left_out=own_out, b_left_out=other_out
+    """Shared wording between a passage pair, with quotations marked and
+    cited left out (BUG-632, `quotations.pair_wording`)."""
+    return pair_wording(
+        pair.own_text, pair.own_context_text, pair.matched_text, pair.matched_context_text, settings
     )
-    evidence["cited_quotation_only"] = bool(
-        not evidence["confirmed"]
-        and (own_out or other_out)
-        and wording_evidence(pair.own_text, pair.matched_text, settings)["confirmed"]
-    )
-    return evidence
 
 
 def _withheld_lead(granularity: str, match, level, pair, settings) -> dict:
@@ -759,7 +748,8 @@ async def run_originality_reuse_check(
                 lead["reason"] == "evidence_below_passage_bar" for lead in withheld_leads
             ),
             # BUG-632: pairs whose shared wording lies only inside quotations
-            # marked and cited in the text.
+            # marked and cited in the text. Judged on the nearest Library
+            # passage, like the count above.
             "n_shared_wording_only_in_cited_quotations": sum(
                 lead["reason"] == "cited_quotation" for lead in withheld_leads
             ),

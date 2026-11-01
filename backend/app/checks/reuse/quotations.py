@@ -3,10 +3,20 @@
 A student who quotes a Library thesis inside quotation marks, with a citation
 beside the quotation, is using the source the honest way. The shared-wording
 rule (`lexical.py`) cannot tell that apart from copying, because a quotation
-shares its wording with its source by definition. The spans found here are
-left out of that comparison on both sides, the way indented block quotes are
-left out of passage matching (`app/ingest/blockquotes.py`). Copied prose
+shares its wording with its source by definition. So the student's cited
+quotations are left out of that comparison, the way indented block quotes
+are left out of passage matching (`app/ingest/blockquotes.py`). Copied prose
 beside the quotation is still compared.
+
+A quotation in quotation marks whose citation the rules do not recognise
+is also left out when the Library thesis quotes the same words with a
+citation: two theses quoting one source are not reuse of each other. Words
+the student copied without quotation marks are always compared, even when
+the Library thesis quoted them from elsewhere. Only the checked thesis's
+text is ever left out.
+
+Leaving text out can only remove evidence. A pair that does not share
+wording with everything compared is not confirmed by comparing less.
 
 What counts as a quotation mark and as a citation is data
 (`data/cited_quotations.json`). A quotation needs a citation next to it:
@@ -16,17 +26,17 @@ and those are compared like any other text.
 
 import json
 import re
+from bisect import bisect_left
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
-_WORD = re.compile(r"[^\W_]+")
-# Around a symmetric mark: what may come before an opening one and after a
-# closing one, besides the start or end of the text.
-_OPEN_BEFORE = re.compile(r"[\s(\[{\u2014\u2013/-]")
-_CLOSE_AFTER = re.compile(r"[\s.,;:!?)\]}\u2014\u2013-]")
-# How far to look for a citation, in characters, before counting words.
-_LOOKAROUND_CHARS = 800
+from app.checks.reuse.lexical import wording_evidence
+from app.config import Settings
+
+# The word `lexical.words` counts, matched on the original text so that
+# offsets stay valid.
+_WORD = re.compile(r"[a-z]+(?:[-'][a-z]+)*", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -36,8 +46,18 @@ class QuotationRules:
     max_words: int
     after_words: int
     before_words: int
+    search_chars: int
+    opening_follows: re.Pattern
+    closing_precedes: re.Pattern
     after: tuple[re.Pattern, ...]
     before: tuple[re.Pattern, ...]
+
+
+@dataclass(frozen=True)
+class Quotation:
+    start: int
+    end: int
+    cited: bool
 
 
 @lru_cache(maxsize=4)
@@ -49,89 +69,159 @@ def load_quotation_rules(path: Path) -> QuotationRules:
         max_words=raw["max_quote_words"],
         after_words=raw["after_words"],
         before_words=raw["before_words"],
+        search_chars=raw["citation_search_chars"],
+        opening_follows=re.compile(raw["symmetric_opening_mark_follows"]),
+        closing_precedes=re.compile(raw["symmetric_closing_mark_precedes"]),
         after=tuple(re.compile(p) for p in raw["citations_after"].values()),
         before=tuple(re.compile(p) for p in raw["citations_before"].values()),
     )
 
 
-def _word_count(text: str) -> int:
-    return len(_WORD.findall(text))
+class _Scan:
+    """One text, with its word starts so word counts between two offsets
+    are a lookup rather than a rescan."""
+
+    def __init__(self, text: str, rules: QuotationRules):
+        self.text = text
+        self.rules = rules
+        self.word_starts = [m.start() for m in _WORD.finditer(text)]
+
+    def words(self, start: int, end: int) -> int:
+        return bisect_left(self.word_starts, end) - bisect_left(self.word_starts, start)
+
+    def opens(self, i: int, symmetric: bool) -> bool:
+        if not symmetric:
+            return True
+        text = self.text
+        before_ok = i == 0 or bool(self.rules.opening_follows.fullmatch(text[i - 1]))
+        return before_ok and i + 1 < len(text) and not text[i + 1].isspace()
+
+    def closes(self, i: int, symmetric: bool) -> bool:
+        if not symmetric:
+            return True
+        text = self.text
+        after_ok = i + 1 == len(text) or bool(self.rules.closing_precedes.fullmatch(text[i + 1]))
+        return after_ok and i > 0 and not text[i - 1].isspace()
+
+    def opening_marks(self) -> list[int]:
+        found = set()
+        for open_mark, close_mark in self.rules.pairs:
+            symmetric = open_mark == close_mark
+            i = self.text.find(open_mark)
+            while i != -1:
+                if self.opens(i, symmetric):
+                    found.add(i)
+                i = self.text.find(open_mark, i + 1)
+        return sorted(found)
+
+    def cited(self, start: int, end: int) -> bool:
+        """A citation starts within `after_words` words after the quotation,
+        or ends within `before_words` words before it."""
+        text, rules = self.text, self.rules
+        after_limit = min(len(text), end + rules.search_chars)
+        for pattern in rules.after:
+            found = pattern.search(text, end, after_limit)
+            if found and self.words(end, found.start()) <= rules.after_words:
+                return True
+        before_start = max(0, start - rules.search_chars)
+        for pattern in rules.before:
+            last = None
+            for found in pattern.finditer(text, before_start, start):
+                last = found
+            if last and self.words(last.end(), start) <= rules.before_words:
+                return True
+        return False
 
 
-def _opens(text: str, i: int) -> bool:
-    before_ok = i == 0 or bool(_OPEN_BEFORE.fullmatch(text[i - 1]))
-    return before_ok and i + 1 < len(text) and not text[i + 1].isspace()
+def quotations(text: str, rules: QuotationRules) -> list[Quotation]:
+    """Every quotation in `text`, cited or not, quotation marks included.
+
+    A span that holds another opening mark is not a quotation: a stray or
+    unclosed mark would otherwise pair with a later quotation's closing mark
+    and swallow the text between them."""
+    scan = _Scan(text, rules)
+    openings = scan.opening_marks()
+    found: list[Quotation] = []
+    for open_mark, close_mark in rules.pairs:
+        symmetric = open_mark == close_mark
+        start = text.find(open_mark)
+        while start != -1:
+            next_from = start + 1
+            close = (
+                _closing_mark(scan, start, close_mark, symmetric)
+                if scan.opens(start, symmetric)
+                else None
+            )
+            if (
+                close is not None
+                and bisect_left(openings, close) - bisect_left(openings, start + 1) == 0
+                and scan.words(start + 1, close) >= rules.min_words
+            ):
+                found.append(Quotation(start, close + 1, scan.cited(start, close + 1)))
+                next_from = close + 1
+            start = text.find(open_mark, next_from)
+    return sorted(found, key=lambda q: q.start)
 
 
-def _closes(text: str, i: int) -> bool:
-    after_ok = i + 1 == len(text) or bool(_CLOSE_AFTER.fullmatch(text[i + 1]))
-    return after_ok and i > 0 and not text[i - 1].isspace()
-
-
-def _closing_mark(
-    text: str, start: int, close_mark: str, symmetric: bool, max_words: int
-) -> int | None:
-    i = start + 1
-    while True:
-        i = text.find(close_mark, i)
-        if i == -1 or _word_count(text[start + 1 : i]) > max_words:
-            return None
-        if not symmetric or _closes(text, i):
+def _closing_mark(scan: _Scan, start: int, close_mark: str, symmetric: bool) -> int | None:
+    i = scan.text.find(close_mark, start + 1)
+    while i != -1 and scan.words(start + 1, i) <= scan.rules.max_words:
+        if scan.closes(i, symmetric):
             return i
-        i += 1
-
-
-def _cited(text: str, start: int, end: int, rules: QuotationRules) -> bool:
-    """A citation starts within `after_words` words after the quotation, or
-    ends within `before_words` words before it."""
-    after_limit = min(len(text), end + _LOOKAROUND_CHARS)
-    for pattern in rules.after:
-        found = pattern.search(text, end, after_limit)
-        if found and _word_count(text[end : found.start()]) <= rules.after_words:
-            return True
-    before_start = max(0, start - _LOOKAROUND_CHARS)
-    for pattern in rules.before:
-        last = None
-        for found in pattern.finditer(text, before_start, start):
-            last = found
-        if last and _word_count(text[last.end() : start]) <= rules.before_words:
-            return True
-    return False
+        i = scan.text.find(close_mark, i + 1)
+    return None
 
 
 def cited_quotation_spans(text: str, rules: QuotationRules) -> list[tuple[int, int]]:
-    """(start, end) of each quotation in `text` that has a citation beside it,
-    quotation marks included."""
-    spans: list[tuple[int, int]] = []
-    for open_mark, close_mark in rules.pairs:
-        symmetric = open_mark == close_mark
-        i = 0
-        while (start := text.find(open_mark, i)) != -1:
-            i = start + 1
-            if symmetric and not _opens(text, start):
-                continue
-            close = _closing_mark(text, start, close_mark, symmetric, rules.max_words)
-            if close is None:
-                continue
-            words = _word_count(text[start + 1 : close])
-            if words >= rules.min_words and _cited(text, start, close + 1, rules):
-                spans.append((start, close + 1))
-                i = close + 1
-    return sorted(spans)
+    """(start, end) of each quotation in `text` with a citation beside it."""
+    return [(q.start, q.end) for q in quotations(text, rules) if q.cited]
 
 
-def cited_quotations_in_passage(
-    passage: str, context: str, rules: QuotationRules
-) -> list[tuple[int, int]]:
-    """Cited quotations that fall in `passage`, in its own offsets. They are
-    found in `context` (the passage with the words around it), so a quotation
-    or citation that runs past the passage's edge is still seen."""
+def quotations_in_passage(passage: str, context: str, rules: QuotationRules) -> list[Quotation]:
+    """Quotations that fall in `passage`, in its own offsets. They are found
+    in `context` (the passage with the words around it), so a quotation or
+    citation that runs past the passage's edge is still seen."""
     offset = context.find(passage) if context else -1
     if offset == -1:
-        return cited_quotation_spans(passage, rules)
+        return quotations(passage, rules)
     end = offset + len(passage)
     return [
-        (max(start, offset) - offset, min(stop, end) - offset)
-        for start, stop in cited_quotation_spans(context, rules)
-        if start < end and stop > offset
+        Quotation(max(q.start, offset) - offset, min(q.end, end) - offset, q.cited)
+        for q in quotations(context, rules)
+        if q.start < end and q.end > offset
     ]
+
+
+def pair_wording(
+    own: str, own_context: str, other: str, other_context: str, settings: Settings
+) -> dict:
+    """Shared wording between the checked passage (`own`) and a Library
+    passage (`other`), with the checked passage's quotations left out as the
+    module docstring says. `cited_quotation_only` is set when the pair shares wording only
+    inside those quotations."""
+    rules = load_quotation_rules(settings.reuse_cited_quotation_rules_file)
+    own_quotes = quotations_in_passage(own, own_context, rules)
+    other_quotes = quotations_in_passage(other, other_context, rules)
+    cited_there = [other[q.start : q.end] for q in other_quotes if q.cited]
+    own_out = [
+        (q.start, q.end)
+        for q in own_quotes
+        if q.cited
+        or any(
+            wording_evidence(own[q.start : q.end], theirs, settings)["confirmed"]
+            for theirs in cited_there
+        )
+    ]
+    raw = wording_evidence(own, other, settings)
+    if not own_out:
+        return {**raw, "cited_quotation_only": False}
+    left = wording_evidence(own, other, settings, a_left_out=own_out)
+    return {
+        **left,
+        "confirmed": left["confirmed"] and raw["confirmed"],
+        "cited_quotation_only": raw["confirmed"] and not left["confirmed"],
+        "with_quotations": {
+            "shingle_share": raw["shingle_share"],
+            "longest_run": raw["longest_run"],
+        },
+    }

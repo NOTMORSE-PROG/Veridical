@@ -9,8 +9,9 @@ titles and code."""
 from app.checks.reuse.lexical import wording_evidence
 from app.checks.reuse.quotations import (
     cited_quotation_spans,
-    cited_quotations_in_passage,
     load_quotation_rules,
+    pair_wording,
+    quotations_in_passage,
 )
 from app.config import Settings
 
@@ -27,8 +28,8 @@ def _quoted_texts(text: str) -> list[str]:
 
 
 def test_a_harvard_citation_after_curly_quotes_marks_the_quotation():
-    text = f"E-business can be defined as “{QUOTED}” (Chaffey 2004, p. 9). It grew."
-    assert _quoted_texts(text) == [f"“{QUOTED}”"]
+    text = f"E-business can be defined as \u201c{QUOTED}\u201d (Chaffey 2004, p. 9). It grew."
+    assert _quoted_texts(text) == [f"\u201c{QUOTED}\u201d"]
 
 
 def test_an_apa_parenthetical_with_a_group_author_marks_the_quotation():
@@ -63,7 +64,7 @@ def test_quotation_marks_without_a_citation_are_not_a_quotation():
     texts = [
         'After the customer presses the "Reserve" button, the "Reservation information" '
         "screen shows the selected frame (Santos, 2019).",
-        "In the journal “Food finder: a mobile food ordering application” the authors "
+        "In the journal \u201cFood finder: a mobile food ordering application\u201d the authors "
         "describe a menu display.",
         '{ "code": "ADHAAR_NUMBER", "osx": 1111, "osy": 802 } Following the same pattern',
         'The card moves from the "To do" field to the "In Progress" field when work starts.',
@@ -83,10 +84,10 @@ def test_a_quotation_longer_than_the_limit_is_not_marked():
 
 
 def test_a_quotation_that_starts_before_the_passage_is_found_through_its_context():
-    context = f"It can be defined as “{QUOTED}” (Chaffey 2004, p. 9). Our study differs."
+    context = f"It can be defined as \u201c{QUOTED}\u201d (Chaffey 2004, p. 9). Our study differs."
     passage = context[context.index("information") :]
-    spans = cited_quotations_in_passage(passage, context, RULES)
-    assert spans and passage[spans[0][0] : spans[0][1]].startswith("information")
+    quotes = [q for q in quotations_in_passage(passage, context, RULES) if q.cited]
+    assert quotes and passage[quotes[0].start : quotes[0].end].startswith("information")
 
 
 SETTINGS = Settings()
@@ -127,3 +128,78 @@ def test_a_left_out_span_breaks_a_run_instead_of_joining_its_neighbours():
     other = "alpha beta gamma delta epsilon zeta eta theta"
     evidence = wording_evidence(own, other, SETTINGS, a_left_out=span)
     assert evidence["longest_run"] == 4
+
+
+COPY_65 = (
+    "Students who registered online spent less time waiting at the registrar, and the staff "
+    "said the queue was shorter during enrolment week than in the previous term, when every "
+    "form was filed by hand at a single window and checked twice by the clerk before it was "
+    "stamped, so many students came back the next morning to finish the process."
+)
+
+
+def test_a_stray_quotation_mark_does_not_hide_a_copy_after_it():
+    """An unclosed mark, or a curly quotation that lost its closing mark,
+    must not pair with a later quotation's closing mark and leave out the
+    unquoted copy between them."""
+    later = 'As Reyes (2020) put it, "the queue is the first thing a student sees" (p. 3).'
+    for stray in ('Click "Enroll to start. ', "The form said \u201cEnroll now. "):
+        own = stray + COPY_65 + " " + later
+        evidence = pair_wording(own, own, COPY_65, COPY_65, SETTINGS)
+        assert evidence["confirmed"], stray
+        assert not evidence["cited_quotation_only"]
+
+
+def test_an_array_index_is_not_a_citation():
+    code = 'value = date3[0] if row["the start date of the term"] else date3[1]'
+    assert _quoted_texts(code) == []
+
+
+def test_an_unquoted_copy_of_a_library_quotation_is_still_compared():
+    """The Library thesis quoted and cited these words; the student copied
+    them without quotation marks. That is still compared."""
+    library = f'Garcia (2023) reported that "{SOURCE}" (p. 14).'
+    evidence = pair_wording(SOURCE, SOURCE, library, library, SETTINGS)
+    assert evidence["confirmed"]
+
+
+def test_the_same_quotation_in_both_theses_is_not_compared():
+    """Both theses quote one source; the student's quotation marks have no
+    citation the rules know, the Library thesis's quotation is cited."""
+    own = f'One report said that "{SOURCE}" according to the clinic staff.'
+    library = f'Garcia (2023) reported that "{SOURCE}" (p. 14).'
+    evidence = pair_wording(own, own, library, library, SETTINGS)
+    assert not evidence["confirmed"]
+    assert evidence["cited_quotation_only"]
+
+
+def _filler(prefix: str, n: int) -> str:
+    """`n` distinct words, so no shingle repeats."""
+    letters = "bcdfghjklmnpqrstvwxz"
+    return " ".join(prefix + letters[i // 20] + letters[i % 20] for i in range(n))
+
+
+def test_leaving_a_quotation_out_never_creates_a_match():
+    """Comparing less can only remove evidence: a remainder whose share of
+    shingles clears the bar alone, inside a pair that does not, stays
+    unconfirmed."""
+    first = "the attendance sheet was collected at the end of each class"
+    second = "the instructor entered every mark into the spreadsheet on friday afternoon"
+    quote = _filler("q", 60)
+    own = f'Reyes (2019) wrote "{quote}" (p. 3). {first} and later {second}'
+    own += " for all of us that term."
+    other = f"{_filler('a', 50)} {first} {_filler('b', 50)} {second} {_filler('c', 50)}"
+    spans = cited_quotation_spans(own, RULES)
+    assert spans
+    assert wording_evidence(own, other, SETTINGS, a_left_out=spans)["confirmed"]
+    assert not wording_evidence(own, other, SETTINGS)["confirmed"]
+    assert not pair_wording(own, own, other, other, SETTINGS)["confirmed"]
+
+
+def test_a_citation_seen_only_in_the_context_still_counts():
+    """The passage ends at the closing quotation mark; its citation is in the
+    words after the passage."""
+    passage = f'Garcia reported that "{SOURCE}"'
+    context = f"{passage} (Garcia, 2023, p. 14). Our study differs."
+    assert not pair_wording(passage, context, SOURCE, SOURCE, SETTINGS)["confirmed"]
+    assert pair_wording(passage, passage, SOURCE, SOURCE, SETTINGS)["confirmed"]
