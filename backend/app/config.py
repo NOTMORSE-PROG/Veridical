@@ -374,6 +374,12 @@ class Settings(BaseSettings):
     # disclosed on every result, while they are at most this share of the
     # manuscript; above it those analyses do not run.
     analysis_unread_pages_max_ratio: float = Field(default=0.25, ge=0, le=1)
+    # BUG-621: the same bar for the originality check alone. It compares
+    # passage by passage, so leaving unread pages out only removes its
+    # evidence, and its result names the pages left out. Above this share it
+    # does not run either: a thesis mostly unreadable in order is reported as
+    # not compared rather than compared on a fragment.
+    reuse_unread_pages_max_ratio: float = Field(default=0.5, ge=0, le=1)
     semantic_batch_max_criteria: int = Field(default=20, ge=1)
     semantic_batch_validation_attempts: int = Field(default=2, ge=1, le=2)
     semantic_item_recovery_max_criteria: int = Field(default=20, ge=0)

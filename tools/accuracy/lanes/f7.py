@@ -439,7 +439,13 @@ def build_cases(
             low, high = words["short" if plant_type in SHORT_TYPES else "long"]
             for _ in range(config["excerpt"]["attempts"]):
                 excerpt = make_excerpt(
-                    donor, extractions[donor], allowed(donor, split), low, high, rng, config
+                    donor,
+                    extractions[donor],
+                    allowed(donor, split),
+                    low,
+                    high,
+                    rng,
+                    config,
                 )
                 if apart(excerpt, used):
                     break
@@ -489,7 +495,8 @@ def plant_block(extraction, index: int, text: str, left: float, config: dict):
     height = max(bottom - top, 1.0)
     geometry = config["geometry"]
     right = max(
-        anchor.bbox[2] if anchor.bbox else left + geometry["width"], left + geometry["min_width"]
+        anchor.bbox[2] if anchor.bbox else left + geometry["width"],
+        left + geometry["min_width"],
     )
     box = (
         left,
@@ -562,7 +569,10 @@ def place_plants(extraction, case: dict, config: dict) -> list[Plant]:
                 donor=plant.get("donor"),
                 donor_pages=plant.get("donor_pages", []),
                 cluster=plant.get("cluster", ""),
-                extra={**plant.get("extra", {}), **({} if on_page else {"not_placed": True})},
+                extra={
+                    **plant.get("extra", {}),
+                    **({} if on_page else {"not_placed": True}),
+                },
                 source_text=plant.get("source_text") or plant["text"],
             )
         )
@@ -938,7 +948,22 @@ def source_scope(extraction, settings) -> list[int] | None:
     bound = bind_analytical_source(extraction, None)
     if not reading_order_issues(bound):
         return []
-    return unread_page_scope(bound, settings.analysis_unread_pages_max_ratio)
+    # The originality check's own bar (BUG-621), as the integrity stage uses it.
+    return unread_page_scope(bound, settings.reuse_unread_pages_max_ratio)
+
+
+def refused_by_shared_bar(extraction, settings) -> bool:
+    """Whether the other integrity checks refuse this host whole: its unread
+    pages are over `analysis_unread_pages_max_ratio`, while F7 reads it at its
+    own bar (BUG-621)."""
+    from app.checks.source_quality import unread_page_scope
+    from app.ingest.analytical_source import bind_analytical_source
+    from app.ingest.quality import reading_order_issues
+
+    bound = bind_analytical_source(extraction, None)
+    return bool(reading_order_issues(bound)) and (
+        unread_page_scope(bound, settings.analysis_unread_pages_max_ratio) is None
+    )
 
 
 def prepare(extraction, unread: list[int]):
@@ -1136,7 +1161,13 @@ async def _measure(ctx: Context, config: dict, url: str, settings) -> dict:
 
         sealed = config.get("holdout_sealed", True)
         twin_flags = [flag for twin in twins.values() for flag in twin["flags"]]
-        records, findings, fresh_total, explained_total, unexplained = [], [], 0, 0, Counter()
+        records, findings, fresh_total, explained_total, unexplained = (
+            [],
+            [],
+            0,
+            0,
+            Counter(),
+        )
         other_passage, hosts_run = 0, set()
         audited, banned = 0, []
         not_run = [c for c in copies if sealed and c["split"] == "holdout"]
@@ -1154,7 +1185,12 @@ async def _measure(ctx: Context, config: dict, url: str, settings) -> dict:
                 p for p in compute_passage_embeddings(extraction, settings) if p.page is not None
             ]
             landings = [
-                _landing(plant, landed_in, library.passages.get(plant.donor, []), config["match"])
+                _landing(
+                    plant,
+                    landed_in,
+                    library.passages.get(plant.donor, []),
+                    config["match"],
+                )
                 for plant in plants
             ]
             _, flags = await library.check(case["host"], extraction, unread)
@@ -1262,6 +1298,8 @@ async def _measure(ctx: Context, config: dict, url: str, settings) -> dict:
                 "body_pages": len(pages),
                 "not_compared": len(set(pages) - compared),
                 "refused": host in refused,
+                "own_bar_only": host not in refused
+                and refused_by_shared_bar(extractions[host], settings),
             }
         return {
             "coverage": coverage,
@@ -1342,7 +1380,10 @@ def twin_rows(twins: dict, library_ids: dict, verify: dict, size: int) -> tuple[
         if item["confirmed"] is None:
             continue
         pair = frozenset(
-            ((item["host"], item.get("page")), (item.get("matched"), item.get("matched_page")))
+            (
+                (item["host"], item.get("page")),
+                (item.get("matched"), item.get("matched_page")),
+            )
         )
         if pair not in seen:
             seen.add(pair)
@@ -1521,6 +1562,34 @@ def metric_rows(measured: dict, config: dict) -> list[MetricRow]:
                 + "."
             ),
             extra={"by_host": coverage},
+        )
+    )
+    own_bar = {h: c for h, c in coverage.items() if c.get("own_bar_only")}
+    rows.append(
+        rate_row(
+            LANE,
+            "body pages compared on hosts the other checks refuse",
+            "body page",
+            sum(c["body_pages"] - c["not_compared"] for c in own_bar.values()),
+            sum(c["body_pages"] for c in own_bar.values()),
+            clusters=len(own_bar),
+            note=(
+                "Hosts whose unread pages are over the shared bar "
+                "(analysis_unread_pages_max_ratio), so agreement, citation and statistics checks "
+                "refuse them whole, but within the originality check's own bar "
+                "(reuse_unread_pages_max_ratio, BUG-621). Hosts: "
+                + (
+                    ", ".join(
+                        f"{h} {c['body_pages'] - c['not_compared']}/{c['body_pages']}"
+                        for h, c in own_bar.items()
+                    )
+                    or "none"
+                )
+                + ". The frozen case set has no plants on a host refused when it was built, so "
+                "these hosts add natural-finding twins, not recall plants, until the next "
+                "frozen version."
+            ),
+            extra={"by_host": own_bar},
         )
     )
     rows.append(

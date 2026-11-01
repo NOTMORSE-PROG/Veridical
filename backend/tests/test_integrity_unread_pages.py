@@ -208,6 +208,8 @@ async def test_check_results_record_the_pages_they_did_not_read(monkeypatch):
     assert passed.detail["n_source_pages_unassessed"] == 2
     assert passed.detail["coverage_reason"] == "source_reading_order_partial"
     assert audit.await_args.kwargs["event_type"] == "statistical_forensics_source_scope_recorded"
+    await machine._record_unread_pages(session, 9, passed, [45], 0.5)
+    assert audit.await_args.kwargs["payload"]["unread_pages_max_ratio"] == 0.5
 
     failed = SimpleNamespace(
         kind=CheckKind.originality_reuse, outcome=ResultOutcome.failed, detail={"n_flags": 2}
@@ -221,3 +223,105 @@ async def test_check_results_record_the_pages_they_did_not_read(monkeypatch):
     )
     await machine._record_unread_pages(session, 9, untouched, [])
     assert untouched.outcome == ResultOutcome.passed and untouched.detail == {}
+
+
+async def _integrity_inputs(monkeypatch, source, settings, *, saved_reuse=None):
+    """Runs the real integrity stage with every check stubbed, and returns the
+    extraction each check was given and the unread pages each one recorded."""
+    import contextlib
+
+    from app.checks.forensics import service as forensics
+
+    given, recorded = {}, {}
+
+    def check(kind, position):
+        async def run(*args, **_kwargs):
+            given[kind] = args[position]
+            return SimpleNamespace(kind=kind, detail={"n_flags": 0})
+
+        return run
+
+    async def none(*_args):
+        return None
+
+    async def record(_session, _run_id, result, pages, _ratio=None):
+        recorded[result.kind] = pages
+
+    async def raw(_settings, _manuscript_id):
+        return source
+
+    @contextlib.asynccontextmanager
+    async def client(_settings):
+        yield None
+
+    async def reuse_existing(*_args):
+        return saved_reuse
+
+    for name in ("existing_internal_agreement_result", "existing_citation_integrity_result"):
+        monkeypatch.setattr(machine, name, none)
+    monkeypatch.setattr(machine, "existing_originality_reuse_result", reuse_existing)
+    monkeypatch.setattr(forensics, "existing_statistical_forensics_result", none)
+    monkeypatch.setattr(
+        machine, "run_internal_agreement_check", check(CheckKind.internal_agreement, 3)
+    )
+    monkeypatch.setattr(
+        machine, "run_citation_integrity_check", check(CheckKind.citation_integrity, 4)
+    )
+    monkeypatch.setattr(
+        forensics, "run_statistical_forensics_check", check(CheckKind.statistical_forensics, 2)
+    )
+    monkeypatch.setattr(
+        machine, "run_originality_reuse_check", check(CheckKind.originality_reuse, 3)
+    )
+    monkeypatch.setattr(machine, "_record_unread_pages", record)
+    monkeypatch.setattr(machine, "_record_stage", lambda *args, **kwargs: None)
+    monkeypatch.setattr(machine, "load_raw_store_async", raw)
+    monkeypatch.setattr(machine, "bind_analytical_source", lambda extraction, _hash: extraction)
+    monkeypatch.setattr(machine, "build_http_client", client)
+    session = SimpleNamespace(
+        scalars=AsyncMock(return_value=SimpleNamespace(all=lambda: [])), commit=AsyncMock()
+    )
+    run = SimpleNamespace(id=9)
+    manuscript = SimpleNamespace(id=4, content_hash=None, instructor_id=1)
+    await machine._run_integrity_stage(session, run, manuscript, settings, None, AsyncMock())
+    return given, recorded
+
+
+async def test_originality_gets_its_own_readable_copy_between_the_two_bars(monkeypatch):
+    """BUG-621: one of three pages unread is over the shared bar, so the
+    other checks keep exactly the copy they had before, and the originality
+    check compares the two readable pages and names the one it left out."""
+    source = _source(CITES_REYES)
+    settings = Settings(analysis_unread_pages_max_ratio=0.25, reuse_unread_pages_max_ratio=0.5)
+    shared, _ = readable_pages_copy(source, settings.analysis_unread_pages_max_ratio)
+    given, recorded = await _integrity_inputs(monkeypatch, source, settings)
+    others = (
+        CheckKind.internal_agreement,
+        CheckKind.citation_integrity,
+        CheckKind.statistical_forensics,
+    )
+    for kind in others:
+        assert given[kind].model_dump_json() == shared.model_dump_json(), kind
+        # Not in the dump, but the citation check reads it.
+        assert given[kind].unread_text == shared.unread_text, kind
+        assert recorded[kind] == []
+    reuse = given[CheckKind.originality_reuse]
+    assert CITES_REYES not in [block.text for block in reuse.blocks]
+    assert source_limitation_detail(reuse) is None
+    assert recorded[CheckKind.originality_reuse] == [2]
+
+
+async def test_originality_shares_the_copy_when_both_bars_leave_the_same_pages(monkeypatch):
+    source = _source(CITES_REYES)
+    settings = Settings(analysis_unread_pages_max_ratio=0.4, reuse_unread_pages_max_ratio=0.5)
+    given, recorded = await _integrity_inputs(monkeypatch, source, settings)
+    assert given[CheckKind.originality_reuse] is given[CheckKind.internal_agreement]
+    assert all(pages == [2] for pages in recorded.values()) and len(recorded) == 4
+
+
+async def test_a_saved_originality_result_gets_its_own_unread_pages_on_resume(monkeypatch):
+    source = _source(CITES_REYES)
+    settings = Settings(analysis_unread_pages_max_ratio=0.25, reuse_unread_pages_max_ratio=0.5)
+    saved = SimpleNamespace(kind=CheckKind.originality_reuse, detail={"n_flags": 0})
+    _given, recorded = await _integrity_inputs(monkeypatch, source, settings, saved_reuse=saved)
+    assert recorded[CheckKind.originality_reuse] == [2]
