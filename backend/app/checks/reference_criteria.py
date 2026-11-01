@@ -77,6 +77,8 @@ class ReferenceData:
     web_address: re.Pattern[str] | None = None
     # (pattern, min_share, max_share) a quality level's own words imply.
     quality_quantifiers: tuple[tuple[re.Pattern[str], float | None, float | None], ...] = ()
+    # Citation-check coverage reasons that mean entries are missing from the list.
+    partial_list_reasons: frozenset[str] = frozenset()
     # Every sentence an instructor reads from this step.
     wording: dict[str, str] = field(default_factory=dict)
 
@@ -110,6 +112,7 @@ def load_reference_data(path: Path) -> ReferenceData:
             (re.compile(item["pattern"], re.I), item.get("min_share"), item.get("max_share"))
             for item in raw.get("quality_quantifiers", [])
         ),
+        partial_list_reasons=frozenset(raw.get("partial_list_reasons", [])),
         wording=dict(raw["wording"]),
     )
 
@@ -635,10 +638,10 @@ def reference_list_problem(citation_detail: dict | None, data: ReferenceData) ->
         return words["problem_unread_pages"].format(pages=_numbers(in_list))
     if citation_detail.get("reference_membership_status") not in (None, "complete"):
         return words["problem_boundary"]
-    # "source_reading_order_partial" is about the body: the check only goes on
-    # to verify entries when the bibliography itself is complete and agrees
-    # with the saved entries. Any other coverage reason leaves the list partial.
-    if citation_detail.get("coverage_reason") not in (None, "source_reading_order_partial"):
+    # Only some coverage reasons mean entries are missing from the list; the
+    # others are about the body, claim checks or single lookups, whose
+    # entries already count as unconfirmed.
+    if citation_detail.get("coverage_reason") in data.partial_list_reasons:
         return words["problem_partial"]
     return None
 

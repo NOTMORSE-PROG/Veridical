@@ -187,5 +187,11 @@
     "no_level": "no level",
     "entries_to_check": "Entries to check, by their place in the reference list: {numbers}.",
     "quality_share": "Between {low} and {high} of the {entries} entries can be journal or conference papers or books."
-  }
+  },
+  "_partial_list_note": "Coverage reasons from the citation check that mean entries may be missing from the list, so it is not counted. Other reasons (body pages, claim checks, single lookups) leave the entries counted as unconfirmed.",
+  "partial_list_reasons": [
+    "reference_source_projection_unbound",
+    "reference_membership_partial",
+    "reference_list_unavailable"
+  ]
 }

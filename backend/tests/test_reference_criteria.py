@@ -547,3 +547,7 @@ def test_unread_body_pages_before_the_list_do_not_stop_the_count(data):
         rc.reference_list_problem({**detail, "coverage_reason": "reference_list_unavailable"}, data)
         is not None
     )
+    # A lookup that could not confirm an entry leaves that entry unconfirmed,
+    # not the list partial.
+    for reason in ("reference_search_identity_unconfirmed", "reference_metadata_insufficient"):
+        assert rc.reference_list_problem({**detail, "coverage_reason": reason}, data) is None
