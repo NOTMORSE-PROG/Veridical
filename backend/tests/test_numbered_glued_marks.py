@@ -66,5 +66,11 @@ def test_a_bridge_never_spans_further_than_the_range_limit():
 
 
 def test_a_range_before_a_page_locator_is_read():
-    for mark in ("[7-10, pp. 3-9]", "[7-10; p. 3]", "[7, 8-10, p. 12]"):
+    for mark in (
+        "[7-10, pp. 3-9]",
+        "[7-10; p. 3]",
+        "[7, 8-10, p. 12]",
+        "[7–10, p. 3]",
+        "[7; 8–10; p. 3]",
+    ):
         assert _uncited(f"The kiosk was compared {mark} across clinics.") == [12], mark

@@ -426,9 +426,11 @@ def _possibly_cited_numbers(
     """Numbers a mark may cite outside the main scan's reading, bounded like
     it: glued and locator marks, and the bridges any mark starts
     ("compared[7]-[10]" also covers 8 and 9). Also whether a glued or locator
-    mark in a citation context could not be read, which leaves every entry
-    possibly cited, as an unreadable body mark in a citation context does
-    (BUG-654)."""
+    mark that does not follow a known non-citation prefix ("Table") could not
+    be read, which leaves every entry possibly cited, as such an unreadable
+    body mark does (BUG-654). Any unreadable mark withholds unless a prefix
+    says it is not a citation, so an interval such as "aged [18-65, inclusive]"
+    withholds too: lost recall, never a false finding."""
     numbers: set[int] = set()
     unreadable = False
     remaining = context.max_body_scan_chars
