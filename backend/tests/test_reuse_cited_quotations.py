@@ -203,3 +203,17 @@ def test_a_citation_seen_only_in_the_context_still_counts():
     context = f"{passage} (Garcia, 2023, p. 14). Our study differs."
     assert not pair_wording(passage, context, SOURCE, SOURCE, SETTINGS)["confirmed"]
     assert pair_wording(passage, passage, SOURCE, SOURCE, SETTINGS)["confirmed"]
+
+
+def test_a_quoted_term_inside_a_cited_quotation_keeps_it_a_quotation():
+    text = (
+        'Lopez (2021) wrote that \u201cthe team called the prototype "the queue board" and '
+        "used it in every clinic visit after the first week\u201d (p. 8)."
+    )
+    quoted = _quoted_texts(text)
+    assert quoted[0].startswith("\u201cthe team") and quoted[0].endswith("first week\u201d")
+
+
+def test_an_index_after_a_call_is_not_a_citation():
+    code = 'first = line.split("the separator text here")[0] and the rest is kept'
+    assert _quoted_texts(code) == []

@@ -103,16 +103,26 @@ class _Scan:
         after_ok = i + 1 == len(text) or bool(self.rules.closing_precedes.fullmatch(text[i + 1]))
         return after_ok and i > 0 and not text[i - 1].isspace()
 
-    def opening_marks(self) -> list[int]:
-        found = set()
+    def opening_marks(self) -> dict[int, tuple[str, bool]]:
+        """Each valid opening mark's offset, with its pair's closing mark and
+        whether the pair is symmetric."""
+        found: dict[int, tuple[str, bool]] = {}
         for open_mark, close_mark in self.rules.pairs:
             symmetric = open_mark == close_mark
             i = self.text.find(open_mark)
             while i != -1:
                 if self.opens(i, symmetric):
-                    found.add(i)
+                    found.setdefault(i, (close_mark, symmetric))
                 i = self.text.find(open_mark, i + 1)
-        return sorted(found)
+        return found
+
+    def closed_before(self, i: int, close_mark: str, symmetric: bool, limit: int) -> bool:
+        j = self.text.find(close_mark, i + 1, limit)
+        while j != -1:
+            if self.closes(j, symmetric):
+                return True
+            j = self.text.find(close_mark, j + 1, limit)
+        return False
 
     def cited(self, start: int, end: int) -> bool:
         """A citation starts within `after_words` words after the quotation,
@@ -136,11 +146,13 @@ class _Scan:
 def quotations(text: str, rules: QuotationRules) -> list[Quotation]:
     """Every quotation in `text`, cited or not, quotation marks included.
 
-    A span that holds another opening mark is not a quotation: a stray or
-    unclosed mark would otherwise pair with a later quotation's closing mark
-    and swallow the text between them."""
+    A span that holds an opening mark it does not also close is not a
+    quotation: a stray or unclosed mark would otherwise pair with a later
+    quotation's closing mark and swallow the text between them. A quoted
+    term inside a quotation is closed inside it, so it does not count."""
     scan = _Scan(text, rules)
-    openings = scan.opening_marks()
+    marks = scan.opening_marks()
+    openings = sorted(marks)
     found: list[Quotation] = []
     for open_mark, close_mark in rules.pairs:
         symmetric = open_mark == close_mark
@@ -154,7 +166,12 @@ def quotations(text: str, rules: QuotationRules) -> list[Quotation]:
             )
             if (
                 close is not None
-                and bisect_left(openings, close) - bisect_left(openings, start + 1) == 0
+                and all(
+                    scan.closed_before(i, *marks[i], close)
+                    for i in openings[
+                        bisect_left(openings, start + 1) : bisect_left(openings, close)
+                    ]
+                )
                 and scan.words(start + 1, close) >= rules.min_words
             ):
                 found.append(Quotation(start, close + 1, scan.cited(start, close + 1)))
