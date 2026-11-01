@@ -3,10 +3,10 @@
 import type { CriterionResultOut } from "../api/types";
 
 export const AUTOMATIC_GRADE_COPY = {
-  agreed: "Graded automatically: {agreeing} of {passes} grading passes chose this grade.",
-  middle_of_three: "Graded automatically: the three grading passes disagreed, so the middle level was used.",
-  lower_of_two: "Graded automatically: two grading passes disagreed and no third pass settled it with quotes VERIDICAL could check, so the lower of the two grades was used.",
-  single_verified_pass: "Graded automatically: only one grading pass settled on a grade with quotes VERIDICAL could check, so its grade was used.",
+  agreed: "Graded automatically: the AI chose this grade in {agreeing} of {passes} grading passes. Matching passes show consistency, not confirmation.",
+  middle_of_three: "Graded automatically: the three grading passes disagreed, so the middle grade of the three was used.",
+  lower_of_two: "Graded automatically: two grading passes disagreed and no third pass settled it with quotes found in the manuscript, so the lower of the two grades was used.",
+  single_verified_pass: "Graded automatically: only one grading pass gave a grade with quotes found in the manuscript, so its grade was used. The other pass's grade had no quotes found in the manuscript, so it was not used.",
   caution: "The quote check did not support this grade: {reason}",
   scope_caution: "{reason}",
   chip_caution: "evidence not confirmed",
@@ -25,7 +25,7 @@ const fill = (template: string, values: Record<string, string | number>) =>
 // What each grading pass chose, so a disagreement behind the grade is visible.
 // Kept apart from AUTOMATIC_GRADE_COPY, which the PDF export mirrors word for word.
 export const GRADE_PASSES_COPY = {
-  passes: "What each grading pass chose: {passes}. A pass is one automatic grading attempt, not an independent reviewer.",
+  passes: "What each grading pass chose: {passes}. Each pass is a separate run of the same AI, not an independent reviewer.",
   pass: "Pass {n} {grade}",
   noGrade: "no grade recorded",
 } as const;
