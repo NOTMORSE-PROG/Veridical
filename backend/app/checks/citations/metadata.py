@@ -89,11 +89,14 @@ class MetadataComparison:
         }
 
 
-def _record_url(template, doi):
+def _record_url(template, doi, *, keep_slashes=False):
     if not template or not isinstance(doi, str) or not re.fullmatch(r"10\.\d{4,9}/\S+", doi):
         return None
+    # A DOI resolver link reads as the DOI does ("https://doi.org/10.1016/j.x");
+    # registry record templates take the whole DOI as one encoded segment.
+    safe = "/" if keep_slashes else ""
     try:
-        return str(TypeAdapter(HttpUrl).validate_python(template.format(doi=quote(doi, safe=""))))
+        return str(TypeAdapter(HttpUrl).validate_python(template.format(doi=quote(doi, safe=safe))))
     except (ValueError, KeyError, IndexError, AttributeError, ValidationError):
         return None
 

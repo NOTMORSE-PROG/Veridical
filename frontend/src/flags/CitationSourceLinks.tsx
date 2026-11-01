@@ -37,7 +37,7 @@ export function CitationSourceLinks({ flag }: { flag: Finding }) {
     <h3 id={heading}>{lookup ? "Saved source lookup" : "Source links from this reference"}</h3>
     <ul>{links.map(link => <li key={`${link.kind}:${link.url}`}>
       <strong>{link.kind === "doi_recorded_lookup" ? "DOI used in the saved lookup" : link.kind === "doi_as_cited" ? "DOI as cited" : "URL as cited"}</strong>
-      <a href={link.url} target="_blank" rel="noopener noreferrer">{link.url} <span>(opens in a new tab)</span></a>
+      <a href={link.url} target="_blank" rel="noopener noreferrer">{"text" in link && link.text ? link.text : link.url} <span>(opens in a new tab)</span></a>
     </li>)}</ul>
     <p className="signal-field-hint">{lookup
       ? "This identifier was used in the recorded lookup. Opening its current external destination does not update the saved result or confirm the source."

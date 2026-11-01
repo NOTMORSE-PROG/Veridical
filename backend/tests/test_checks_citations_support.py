@@ -85,7 +85,7 @@ async def test_batched_claim_links_bind_global_pair_and_own_saved_reference():
         assert flag.detail["claim_support_pair_index"] == index
         locator = citation_source_locator("citation_integrity", flag.evidence_excerpt, flag.detail)
         assert locator["order_index"] == index + 10
-        assert locator["links"][0]["url"] == f"https://doi.org/10.1234%2Fsource{index}"
+        assert locator["links"][0]["url"] == f"https://doi.org/10.1234/source{index}"
 
 
 async def test_possibly_unsupported_with_verified_excerpt_is_medium_severity():

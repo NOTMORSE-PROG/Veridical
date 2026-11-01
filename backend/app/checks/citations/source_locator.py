@@ -1,6 +1,7 @@
 """F5/F8: immutable reference locators for deliberate external navigation."""
 
 import hashlib
+import re
 from dataclasses import replace
 from typing import Literal
 from urllib.parse import unquote, urlsplit
@@ -124,7 +125,7 @@ def _doi_url(doi, raw, settings):
         or possible_split_doi(raw, doi)
     ):
         return None
-    url = _record_url(settings.citation_doi_source_url_template, doi)
+    url = _record_url(settings.citation_doi_source_url_template, doi, keep_slashes=True)
     if not url or not supported_reference_url(url):
         return None
     parsed = urlsplit(url)
@@ -139,6 +140,29 @@ def _doi_url(doi, raw, settings):
     ):
         return None
     return url
+
+
+def _same_doi_link(url, doi, settings):
+    parsed = urlsplit(url)
+    patterns = load_reference_metadata_patterns(settings.reference_metadata_patterns_file)
+    return (
+        parsed.hostname in patterns.doi_resolver_hosts
+        and not parsed.query
+        and not parsed.fragment
+        and same_doi(unquote(parsed.path.removeprefix("/")), doi)
+    )
+
+
+def _as_cited(kind, url, reference_text, value):
+    """The link, with the text the manuscript printed for it when it is found
+    there. Shown in place of the link's address, so "as cited" is never our
+    normalised or encoded form of what the student wrote."""
+    link = {"kind": kind, "url": url}
+    if isinstance(value, str) and value:
+        found = re.search(re.escape(value), reference_text, re.IGNORECASE)
+        if found:
+            link["text"] = found.group(0)
+    return link
 
 
 def _safe_url(value):
@@ -209,15 +233,26 @@ def citation_source_locator(check_kind, raw, detail, *, settings=None):
     ):
         return None
     links = []
+    settings = settings or get_settings()
     try:
-        doi_url = _doi_url(saved.doi, reference_text, settings or get_settings())
+        doi_url = _doi_url(saved.doi, reference_text, settings)
     except (OSError, ValueError, UnicodeError):
         doi_url = None
-    if doi_url:
-        links.append({"kind": "doi_as_cited", "url": doi_url})
     cited_url = _safe_url(saved.cited_url)
-    if cited_url and not any(link["url"] == cited_url for link in links):
-        links.append({"kind": "url_as_cited", "url": cited_url})
+    # A printed DOI link ("https://doi.org/10.1016/j.x") is the DOI as cited:
+    # it is shown once, as printed, not again as a separate URL.
+    cited_is_doi = bool(doi_url and cited_url and _same_doi_link(cited_url, saved.doi, settings))
+    if doi_url:
+        links.append(
+            _as_cited(
+                "doi_as_cited",
+                cited_url if cited_is_doi else doi_url,
+                reference_text,
+                saved.cited_url if cited_is_doi else saved.doi,
+            )
+        )
+    if cited_url and not cited_is_doi and not any(link["url"] == cited_url for link in links):
+        links.append(_as_cited("url_as_cited", cited_url, reference_text, saved.cited_url))
     return (
         {"basis": "saved_reference", "order_index": order_index, "links": links} if links else None
     )
