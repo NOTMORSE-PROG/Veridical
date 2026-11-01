@@ -31,6 +31,9 @@ from app.checks.agreement.extract import Statement
 from app.checks.section_roles import SectionMap
 
 NOT_IDENTIFIED_NOTE = "results section not identified, all sections used"
+OBJECTIVES_ALL_SET_ASIDE_NOTE = (
+    "every objective found lies outside the thesis's own objectives sections, so all were kept"
+)
 OBJECTIVES_NOT_IDENTIFIED_NOTE = (
     "objectives section not identified, objectives from all sections used"
 )
@@ -133,6 +136,9 @@ class ObjectiveGate:
     kept: list[Statement]
     set_aside: list[dict] = field(default_factory=list)
     identified: bool = True
+    # When every aim would have been set aside, all are kept and these are the
+    # ones the chapter map judged not to be this study's objectives.
+    kept_despite_role: list[dict] = field(default_factory=list)
 
     def detail(self) -> dict:
         detail = {
@@ -143,6 +149,9 @@ class ObjectiveGate:
         }
         if not self.identified:
             detail["note"] = OBJECTIVES_NOT_IDENTIFIED_NOTE
+        if self.kept_despite_role:
+            detail["note"] = OBJECTIVES_ALL_SET_ASIDE_NOTE
+            detail["kept_despite_role"] = self.kept_despite_role
         return detail
 
 
@@ -169,6 +178,7 @@ def gate_objectives(intents: list[Statement], sections: SectionMap) -> Objective
     if intents and not kept:
         # Setting aside every aim would report "no objectives found" for a
         # thesis that states some; the chapter map is less likely right than
-        # that, so nothing is set aside and the run says so.
-        return ObjectiveGate(kept=list(intents), identified=False)
+        # that, so nothing is set aside, and the run records which aims it
+        # would have set aside.
+        return ObjectiveGate(kept=list(intents), kept_despite_role=set_aside)
     return ObjectiveGate(kept=kept, set_aside=set_aside)

@@ -29,3 +29,10 @@ def test_the_original_statement_of_the_same_objective_states_it():
 def test_another_objective_that_shares_a_few_words_does_not():
     # Both are "platform" objectives; sharing that word is not stating it.
     assert not states_objective(OTHER, RESTATEMENT, VOCAB)
+
+
+def test_a_sentence_sharing_under_half_of_the_core_does_not_state_it():
+    # Four of the restatement's nine core words is a related objective, not this one.
+    assert not states_objective(
+        "To engineer a versatile multi sensor platform for birds.", RESTATEMENT, VOCAB
+    )
