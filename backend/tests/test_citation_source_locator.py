@@ -478,3 +478,38 @@ def test_a_doi_link_for_another_doi_is_not_merged():
     _, draft = saved(raw=raw, url="https://doi.org/10.5678/other")
     kinds = [link["kind"] for link in project(draft)["links"]]
     assert kinds == ["doi_as_cited", "url_as_cited"]
+
+
+def test_a_doi_wrapped_across_a_line_is_shown_as_printed_without_the_break():
+    raw = "Author. A source. Microprocessors. doi:10.1016/J.MIC PRO.2020.103768"
+    _, draft = saved(raw=raw, doi="10.1016/j.micpro.2020.103768")
+    assert project(draft)["links"] == [
+        {
+            "kind": "doi_as_cited",
+            "url": "https://doi.org/10.1016/j.micpro.2020.103768",
+            "text": "10.1016/J.MICPRO.2020.103768",
+        }
+    ]
+
+
+def test_a_doi_not_found_in_the_reference_is_shown_as_the_doi_not_our_address():
+    from app.checks.citations.source_locator import _as_cited
+
+    link = _as_cited("doi_as_cited", "https://doi.org/10.1/x", "No identifier here", "10.1/x")
+    assert link["text"] == "10.1/x"
+    assert "text" not in _as_cited("url_as_cited", "https://a.org/", "No address", "https://a.org/")
+
+
+def test_a_look_alike_letter_elsewhere_is_not_taken_for_the_doi():
+    raw = "Author. Earlier 10.1234/\u212aey note. A source. DOI 10.1234/key"
+    _, draft = saved(raw=raw, doi="10.1234/KEY")
+    assert project(draft)["links"][0]["text"] == "10.1234/key"
+
+
+def test_a_doi_link_on_another_port_is_not_merged_into_the_doi_line():
+    printed = "https://doi.org:8443/10.1016/j.micpro.2020.103768"
+    raw = f"Author. A source. {printed}"
+    _, draft = saved(raw=raw, doi="10.1016/j.micpro.2020.103768", url=printed)
+    links = project(draft)["links"]
+    assert links[0]["url"] == "https://doi.org/10.1016/j.micpro.2020.103768"
+    assert [link["kind"] for link in links] == ["doi_as_cited", "url_as_cited"]

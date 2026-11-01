@@ -272,7 +272,9 @@ def compare_metadata(
         policy.version,
         policy.sha256,
         result.provider,
-        _record_url(settings.citation_doi_source_url_template, citation.doi) if settings else None,
+        _record_url(settings.citation_doi_source_url_template, citation.doi, keep_slashes=True)
+        if settings
+        else None,
         _record_url(
             settings.citation_registry_record_url_templates.get(result.provider),
             returned_doi(result),

@@ -147,6 +147,7 @@ def _same_doi_link(url, doi, settings):
     patterns = load_reference_metadata_patterns(settings.reference_metadata_patterns_file)
     return (
         parsed.hostname in patterns.doi_resolver_hosts
+        and parsed.port is None
         and not parsed.query
         and not parsed.fragment
         and same_doi(unquote(parsed.path.removeprefix("/")), doi)
@@ -158,11 +159,27 @@ def _as_cited(kind, url, reference_text, value):
     there. Shown in place of the link's address, so "as cited" is never our
     normalised or encoded form of what the student wrote."""
     link = {"kind": kind, "url": url}
-    if isinstance(value, str) and value:
-        found = re.search(re.escape(value), reference_text, re.IGNORECASE)
-        if found:
-            link["text"] = found.group(0)
+    printed = _printed(reference_text, value)
+    if printed:
+        link["text"] = printed
+    elif kind == "doi_as_cited" and isinstance(value, str) and value:
+        # Not found as one run of text: the DOI itself, which the reference
+        # printed, rather than our resolver address.
+        link["text"] = value
     return link
+
+
+def _printed(reference_text, value):
+    if not isinstance(value, str) or not value or any(char.isspace() for char in value):
+        return None
+    if value in reference_text:
+        return value
+    # A wrapped identifier ("10.1016/j.mic pro.2020.1") is read across the
+    # break, and shown without it. ASCII-only case folding, so a look-alike
+    # letter elsewhere in the reference is never taken for it.
+    pattern = r"\s*".join(re.escape(char) for char in value)
+    found = re.search(pattern, reference_text, re.IGNORECASE | re.ASCII)
+    return re.sub(r"\s+", "", found.group(0)) if found else None
 
 
 def _safe_url(value):
