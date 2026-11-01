@@ -28,6 +28,7 @@ installed. Exits non-zero, naming the gate, when either gate fails.
 
 import argparse
 import importlib.util
+import json
 import subprocess
 import sys
 import tempfile
@@ -38,6 +39,7 @@ REPO = HERE.parents[1]
 # The backend's own committed ingest fixtures: synthetic documents.
 FIXTURE_DIR = REPO / "backend" / "tests" / "fixtures" / "ingest"
 FIXTURES = ("native.pdf", "native.docx", "image_table.pdf")
+MIN_CROPS = {"image_table.pdf": 1}
 
 
 def import_gate(staged: Path) -> tuple[bool, str]:
@@ -108,9 +110,17 @@ def signed_job_gate(staged: Path, pins_python: str, out: Path) -> tuple[bool, st
             shutil.copyfile(FIXTURE_DIR / name, source)
             try:
                 result = extract_remote(str(source), settings, owner_id=1)
-                ok = bool(result.blocks)  # a DOCX has no pages, only blocks
+                # The API keeps the accepted manifest beside the source.
+                manifest = json.loads(
+                    source.with_name(source.name + ".native.json").read_text(encoding="utf-8")
+                )
+                crops = len(manifest.get("crops") or [])
+                # A DOCX has no pages, only blocks; the image-table PDF is there
+                # to exercise the crop path, so it must yield a crop.
+                ok = bool(result.blocks) and crops >= MIN_CROPS.get(name, 0)
                 lines.append(
-                    f"{name}: accepted; {result.page_count} pages, {len(result.blocks)} blocks"
+                    f"{name}: accepted; {result.page_count} pages, "
+                    f"{len(result.blocks)} blocks, {crops} crops"
                 )
             except Exception as exc:  # the gate reports any refusal, whatever its kind
                 ok = False

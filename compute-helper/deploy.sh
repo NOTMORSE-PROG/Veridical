@@ -28,7 +28,8 @@
 #   VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID   to deploy
 #   VERCEL_CLI         the CLI package (default vercel@65.7.0; the API refuses CLIs older than 47.2.2)
 #   VERCEL_API         default https://api.vercel.com
-#   HTTP_TIMEOUT, VERIFY_ATTEMPTS, VERIFY_INTERVAL   default 90 seconds, 20 tries, 15 seconds
+#   HTTP_TIMEOUT, HTTP_RETRIES, HTTP_RETRY_DELAY   default 90 seconds, 2 retries, 10 seconds
+#   VERIFY_ATTEMPTS, VERIFY_INTERVAL               default 20 tries, 15 seconds
 set -euo pipefail
 
 mode="${1:-}"
@@ -39,6 +40,8 @@ work="${WORK:-$(mktemp -d)}"
 http_timeout="${HTTP_TIMEOUT:-90}"
 attempts="${VERIFY_ATTEMPTS:-20}"
 interval="${VERIFY_INTERVAL:-15}"
+retries="${HTTP_RETRIES:-2}"
+retry_delay="${HTTP_RETRY_DELAY:-10}"
 cli="${VERCEL_CLI:-vercel@65.7.0}"
 paths=(api backend/app compute-helper/vercel.json compute-helper/requirements.txt)
 
@@ -49,7 +52,8 @@ same_files() {
   for path in "${paths[@]}"; do same_tree "$1" "$2" "$path" || return 1; done
 }
 reported_commit() {
-  curl -sS --retry 2 --retry-delay 10 --max-time "$http_timeout" "$1" | jq -r '.commit // empty' || true
+  curl -sS --retry "$retries" --retry-delay "$retry_delay" --max-time "$http_timeout" "$1" \
+    | jq -r '.commit // empty' || true
 }
 
 if [ "$mode" = "--dry-run" ]; then
@@ -79,7 +83,8 @@ pins_python="${PINS_PYTHON:-}"
 if [ -z "$pins_python" ]; then
   # Built from the staged pins, so the gate tests the target with its own pins.
   "${BASE_PYTHON:-python3}" -m venv "$work/pins"
-  "$work/pins/bin/pip" install --quiet --disable-pip-version-check -r "$work/helper/requirements.txt"
+  env -u VERCEL_TOKEN "$work/pins/bin/pip" install --quiet --disable-pip-version-check \
+    -r "$work/helper/requirements.txt"
   pins_python="$work/pins/bin/python"
 fi
 # The gates run the target's code, so they never see the deploy token.
@@ -128,17 +133,29 @@ url="$(cd "$work/helper" && npx --yes "$cli" deploy --prod --skip-domain --yes \
 [ -n "$url" ] || { echo "::error::the Vercel CLI reported no deployment URL"; exit 1; }
 new_id="$(deployment_id "${url#https://}")"
 [ -n "$new_id" ] || { echo "::error::the Vercel API does not know $url"; exit 1; }
-echo "deployed $target as $new_id (not yet on $HELPER_ALIAS)"
+if [ "$(deployment_id "$HELPER_ALIAS")" = "$new_id" ]; then
+  # --skip-domain should have held the production domain back. If it did not,
+  # the deployment already serves production: say so before checking it.
+  echo "::warning::$HELPER_ALIAS already points at $new_id before its checks; if they fail, roll back"
+  held_back=no
+else
+  echo "deployed $target as $new_id (not yet on $HELPER_ALIAS)"
+  held_back=yes
+fi
 
 ok=no
 for attempt in $(seq 1 "$attempts"); do
   if check "$url${HELPER_PATH:-/api/native_extract}"; then ok=yes; break; fi
   sleep "$interval"
 done
-[ "$ok" = yes ] || {
-  echo "::error::the new deployment failed its own checks; production still runs the previous helper"
+if [ "$ok" != yes ]; then
+  if [ "$held_back" = yes ]; then
+    echo "::error::the new deployment failed its own checks; production still runs the previous helper"
+  else
+    echo "::error::the new deployment failed its checks AND serves $HELPER_ALIAS; roll back with \`vercel rollback\` now"
+  fi
   exit 1
-}
+fi
 
 npx --yes "$cli" promote "$url" --yes --token "$VERCEL_TOKEN" >/dev/null
 ok=no
