@@ -352,20 +352,23 @@ def _extract_outcome_prose(
             candidates.extend(_outcome_sentences(run, cues))
             run.clear()
 
-    for block in blocks:
-        if block.is_furniture or not block.text.strip():
-            continue
+    content = [b for b in blocks if not b.is_furniture and b.text.strip()]
+    for index, block in enumerate(content):
         text = block.text.strip()
-        ends_sentence = _ENDS_CLAUSE.search(text) is not None
-        if not _has_words(text) and not ends_sentence:
-            # A lone page number between pages is skipped and the sentence
-            # carries on across it; other number lines (table cells) are not
-            # prose and end it. A number line that ends a sentence ("4.52.")
+        if not _has_words(text) and not _ENDS_CLAUSE.search(text):
+            # A lone page number at a page break is skipped and the sentence
+            # carries on across it. Any other number line is a table cell:
+            # it is not prose and ends the sentence, so two table rows are
+            # never read as one. A number line that ends a sentence ("4.52.")
             # is the sentence's last line and is read as prose.
-            if not _PAGE_NUMBER.fullmatch(text):
+            following = content[index + 1] if index + 1 < len(content) else None
+            at_page_break = (following is None or following.page != block.page) or (
+                bool(run) and run[-1].page != block.page
+            )
+            if not (_PAGE_NUMBER.fullmatch(text) and at_page_break):
                 _flush()
             continue
-        if not ends_sentence and any(re.search(p, text, re.I) for p in cues.caption_patterns):
+        if any(re.search(p, text, re.I) for p in cues.caption_patterns):
             # A caption is not prose and does not open a new section; a
             # sentence never continues through it. "Table 4.2 shows that ..."
             # is prose: the patterns leave out a reporting verb after the number.
