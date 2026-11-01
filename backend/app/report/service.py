@@ -38,7 +38,12 @@ from app.checks.reuse.query import (
 )
 from app.checks.reuse.service import NO_TEXT_NOTE
 from app.checks.reuse.source import passage_match_supported
-from app.checks.support import SOURCE_SCOPE_POLICY_VERSION, scope_obligations, scope_wording
+from app.checks.support import (
+    SOURCE_SCOPE_POLICY_VERSION,
+    later_scope_note,
+    scope_obligations,
+    scope_wording,
+)
 from app.config import Settings, get_settings
 from app.errors import ConflictError, GoneError, NotFoundError
 from app.findings.policy import exclusion_reason, problem_kind_of, reuse_excerpt
@@ -339,6 +344,7 @@ def _to_criterion_result(
         else None
     )
     scope = scope_capabilities(criterion, detail) if result.kind == CheckKind.semantic else None
+    note = later_note(result, criterion, detail)
     return CriterionResultOut(
         rule_scope_unconfirmed=project_rule_scope_unconfirmed(
             detail, criterion=criterion, kind=result.kind.value, outcome=result.outcome.value
@@ -362,7 +368,10 @@ def _to_criterion_result(
         score=float(result.score) if result.score is not None else None,
         basis=detail.get("basis"),
         anchor=detail.get("anchor"),
-        reasoning=detail.get("reasoning"),
+        # Under a later note, the quote check's "supported" sentence would sit
+        # right above the note disowning it, so the grader's own reasoning is
+        # shown instead, as it is for grades checked under today's rule.
+        reasoning=(note and detail.get("grading_reasoning")) or detail.get("reasoning"),
         reason=scope_wording(scope)[0]
         if scope and detail.get("support_withheld")
         else detail.get("reason"),
@@ -373,6 +382,7 @@ def _to_criterion_result(
         # for a levelled criterion's decided result — `None` otherwise.
         level=CriterionLevelOut(**detail["level"]) if detail.get("level") else None,
         **_automatic_grade(result, detail, resolution_detail, scope),
+        later_note=note,
         reason_codes=[code for code in detail.get("reason_codes") or [] if isinstance(code, str)]
         or None,
     )
@@ -389,13 +399,35 @@ def scope_capabilities(criterion: Criterion, detail: dict) -> list[str] | None:
     support = detail.get("support_check") or {}
     if support.get("scope_guard") != "independent_assessment_required":
         return None
-    verdict = detail.get("verdict") or detail.get("proposed_verdict")
+    current = _current_scope(criterion, detail.get("verdict") or detail.get("proposed_verdict"))
+    stored = [item for item in support.get("missing_capabilities") or [] if isinstance(item, str)]
+    return current or stored or None
+
+
+def _current_scope(criterion: Criterion, verdict: str | None) -> list[str]:
     obligations = scope_obligations(
         criterion, verdict, get_settings().semantic_evidence_scope_patterns_file
     )
-    current = sorted({item for obligation in obligations for item in obligation["capabilities"]})
-    stored = [item for item in support.get("missing_capabilities") or [] if isinstance(item, str)]
-    return current or stored or None
+    return sorted({item for obligation in obligations for item in obligation["capabilities"]})
+
+
+def later_note(result: CheckResult, criterion: Criterion, detail: dict) -> str | None:
+    """A note for an automatic grade whose saved evidence check said
+    "supported" for a level quotes cannot show, saved before that rule
+    existed (BUG-611). Shown at report time only: the stored decision, score,
+    band and audit record are untouched, and the note says it came later."""
+    if result.kind != CheckKind.semantic or result.outcome not in (
+        ResultOutcome.passed,
+        ResultOutcome.failed,
+    ):
+        return None
+    if detail.get("resolution") or detail.get("basis") != "llm":
+        return None
+    support = detail.get("support_check") or {}
+    if support.get("status") != "supported" or support.get("scope_guard"):
+        return None
+    scope = _current_scope(criterion, detail.get("verdict"))
+    return later_scope_note(scope) if scope else None
 
 
 def _automatic_grade(

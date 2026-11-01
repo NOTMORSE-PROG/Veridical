@@ -630,6 +630,7 @@ def test_shared_report_public_schema_is_an_exact_allow_list(
         "decision_basis",
         "support_caution",
         "support_caution_scope",
+        "later_note",
         "agreeing_passes",
         "grading_passes",
     }

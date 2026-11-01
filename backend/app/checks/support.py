@@ -89,12 +89,16 @@ def _scope_wording_data() -> dict:
     return json.loads(_SCOPE_WORDING.read_text(encoding="utf-8"))
 
 
-def scope_wording(missing: list[str]) -> tuple[str, str]:
-    """(reason, caution) for a grade whose level quoted passages cannot show:
-    the reason when no grade was assigned, the caution beside a kept grade.
-    Worded per capability from data, so a tone or an error rate is never
-    described as a collection."""
+def later_scope_note(missing: list[str]) -> str:
+    """The note a report adds, at display time, to a grade whose saved
+    evidence check said "supported" before this rule existed. It says where it
+    came from, and it changes nothing stored."""
     data = _scope_wording_data()
+    about, check = _about_and_check(missing, data)
+    return data["later_note"].format(about=about, check=check)
+
+
+def _about_and_check(missing: list[str], data: dict) -> tuple[str, str]:
     known = data["capabilities"]
     named = [capability for capability in known if capability in missing]
     for capability in list(named):
@@ -103,6 +107,16 @@ def scope_wording(missing: list[str]) -> tuple[str, str]:
                 named.remove(narrower)
     about = " and ".join(known[capability]["about"] for capability in named)
     check = known[named[0]]["check"] if len(named) == 1 else data["joined_check"]
+    return about, check
+
+
+def scope_wording(missing: list[str]) -> tuple[str, str]:
+    """(reason, caution) for a grade whose level quoted passages cannot show:
+    the reason when no grade was assigned, the caution beside a kept grade.
+    Worded per capability from data, so a tone or an error rate is never
+    described as a collection."""
+    data = _scope_wording_data()
+    about, check = _about_and_check(missing, data)
     return (
         data["reason"].format(about=about, check=check),
         data["caution"].format(about=about, check=check),
