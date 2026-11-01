@@ -60,6 +60,16 @@ def test_a_surname_shared_by_two_entries_withholds_both():
     assert [ref for ref, _pages, _why in withheld] == [CRUZ_A, CRUZ_B]
 
 
+def test_a_short_surname_is_found_only_as_written():
+    ho = _ref(4, "Ho, R.C. & Muslim, A. (2019). Smartphone adoption.", ["Ho, R.C."], 2019)
+    lim = _ref(5, "Lim, K. (2016). Trip itineraries.", ["Lim, K."], 2016)
+    released, withheld = _split([ho, lim], {18: "As Ho (2019) and Lim noted, the figures differ."})
+    assert released == [] and [w[1] for w in withheld] == [[18], [18]]
+    # In lower case, inside other words, they are ordinary text, not the names.
+    released, withheld = _split([ho, lim], {18: "who knows; the limit was ho-hum"})
+    assert released == [ho, lim] and withheld == []
+
+
 def test_an_entry_without_a_usable_name_falls_back_to_where_the_citing_text_is():
     inside = _split([NAMELESS], {4: "some text"})
     assert inside[1] == [(NAMELESS, [4], "within_citing_text")]

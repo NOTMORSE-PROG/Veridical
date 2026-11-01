@@ -1262,15 +1262,28 @@ def _unread_page_rows(records):
     rows.append(
         rate_row(
             LANE,
-            "unread pages: entry named on an unread page stays withheld",
+            "unread pages: entry named on an unread page is not reported uncited",
             "plant",
-            sum(not r["reported_uncited"] and (r["leads"] or 0) > 0 for r in named),
+            sum(not r["reported_uncited"] for r in named),
             len(named),
             note=(
                 "Adversarial: the entry's surname written on an unread page, with its own "
-                "year or another one. It must not be reported uncited and must be shown "
-                "as a lead naming the page."
+                "year or another one. Reporting it uncited would be a false finding."
             ),
+        )
+    )
+    # A lead is owed only where the plant alone is reported: elsewhere another
+    # rule already keeps the entry from being called uncited.
+    reported_alone = {(r["host"], r["entry"]) for r in plain if r["reported_uncited"]}
+    owed = [r for r in named if (r["host"], r["entry"]) in reported_alone]
+    rows.append(
+        rate_row(
+            LANE,
+            "unread pages: lead naming the page shown for such an entry",
+            "plant",
+            sum(not r["reported_uncited"] and (r["leads"] or 0) > 0 for r in owed),
+            len(owed),
+            note="Counted only where the plant alone is reported uncited.",
         )
     )
     return rows

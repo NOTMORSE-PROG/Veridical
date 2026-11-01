@@ -35,15 +35,24 @@ def load_policy(path: Path | None = None) -> dict:
     return json.loads((path or _DEFAULT_FILE).read_text(encoding="utf-8"))
 
 
-def _surname_words(ref: ReferenceLike, min_chars: int) -> list[str]:
-    """The first author's surname, as the words long enough to search for.
-    "Black, S." gives ["black"]; an organisation gives its longer words."""
+def _surname_patterns(ref: ReferenceLike, min_chars: int) -> list[re.Pattern]:
+    """How to find the first author's surname on a page. A word of at least
+    `min_chars` letters is matched in any case ("Black, S." finds "black");
+    a shorter one ("Ho", "Lim") only exactly as written, capital first, because
+    in any case it would match ordinary words. Either way a match only ever
+    withholds a claim, never raises one."""
     authors = ref.authors or []
     if not authors:
         return []
     name = authors[0]
     surname = name.split(",", 1)[0] if "," in name else name
-    return [w.lower() for w in _WORD.findall(surname) if len(w) >= min_chars]
+    patterns = []
+    for word in _WORD.findall(surname):
+        if len(word) >= min_chars:
+            patterns.append(re.compile(rf"\b{re.escape(word)}\b", re.IGNORECASE))
+        elif len(word) >= 2 and word[0].isupper():
+            patterns.append(re.compile(rf"\b{re.escape(word)}\b"))
+    return patterns
 
 
 def _number(ref: ReferenceLike) -> int | None:
@@ -64,7 +73,7 @@ def split_by_unread_pages(
     unread = sorted(extraction.unread_pages or [])
     if not unread:
         return list(candidates), []
-    texts = {page: (extraction.unread_text or {}).get(page, "").lower() for page in unread}
+    texts = {page: (extraction.unread_text or {}).get(page, "") for page in unread}
     policy = load_policy(settings.citation_unread_pages_policy_file)
     span = (min(citing_pages), max(citing_pages)) if citing_pages else None
     inside = [p for p in unread if span is None or span[0] <= p <= span[1]]
@@ -80,11 +89,9 @@ def split_by_unread_pages(
             named = [p for p in unread if pattern and pattern.search(texts[p])]
             usable = pattern is not None
         else:
-            words = _surname_words(ref, settings.citation_linkage_name_word_min_chars)
-            named = [
-                p for p in unread if any(re.search(rf"\b{re.escape(w)}\b", texts[p]) for w in words)
-            ]
-            usable = bool(words)
+            patterns = _surname_patterns(ref, settings.citation_linkage_name_word_min_chars)
+            named = [p for p in unread if any(pat.search(texts[p]) for pat in patterns)]
+            usable = bool(patterns)
         if named:
             withheld.append((ref, named, "named"))
         elif not usable and inside:
