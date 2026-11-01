@@ -30,9 +30,13 @@ class Settings(BaseSettings):
     # BUG-418: the commit this process was built from, reported on /health so a
     # stale production backend is visible (CI deploy and the production smoke
     # test compare it with main). Render sets RENDER_GIT_COMMIT on every build;
-    # DEPLOYED_COMMIT overrides it elsewhere. Empty when unknown (local dev).
+    # the native helper's CI deploy sets DEPLOYED_COMMIT, and Vercel sets
+    # VERCEL_GIT_COMMIT_SHA on git builds. Empty when unknown (local dev).
     deployed_commit: str = Field(
-        default="", validation_alias=AliasChoices("DEPLOYED_COMMIT", "RENDER_GIT_COMMIT")
+        default="",
+        validation_alias=AliasChoices(
+            "DEPLOYED_COMMIT", "RENDER_GIT_COMMIT", "VERCEL_GIT_COMMIT_SHA"
+        ),
     )
     # VERIDICAL_FAKE_LLM=1 swaps the Gemini client for the fixture-backed
     # stub so the whole pipeline runs with zero API keys and zero quota burn.

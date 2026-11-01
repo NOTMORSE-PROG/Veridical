@@ -90,3 +90,43 @@ def test_the_helper_entrypoint_loads_with_only_the_helper_requirements():
     )
     assert result.returncode == 0, result.stderr[-3000:]
     assert "helper loaded: handler" in result.stdout
+
+
+def _pins(path):
+    lines = (REPO / path).read_text(encoding="utf-8").splitlines()
+    return sorted(line.strip() for line in lines if line.strip() and not line.startswith("#"))
+
+
+def test_the_root_requirements_list_the_helper_pins_directly():
+    # A deployment built from the repository root reads requirements.txt, and
+    # Vercel's builder no longer follows a "-r" include there.
+    assert _pins("requirements.txt") == _pins("compute-helper/requirements.txt")
+    assert not any(pin.startswith("-") for pin in _pins("requirements.txt"))
+
+
+def test_the_helper_reports_the_commit_it_was_deployed_from(monkeypatch):
+    import importlib.util
+    import io
+    import json
+
+    spec = importlib.util.spec_from_file_location(
+        "native_extract_commit", REPO / "api" / "native_extract.py"
+    )
+    entry = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(entry)
+
+    def get():
+        handler = entry.handler.__new__(entry.handler)
+        handler.wfile = io.BytesIO()
+        handler.request_version = "HTTP/1.1"
+        handler.requestline = "GET / HTTP/1.1"
+        handler.command = "GET"
+        handler.close_connection = True
+        handler.do_GET()
+        return json.loads(handler.wfile.getvalue().split(b"\r\n\r\n", 1)[1])
+
+    for name in ("DEPLOYED_COMMIT", "RENDER_GIT_COMMIT", "VERCEL_GIT_COMMIT_SHA"):
+        monkeypatch.delenv(name, raising=False)
+    assert get() == {"service": "native-compute", "version": "native-v1", "commit": None}
+    monkeypatch.setenv("DEPLOYED_COMMIT", "abc123")
+    assert get()["commit"] == "abc123"

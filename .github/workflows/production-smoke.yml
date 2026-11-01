@@ -51,6 +51,32 @@ jobs:
           fi
           echo "::error::Production backend is not the latest backend commit (expected $expected, got ${live:-unknown})"
           exit 1
+      - name: Native helper runs main's helper files (BUG-531)
+        # The helper bundles its own copy of backend/app; a merge the API gets
+        # does not reach it until the helper is deployed too. Its GET reports
+        # the commit it was deployed from. A helper deployed before it could
+        # report one only warns, until its first deploy from CI.
+        env:
+          HELPER_URL: ${{ vars.HELPER_URL || 'https://veridical-native-compute.vercel.app/api/native_extract' }}
+        run: |
+          paths="api backend/app compute-helper/vercel.json compute-helper/requirements.txt"
+          expected="$(git log -1 --format=%H -- $paths)"
+          live="$(curl -sS --retry 2 --retry-delay 10 --max-time 90 "$HELPER_URL" | jq -r '.commit // empty')"
+          echo "expected $expected, helper ${live:-reports no commit}"
+          if [ -z "$live" ]; then
+            echo "::warning::The native helper reports no commit; it predates CI deploys (BUG-531)"
+            exit 0
+          fi
+          [ "$live" = "$expected" ] && exit 0
+          if git cat-file -e "$live^{commit}" 2>/dev/null; then
+            same=yes
+            for path in $paths; do
+              [ "$(git rev-parse "$live:$path" 2>/dev/null)" = "$(git rev-parse "$expected:$path")" ] || same=no
+            done
+            [ "$same" = yes ] && { echo "helper files match $expected"; exit 0; }
+          fi
+          echo "::error::The native helper does not run main's helper files (expected $expected, got $live)"
+          exit 1
       - name: Frontend reachable
         run: |
           code="$(curl -sS -o /dev/null -w '%{http_code}' --retry 2 --retry-delay 5 --max-time 60 "$WEB_URL")"
