@@ -417,7 +417,9 @@ def test_undecided_roles_belong_only_to_their_own_check(change):
 
     current = report(integrity_modules=[undecided_module(("Objective one.", "Result one."))])
     values = next(
-        ref for ref in build(current, include_undecided=True).references if ref.owner_kind == "module"
+        ref
+        for ref in build(current, include_undecided=True).references
+        if ref.owner_kind == "module"
     ).model_dump(exclude={"reference_id"})
     values.update(change)
     with pytest.raises(ValidationError):
