@@ -161,3 +161,10 @@ def test_glued_and_page_locator_marks_withhold_numbered_entries():
         released, withheld = _split(refs, {5: text}, numbered=True)
         assert [r.order_index + 1 for r, *_ in withheld] == [7, 8, 9, 10], text
         assert [r.order_index + 1 for r in released] == [11], text
+
+
+def test_an_unreadable_glued_mark_falls_back_to_the_citing_pages():
+    # A range past the limit cannot be read, so any entry might be in it.
+    refs = [_numbered(n) for n in (7, 8)]
+    released, withheld = _split(refs, {5: "compared[7-40] across clinics."}, numbered=True)
+    assert released == [] and {why for _r, _p, why, _f in withheld} == {"within_citing_text"}
