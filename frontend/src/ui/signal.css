@@ -9148,19 +9148,15 @@
   .signal-report-hero :focus-visible { outline-color: var(--color-signal-brand); }
   /* Review Desk queue cards: content starts at the top so counts line up. */
   .signal-queue-tabs button { align-content: start; align-items: start; }
-  /* Readiness report: criterion records in two columns; one when the
-     window is narrow. */
+  /* Readiness report: criterion records in one column. In two columns a
+     row is as tall as its tallest card, so opening one card's details left
+     a gap beside it and pushed the next row down. One column: opening a
+     card moves only the cards below it. */
   #record-panel-grades .signal-result-list {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: minmax(0, 1fr);
     gap: var(--signal-rhythm-control);
-    /* Each card keeps its own height: opening one card's details must not
-       stretch its neighbour into an empty box. */
-    align-items: start;
     padding: var(--signal-space-5) var(--signal-space-6) var(--signal-space-6);
-  }
-  @media (max-width: 1023px) {
-    #record-panel-grades .signal-result-list { grid-template-columns: minmax(0, 1fr); }
   }
   #record-panel-grades .signal-result-list > .signal-result-card {
     border: var(--signal-border-hairline) solid var(--color-signal-border);
@@ -9169,6 +9165,10 @@
     min-inline-size: 0;
   }
   #record-panel-grades .signal-result-list > .signal-result-card { display: flex; flex-direction: column; gap: var(--signal-space-2); }
+  /* A full-width card keeps its buttons at their own width and its text at
+     a readable line length. */
+  #record-panel-grades .signal-result-card > .signal-button { align-self: flex-start; }
+  #record-panel-grades .signal-result-card :is(h3, p, blockquote) { max-inline-size: var(--signal-prose-width); }
   /* BUG-518: confirm a finding as a real issue (note optional). */
   .signal-finding-confirm,
   .signal-finding-confirmed {
@@ -9273,8 +9273,6 @@
     font-weight: var(--signal-weight-semibold);
   }
   .signal-result-card--waiting > .signal-button { justify-self: start; }
-  /* Change grade sits at the same height in every card of a row. */
-  #record-panel-grades .signal-result-card > .signal-judgment-tools,
   .signal-result-list > .signal-result-card > .signal-judgment-tools { margin-block-start: auto; }
   /* A link in running text looks like a link: link colour and an underline.
      Styled links (buttons, navigation, tabs) carry a class and keep their own look. */
