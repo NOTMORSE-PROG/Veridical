@@ -44,7 +44,16 @@ class MetricRow:
 
 
 def rate_row(
-    lane, metric, unit, numerator, denominator, *, split="all", note="", extra=None, clusters=None
+    lane,
+    metric,
+    unit,
+    numerator,
+    denominator,
+    *,
+    split="all",
+    note="",
+    extra=None,
+    clusters=None,
 ):
     """One rate with its Wilson interval. When the cases come in clusters
     (several plants built on one objective, every plant on one host), the
@@ -70,7 +79,11 @@ def rate_row(
 
 
 def cluster_bootstrap(
-    outcomes: list[tuple[object, bool]], *, seed: int, resamples: int = 2000, level: float = 0.95
+    outcomes: list[tuple[object, bool]],
+    *,
+    seed: int,
+    resamples: int = 2000,
+    level: float = 0.95,
 ) -> tuple[float, float] | None:
     """A percentile interval for a rate whose cases come in clusters (several
     plants built on one objective), resampling whole clusters so the interval
@@ -209,7 +222,16 @@ def git_commit(repo: Path) -> str:
             check=True,
         ).stdout.strip()
         changed = subprocess.run(
-            ["git", "-C", str(repo), "status", "--porcelain", "--", "backend/app", "tools"],
+            [
+                "git",
+                "-C",
+                str(repo),
+                "status",
+                "--porcelain",
+                "--",
+                "backend/app",
+                "tools",
+            ],
             capture_output=True,
             text=True,
             check=True,
@@ -270,10 +292,18 @@ def _markdown(payload: dict) -> str:
     for lane, items in payload.get("warnings", {}).items():
         lines += [f"**{lane}: {item}**" for item in items]
         lines += [""] if items else []
-    lines += [*[f"- **{lane}**: {scope}" for lane, scope in payload["scopes"].items()], ""]
+    lines += [
+        *[f"- **{lane}**: {scope}" for lane, scope in payload["scopes"].items()],
+        "",
+    ]
     for lane, items in payload.get("limitations", {}).items():
         if items:
-            lines += [f"Limitations of the {lane} figures:", "", *[f"- {i}" for i in items], ""]
+            lines += [
+                f"Limitations of the {lane} figures:",
+                "",
+                *[f"- {i}" for i in items],
+                "",
+            ]
     lines += [
         "| Lane | Metric | Split | Result | 95% Wilson | n | Note |",
         "|---|---|---|---|---|---|---|",
