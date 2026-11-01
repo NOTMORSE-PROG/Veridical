@@ -624,10 +624,19 @@ def _verdict_flag_draft(
             ),
             {},
         )
-        policy = load_different_work_policy(
-            (settings or get_settings()).citation_metadata_different_work_file
-        )
-        overlap = leads_to_different_work(verdict.metadata_comparison, policy)
+        policy, overlap = None, None
+        comparison = verdict.metadata_comparison
+        if comparison is not None and comparison.title_status == "differs":
+            try:
+                policy = load_different_work_policy(
+                    (settings or get_settings()).citation_metadata_different_work_file
+                )
+            except (OSError, ValueError, UnicodeError):
+                # Without its policy the check cannot tell a different work
+                # from drift, so it stays the Low mismatch below.
+                policy = None
+            if policy is not None:
+                overlap = leads_to_different_work(comparison, policy)
         if overlap is not None:
             # The registry record is another paper, not drift; usually a DOI typo.
             severity = FlagSeverity(policy.severity)

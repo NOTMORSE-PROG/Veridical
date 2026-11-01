@@ -35,7 +35,7 @@ from tools.accuracy.core import (
     split_for,
 )
 
-from app.checks.citations import verify
+from app.checks.citations import different_work, verify
 from app.checks.citations.cross_match import _reference_surnames, cross_match
 from app.checks.citations.extract import extract_in_text_citations
 from app.checks.citations.linkage_guard import guarded_absence_candidates
@@ -70,7 +70,12 @@ EXISTENCE_TYPES = ("nonexistent_doi", "retracted_doi")
 # Derived from the valid controls (BUG-664): another entry's DOI, so the DOI
 # leads to a different work; and two kinds of drift the registry record
 # still matches, the second a borderline case (only the subtitle is cited).
-METADATA_TYPES = ("doi_other_work", "metadata_drift_year", "metadata_drift_subtitle_only")
+METADATA_TYPES = (
+    "doi_other_work",
+    "metadata_drift_year",
+    "metadata_drift_subtitle_only",
+    "metadata_half_title_other_author",
+)
 CONTROL_TYPES = ("intact_entry", "valid_doi")
 
 # Every value here can be overridden in <golden>/f5/config.json.
@@ -1081,6 +1086,7 @@ def _metadata_plants(valid):
     labelled by construction from the valid controls. Their DOIs are the
     controls' own, so their lookups are the controls' cached answers."""
     plants = {kind: [] for kind in METADATA_TYPES}
+    policy = different_work.load_different_work_policy()
     for i, item in enumerate(valid):
         other = valid[(i + 1) % len(valid)]
         if other["doi"] != item["doi"]:
@@ -1109,7 +1115,37 @@ def _metadata_plants(valid):
                         ),
                     }
                 )
+        half = _half_title_other_author(item, other, policy)
+        if half:
+            plants["metadata_half_title_other_author"].append(half)
     return plants
+
+
+def _half_title_other_author(item, other, policy):
+    """The borderline case: another first author, and a title that keeps exactly
+    half of its own content words (the rest from the other entry's title), so
+    the overlap sits on the threshold. It must stay a Low mismatch."""
+    title = parse_reference(item["entry"], order_index=0).title
+    other_title = parse_reference(other["entry"], order_index=0).title
+    if not title or not other_title or title not in item["entry"]:
+        return None
+    own = [w for w in dict.fromkeys(different_work._words(title)) if w not in policy.ignored_words]
+    filler = [
+        w
+        for w in dict.fromkeys(different_work._words(other_title))
+        if w not in policy.ignored_words and w not in own
+    ]
+    k = len(own) // 2
+    if k < policy.min_title_words or len(filler) < k:
+        return None
+    words = own[:k] + filler[:k]
+    new_title = " ".join(words)
+    surname, rest = item["entry"].split(",", 1)
+    other_surname = other["entry"].split(",", 1)[0]
+    if set(different_work._words(surname)) & set(different_work._words(other_surname)):
+        return None
+    entry = other_surname + "," + rest.replace(title, new_title[:1].upper() + new_title[1:], 1)
+    return {**item, "entry": entry}
 
 
 def _metadata_rows(outcomes):
@@ -1117,10 +1153,11 @@ def _metadata_rows(outcomes):
     expected = {
         "doi_other_work": (True, "med", "DOI leading to another paper named as a different work"),
         "metadata_drift_year": (False, "low", "year drift kept a Low mismatch"),
-        "metadata_drift_subtitle_only": (
+        "metadata_drift_subtitle_only": (False, "low", "subtitle-only title kept a Low mismatch"),
+        "metadata_half_title_other_author": (
             False,
             "low",
-            "subtitle-only title kept a Low mismatch (borderline)",
+            "half the title and another first author kept a Low mismatch (on the threshold)",
         ),
     }
     for kind, (different, severity, name) in expected.items():
