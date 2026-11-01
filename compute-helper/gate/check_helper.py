@@ -30,6 +30,8 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
+# The backend's own committed ingest fixtures: synthetic documents.
+FIXTURE_DIR = REPO / "backend" / "tests" / "fixtures" / "ingest"
 FIXTURES = ("native.pdf", "native.docx", "image_table.pdf")
 
 
@@ -57,7 +59,7 @@ def signed_job_gate(staged: Path, pins_python: str, out: Path) -> tuple[bool, st
             str(HERE / "e2e_helper.py"),
             str(staged),
             str(out),
-            *(str(HERE / "fixtures" / name) for name in FIXTURES),
+            *(str(FIXTURE_DIR / name) for name in FIXTURES),
         ],
         capture_output=True,
         text=True,
