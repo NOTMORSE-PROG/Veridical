@@ -191,3 +191,64 @@ def test_required_discordant_pairs_is_the_floor_for_a_meaningful_ab_run():
     assert required_discordant_pairs(0.05) == 6
     assert 2 * (0.5**5) > 0.05
     assert 2 * (0.5**6) < 0.05
+
+
+# Fleiss (1971) worked example as reproduced in most references: 10 units,
+# 14 ratings each, 5 categories. Row i is how many ratings unit i got per
+# category. Published kappa = 0.210 (P-bar = 0.378, P-e = 0.213).
+FLEISS_TABLE = [
+    [0, 0, 0, 0, 14],
+    [0, 2, 6, 4, 2],
+    [0, 0, 3, 5, 6],
+    [0, 3, 9, 2, 0],
+    [2, 2, 8, 1, 1],
+    [7, 7, 0, 0, 0],
+    [3, 2, 6, 3, 0],
+    [2, 5, 3, 2, 2],
+    [6, 5, 2, 1, 0],
+    [0, 2, 2, 3, 7],
+]
+FLEISS_RATINGS = [
+    [category for category, n in enumerate(row) for _ in range(n)] for row in FLEISS_TABLE
+]
+
+
+def test_fleiss_kappa_matches_the_published_example():
+    from app.checks.accuracy_stats import fleiss_kappa
+
+    assert fleiss_kappa(FLEISS_RATINGS) == pytest.approx(0.210, abs=5e-4)
+
+
+def test_gwet_ac1_multi_matches_hand_computation():
+    # Category shares 0.143, 0.200, 0.279, 0.150, 0.229 -> sum pi(1-pi) = 0.7872.
+    # P-e = 0.7872 / (5 - 1) = 0.1968; AC1 = (0.3780 - 0.1968) / (1 - 0.1968) = 0.2256.
+    from app.checks.accuracy_stats import gwet_ac1_multi
+
+    assert gwet_ac1_multi(FLEISS_RATINGS, range(5)) == pytest.approx(0.2256, abs=5e-4)
+
+
+def test_one_dominant_level_collapses_kappa_but_not_ac1():
+    """The paradox the grading proxy hit: three repeats agree on 19 of 20
+    units, nearly all Proficient, yet kappa reads as no better than chance."""
+    from app.checks.accuracy_stats import fleiss_kappa, gwet_ac1_multi
+
+    ratings = [["Proficient"] * 3] * 19 + [["Proficient", "Proficient", "Exemplary"]]
+    scale = ["Beginner", "Acceptable", "Proficient", "Exemplary"]
+    assert fleiss_kappa(ratings) == pytest.approx(-1 / 59, abs=1e-9)
+    assert gwet_ac1_multi(ratings, scale) > 0.95
+
+
+def test_repeat_agreement_is_undefined_or_refused_where_it_means_nothing():
+    from app.checks.accuracy_stats import fleiss_kappa, gwet_ac1_multi
+
+    assert fleiss_kappa([]) is None
+    assert fleiss_kappa([["a", "a"], ["a", "a"]]) is None
+    assert gwet_ac1_multi([["a", "a"], ["b", "b"]], ["a", "b"]) == pytest.approx(1.0)
+    with pytest.raises(ValueError):
+        fleiss_kappa([["a", "a"], ["a"]])
+    with pytest.raises(ValueError):
+        fleiss_kappa([["a"]])
+    with pytest.raises(ValueError):
+        gwet_ac1_multi([["a", "c"]], ["a", "b"])
+    with pytest.raises(ValueError):
+        gwet_ac1_multi([["a", "a"]], ["a"])

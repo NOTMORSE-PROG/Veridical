@@ -40,6 +40,8 @@ Method choices, and why (see context/RESEARCH.md §9 for sources):
 """
 
 import math
+from collections import Counter
+from collections.abc import Hashable, Sequence
 from dataclasses import dataclass
 
 # 95% two-sided normal quantile. Not a tunable knob — changing it changes
@@ -285,6 +287,73 @@ def matthews_corrcoef(matrix: ConfusionMatrix) -> float | None:
     if denominator == 0:
         return None
     return (tp * tn - fp * fn) / denominator
+
+
+def _repeat_counts(ratings: Sequence[Sequence[Hashable]]) -> tuple[list[Counter], int]:
+    """Per-unit category counts, checking every unit was rated the same number
+    of times. Units missing a rating are the caller's to drop or report: a
+    silent unequal count would make the agreement term mean something else."""
+    if not ratings:
+        return [], 0
+    raters = len(ratings[0])
+    if raters < 2 or any(len(unit) != raters for unit in ratings):
+        raise ValueError("every unit needs the same number of ratings, at least 2")
+    return [Counter(unit) for unit in ratings], raters
+
+
+def _observed_repeat_agreement(counts: list[Counter], raters: int) -> float:
+    pairs = raters * (raters - 1)
+    return sum((sum(c * c for c in unit.values()) - raters) / pairs for unit in counts) / len(
+        counts
+    )
+
+
+def fleiss_kappa(ratings: Sequence[Sequence[Hashable]]) -> float | None:
+    """Fleiss' kappa for several ratings of each unit (Fleiss 1971), e.g. the
+    level each repeat of a grading run gave one criterion of one manuscript.
+
+    `ratings[i]` holds unit i's ratings. None when there is no data or when
+    chance agreement is total (every rating is the same category), because
+    the correction then has nothing to work with. Like Cohen's kappa it
+    collapses when one category dominates, so report it with the category
+    shares and with `gwet_ac1_multi`."""
+    counts, raters = _repeat_counts(ratings)
+    if not counts:
+        return None
+    total = len(counts) * raters
+    shares = Counter()
+    for unit in counts:
+        shares.update(unit)
+    pe = sum((n / total) ** 2 for n in shares.values())
+    if math.isclose(pe, 1.0):
+        return None
+    return (_observed_repeat_agreement(counts, raters) - pe) / (1 - pe)
+
+
+def gwet_ac1_multi(
+    ratings: Sequence[Sequence[Hashable]], categories: Sequence[Hashable]
+) -> float | None:
+    """Gwet's AC1 for several ratings of each unit (Gwet 2008).
+
+    `categories` is the whole scale, not only the levels that occurred: the
+    chance term divides by the number of categories, so a four-level rubric
+    must be passed as four levels even when two were never given."""
+    scale = set(categories)
+    if len(scale) < 2:
+        raise ValueError("AC1 needs a scale of at least two categories")
+    counts, raters = _repeat_counts(ratings)
+    if not counts:
+        return None
+    if any(category not in scale for unit in counts for category in unit):
+        raise ValueError("a rating is not one of the scale's categories")
+    total = len(counts) * raters
+    shares = Counter()
+    for unit in counts:
+        shares.update(unit)
+    pe = sum((n / total) * (1 - n / total) for n in shares.values()) / (len(scale) - 1)
+    if math.isclose(pe, 1.0):
+        return None
+    return (_observed_repeat_agreement(counts, raters) - pe) / (1 - pe)
 
 
 @dataclass(frozen=True)
