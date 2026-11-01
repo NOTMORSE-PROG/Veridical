@@ -295,6 +295,30 @@ describe("FlagDetailPage", () => {
     expect(screen.queryByText(/did not find one close enough/)).not.toBeInTheDocument();
   });
 
+  it("BUG-674: lists and links every Library record a resubmission matched", async () => {
+    vi.stubGlobal("fetch", stubFetchByPath({
+      "/flags/5": {
+        ...FLAG,
+        check_kind: "originality_reuse",
+        ai_verdict_summary: "reuse_same_instructor_resubmission",
+        is_passage_level: false,
+        severity: "low",
+        evidence_excerpt: "This manuscript appears to be the same work as your own Library records.",
+        ai_reasoning: null,
+        page_anchor: "whole document",
+        passage_pair: null,
+        evidence_unavailable: false,
+        matched_ref: 10,
+        matched_refs: [10, 12, 14],
+      },
+    }));
+    renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
+
+    expect(await screen.findByText(/against 3 of your own Library records/)).toBeInTheDocument();
+    const list = screen.getByRole("list", { name: "Matching Library records" });
+    expect(within(list).getAllByRole("link").map(link => link.getAttribute("href"))).toEqual(["/library/10", "/library/12", "/library/14"]);
+  });
+
   it("BUG-170: says severity was lowered only for the genuine BUG-153 unevidenceable-match downgrade, not the resubmission case", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({
       "/flags/5": {

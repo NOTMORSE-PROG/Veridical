@@ -35,6 +35,8 @@ import { RecordedFindingSources } from "../report/RecordedEvidencePage";
 import { useFlag } from "./useFlag";
 import { recoverableReadError } from "../report/reportReadState";
 import { isRecencyNote, RECENCY_NOTE_LABEL } from "../domain/findingSummary";
+import { matchedRecords } from "../domain/matchedRecords";
+import { MatchedRecordLinks } from "../report/MatchedRecordLinks";
 
 const SEVERITY_LABEL: Record<FlagOut["severity"], string> = {
   high: "High severity",
@@ -84,6 +86,7 @@ function EvidenceSection({
 }) {
   const sourceLocation = useLocation();
   const { showsManuscriptQuote, showsManuscriptEvidence, isResubmission } = evidenceDisplayState(flag);
+  const records = matchedRecords(flag);
   const headingId = showsManuscriptEvidence ? "evidence-heading" : "system-record-heading";
   const pairedSources = expanded && ((flag.check_kind === "internal_agreement" && Boolean(flag.agreement_pair))
     || (flag.check_kind === "originality_reuse" && Boolean(flag.passage_pair)));
@@ -129,17 +132,15 @@ function EvidenceSection({
           tone={isResubmission ? "info" : "warning"}
         >
           {isResubmission
-            ? "This finding compares the manuscript as a whole against your own Library record named above, so there is no specific passage to compare side by side. Open that record and the manuscript location below to check it yourself."
+            ? records.length > 1
+              ? `This finding compares the manuscript as a whole against ${records.length} of your own Library records, so there is no specific passage to compare side by side. Open each record listed below, and the manuscript location, to check them yourself.`
+              : "This finding compares the manuscript as a whole against your own Library record named above, so there is no specific passage to compare side by side. Open that record and the manuscript location below to check it yourself."
             : flag.evidence_unavailable
               ? "VERIDICAL looked for a specific passage that matches the Library record named above and did not find one close enough to show side by side. This finding's severity was lowered because no matching passage could be shown. Open the manuscript location below to check it yourself."
               : "VERIDICAL looked for a specific passage that matches the Library record named above and did not find one close enough to show side by side. Open the manuscript location below to check it yourself."}
         </Alert>
       )}
-      {flag.matched_ref != null && (
-        <ActionLink to={`/library/${flag.matched_ref}`} variant="secondary">
-          Open Library record #{flag.matched_ref}
-        </ActionLink>
-      )}
+      <MatchedRecordLinks records={records} />
       <Button id={sourceLinkId} variant="quiet" onClick={() => onSource()}>Show recorded location</Button>
       <ActionLink id={`flag-review-queue-${flag.id}`} to={sourcePath} variant="quiet" onClick={() => rememberRouteReturnFocus(sourceLocation.pathname + sourceLocation.search, sourcePath, `flag-review-queue-${flag.id}`)}>Open review queue</ActionLink>
     </section>

@@ -36,6 +36,7 @@ import { CITATION_HISTORY_TITLE } from "../domain/citationHistory";
 import { instructorAnchor } from "../domain/sourceAnchor";
 import { resultDisplay } from "./ResultsTable";
 import { claimFocusContinuation, type FocusContinuation } from "../routing/focusContinuation";
+import { matchedRecords, recordList } from "../domain/matchedRecords";
 
 function useNoindexMeta() {
   useEffect(() => {
@@ -278,7 +279,7 @@ export function AdviserViewPage() {
                   {lead ? <p className="signal-field-hint">{COMPARISON_LEAD_COPY.qualification}</p>
                     : readinessExclusionLine(flag) && <p className="signal-field-hint">{readinessExclusionLine(flag)}</p>}
                   {flag.citation_metadata_review_warning && <p className="signal-field-hint"><strong>{CITATION_HISTORY_TITLE}</strong></p>}
-                  {flag.check_kind === "originality_reuse" && flag.matched_ref != null && <p>Possible match with archived manuscript #{flag.matched_ref}</p>}
+                  {flag.check_kind === "originality_reuse" && matchedRecords(flag).length > 0 && <p>Possible match with archived {matchedRecords(flag).length === 1 ? "manuscript" : "manuscripts"} {recordList(matchedRecords(flag))}</p>}
                   {flag.first_upload_context && <p className="signal-field-hint">First-upload context: the comparison archive was limited when this signal was created.</p>}
                 </div>
                 <section className="signal-item-section"><h4 className="signal-item-section__title">What the check found</h4>
