@@ -1888,8 +1888,8 @@ async def test_a_section_match_whose_only_evidence_is_below_the_passage_bar_is_n
     weaker passage (shared standard text) as its only evidence, is counted,
     not reported as reuse. The same shared sentence is planted on both sides."""
     shared = (
-        "Usability is the degree to which a product or system can be used by specified "
-        "users to achieve specified goals with effectiveness, efficiency and satisfaction."
+        "Dependability is the extent to which a campus system keeps working for the "
+        "people who rely on it during enrolment, grading and every other busy week."
     )
     settings = get_settings().model_copy(
         update={

@@ -34,9 +34,8 @@ def test_a_harvard_citation_after_curly_quotes_marks_the_quotation():
 
 def test_an_apa_parenthetical_with_a_group_author_marks_the_quotation():
     text = (
-        'Usability is "the degree to which a product can be used by specified users to '
-        'achieve specified goals" (International Organization for Standardization [ISO], '
-        "2018, p. 3)."
+        'Dependability is "the extent to which a campus system keeps working for the people '
+        'who rely on it" (Society of Example Engineers [SEE], 2018, p. 3).'
     )
     assert len(_quoted_texts(text)) == 1
 
