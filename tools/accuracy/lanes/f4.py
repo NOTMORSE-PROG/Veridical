@@ -389,11 +389,16 @@ def run(ctx: Context) -> tuple[list[MetricRow], dict]:
         raise SystemExit(f"{config['key_variable']} is not set in {env_file}")
     if production_key and key == production_key:
         raise SystemExit("The configured key is the production key; use the local test key")
+    overrides = {}
+    if config.get("pairs_per_call"):
+        # A stability arm (BUG-635) can judge each pair in a call of its own.
+        overrides["agreement_pairing_max_pairs_per_call"] = int(config["pairs_per_call"])
     settings = Settings(
         _env_file=None,
         gemini_api_key=key,
         # The pre-registered secondary measurement (V-094) runs with this on.
         agreement_contradiction_majority_of_three=bool(config.get("majority_of_three", False)),
+        **overrides,
     )
     cues = load_cues(settings.agreement_cues_file)
 
@@ -401,8 +406,17 @@ def run(ctx: Context) -> tuple[list[MetricRow], dict]:
     # A development round can judge one half only, leaving the other unread.
     splits = set(config.get("judge_splits", ("dev", "holdout")))
     records = [r for r in records if r["split"] in splits]
+    if config.get("plant_sample"):
+        # A stability arm judges a fixed, evenly spread sample of the reached
+        # plants, chosen by plant id so every arm judges the same ones.
+        ids = sorted(r["plant_id"] for r in records if r["reached"])
+        step = max(1, len(ids) // int(config["plant_sample"]))
+        keep = set(ids[::step][: int(config["plant_sample"])])
+        records = [r for r in records if r["plant_id"] in keep]
     reached = [r for r in records if r["reached"]]
-    random.Random(f"{ctx.seed}-batches").shuffle(reached)
+    # Which pairs share a call depends on this order; a stability arm reshuffles
+    # with another seed to see whether verdicts follow their neighbours.
+    random.Random(f"{ctx.seed}-{config.get('batch_seed', 'batches')}").shuffle(reached)
     batches = math.ceil(len(reached) / max(1, settings.agreement_pairing_max_pairs_per_call))
     # Confirmation calls are bounded by the same batching over the pairs judged
     # contradictory, at most every pair once per confirmation round.
@@ -485,6 +499,14 @@ def run(ctx: Context) -> tuple[list[MetricRow], dict]:
         verdict_counts[record["kind"]][record.get("verdict", default)] += 1
     unjudged = sum(1 for r in records if r["reached"] and r.get("verdict") not in ANSWERED)
     warnings = []
+    if not config.get("dry_run"):
+        warnings.append(
+            "Verdicts on identical pairs can change with which other pairs share a model "
+            "call (BUG-635). A difference between this run and another one is evidence of a "
+            "code change only where that change decides the outcome without the model "
+            "(a pair no longer reached, a gate); verdict differences on pairs judged in both "
+            "runs are not."
+        )
     if config.get("dry_run"):
         warnings.append("DRY RUN: no model call was made; only pairing figures are given.")
     elif unjudged:
@@ -499,6 +521,9 @@ def run(ctx: Context) -> tuple[list[MetricRow], dict]:
         "prompt_version": pair.PROMPT_VERSION,
         "majority_of_three": settings.agreement_contradiction_majority_of_three,
         "batches": batches,
+        "batch_seed": config.get("batch_seed", "batches"),
+        "pairs_per_call": settings.agreement_pairing_max_pairs_per_call,
+        "plant_sample": config.get("plant_sample"),
         "attempts_sent": client.attempts if client else 0,
         "cache_hits": client.cache_hits if client else 0,
         "failed_calls": client.failed_calls if client else 0,
