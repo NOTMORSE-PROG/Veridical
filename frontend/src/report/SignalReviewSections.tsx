@@ -1,6 +1,7 @@
 import { AUTOMATIC_GRADE_COPY, automaticGradeCaution, automaticGradeChip, automaticGradeLines, automaticGradePasses } from "../domain/automaticGrade";
 import { RecordedEvidencePage } from "./RecordedEvidencePage";
 import { EvidenceItem } from "./EvidenceItem";
+import { sharedFindingsIntro } from "./sharedModuleStatus";
 import { IntegrityModuleNavigation, selectedIntegrityModule, type IntegrityKind } from "./IntegrityModules";
 import { ActionAssessmentContext, ReportAssessmentContext } from "./ReportAssessmentContext";
 import { criterionAssessmentDetails } from "../domain/criterionAssessment";
@@ -1273,9 +1274,9 @@ export function SignalPublicFlags({
   const hasOptional = Boolean(optional.snapshot?.total);
   const onlyOptional = hasOptional && otherFlags.length === 0;
   return (
-    <section id="integrity-signals" tabIndex={-1} className="signal-review-section" aria-labelledby="flags-heading">
+    <section id="integrity-signals" tabIndex={-1} className={framingOnly ? "signal-shared-scope" : "signal-review-section"} aria-labelledby="flags-heading">
       <div className="signal-review-section__heading"><div><p className="signal-section-kicker">Integrity record</p><h2 id="flags-heading">Possible inconsistencies</h2></div>{!onlyOptional && <span>{findingCount} {hasOptional ? "other " : ""}finding{findingCount === 1 ? "" : "s"}{sourceAgeNotes > 0 && ` · ${sourceAgeNotesLabel(sourceAgeNotes)}`}</span>}</div>
-      {!onlyOptional && <p className="signal-review-section__intro">These are possible inconsistencies, not accusations. This link shows every finding the checks saved, as the report stands now. {detailSnapshot === "stale" ? "Explanations are not shown, because the report changed after the link was made." : detailSnapshot === "not_recorded" ? "No explanations were saved with this link." : "Explanations and quotations are shown as they were when the link was made."} It does not include the instructor's reasons for changing a grade or the private record of changes.</p>}
+      {!onlyOptional && !framingOnly && <p className="signal-review-section__intro">{sharedFindingsIntro(detailSnapshot)}</p>}
       {(!selectedModule || selectedModule === "statistical_forensics") && <StatisticalCheckScope scope={statisticalScope} />}
       {(!selectedModule || selectedModule === "originality_reuse") && <OriginalityScope scope={originalityScope} />}
       {framingOnly ? null : visibleOtherFlags.length

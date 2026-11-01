@@ -35,7 +35,12 @@ export interface SharedModuleStatusInput {
   detailSnapshot?: "current" | "stale" | "not_recorded";
 }
 
-export function sharedModuleStatus({ kind, state, findings, leads, coverageReason, coverageShownElsewhere, detailSnapshot }: SharedModuleStatusInput): { lead: string; detail: string[] } {
+/** How strongly the state should read: done, partial or unknown. */
+export function sharedModuleTone(state: State): "done" | "partial" | "unknown" {
+  return state === "partial" || state === "incomplete" ? "partial" : state === "not_recorded" ? "unknown" : "done";
+}
+
+export function sharedModuleStatus({ kind, state, findings, leads, coverageReason, coverageShownElsewhere, detailSnapshot }: SharedModuleStatusInput): { title: string; points: string[] } {
   const found = plural(findings, "possible inconsistency", "possible inconsistencies");
   const notCovered = coverageReason && coverageCopy(coverageReason)
     ? [`Not covered: ${coverageCopy(coverageReason)}`]
@@ -43,24 +48,32 @@ export function sharedModuleStatus({ kind, state, findings, leads, coverageReaso
   const leadLine = leads > 0 ? [`${plural(leads, "comparison lead", "comparison leads")}: a lead is a passage to compare yourself. It is not a finding and is not scored.`] : [];
   if (state === "completed") {
     return findings > 0
-      ? { lead: `Completed. ${found} recorded.`, detail: ["All saved findings for this check are shown here.", ...leadLine] }
-      : { lead: "Completed. No possible inconsistencies were recorded.", detail: [`This covers only what this check looks at: ${SCOPE[kind]}.`, ...leadLine] };
+      ? { title: "Completed", points: [`${found} recorded. All of them are shown here.`, ...leadLine] }
+      : { title: "Completed", points: ["No possible inconsistencies were recorded.", `This covers only what this check looks at: ${SCOPE[kind]}.`, ...leadLine] };
   }
   if (state === "partial" || state === "incomplete") {
     return findings > 0
-      ? { lead: `Ran only in part. ${found} recorded.`, detail: ["All of them are shown here. Parts the check did not cover may have others.", ...notCovered, ...leadLine] }
-      : { lead: "Ran only in part. No possible inconsistencies were recorded in the part it checked, so this does not mean there are none.", detail: [...notCovered, ...leadLine] };
+      ? { title: "Ran only in part", points: [`${found} recorded. All of them are shown here.`, "Parts the check did not cover may have others.", ...notCovered, ...leadLine] }
+      : { title: "Ran only in part", points: ["No possible inconsistencies were recorded in the part it checked.", "That does not mean there are none.", ...notCovered, ...leadLine] };
   }
   if (state === "not_applicable") {
-    return { lead: "Not applicable.", detail: [`The check found no ${NOUN[kind]} to check in the text it could read, so it did not run. This does not mean the paper has none.`] };
+    return { title: "Not applicable", points: [`The check found no ${NOUN[kind]} to check in the text it could read, so it did not run.`, "This does not mean the paper has none."] };
   }
   const why = detailSnapshot === "stale"
     ? ["The report changed after this link was made. Ask the instructor for a new link to see each check's status."]
     : detailSnapshot === "not_recorded" ? ["This link was saved without each check's status."] : [];
   return {
-    lead: "Status not recorded.",
-    detail: [findings > 0 ? `This link does not say whether this check ran. The ${found} shown here are all it saved.` : "This link does not say whether this check ran. No findings are shown, but that does not mean there are none.", ...why, ...leadLine],
+    title: "Status not recorded",
+    points: ["This link does not say whether this check ran.", findings > 0 ? `The ${found} shown here are all it saved.` : "No findings are shown, but that does not mean there are none.", ...why, ...leadLine],
   };
+}
+
+/** What a shared link holds, said once for the whole Findings tab. */
+export function sharedFindingsIntro(detailSnapshot?: "current" | "stale" | "not_recorded"): string {
+  const explanations = detailSnapshot === "stale" ? "Explanations are not shown, because the report changed after the link was made."
+    : detailSnapshot === "not_recorded" ? "No explanations were saved with this link."
+    : "Explanations and quotations are shown as they were when the link was made.";
+  return `These are possible inconsistencies, not accusations. This link shows every finding the checks saved, as the report stands now. ${explanations} It does not include the instructor's reasons for changing a grade or the private record of changes.`;
 }
 
 /** "3 findings", "10 comparison leads", "2 findings, 1 comparison lead". */

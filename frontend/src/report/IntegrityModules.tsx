@@ -14,7 +14,7 @@ export function selectedIntegrityModule(value: string | null): IntegrityKind {
   return INTEGRITY_MODULES.find(module => module.kind === value)?.kind ?? INTEGRITY_MODULES[0].kind;
 }
 const STATE_LABEL: Record<IntegrityModuleOut["state"], string> = {
-  completed: "Completed", partial: "Ran in part", incomplete: "Not fully run",
+  completed: "Completed", partial: "Ran only in part", incomplete: "Ran only in part",
   not_applicable: "Not applicable", not_recorded: "Status not recorded",
 };
 

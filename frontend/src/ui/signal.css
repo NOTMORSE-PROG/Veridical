@@ -9127,6 +9127,10 @@
   /* Shared report: eyebrow contrast, footer aligned with the page, decision
      beside the band, readable evidence preview, aligned criterion controls. */
   .signal-shared-report-header .signal-eyebrow { color: var(--color-signal-ink-secondary); }
+  .signal-shared-report-facts { display: flex; flex-wrap: wrap; gap: var(--signal-space-2) var(--signal-space-6); margin: var(--signal-space-3) 0 0; }
+  .signal-shared-report-facts > div { display: grid; gap: var(--signal-space-1); }
+  .signal-shared-report-facts dt { font-size: var(--signal-type-label); font-weight: var(--signal-weight-semibold); letter-spacing: 0.04em; text-transform: uppercase; color: var(--color-signal-ink-secondary); }
+  .signal-shared-report-facts dd { margin: 0; font-weight: var(--signal-weight-medium); }
   .signal-shared-footer { padding-inline: 0; }
   .signal-shared-footer__inner {
     display: grid;
@@ -9226,8 +9230,57 @@
   .signal-review-item .signal-grade-caution { font-weight: var(--signal-weight-medium); }
   .signal-review-item > :is(p, .signal-grade-caution) { max-inline-size: var(--signal-review-detail-measure); }
   /* Adviser view: what the selected check's result means, said once. */
-  .signal-shared-module-status { padding: var(--signal-space-4); border-inline-start: var(--signal-border-emphasis) solid var(--color-signal-border-strong); background: var(--color-signal-surface-muted); }
-  .signal-shared-module-status p { margin: 0; max-inline-size: var(--signal-review-detail-measure); }
+  /* Adviser view, one check: its name, then what it found, then what it
+     covered. Every block spans the panel with the same frame; only the text
+     inside keeps a readable line length. */
+  #shared-selected-module { display: grid; gap: var(--signal-space-4); min-inline-size: 0; }
+  #shared-selected-module > :is(h3, .signal-integrity-module-summary) { margin: 0; }
+  .signal-shared-check-title { font-family: var(--font-signal-display); font-size: var(--signal-item-title-size); font-weight: var(--signal-item-title-weight); line-height: var(--signal-line-section); }
+  .signal-shared-scope { display: grid; gap: var(--signal-space-4); min-inline-size: 0; }
+  .signal-shared-scope > :is(h2, .signal-review-section__heading) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .signal-check-scope, .signal-shared-module-status, #shared-selected-module .signal-agreement-scope { display: grid; gap: var(--signal-space-2); margin: 0; padding: var(--signal-space-5); border: var(--signal-border-hairline) solid var(--color-signal-border); border-radius: var(--signal-radius-control); background: var(--color-signal-canvas); }
+  .signal-shared-module-status { border-inline-start: var(--signal-border-emphasis) solid var(--color-signal-brand); background: var(--color-signal-surface-muted); }
+  :is(.signal-check-scope, .signal-shared-module-status) p, .signal-shared-module-status li { margin: 0; max-inline-size: var(--signal-review-detail-measure); }
+  .signal-check-scope__head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--signal-space-2); }
+  .signal-check-scope__state { padding: 0 var(--signal-space-2); border: var(--signal-border-hairline) solid var(--color-signal-border-strong); border-radius: var(--signal-radius-pill); background: var(--color-signal-surface); font-size: var(--signal-type-label); font-weight: var(--signal-weight-semibold); }
+  .signal-check-scope__part { display: grid; gap: var(--signal-space-1); padding-block-start: var(--signal-space-3); border-block-start: var(--signal-border-hairline) solid var(--color-signal-border); }
+  .signal-shared-module-status ul { display: grid; gap: var(--signal-space-1); margin: 0; padding: 0; list-style: none; }
+  /* The check's state as a headline, marked by tone, so the answer reads first. */
+  .signal-shared-module-status { gap: var(--signal-space-1); }
+  .signal-shared-module-status__kicker { font-size: var(--signal-type-label); font-weight: var(--signal-weight-semibold); letter-spacing: 0.04em; text-transform: uppercase; color: var(--color-signal-ink-secondary); }
+  .signal-shared-module-status__headline { display: flex; align-items: center; gap: var(--signal-space-2); margin-block-end: var(--signal-space-2) !important; font-family: var(--font-signal-display); font-size: var(--signal-type-subhead); font-weight: var(--signal-weight-semibold); line-height: var(--signal-line-section); }
+  .signal-shared-module-status__headline::before { content: ""; inline-size: var(--signal-space-3); block-size: var(--signal-space-3); border-radius: var(--signal-radius-pill); background: var(--color-signal-border-strong); }
+  .signal-shared-module-status--partial { border-inline-start-color: var(--color-signal-warning-border, var(--color-signal-brand)); }
+  .signal-shared-module-status--partial .signal-shared-module-status__headline::before { background: var(--color-signal-brand); }
+  .signal-shared-module-status--done { border-inline-start-color: var(--color-signal-border-strong); }
+  .signal-shared-module-status--unknown { border-inline-start-color: var(--color-signal-border); }
+  /* Adviser view: undecided pairs grouped by objective, as compact cards. */
+  .signal-shared-pairs { display: grid; gap: var(--signal-space-4); padding: var(--signal-space-5); border: var(--signal-border-hairline) solid var(--color-signal-border); border-radius: var(--signal-radius-control); background: var(--color-signal-canvas); }
+  .signal-shared-pairs p { margin: 0; }
+  .signal-shared-pairs__head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--signal-space-3); }
+  .signal-shared-pairs__title { font-weight: var(--signal-weight-semibold); }
+  .signal-shared-pairs > div[id] { display: grid; gap: var(--signal-space-3); }
+  .signal-shared-pairs__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(18rem, 1fr)); gap: var(--signal-space-3); margin: 0; padding: 0; list-style: none; }
+  .signal-pair-card { display: grid; align-content: start; gap: var(--signal-space-2); padding: var(--signal-space-4); border: var(--signal-border-hairline) solid var(--color-signal-border); border-radius: var(--signal-radius-control); background: var(--color-signal-surface); min-inline-size: 0; }
+  .signal-pair-card__tag { font-size: var(--signal-type-label); font-weight: var(--signal-weight-semibold); color: var(--color-signal-ink-secondary); }
+  .signal-pair-card__tag span { font-weight: var(--signal-weight-medium); }
+  .signal-pair-card__quote { margin: 0; padding-inline-start: var(--signal-space-3); border-inline-start: var(--signal-border-emphasis) solid var(--color-signal-brand); overflow-wrap: anywhere; }
+  .signal-pair-card__results { display: grid; gap: var(--signal-space-1); padding-block-start: var(--signal-space-2); border-block-start: var(--signal-border-hairline) solid var(--color-signal-border); }
+  .signal-pair-card__results ul { display: grid; gap: var(--signal-space-2); margin: 0; padding: 0; list-style: none; }
+  .signal-pair-card__results li { display: grid; gap: var(--signal-space-1); font-size: var(--signal-type-label); overflow-wrap: anywhere; }
+  .signal-pair-card__results cite { font-style: normal; color: var(--color-signal-ink-secondary); }
+  /* Counts as tiles to scan: the number large, its label small under it. */
+  .signal-fact-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: var(--signal-space-3); margin: 0; }
+  .signal-fact-tiles > div { display: flex; flex-direction: column-reverse; gap: var(--signal-space-1); padding: var(--signal-space-3) var(--signal-space-4); border: var(--signal-border-hairline) solid var(--color-signal-border); border-radius: var(--signal-radius-control); background: var(--color-signal-surface); }
+  .signal-fact-tiles dt { font-size: var(--signal-type-label); color: var(--color-signal-ink-secondary); }
+  .signal-fact-tiles dd { margin: 0; font-family: var(--font-signal-display); font-size: var(--signal-type-subhead); font-weight: var(--signal-weight-semibold); }
+  /* Labelled rows: what each part of the check covered. */
+  .signal-fact-rows { display: grid; gap: 0; margin: 0; }
+  .signal-fact-rows > div { display: grid; grid-template-columns: minmax(10rem, 14rem) minmax(0, 1fr); gap: var(--signal-space-4); padding-block: var(--signal-space-3); border-block-start: var(--signal-border-hairline) solid var(--color-signal-border); }
+  .signal-fact-rows > div:first-child { border-block-start: 0; padding-block-start: var(--signal-space-1); }
+  .signal-fact-rows dt { font-weight: var(--signal-weight-semibold); }
+  .signal-fact-rows dd { margin: 0; max-inline-size: var(--signal-review-detail-measure); }
+  @media (max-width: 47.99rem) { .signal-fact-rows > div { grid-template-columns: minmax(0, 1fr); gap: var(--signal-space-1); } }
   /* Adviser finding page: the picker is a full-size control, the finding one item. */
   .signal-shared-finding-picker select { min-block-size: var(--signal-control-height); }
   .signal-shared-finding { display: grid; gap: var(--signal-item-section-gap); padding-block-start: var(--signal-space-5); border-block-start: var(--signal-border-hairline) solid var(--color-signal-border); }

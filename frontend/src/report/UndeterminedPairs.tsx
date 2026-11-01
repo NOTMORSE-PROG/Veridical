@@ -15,14 +15,21 @@ type Item =
   | { kind: "pair"; key: string; intentText: string; intentAnchor: string; outcomeText: string; outcomeAnchor: string; reason: string | null }
   | { kind: "legacy"; key: string; flagId: number; intentText: string; intentAnchor: string };
 
-function itemsFrom(undetermined: UndeterminedPairsOut | null | undefined, legacy: FlagSummaryOut[]): Item[] {
+type SavedPair = { intent_text: string; intent_anchor: string | null; outcome_text: string; outcome_anchor: string | null };
+
+function itemsFrom(undetermined: UndeterminedPairsOut | null | undefined, legacy: FlagSummaryOut[], legacyPairs?: ReadonlyMap<number, SavedPair>): Item[] {
   const pairs: Item[] = (undetermined?.pairs ?? []).map((pair, index) => ({
     kind: "pair", key: `pair-${index}`, intentText: pair.intent_text, intentAnchor: pair.intent_anchor,
     outcomeText: pair.outcome_text, outcomeAnchor: pair.outcome_anchor, reason: pair.reason ?? null,
   }));
-  const saved: Item[] = legacy.map((flag) => ({
-    kind: "legacy", key: `flag-${flag.id}`, flagId: flag.id, intentText: flag.evidence_excerpt, intentAnchor: flag.page_anchor,
-  }));
+  // An older row whose saved pair is known shows both statements, like a
+  // newer one; otherwise only its saved excerpt.
+  const saved: Item[] = legacy.map((flag): Item => {
+    const pair = legacyPairs?.get(flag.id);
+    return pair
+      ? { kind: "pair", key: `flag-${flag.id}`, intentText: pair.intent_text, intentAnchor: pair.intent_anchor ?? "", outcomeText: pair.outcome_text, outcomeAnchor: pair.outcome_anchor ?? "", reason: null }
+      : { kind: "legacy", key: `flag-${flag.id}`, flagId: flag.id, intentText: flag.evidence_excerpt, intentAnchor: flag.page_anchor };
+  });
   return [...pairs, ...saved].sort((a, b) => pageOf(a.intentAnchor) - pageOf(b.intentAnchor));
 }
 
@@ -34,15 +41,19 @@ function pageOf(anchor: string): number {
 /** Objective and result pairs the agreement check compared but could not
  * decide. They make no claim about the manuscript, so they are shown once,
  * after the findings, and never counted as findings. */
-export function UndeterminedPairs({ checkRunId, undetermined, legacy, incomplete = false }: {
+export function UndeterminedPairs({ checkRunId, undetermined, legacy, incomplete = false, shared = false, legacyPairs }: {
+  /** Saved pairs for older rows, by record id, where the link carries them. */
+  legacyPairs?: ReadonlyMap<number, SavedPair>;
   checkRunId: number;
+  /** The adviser's read-only copy: the statements, with no links into the instructor's pages. */
+  shared?: boolean;
   undetermined?: UndeterminedPairsOut | null;
   legacy: FlagSummaryOut[];
   incomplete?: boolean;
 }) {
   const location = useLocation();
   const [params, setParams] = useSearchParams();
-  const items = itemsFrom(undetermined, legacy);
+  const items = itemsFrom(undetermined, legacy, legacyPairs);
   const open = params.get(OPEN_PARAM) === "open";
   const shown = Math.max(FLAG_LIST_INITIAL_COUNT, Number(params.get(SHOWN_PARAM)) || FLAG_LIST_INITIAL_COUNT);
   const focusKey = useRef<string | null>(null);
@@ -71,12 +82,15 @@ export function UndeterminedPairs({ checkRunId, undetermined, legacy, incomplete
     update((next) => next.set(SHOWN_PARAM, String(shown + FLAG_LIST_INITIAL_COUNT)));
   }
 
+  if (shared) return <SharedPairs listId={listId} items={items} open={open} shown={shown}
+    onToggle={() => update((next) => { if (open) { next.delete(OPEN_PARAM); next.delete(SHOWN_PARAM); } else next.set(OPEN_PARAM, "open"); })}
+    onMore={(count) => update((next) => next.set(SHOWN_PARAM, String(shown + count)))} />;
   const visible = items.slice(0, shown);
   return <section className="signal-copy-flow signal-undecided-pairs" aria-labelledby={`${listId}-title`}>
     <p id={`${listId}-title`}>{compared === null
       ? `VERIDICAL could not decide on ${count} objective and result pair${one ? "" : "s"}.`
       : `VERIDICAL could not decide on ${count} of ${compared} objective and result pair${compared === 1 ? "" : "s"} it compared.`}</p>
-    <p>For these pairs, the check could not tell whether the result answers the objective. This is not a problem found in the manuscript. If objective coverage matters for this defense, read the pairs and decide yourself.</p>
+    <p>For these pairs, the check could not tell whether the result answers the objective. This is not a problem found in the manuscript. {shared ? "They are listed here so you can read them." : "If objective coverage matters for this defense, read the pairs and decide yourself."}</p>
     {incomplete && <p>This check did not finish, so pairs it never reached are not listed.</p>}
     <Button variant="secondary" aria-expanded={open} aria-controls={listId}
       onClick={() => update((next) => { if (open) { next.delete(OPEN_PARAM); next.delete(SHOWN_PARAM); } else next.set(OPEN_PARAM, "open"); })}>
@@ -91,15 +105,15 @@ export function UndeterminedPairs({ checkRunId, undetermined, legacy, incomplete
             <h5 id={`${listId}-${item.key}`} tabIndex={-1}>Pair {index + 1} of {count}</h5>
             <Statement label="Statement selected as an objective" text={item.intentText} anchor={item.intentAnchor}
               linkLabel={`Open objective location, ${instructorAnchor(item.intentAnchor)}, ${number}`}
-              checkRunId={checkRunId} controlId={`${listId}-${item.key}-objective`} location={location} />
+              checkRunId={checkRunId} controlId={`${listId}-${item.key}-objective`} location={location} link={!shared} />
             {item.kind === "pair"
               ? <>
                 <Statement label="Statement selected as a result" text={item.outcomeText} anchor={item.outcomeAnchor}
                   linkLabel={`Open result location, ${instructorAnchor(item.outcomeAnchor)}, ${number}`}
-                  checkRunId={checkRunId} controlId={`${listId}-${item.key}-result`} location={location} />
+                  checkRunId={checkRunId} controlId={`${listId}-${item.key}-result`} location={location} link={!shared} />
                 {item.reason && <p className="signal-field-hint">Reason recorded by the check: {item.reason}</p>}
               </>
-              : <ActionLink to={`/flags/${item.flagId}`} variant="quiet" aria-label={`Review this pair, ${number}`}>Review this pair</ActionLink>}
+              : !shared && <ActionLink to={`/flags/${item.flagId}`} variant="quiet" aria-label={`Review this pair, ${number}`}>Review this pair</ActionLink>}
           </li>;
         })}</ol>
         <p role="status" className="signal-field-hint">Showing {visible.length} of {count} pairs.</p>
@@ -109,17 +123,65 @@ export function UndeterminedPairs({ checkRunId, undetermined, legacy, incomplete
   </section>;
 }
 
-export function Statement({ label, text, anchor, linkLabel, checkRunId, controlId, location }: {
+export function Statement({ label, text, anchor, linkLabel, checkRunId, controlId, location, link = true }: {
   label: string; text: string; anchor: string; linkLabel: string; checkRunId: number; controlId: string;
   location: ReturnType<typeof useLocation>;
+  /** Off on the shared view, which cannot open the instructor's manuscript review. */
+  link?: boolean;
 }) {
   const sourcePath = reviewDeskDestination(`/report/${checkRunId}/document?anchor=${encodeURIComponent(anchor)}`, location);
   return <div className="signal-attached-flow">
     <p><strong>{label}</strong></p>
     <blockquote className="signal-evidence-quote"><span>“{text}”</span>{anchor.trim() && <cite>{instructorAnchor(anchor)}</cite>}</blockquote>
-    {anchor.trim()
+    {!link ? null : anchor.trim()
       ? <ActionLink id={controlId} to={sourcePath} variant="quiet" aria-label={linkLabel}
         onClick={() => rememberRouteReturnFocus(location.pathname + location.search, sourcePath, controlId)}>Open location</ActionLink>
       : <p>No manuscript location was recorded for this statement.</p>}
   </div>;
+}
+
+// How many objective groups the adviser sees before asking for more.
+const SHARED_GROUPS_SHOWN = 4;
+
+/** The adviser's copy: each objective once, with the results it was compared
+ * with under it, as compact cards a few at a time. Read-only. */
+function SharedPairs({ listId, items, open, shown, onToggle, onMore }: {
+  listId: string; items: Item[]; open: boolean; shown: number;
+  onToggle: () => void; onMore: (count: number) => void;
+}) {
+  const groups = new Map<string, { text: string; anchor: string; results: { text: string; anchor: string }[] }>();
+  for (const item of items) {
+    const key = `${item.intentText}|${item.intentAnchor}`;
+    const group = groups.get(key) ?? { text: item.intentText, anchor: item.intentAnchor, results: [] };
+    if (item.kind === "pair" && !group.results.some(result => result.text === item.outcomeText)) group.results.push({ text: item.outcomeText, anchor: item.outcomeAnchor });
+    groups.set(key, group);
+  }
+  const all = [...groups.values()];
+  const limit = Math.max(SHARED_GROUPS_SHOWN, shown === FLAG_LIST_INITIAL_COUNT ? SHARED_GROUPS_SHOWN : shown);
+  const visible = all.slice(0, limit);
+  const count = items.length;
+  return <section className="signal-shared-pairs" aria-labelledby={`${listId}-title`}>
+    <div className="signal-shared-pairs__head">
+      <div>
+        <p id={`${listId}-title`} className="signal-shared-pairs__title">{count} {count === 1 ? "pair" : "pairs"} the check could not decide</p>
+        <p className="signal-field-hint">{all.length} {all.length === 1 ? "objective" : "objectives"} involved. Not findings; they do not change readiness.</p>
+      </div>
+      <Button variant="secondary" aria-expanded={open} aria-controls={listId} onClick={onToggle}>{open ? "Hide" : "Show"} the {all.length === 1 ? "objective" : "objectives"}</Button>
+    </div>
+    <div id={listId} hidden={!open}>
+      {open && <>
+        <ol className="signal-shared-pairs__grid">{visible.map((group, index) => <li key={`${group.text}|${group.anchor}`} className="signal-pair-card">
+          <p className="signal-pair-card__tag">Objective {index + 1}{group.anchor.trim() && <span> · {instructorAnchor(group.anchor)}</span>}</p>
+          <blockquote className="signal-pair-card__quote">“{group.text}”</blockquote>
+          {group.results.length > 0
+            ? <div className="signal-pair-card__results">
+              <p className="signal-pair-card__tag">Compared with {group.results.length} {group.results.length === 1 ? "result" : "results"}</p>
+              <ul>{group.results.map(result => <li key={result.text}><span>“{result.text}”</span>{result.anchor.trim() && <cite>{instructorAnchor(result.anchor)}</cite>}</li>)}</ul>
+            </div>
+            : <p className="signal-field-hint">The result it was compared with was not saved with this link.</p>}
+        </li>)}</ol>
+        {visible.length < all.length && <Button variant="secondary" onClick={() => onMore(Math.max(SHARED_GROUPS_SHOWN, limit) + SHARED_GROUPS_SHOWN - shown)}>Show {Math.min(SHARED_GROUPS_SHOWN, all.length - visible.length)} more</Button>}
+      </>}
+    </div>
+  </section>;
 }

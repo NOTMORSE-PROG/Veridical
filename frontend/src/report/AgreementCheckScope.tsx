@@ -107,9 +107,10 @@ function ScopeLines({ scope, outcome, compared, interrupted, adviser = false }: 
   const setAside = notIdentified ? (scope.n_results_too_short ? lines.slice(-1) : []) : lines;
   const stopped = interruptedLine(scope, { compared, interrupted, outcomeShown: outcome.length > 0 });
   return <>
-    {outcome.length > 0 && <p className="signal-agreement-scope__outcome"><strong>{outcome.join(" ")}</strong></p>}
+    {outcome.length > 0 && <p className="signal-agreement-scope__outcome">{adviser ? outcome.join(" ") : <strong>{outcome.join(" ")}</strong>}</p>}
     {stopped && <p>{stopped}</p>}
-    {found && <p>{found}</p>}
+    {found && !adviser && <p>{found}</p>}
+    {adviser && matchedLine(scope) && <p>{matchedLine(scope)}</p>}
     {setAside.length > 0 && <p>{setAside.join(" ")}{adviser && !notIdentified && scope.n_results_set_aside ? ` ${AGREEMENT_SCOPE_COPY.adviserSetAside}` : ""}</p>}
     {notIdentified && <p>{AGREEMENT_SCOPE_COPY.notIdentified}</p>}
     <p>{AGREEMENT_SCOPE_COPY.limit}</p>
@@ -131,8 +132,16 @@ export function AgreementScopeSummary({ scope, findings, undecided, compared, in
   interrupted: boolean;
 }) {
   const outcome = outcomeLines(scope, { findings, undecided, compared, interrupted, surface: "adviser" });
+  // The numbers first, as facts to scan; the sentences that qualify them after.
+  const facts: [string, string][] = [
+    ...(scope.n_objectives != null ? [["Objectives found", String(scope.n_objectives)] as [string, string]] : []),
+    ...(scope.n_results != null ? [["Results found", String(scope.n_results)] as [string, string]] : []),
+    ["Pairs compared", compared == null ? "Not recorded" : String(compared)],
+    ...(undecided > 0 ? [["Pairs not decided", String(undecided)] as [string, string]] : []),
+  ];
   return <section className="signal-agreement-scope" aria-labelledby="shared-agreement-scope-title">
     <h4 id="shared-agreement-scope-title" className="signal-agreement-scope__title">{AGREEMENT_SCOPE_COPY.heading}</h4>
+    <dl className="signal-fact-tiles">{facts.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
     <ScopeLines scope={scope} outcome={outcome} compared={compared} interrupted={interrupted} adviser />
   </section>;
 }

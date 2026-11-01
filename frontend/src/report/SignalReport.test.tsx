@@ -176,14 +176,14 @@ describe("SignalReportPage", () => {
   });
 
   it.each([
-    ["completed", "Completion recorded.", false],
-    ["completed", "Completion recorded.", true],
-    ["not_applicable", "Not applicable.", false],
+    ["completed", "Completed", false],
+    ["completed", "Completed", true],
+    ["not_applicable", "Not applicable", false],
   ] as const)("shows saved statistical scope independently of findings (%s, %s, concern=%s)", async (state, label, hasConcern) => {
     const flag = { ...FLAG, check_kind: "statistical_forensics", problem_kind: "p_value_decision_error", evidence_excerpt: "t(28) = 2.45, p = .500" };
     stubReport({ ...BASE_REPORT, statistical_check_scope: { state }, historical_native_math_unverified: true }, [], hasConcern ? [flag] : []);
     renderWithProviders(<SignalReportPage />, { route: "/report/5?review_step=findings&module=statistical_forensics", path: "/report/:checkRunId" });
-    expect(await screen.findByText(`Statistical checks: ${label}`)).toBeVisible();
+    expect(await screen.findByRole("region", { name: "What the statistical check covered" })).toHaveTextContent(label);
     if (hasConcern) {
       expect(await screen.findByText("1 open finding")).toBeVisible();
       expect(await screen.findByRole("link", { name: /Review evidence/ })).toBeVisible();

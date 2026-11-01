@@ -84,14 +84,14 @@ function shared(overrides: Partial<SharedReportOut> = {}): SharedReportOut {
 
 describe("shared statistical applicability", () => {
   it.each([
-    ["completed", "Completion recorded."],
-    ["not_applicable", "Not applicable."],
-    ["incomplete", "Ran only in part."],
+    ["completed", "Completed"],
+    ["not_applicable", "Not applicable"],
+    ["incomplete", "Ran only in part"],
   ] as const)("shows safe %s status alongside the existing shared warning", async (state, label) => {
     const payload = shared({ report: { ...BASE_REPORT, statistical_check_scope: { state }, historical_native_math_unverified: true } });
     vi.stubGlobal("fetch", stubFetchByPath({ "/shared/scope-control/report": payload }));
     renderWithProviders(<AdviserViewPage />, { route: "/shared/scope-control?section=findings&module=statistical_forensics", path: "/shared/:token" });
-    expect(await screen.findByText(`Statistical checks: ${label}`)).toBeVisible();
+    expect(await screen.findByRole("region", { name: "What the statistical check covered" })).toHaveTextContent(label);
     expect(screen.getAllByText("Saved native Word coverage is unverified")[0]).toBeVisible();
   });
 });
@@ -119,8 +119,10 @@ describe("AdviserViewPage", () => {
     } }) }));
     render();
     expect(await screen.findByRole("heading", { level: 1, name: "Recorded manuscript title" })).toBeVisible();
-    expect(screen.getByText("Group members: First Member, Second Member.")).toBeVisible();
-    expect(screen.getByText("Required format: TIP Format")).toBeVisible();
+    expect(screen.getByText("Group members", { selector: "dt" })).toBeVisible();
+    expect(screen.getByText(/First Member, Second Member/, { selector: "dd" })).toBeVisible();
+    expect(screen.getByText("Required format", { selector: "dt" })).toBeVisible();
+    expect(screen.getByText("TIP Format", { selector: "dd" })).toBeVisible();
     expect(screen.getAllByRole("heading", { name: "Recorded manuscript title" })).toHaveLength(1);
     expect(screen.getByRole("heading", { name: "Conditionally Ready" })).toBeVisible();
     expect(screen.getByText("Not recorded", { selector: "dd" })).toBeVisible();

@@ -36,14 +36,14 @@ _SAVED_STATES = {
 
 STATISTICAL_SCOPE_COPY = {
     "completed": (
-        "Statistical checks: Completion recorded.",
-        "The saved check records completed statistical processing. This does not establish "
-        "that every reported value is correct or verify the raw data.",
+        "Statistical checks: Completed.",
+        "The check ran on the statistics it could read. This does not mean every reported "
+        "value is correct, and it does not check the raw data.",
     ),
     "not_applicable": (
         "Statistical checks: Not applicable.",
-        "This is the saved applicability result for the extracted content the check supports. "
-        "It does not establish that the manuscript contains no statistics.",
+        "The check found no statistics it could test in the text it could read. "
+        "This does not mean the paper has no statistics.",
     ),
     "incomplete": (
         "Statistical checks: Ran only in part.",
@@ -51,8 +51,8 @@ STATISTICAL_SCOPE_COPY = {
     ),
     "not_recorded": (
         "Statistical checks: Not recorded.",
-        "This run has no usable saved statistical status. "
-        "Do not infer that the check ran or was not applicable.",
+        "No usable status was saved for this check, so do not assume it ran or that it did "
+        "not apply.",
     ),
 }
 
