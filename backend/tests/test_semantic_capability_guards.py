@@ -7,7 +7,12 @@ import pytest
 
 from app.checks.consistency import run_semantic_checks_with_consistency
 from app.checks.semantic import run_semantic_checks
-from app.checks.support import _capability_failure, apply_support, check_support
+from app.checks.support import (
+    _capability_failure,
+    apply_support,
+    check_support,
+    scope_obligations,
+)
 from app.config import Settings
 from app.models.enums import ResultOutcome
 from tests.test_semantic_support_gate import QUOTE, Client, Session, criterion, extraction
@@ -23,35 +28,29 @@ def local_item():
     return item
 
 
+REQUIREMENTS = [
+    ("The publications are peer-reviewed", "external_verification_required"),
+    ("The devices are certified", "external_verification_required"),
+    ("The professional legitimacy of sources is established", "external_verification_required"),
+    ("The reliability\nof sources is established", "external_verification_required"),
+    ("Most devices meet the stated conditions", "collection_assessment_required"),
+    ("Every device is documented", "collection_assessment_required"),
+    ("Each requirement is met", "collection_assessment_required"),
+    ("All the devices are documented", "collection_assessment_required"),
+    ("Every one of the items is documented", "collection_assessment_required"),
+    ("A few references are questionable", "collection_assessment_required"),
+    ("Professional tone is maintained throughout", "whole_paper_assessment_required"),
+]
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("runner", [run_semantic_checks, run_semantic_checks_with_consistency])
-@pytest.mark.parametrize("obligation", ["criterion", "evidence_request", "level_descriptor"])
-@pytest.mark.parametrize(
-    ("requirement", "capability"),
-    [
-        ("The publications are peer-reviewed", "external_verification_required"),
-        ("The devices are certified", "external_verification_required"),
-        ("The professional legitimacy of sources is established", "external_verification_required"),
-        ("The reliability\nof sources is established", "external_verification_required"),
-        ("Most devices meet the stated conditions", "collection_assessment_required"),
-        ("Every device is documented", "collection_assessment_required"),
-        ("Each requirement is met", "collection_assessment_required"),
-        ("All the devices are documented", "collection_assessment_required"),
-        ("Every one of the items is documented", "collection_assessment_required"),
-        ("A few references are questionable", "collection_assessment_required"),
-        ("Professional tone is maintained throughout", "whole_paper_assessment_required"),
-    ],
-)
+@pytest.mark.parametrize(("requirement", "capability"), REQUIREMENTS)
 async def test_support_model_cannot_supply_missing_assessment_capability(
-    runner, obligation, requirement, capability
+    runner, requirement, capability
 ):
     item = local_item()
-    if obligation == "criterion":
-        item.text = requirement
-    elif obligation == "evidence_request":
-        item.evidence = requirement
-    else:
-        item.levels[1]["descriptor"] = requirement
+    item.levels[1]["descriptor"] = requirement
     client = Client("supported")
     result = (await runner(Session(), 6, [item], extraction(), client, Settings()))[0]
     assert result.outcome == ResultOutcome.escalated and result.score is None
@@ -61,8 +60,41 @@ async def test_support_model_cannot_supply_missing_assessment_capability(
     support = result.detail["support_check"]
     assert support["scope_guard"] == "independent_assessment_required"
     assert support["missing_capabilities"] == [capability]
-    assert support["guarded_obligations"] == [{"key": obligation, "capabilities": [capability]}]
+    assert support["guarded_obligations"] == [
+        {"key": "level_descriptor", "capabilities": [capability], "decides": True}
+    ]
+    assert "advisory_obligations" not in support
     assert sum(kind == "semantic_support" for kind, _, _ in client.calls) == 1
+
+
+@pytest.mark.parametrize(("requirement", "capability"), REQUIREMENTS)
+@pytest.mark.parametrize("levelled", [True, False])
+def test_the_criterion_line_is_the_formats_own_requirement(levelled, requirement, capability):
+    item = local_item()
+    if not levelled:
+        item.levels = None
+    item.text = requirement
+    batch = SimpleNamespace(label="whole document", scope_patterns_file=None)
+    verdict = "Exceptional" if levelled else "pass"
+    support = _capability_failure(batch, item, {"verdict": verdict})
+    assert support["missing_capabilities"] == [capability]
+    assert support["guarded_obligations"] == [
+        {"key": "criterion", "capabilities": [capability], "decides": True}
+    ]
+
+
+@pytest.mark.parametrize(("requirement", "capability"), REQUIREMENTS)
+def test_the_evidence_request_never_guards_on_its_own(requirement, capability):
+    """BUG-609: the evidence request is the parser's own paraphrase; a match
+    there is recorded, not decisive."""
+    item = local_item()
+    item.evidence = requirement
+    batch = SimpleNamespace(label="whole document", scope_patterns_file=None)
+    assert _capability_failure(batch, item, {"verdict": "Exceptional"}) is None
+    matched = scope_obligations(item, "Exceptional")
+    assert matched == [
+        {"key": "evidence_request", "capabilities": [capability], "decides": False}
+    ]
 
 
 @pytest.mark.parametrize("term", ["few-shot learning", "majority-vote algorithm"])
@@ -109,10 +141,8 @@ async def test_absent_policy_override_and_repeated_quote_cannot_bypass_both_capa
         "collection_assessment_required",
         "external_verification_required",
     ]
-    assert {row["key"] for row in support["guarded_obligations"]} == {
-        "evidence_request",
-        "level_descriptor",
-    }
+    assert [row["key"] for row in support["guarded_obligations"]] == ["level_descriptor"]
+    assert [row["key"] for row in support["advisory_obligations"]] == ["evidence_request"]
 
 
 @pytest.mark.asyncio
@@ -139,7 +169,7 @@ async def test_secondary_request_contains_only_owned_quotes_and_not_surrounding_
 
 def test_a_kept_grade_never_says_no_grade_was_assigned():
     item = criterion()
-    item.text = "The publications are peer-reviewed"
+    item.levels[1]["descriptor"] = "The publications are peer-reviewed"
     batch = SimpleNamespace(scope_patterns_file=None, label="whole document")
     support = _capability_failure(batch, item, {"verdict": item.levels[1]["name"]})
     assert "did not assign it" in support["reason"]

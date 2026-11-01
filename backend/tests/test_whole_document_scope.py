@@ -129,9 +129,18 @@ def test_a_whole_paper_level_needs_more_than_a_quote(item, level):
 @pytest.mark.parametrize("level", NAMES)
 def test_every_grammar_level_is_whole_paper_because_of_the_criterion_itself(level):
     failure = guard(GRAMMAR, level)
-    assert {"key": "criterion", "capabilities": ["whole_paper_assessment_required"]} in failure[
-        "guarded_obligations"
-    ]
+    assert {
+        "key": "criterion",
+        "capabilities": ["whole_paper_assessment_required"],
+        "decides": True,
+    } in failure["guarded_obligations"]
+
+
+@pytest.mark.parametrize("level", NAMES)
+def test_every_grammar_level_is_whole_paper_by_its_own_descriptor_too(level):
+    # A parse whose criterion line names no error rate still guards Grammar.
+    descriptors = [item["descriptor"] for item in GRAMMAR.levels]
+    assert guard(criterion("Grammar", None, *descriptors), level) is not None
 
 
 @pytest.mark.parametrize(
@@ -231,3 +240,134 @@ def test_a_whole_paper_grade_is_kept_with_a_caution_under_decide():
     outcome, updated = apply_support(ResultOutcome.passed, detail, failure, decide=True)
     assert outcome == ResultOutcome.passed
     assert updated["support_caution"] and updated["support_check"]["status"] == "unsupported"
+
+
+# BUG-609: three stored parses of the same T.I.P. format word the criterion
+# line and the evidence request differently. The level descriptors are the
+# format's own words; whether a level is guarded must follow them alone.
+PARSE_WORDING = {
+    "Purpose": [
+        (
+            "Statement and clarity of purpose or argument",
+            "A reader evaluates how clearly and consistently the central purpose or argument is "
+            "stated throughout the paper.",
+        ),
+        (
+            "Purpose",
+            "A reader evaluates whether the paper's purpose or central argument is clearly and "
+            "consistently stated.",
+        ),
+        (
+            "Purpose: Clarity and conciseness of the paper's central purpose or argument.",
+            "A reader checks the statement of purpose for clarity, conciseness, and framing as a "
+            "single sentence.",
+        ),
+    ],
+    "Tone": [
+        (
+            "Professional tone appropriate for an academic research paper",
+            "A reader assesses the overall voice and tone used throughout the document.",
+        ),
+        (
+            "Tone",
+            "A reader evaluates whether the tone of the writing is professional and appropriate "
+            "for an academic research paper.",
+        ),
+        (TONE.text, TONE.evidence),
+    ],
+}
+
+
+def _decision(failure):
+    return None if failure is None else failure["missing_capabilities"]
+
+
+@pytest.mark.parametrize("name", list(PARSE_WORDING))
+@pytest.mark.parametrize("level", NAMES)
+def test_the_guard_does_not_depend_on_how_the_parser_worded_the_criterion(name, level):
+    scale = {"Purpose": PURPOSE, "Tone": TONE}[name]
+    descriptors = [item["descriptor"] for item in scale.levels]
+    decisions = {
+        str(_decision(guard(criterion(text, evidence, *descriptors), level)))
+        for text, evidence in PARSE_WORDING[name]
+    }
+    assert len(decisions) == 1, decisions
+
+
+def test_a_single_sentence_purpose_stays_locatable_under_the_throughout_wording():
+    text, evidence = PARSE_WORDING["Purpose"][0]
+    item = criterion(text, evidence, *(level["descriptor"] for level in PURPOSE.levels))
+    assert guard(item, "PROFICIENT") is None
+    assert locatable_subclaim(item, {"verdict": "PROFICIENT"})
+
+
+# Rubric 8's Use of References, whose levels were traced word for word to the
+# T.I.P. format, with each stored parse's own criterion line and request.
+USE_OF_REFERENCES_LEVELS = (
+    "References are seldom cited to support statements.",
+    "Although attributions are occasionally given, many statements seem unsubstantiated. The "
+    "reader is confused about the source of information and ideas.",
+    "Professionally legitimate sources that support claims are generally present and attribution "
+    "is, for the most part, clear and fairly represented.",
+    "Compelling evidence from professionally legitimate sources is given to support claims. "
+    "Attribution is clear and fairly represented.",
+)
+USE_OF_REFERENCES_WORDING = [
+    (
+        "Use and attribution of references",
+        "A reader checks whether claims are properly supported by citations and whether source "
+        "attribution is clear and fair.",
+    ),
+    (
+        "Use of References",
+        "A reader checks whether claims are properly substantiated with sources and attributions.",
+    ),
+    (
+        "Use of References: Presence of supporting references and clarity of attributions for "
+        "claims.",
+        "A reader inspects in-text attributions and reference usage to verify that claims are "
+        "supported by legitimate sources.",
+    ),
+]
+WHOLE = "whole_paper_assessment_required"
+EXTERNAL = "external_verification_required"
+COLLECTION = "collection_assessment_required"
+
+
+@pytest.mark.parametrize(
+    ("level", "expected"),
+    [
+        # "Seldom cited" is a rate across the paper; it was guarded only by
+        # one parse's evidence request until frequency words were data.
+        ("BEGINNER", [WHOLE]),
+        ("ACCEPTABLE", [WHOLE]),
+        # "For the most part" also reads as a share of the collection.
+        ("PROFICIENT", [COLLECTION, EXTERNAL, WHOLE]),
+        ("EXEMPLARY", [EXTERNAL]),
+    ],
+)
+@pytest.mark.parametrize(("text", "evidence"), USE_OF_REFERENCES_WORDING)
+def test_use_of_references_is_guarded_the_same_way_in_every_parse(text, evidence, level, expected):
+    failure = guard(criterion(text, evidence, *USE_OF_REFERENCES_LEVELS), level)
+    assert failure is not None and sorted(failure["missing_capabilities"]) == expected
+
+
+@pytest.mark.parametrize(
+    ("item", "level", "expected"),
+    [
+        (PURPOSE, "PROFICIENT", None),
+        (PURPOSE, "EXEMPLARY", None),
+        (PURPOSE, "ACCEPTABLE", [WHOLE]),
+        # Accepted (PM, 2026-11-01): "The tone is unprofessional" names no
+        # rate or extent, as rubric 8 already treated it; Tone's other levels
+        # keep the whole-paper caution through their own wording.
+        (TONE, "BEGINNER", None),
+        (TONE, "PROFICIENT", [COLLECTION, WHOLE]),
+        (TONE, "EXEMPLARY", [WHOLE]),
+    ],
+)
+def test_expected_guard_per_level_whichever_parse_worded_the_criterion(item, level, expected):
+    name = "Purpose" if item is PURPOSE else "Tone"
+    descriptors = [entry["descriptor"] for entry in item.levels]
+    for text, evidence in PARSE_WORDING[name]:
+        assert _decision(guard(criterion(text, evidence, *descriptors), level)) == expected
