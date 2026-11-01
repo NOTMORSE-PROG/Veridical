@@ -75,7 +75,9 @@ export function Dialog({
     const focusReturnTarget = returnTarget.current;
     const options = returnOptions.current;
     const [first] = dialog ? focusable(dialog) : [];
-    (focusTitle.current ? titleRef.current : first ?? dialog)?.focus();
+    // Focus already placed inside (a return to a control in the dialog)
+    // stays where it is.
+    if (!dialog?.contains(document.activeElement)) (focusTitle.current ? titleRef.current : first ?? dialog)?.focus();
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => {

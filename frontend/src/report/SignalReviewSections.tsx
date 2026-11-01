@@ -1276,7 +1276,10 @@ export function SignalPublicFlags({
 
 // `readOnly` is the readiness report's record view: grades are shown but
 // changed only in manuscript review, beside the manuscript.
-export function SignalCriteriaResults({ results, checkRunId, publicView = false, readOnly = false, sourceTarget, onOpenSource, renderEvidence, publicSelection }: {
+/** The criterion whose assessment details are open in a dialog. */
+const DETAILS_PARAM = "criterion_details";
+
+export function SignalCriteriaResults({ results, checkRunId, publicView = false, readOnly = false, sourceTarget, onOpenSource, renderEvidence, publicSelection, detailsInDialog = false }: {
   results: ResultRowCommon[];
   checkRunId: number;
   publicView?: boolean;
@@ -1285,8 +1288,20 @@ export function SignalCriteriaResults({ results, checkRunId, publicView = false,
   onOpenSource?: CriterionSourceOpen;
   renderEvidence?: (row: ResultRowCommon) => ReactNode;
   publicSelection?: { position: number; total: number };
+  /** Open a card's assessment details in a dialog, so the cards in a grid
+   * keep one height and opening one never moves the others. */
+  detailsInDialog?: boolean;
 }) {
   const AssessmentBody = publicSelection ? "section" : "details";
+  // The open dialog lives in the address, so a return from a source opened
+  // inside it finds the dialog, and the control it left from, again.
+  const [detailsParams, setDetailsParams] = useSearchParams();
+  const openDetails = Number(detailsParams.get(DETAILS_PARAM)) || null;
+  const setOpenDetails = (criterionId: number | null) => {
+    const next = new URLSearchParams(detailsParams);
+    if (criterionId === null) next.delete(DETAILS_PARAM); else next.set(DETAILS_PARAM, String(criterionId));
+    setDetailsParams(next, { replace: true, state: location.state, preventScrollReset: true });
+  };
   const location = useLocation();
   const navigate = useNavigate();
   const review = useContext(ReviewContext);
@@ -1370,15 +1385,7 @@ export function SignalCriteriaResults({ results, checkRunId, publicView = false,
             }}
           >Open in manuscript: {instructorAnchor(anchor)}</ActionLink>;
         };
-        return <li key={row.criterion_id} className="signal-result-card"><div className="signal-result-card__top"><span className="signal-result-card__number">{publicSelection?.position ?? index + 1}</span><span className={`signal-outcome signal-outcome--${assessment.ruleScopeUnconfirmed && !assessment.instructorRecorded ? "neutral" : gradeCaution ? "warning" : outcome.tone}`}>{assessment.ruleScopeUnconfirmed && !assessment.instructorRecorded ? "Previously recorded: " : ""}{outcome.label}{gradeCaution && <> · {automaticGradeChip(row as CriterionResultOut)}</>}</span><span className={`signal-importance signal-importance--${row.weight_importance === "med" ? "medium" : row.weight_importance}`}>{row.weight_importance === "med" ? "Medium" : `${row.weight_importance.slice(0, 1).toUpperCase()}${row.weight_importance.slice(1)}`} importance</span></div><h3 id={criterionRecordId(checkRunId, row.criterion_id)} tabIndex={-1}>{row.text}</h3>{automaticRow && automaticGradeLines(row as CriterionResultOut).map((line) => <p key={line} className="signal-resolution-note">{line}</p>)}{!publicView && !row.resolution && automaticGradeLines(row as CriterionResultOut).length > 0 && automaticGradePasses(row as CriterionResultOut) && <p className="signal-resolution-note">{automaticGradePasses(row as CriterionResultOut)}</p>}{gradeCaution && <p className="signal-grade-caution"><span aria-hidden="true">{"⚠"}</span>{gradeCaution}</p>}{!publicView && !row.resolution && flagsQuery.data && automaticGradeLines(row as CriterionResultOut).length > 0 && <RelatedFindings evidence={row.evidence} flags={flagsQuery.data} findingsTo={findingsTo} criterionText={row.text} />}{assessment.ruleScopeUnconfirmed && !assessment.instructorRecorded && <RuleScopeNotice />}{!publicView && row.resolution && <p className="signal-resolution-note"><strong>Instructor judgment</strong></p>}{!publicView && row.resolution?.type === "needs_document" && <p className="signal-resolution-note">{CRITERION_EXCLUSION_COPY.recorded}. {CRITERION_EXCLUSION_COPY.noGrade}</p>}{!publicView && row.resolution && <>{row.resolution.type !== "needs_document" && <p className="signal-resolution-note"><strong>Recorded grade:</strong> {recordedGradeLabel(row)}</p>}<p className="signal-resolution-note"><strong>Instructor reason:</strong> {recordedInstructorComment(row.resolution.type, row.resolution.reason) ?? "No instructor reason is available in this record."}</p></>}{/* BUG-065: this summary repeats verbatim once per row -- a screen-reader
-                links/buttons list can't tell them apart without a per-criterion
-                accessible name, same fix already applied to the flag "Review
-                evidence" links and the escalation resolve-button groups. */}
-              {privateScope && !readOnly && (row.resolution || (row.type !== "not_assessable" && (row as CriterionResultOut).judgment_revision == null
-                && ["structural", "semantic"].includes(row.kind) && ["passed", "failed"].includes(row.outcome)))
-                && <RecordedJudgmentTools checkRunId={checkRunId} criterionId={row.criterion_id} criterionText={row.text} canonical={row} />}
-              {assessment.ruleScopeUnconfirmed && assessment.instructorRecorded && <RuleScopeNotice earlier />}
-              <AssessmentBody className={publicSelection ? "signal-public-criterion-assessment" : undefined}>{publicSelection ? <><h4>Why this grade</h4><p id={evidenceSummaryId} className="signal-field-hint">{assessment.summary}</p></> : <summary id={evidenceSummaryId} aria-label={`${assessment.summary}: ${row.text}`}>{assessment.summary}</summary>}<div className="signal-result-card__evidence">
+        const evidenceBody = <div className="signal-result-card__evidence">
                 {assessment.relationship && <p>{assessment.relationship}</p>}
                 {assessment.sourceCoverage && <CriterionSourceCoverage value={assessment.sourceCoverage} sourceAction={sourceAction} firstSlot={row.evidence.length + 1} criterionText={row.text} />}
                 {unresolvedAi && <><p><strong>No grade accepted</strong></p><p>{RECORDED_GRADE_BASIS.review}</p><p>{RECORDED_GRADE_BASIS.qualification}</p></>}
@@ -1396,18 +1403,34 @@ export function SignalCriteriaResults({ results, checkRunId, publicView = false,
                     && ref.role === "criterion_evidence" && ref.index === evidenceIndex && ref.quote === item.quote && ref.anchor === item.anchor);
                   return <div className="signal-attached-flow" key={`${item.anchor}-${item.quote}-${evidenceIndex}`}>
                   <blockquote><span>“{item.quote}”</span><cite>{instructorAnchor(item.anchor)}</cite></blockquote>
+                    {!hasAnchor && <p>No manuscript location was recorded for this excerpt.</p>}
+                    {!publicView && showAction && sourceAction(item.anchor)}
                     {recorded && currentManifest && <RecordedEvidencePage checkRunId={checkRunId} snapshot={currentManifest.snapshot_id} reference={recorded} context={{
                       title: row.text, explanation: row.reasoning, explanationLabel: assessment.explanationLabel ?? "Recorded explanation:",
                       recordedNote: row.reason, references: currentManifest.references.filter(ref => ref.criterion_id === row.criterion_id && ref.role === "criterion_evidence"),
                     }} />}
-                    {!hasAnchor && <p>No manuscript location was recorded for this excerpt.</p>}
-                    {!publicView && showAction && sourceAction(item.anchor)}
+
                   </div>;
                 }) : !assessment.ruleFacts && <p>{unresolvedAi ? RECORDED_GRADE_BASIS.missingExcerpt : "No excerpt is available in this assessment record."}</p>}
                 {!publicView && row.anchor?.trim() && !excerptAnchors.has(row.anchor) && <div className="signal-attached-flow"><p>Recorded criterion location: {row.anchor}</p>{sourceAction(row.anchor)}</div>}
 
                 </>}
-              </div></AssessmentBody></li>;
+              </div>;
+        return <li key={row.criterion_id} className="signal-result-card"><div className="signal-result-card__top"><span className="signal-result-card__number">{publicSelection?.position ?? index + 1}</span><span className={`signal-outcome signal-outcome--${assessment.ruleScopeUnconfirmed && !assessment.instructorRecorded ? "neutral" : gradeCaution ? "warning" : outcome.tone}`}>{assessment.ruleScopeUnconfirmed && !assessment.instructorRecorded ? "Previously recorded: " : ""}{outcome.label}{gradeCaution && <> · {automaticGradeChip(row as CriterionResultOut)}</>}</span><span className={`signal-importance signal-importance--${row.weight_importance === "med" ? "medium" : row.weight_importance}`}>{row.weight_importance === "med" ? "Medium" : `${row.weight_importance.slice(0, 1).toUpperCase()}${row.weight_importance.slice(1)}`} importance</span></div><h3 id={criterionRecordId(checkRunId, row.criterion_id)} tabIndex={-1}>{row.text}</h3>{automaticRow && automaticGradeLines(row as CriterionResultOut).map((line) => <p key={line} className="signal-resolution-note">{line}</p>)}{!publicView && !row.resolution && automaticGradeLines(row as CriterionResultOut).length > 0 && automaticGradePasses(row as CriterionResultOut) && <p className="signal-resolution-note">{automaticGradePasses(row as CriterionResultOut)}</p>}{gradeCaution && <p className="signal-grade-caution"><span aria-hidden="true">{"⚠"}</span>{gradeCaution}</p>}{!publicView && !row.resolution && flagsQuery.data && automaticGradeLines(row as CriterionResultOut).length > 0 && <RelatedFindings evidence={row.evidence} flags={flagsQuery.data} findingsTo={findingsTo} criterionText={row.text} />}{assessment.ruleScopeUnconfirmed && !assessment.instructorRecorded && <RuleScopeNotice />}{!publicView && row.resolution && <p className="signal-resolution-note"><strong>Instructor judgment</strong></p>}{!publicView && row.resolution?.type === "needs_document" && <p className="signal-resolution-note">{CRITERION_EXCLUSION_COPY.recorded}. {CRITERION_EXCLUSION_COPY.noGrade}</p>}{!publicView && row.resolution && <>{row.resolution.type !== "needs_document" && <p className="signal-resolution-note"><strong>Recorded grade:</strong> {recordedGradeLabel(row)}</p>}<p className="signal-resolution-note"><strong>Instructor reason:</strong> {recordedInstructorComment(row.resolution.type, row.resolution.reason) ?? "No instructor reason is available in this record."}</p></>}{/* BUG-065: this summary repeats verbatim once per row -- a screen-reader
+                links/buttons list can't tell them apart without a per-criterion
+                accessible name, same fix already applied to the flag "Review
+                evidence" links and the escalation resolve-button groups. */}
+              {privateScope && !readOnly && (row.resolution || (row.type !== "not_assessable" && (row as CriterionResultOut).judgment_revision == null
+                && ["structural", "semantic"].includes(row.kind) && ["passed", "failed"].includes(row.outcome)))
+                && <RecordedJudgmentTools checkRunId={checkRunId} criterionId={row.criterion_id} criterionText={row.text} canonical={row} />}
+              {assessment.ruleScopeUnconfirmed && assessment.instructorRecorded && <RuleScopeNotice earlier />}
+              {detailsInDialog && !publicSelection ? <>
+                <Button id={evidenceSummaryId} variant="secondary" className="signal-result-card__details" aria-haspopup="dialog"
+                  aria-label={`${assessment.summary}: ${row.text}`} onClick={() => setOpenDetails(row.criterion_id)}>{assessment.summary}</Button>
+                {openDetails === row.criterion_id && <Dialog wide title={<>{assessment.summary.split(":")[0]}<span className="signal-dialog__subtitle">{row.text}</span></>}
+                  returnFocusTarget={() => document.getElementById(evidenceSummaryId)}
+                  onClose={() => setOpenDetails(null)}>{evidenceBody}</Dialog>}
+              </> : <AssessmentBody className={publicSelection ? "signal-public-criterion-assessment" : undefined}>{publicSelection ? <><h4>Why this grade</h4><p id={evidenceSummaryId} className="signal-field-hint">{assessment.summary}</p></> : <summary id={evidenceSummaryId} aria-label={`${assessment.summary}: ${row.text}`}>{assessment.summary}</summary>}{evidenceBody}</AssessmentBody>}</li>;
       })}</ol> : updating ? <p>Recorded results are updating.</p> : <div className="signal-desk-empty"><h3>No criterion records in this section</h3><p>No criterion records are shown here. Review the other report sections for unresolved criteria and assessment limits.</p></div>}
     </section>
   );

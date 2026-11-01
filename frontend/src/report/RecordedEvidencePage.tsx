@@ -96,7 +96,7 @@ function RecordedPageSession({ checkRunId, snapshot, reference, cachedPage, cont
   </>;
   return <div className="signal-recorded-page-actions">
     <Button id={actionId} variant="secondary" aria-label={reference.anchor?.trim() ? `Open original page: ${instructorAnchor(reference.anchor)}` : undefined} onClick={() => setOpen(true)}>{reference.anchor?.trim() ? "Open original page" : "Open saved source"}</Button>
-    <Button variant="secondary" aria-expanded={preview} onClick={() => setPreview(value => !value)}>{preview ? "Hide" : "Show"} original-page preview</Button>
+    <Button variant="secondary" aria-expanded={preview} onClick={() => setPreview(value => !value)}>{preview ? "Hide" : "Show"} page preview</Button>
     {preview && content(false)}
     {open && owner.isCurrent() && context && <CriterionEvidenceDialog run={checkRunId} request={{ snapshotId: snapshot, reference, actionId }} context={context} onClose={() => setOpen(false)} />}
     {open && owner.isCurrent() && !context && <Dialog title={`Original source: ${instructorAnchor(reference.anchor ?? "") || "Saved source"}`} wide onClose={() => setOpen(false)}>

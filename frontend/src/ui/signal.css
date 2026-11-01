@@ -9148,15 +9148,19 @@
   .signal-report-hero :focus-visible { outline-color: var(--color-signal-brand); }
   /* Review Desk queue cards: content starts at the top so counts line up. */
   .signal-queue-tabs button { align-content: start; align-items: start; }
-  /* Readiness report: criterion records in one column. In two columns a
-     row is as tall as its tallest card, so opening one card's details left
-     a gap beside it and pushed the next row down. One column: opening a
-     card moves only the cards below it. */
+  /* Readiness report: criterion records in two even columns. The cards in
+     a row share one height and their actions line up at the bottom; the
+     assessment details open in a dialog, so opening them never resizes a
+     card or moves its neighbours. One column when the window is narrow. */
   #record-panel-grades .signal-result-list {
     display: grid;
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: var(--signal-rhythm-control);
+    align-items: stretch;
     padding: var(--signal-space-5) var(--signal-space-6) var(--signal-space-6);
+  }
+  @media (max-width: 1023px) {
+    #record-panel-grades .signal-result-list { grid-template-columns: minmax(0, 1fr); }
   }
   #record-panel-grades .signal-result-list > .signal-result-card {
     border: var(--signal-border-hairline) solid var(--color-signal-border);
@@ -9165,10 +9169,17 @@
     min-inline-size: 0;
   }
   #record-panel-grades .signal-result-list > .signal-result-card { display: flex; flex-direction: column; gap: var(--signal-space-2); }
-  /* A full-width card keeps its buttons at their own width and its text at
-     a readable line length. */
-  #record-panel-grades .signal-result-card > .signal-button { align-self: flex-start; }
-  #record-panel-grades .signal-result-card :is(h3, p, blockquote) { max-inline-size: var(--signal-prose-width); }
+  /* The card's actions sit at its foot, so they line up across a row. */
+  #record-panel-grades .signal-result-card > :is(.signal-judgment-tools, .signal-result-card__details, .signal-button) { margin-block-start: auto; }
+  #record-panel-grades .signal-result-card > .signal-judgment-tools ~ :is(.signal-result-card__details, .signal-button) { margin-block-start: 0; }
+  #record-panel-grades .signal-result-card__details { justify-content: flex-start; text-align: start; white-space: normal; }
+  /* Each recorded excerpt: the quote, one row of actions, then any preview
+     or message across the full width. */
+  .signal-result-card__evidence .signal-attached-flow { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--signal-rhythm-control); }
+  .signal-result-card__evidence .signal-attached-flow > :not(.signal-button, .signal-recorded-page-actions),
+  .signal-result-card__evidence .signal-recorded-page-actions > :not(.signal-button) { flex-basis: 100%; }
+  .signal-result-card__evidence .signal-recorded-page-actions { display: contents; }
+  .signal-dialog__subtitle { display: block; margin-block-start: var(--signal-space-1); font-size: var(--signal-type-body); font-weight: var(--signal-weight-medium); color: var(--color-signal-ink-secondary); }
   /* BUG-518: confirm a finding as a real issue (note optional). */
   .signal-finding-confirm,
   .signal-finding-confirmed {
