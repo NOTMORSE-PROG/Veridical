@@ -435,8 +435,10 @@ def test_counts_that_confirm_no_level_go_to_the_instructor(data):
     assert "do not confirm any one level" in row.detail["reason"]
 
 
-def test_counts_that_fit_exactly_one_level_decide_it(data):
-    # A scale where only one level's words imply a share.
+def test_a_level_the_counts_cannot_check_is_never_treated_as_ruled_out(data):
+    # "Excellent sources." implies no share, so the counts cannot show that
+    # "most ... legitimate" is the only level that fits; deciding it would
+    # lower an EXEMPLARY grade on wording nobody checked.
     scale = SimpleNamespace(
         id=13,
         text="Sources",
@@ -449,7 +451,23 @@ def test_counts_that_fit_exactly_one_level_decide_it(data):
     )
     row = graded_row("EXEMPLARY")
     rc.decide_quality(row, scale, profile(peer_reviewed=15, unclassified=5), data)
-    assert row.detail["verdict"] == "PROFICIENT"
+    assert row.outcome == ResultOutcome.escalated and row.detail.get("verdict") is None
+    assert "words the counts cannot check" in row.detail["reason"]
+
+
+def test_counts_that_fit_exactly_one_checkable_level_decide_it(data):
+    # Every level's words imply a share, and only one holds.
+    scale = SimpleNamespace(
+        id=14,
+        text="Sources",
+        levels=levels(
+            "There are virtually no sources that are professionally reliable.",
+            "Most of the references are professionally legitimate.",
+        ),
+    )
+    row = graded_row("PROFICIENT")
+    rc.decide_quality(row, scale, profile(peer_reviewed=15, unclassified=5), data)
+    assert row.detail["verdict"] == "ACCEPTABLE"
     assert row.detail["decision_basis"] == "reference_profile"
     assert row.detail["reference_strategy"]["strategy"] == rc.QUALITY
     assert "Only this level's wording fits these counts" in row.detail["reasoning"]

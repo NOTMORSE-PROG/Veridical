@@ -186,7 +186,8 @@
     "counts_other": "{n} other works, ",
     "no_level": "no level",
     "entries_to_check": "Entries to check, by their place in the reference list: {numbers}.",
-    "quality_share": "Between {low} and {high} of the {entries} entries can be journal or conference papers or books."
+    "quality_share": "Between {low} and {high} of the {entries} entries can be journal or conference papers or books.",
+    "quality_unverifiable": "Some levels of this format describe sources in words the counts cannot check, so no level can be shown to be the only one that fits, and VERIDICAL did not choose one. Please check the reference list."
   },
   "_partial_list_note": "Coverage reasons from the citation check that mean entries may be missing from the list, so it is not counted. Other reasons (body pages, claim checks, single lookups) leave the entries counted as unconfirmed.",
   "partial_list_reasons": [

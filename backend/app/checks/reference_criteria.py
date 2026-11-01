@@ -606,6 +606,11 @@ def decide_quality(
     record["level_checks"] = {str(ordinal): check for ordinal, check in checks.items()}
     fitting = [ordinal for ordinal, check in checks.items() if check["fits"]]
     names = {int(level["level"]): level["name"] for level in _levels(criterion)}
+    # A level whose words imply no share cannot be ruled out by counts, so no
+    # other level can be shown to be the only one that fits.
+    if any(not check["implied_shares"] for check in checks.values()):
+        _escalate(row, f"{counts} {words['quality_unverifiable']}", record)
+        return
     if not fitting:
         _escalate(row, f"{counts} {words['quality_none']}", record)
         return
