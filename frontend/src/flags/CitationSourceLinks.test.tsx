@@ -45,6 +45,14 @@ describe("saved citation source navigation", () => {
     expect(link).not.toHaveTextContent("%2F");
     expect(screen.getAllByText("DOI as cited")).toHaveLength(1);
     expect(screen.queryByText("URL as cited")).not.toBeInTheDocument();
+    expect(screen.getByText(/Opens through doi\.org\./)).toBeVisible();
+  });
+  it("shows the address, with no resolver hint, when no printed text was saved", () => {
+    render(<CitationSourceLinks flag={{ ...flag, citation_source_locator: { ...flag.citation_source_locator, links: [
+      { kind: "doi_as_cited", url: "https://doi.org/10.1234/example" },
+    ] } }} />);
+    expect(screen.getByRole("link")).toHaveTextContent("https://doi.org/10.1234/example");
+    expect(screen.queryByText(/Opens through/)).not.toBeInTheDocument();
   });
   it("does not interpret a locator from another check as a citation", () => {
     render(<CitationSourceLinks flag={{ ...flag, check_kind: "internal_agreement" }} />);
