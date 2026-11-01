@@ -55,7 +55,9 @@ def saved(outcome=ResultOutcome.passed, kind=CheckKind.semantic, **detail):
 def test_an_old_supported_whole_paper_grade_gets_a_note_that_says_it_came_later():
     result, detail = saved()
     note = later_note(result, GRAMMAR, detail)
-    assert note.startswith("This note was added later by a newer VERIDICAL rule, not by the original check.")
+    assert note.startswith(
+        "This note was added later by a newer VERIDICAL rule, not by the original check."
+    )
     assert "grade and readiness band are unchanged" in note
     assert "whole paper" in note
 
@@ -180,7 +182,8 @@ def test_the_note_reaches_the_report_row_and_leaves_the_grade_alone():
         judgment_revision=0,
     )
     out = _to_criterion_result(result, criterion, importance="high")
-    assert out.later_note and out.later_note.startswith("This note was added later by a newer VERIDICAL rule")
+    assert out.later_note
+    assert out.later_note.startswith("This note was added later by a newer VERIDICAL rule")
     assert (out.outcome, out.score, result.detail) == (ResultOutcome.passed, 3, stored)
     # The quote check's "supported" sentence would contradict the note, so the
     # grader's own reasoning is shown, as it is for grades checked today.
