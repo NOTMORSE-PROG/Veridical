@@ -8,6 +8,7 @@ export const READINESS_EXCLUSION_COPY: Record<string, string> = {
   statement_roles_unverified: "VERIDICAL cannot yet reliably tell which statements report this study's own results.",
   unassessed_evidence: "the evidence for this finding could not be checked.",
   recency_note_not_counted: "this format records source age as a note, not as a readiness concern.",
+  retraction_lead_not_counted: "only a retraction Crossref records counts; this one comes from OpenAlex alone and is a lead to verify.",
 };
 
 const NOT_COUNTED = "Not counted for readiness";

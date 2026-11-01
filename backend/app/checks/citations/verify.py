@@ -61,6 +61,10 @@ from app.checks.citations.recency import (
     resolve_policy,
     unassessed_summary,
 )
+from app.checks.citations.retraction_lead import (
+    load_retraction_lead_policy,
+    openalex_retraction_lead,
+)
 from app.checks.citations.search_identity import SearchIdentity, search_identity
 from app.checks.citations.source_locator import with_reference_locator
 from app.checks.citations.support import (
@@ -71,7 +75,7 @@ from app.checks.citations.support import (
 from app.checks.citations.title_policy import TitlePolicy, load_title_policy
 from app.checks.citations.unread_pages import split_by_unread_pages, unread_page_leads
 from app.checks.source_quality import persist_source_limitation, source_limitation_detail
-from app.config import Settings
+from app.config import Settings, get_settings
 from app.errors import ApiDownError
 from app.external import cache
 from app.external import crossref as crossref_client
@@ -597,7 +601,26 @@ def _verdict_from_result(
     return CitationVerdict(VerdictKind.existence_confirmed, result)
 
 
-def _verdict_flag_draft(citation: Citation, verdict: CitationVerdict) -> CitationFlagDraft | None:
+def _verdict_flag_draft(
+    citation: Citation, verdict: CitationVerdict, settings: Settings | None = None
+) -> CitationFlagDraft | None:
+    if verdict.kind == VerdictKind.existence_confirmed and verdict.search_identity is not None:
+        # Found by title search. When that answer came from OpenAlex, its
+        # retraction flag is a lead to verify, never a counted finding.
+        try:
+            policy = load_retraction_lead_policy(
+                (settings or get_settings()).citation_openalex_retraction_lead_file
+            )
+        except (OSError, ValueError, UnicodeError):
+            policy = None
+        lead = openalex_retraction_lead(verdict.result, policy) if policy else None
+        if lead is not None:
+            return CitationFlagDraft(
+                severity=FlagSeverity(policy.severity),
+                evidence_excerpt=citation.raw_text,
+                page_anchor=f"reference #{citation.order_index + 1}",
+                detail=lead,
+            )
     if verdict.kind in (
         VerdictKind.existence_confirmed,
         VerdictKind.instructor_confirmed,
@@ -1267,7 +1290,7 @@ async def _run_citation_integrity_check(
                 else "unassessed",
             }
         )
-        draft = _verdict_flag_draft(citation, verdict)
+        draft = _verdict_flag_draft(citation, verdict, settings)
         if draft is not None:
             draft = with_reference_locator(draft, citation)
             if citation.order_index in source_projections:

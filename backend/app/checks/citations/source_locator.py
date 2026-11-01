@@ -23,6 +23,8 @@ class SavedReferenceLocator(BaseModel):
     finding_kind: Literal[
         "uncited_reference",
         "retracted_source",
+        "possible_retraction_unconfirmed",
+        "retraction_notice_cited",
         "corrected_source",
         "unverifiable_api_down",
         "unverifiable_not_found",

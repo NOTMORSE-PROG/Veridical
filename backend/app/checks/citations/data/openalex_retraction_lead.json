@@ -1,0 +1,17 @@
+{
+  "_source": "BUG-640 (2026-11-01, owner decision via the PM). OpenAlex's is_retracted is used only when OpenAlex is already asked for the entry (the title-search fallback, after Crossref found no match), only as a Low lead to verify, and never counts for readiness. Measured: of 30 works OpenAlex marks retracted, Crossref records a retraction for 17; of the other 12, about 10 are retraction notices themselves, 1 a retracted preprint Crossref does not mark, and 1 unverified. A notice is never treated as a retracted work.",
+  "_notice_note": "A record is a retraction notice when OpenAlex types it as one, or when its title starts like one. Matched case-insensitively at the start of the title.",
+  "notice_types": ["retraction"],
+  "notice_title_patterns": [
+    "^\\s*retracted\\s*[:.\\-]",
+    "^\\s*retraction\\s*(?:note|notice|statement)?\\s*[:.\\-]",
+    "^\\s*(?:notice|statement)\\s+of\\s+retraction\\b",
+    "^\\s*retraction\\s+(?:note|notice)\\b",
+    "^\\s*withdrawal\\b",
+    "^\\s*withdrawn\\s*[:.\\-]"
+  ],
+  "severity": "low",
+  "retracted_work_reason": "OpenAlex marks this work as possibly retracted ('{title}'); Crossref, which did not find this work, could not confirm it. Possible retraction, please verify on the publisher's page: {url}. Not counted for readiness.",
+  "notice_reason": "This entry matches a retraction notice in OpenAlex ('{title}'), not a research work. Please check whether the entry means to cite the notice itself or the work it retracts: {url}. Not counted for readiness.",
+  "unknown_url": "the record could not be linked; search the title on the publisher's site"
+}

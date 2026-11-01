@@ -84,6 +84,10 @@ DEFAULTS = {
     # (e.g. a DataCite record with every author packed into one creator).
     # Each item: {"doi", "entry", "registry", "why"}.
     "extra_valid_doi_controls": [],
+    # BUG-640: works OpenAlex marks retracted and lists without a DOI, cited
+    # by title alone, so a lookup can reach OpenAlex's title search.
+    "openalex_retraction_rows": 25,
+    "openalex_retraction_seed": 640,
     "notice_title_pattern": r"notice of|retraction|withdrawn|expression of concern",
     "accusation_words": r"fake|fabricat|fraud|forg|plagiar|dishonest|false",
 }
@@ -1063,6 +1067,138 @@ async def _part_b(ctx, config, patterns, settings, client, cache_stats):
     return outcomes, notes, drafts_by_type
 
 
+def _openalex_entry(work):
+    """An APA-shaped entry, without a DOI, from an OpenAlex work."""
+    names = []
+    for authorship in work.get("authorships") or []:
+        display = _clean((authorship.get("author") or {}).get("display_name"))
+        parts = display.split()
+        if len(parts) >= 2:
+            initials = " ".join(f"{p[0]}." for p in parts[:-1])
+            names.append(f"{parts[-1]}, {initials}")
+    location = (work.get("primary_location") or {}).get("source") or {}
+    source = _clean(location.get("display_name"))
+    title = _clean(work.get("display_name")).rstrip(".")
+    year = work.get("publication_year")
+    if not (names and source and title and year):
+        return None
+    authors = names[0] if len(names) == 1 else ", ".join(names[:-1]) + ", & " + names[-1]
+    return f"{authors} ({year}). {title}. {source}."
+
+
+async def _openalex_retraction_part(ctx, config, patterns, settings, client):
+    """Entries for works OpenAlex alone marks retracted, cited without a DOI.
+
+    The case list is frozen on first build, like the existence cases. Each
+    entry runs the product's own lookup: Crossref's title search first, then
+    OpenAlex's. Only where OpenAlex answers can the lead appear."""
+    frozen = ctx.golden / LANE / "openalex_retraction_cases.json"
+    notes = []
+    if not frozen.exists():
+        data = await _json(
+            client,
+            "https://api.openalex.org/works",
+            {
+                "filter": "is_retracted:true,has_doi:false",
+                "sample": str(config["openalex_retraction_rows"]),
+                "seed": str(config["openalex_retraction_seed"]),
+                "per_page": str(config["openalex_retraction_rows"]),
+                "select": "id,display_name,publication_year,type,authorships,primary_location",
+            },
+        )
+        cases = []
+        for work in (data or {}).get("results") or []:
+            entry = _openalex_entry(work)
+            if entry:
+                title = _clean(work.get("display_name")).casefold()
+                cases.append(
+                    {
+                        "openalex_id": work.get("id"),
+                        "entry": entry,
+                        "record_type": work.get("type"),
+                        # By construction: a record typed or titled as a notice.
+                        "is_notice": (work.get("type") or "") == "retraction"
+                        or title.startswith(("retracted", "retraction")),
+                    }
+                )
+        built = {"built_on": datetime.now(UTC).date().isoformat(), "cases": cases}
+        frozen.write_text(json.dumps(built, indent=1), encoding="utf-8")
+    cases = json.loads(frozen.read_text(encoding="utf-8"))["cases"]
+    outcomes = []
+    for start in range(0, len(cases), config["plants_per_copy"]):
+        chunk = cases[start : start + config["plants_per_copy"]]
+        host = load_extraction(ctx.extractions / f"{config['host_for_entries']}.json")
+        drafts = _plant_entries(host, patterns, [c["entry"] for c in chunk])
+        try:
+            verdicts = await _verify_entries(client, settings, drafts)
+        except RateLimited as stop:
+            notes.append(f"stopped early: {stop}")
+            break
+        for case, draft, (verdict, flag) in zip(chunk, drafts, verdicts, strict=False):
+            reason = (flag.detail.get("reason") if flag else "") or ""
+            parsed = draft.parse_status == CitationParseStatus.parsed and bool(draft.title)
+            outcomes.append(
+                {
+                    **case,
+                    "parsed": parsed,
+                    "verdict": verdict.kind.value,
+                    "answered_by": verdict.result.provider if verdict.result else None,
+                    "search_matched": verdict.search_identity is not None,
+                    "flag_kind": flag.detail.get("kind") if flag else None,
+                    "flag_severity": str(flag.severity) if flag else None,
+                    "counted": bool(flag) and flag.detail.get("affects_readiness") is not False,
+                    "flag_reason": reason or None,
+                    "accusation_wording": bool(
+                        re.search(config["accusation_words"], reason, re.IGNORECASE)
+                    ),
+                }
+            )
+    return outcomes, notes
+
+
+RETRACTION_LEADS = {"possible_retraction_unconfirmed", "retraction_notice_cited"}
+
+
+def _openalex_retraction_rows(outcomes):
+    reached = [
+        o
+        for o in outcomes
+        if o["parsed"] and o["answered_by"] == "openalex" and o["search_matched"]
+    ]
+    leads = [o for o in reached if o["flag_kind"] in RETRACTION_LEADS]
+    offered = [o for o in leads if o["flag_severity"] == "low" and not o["counted"]]
+    all_leads = [o for o in outcomes if o["flag_kind"] in RETRACTION_LEADS]
+    return [
+        rate_row(
+            LANE,
+            "OpenAlex-only retraction offered as an uncounted Low lead",
+            "entry",
+            len(offered),
+            len(reached),
+            note="Works OpenAlex marks retracted, without a DOI, cited by title (BUG-640). "
+            "Only an entry OpenAlex's title search identified can carry the lead; the rest "
+            "are answered by Crossref first or not found (see the details).",
+        ),
+        rate_row(
+            LANE,
+            "a retraction notice described as a notice, a retracted work as a work",
+            "lead",
+            sum((o["flag_kind"] == "retraction_notice_cited") == o["is_notice"] for o in leads),
+            len(leads),
+            note="Notice by construction: OpenAlex types it a retraction, or its title opens "
+            "with 'Retracted' or 'Retraction'.",
+        ),
+        rate_row(
+            LANE,
+            "wording check OpenAlex retraction leads",
+            "lead",
+            sum(not o["accusation_wording"] for o in all_leads),
+            len(all_leads),
+            note="Leads with no accusation word in their text.",
+        ),
+    ]
+
+
 def _part_b_rows(outcomes):
     rows = []
     expected = {
@@ -1333,9 +1469,12 @@ def run(ctx: Context) -> tuple[list[MetricRow], dict]:
             part_a = await _part_a(ctx, config, patterns, settings)
             unread_cases = await _unread_page_cases(ctx, config, patterns, settings)
             part_b = await _part_b(ctx, config, patterns, settings, client, transport)
-        return part_a, unread_cases, part_b, transport
+            oa_part = await _openalex_retraction_part(ctx, config, patterns, settings, client)
+        return part_a, unread_cases, part_b, oa_part, transport
 
-    part_a, unread_cases, (outcomes, notes, counts), transport = asyncio.run(go())
+    part_a, unread_cases, part_b, oa_part, transport = asyncio.run(go())
+    outcomes, notes, counts = part_b
+    oa_outcomes, oa_notes = oa_part
     rows, details = [], {"unread_page_cases": unread_cases}
     if isinstance(part_a, tuple):
         tally, new_counts, unmatched, records, coverage = part_a
@@ -1351,12 +1490,18 @@ def run(ctx: Context) -> tuple[list[MetricRow], dict]:
         details["linkage_coverage"] = part_a
     rows += _unread_page_rows(unread_cases)
     rows += _part_b_rows(outcomes)
+    rows += _openalex_retraction_rows(oa_outcomes)
     rows += real_precision_rows(ctx.golden, LANE)
     details.update(
         {
             "existence_plants": outcomes,
             "existence_candidates": counts,
             "existence_notes": notes,
+            "openalex_retraction_plants": oa_outcomes,
+            "openalex_retraction_answered_by": dict(
+                Counter(str(o["answered_by"]) for o in oa_outcomes)
+            ),
+            "openalex_retraction_notes": oa_notes,
             "registry_requests_sent": transport.sent,
             "registry_cache_hits": transport.hits,
             "registry_answers_fetched_on": sorted(transport.fetched_on),
