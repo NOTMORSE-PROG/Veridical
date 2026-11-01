@@ -356,9 +356,19 @@ def _extract_outcome_prose(
         if block.is_furniture or not block.text.strip():
             continue
         text = block.text.strip()
-        if not _has_words(text) or any(re.search(p, text, re.I) for p in cues.caption_patterns):
-            # Table cells, a stray page number or a caption are not prose and
-            # do not open a new section; a sentence never continues through them.
+        ends_sentence = _ENDS_CLAUSE.search(text) is not None
+        if not _has_words(text) and not ends_sentence:
+            # A lone page number between pages is skipped and the sentence
+            # carries on across it; other number lines (table cells) are not
+            # prose and end it. A number line that ends a sentence ("4.52.")
+            # is the sentence's last line and is read as prose.
+            if not _PAGE_NUMBER.fullmatch(text):
+                _flush()
+            continue
+        if not ends_sentence and any(re.search(p, text, re.I) for p in cues.caption_patterns):
+            # A caption is not prose and does not open a new section; a
+            # sentence never continues through it. "Table 4.2 shows that ..."
+            # is prose: the patterns leave out a reporting verb after the number.
             _flush()
             continue
         if _is_heading_like(text, max_words=heading_max_words):
@@ -379,6 +389,7 @@ def _extract_outcome_prose(
 
 
 _WORD_OF_LETTERS = re.compile(r"[^\W\d_]{2,}")
+_PAGE_NUMBER = re.compile(r"\d{1,4}")
 _ENDS_CLAUSE = re.compile(r"[.!?:][\"'”’)\]]*$")
 
 
@@ -413,10 +424,15 @@ def _outcome_sentences(run: list[TextBlock], cues: AgreementCues) -> list[Statem
     joined, ranges = _joined_with_offsets(run)
     out = []
     for start, end in _sentence_spans(joined):
-        sentence = _normalize(joined[start:end])
+        span = joined[start:end]
         if cues.leading_note_pattern:
-            # "(Appendix 5)" closing the previous sentence is not part of this one.
-            sentence = re.sub(cues.leading_note_pattern, "", sentence, count=1)
+            # "(Appendix 5)" closing the previous sentence is not part of this
+            # one, and the sentence is anchored where it starts after the note.
+            note = re.match(cues.leading_note_pattern, span.lstrip())
+            if note:
+                start += len(span) - len(span.lstrip()) + note.end()
+                span = joined[start:end]
+        sentence = _normalize(span)
         if not sentence or not _is_whole_sentence(sentence):
             continue
         lowered = sentence.lower()

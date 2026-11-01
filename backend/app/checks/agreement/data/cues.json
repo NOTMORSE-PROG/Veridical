@@ -277,8 +277,9 @@
     "OpenAPI"
   ],
   "_source_bug626": "BUG-626 (2026-11-01): result sentences are read across wrapped lines. A caption line is not prose, so a sentence never continues through one; and a short note in brackets that closes the previous sentence, such as '(Appendix 5)', is not part of the next one.",
+  "_caption_patterns_note": "A caption line: 'Table 4.3 weighted mean of the respondents' evaluation'. A line where a reporting verb follows the number ('Table 4.2 shows that ...') is a sentence, not a caption, and so is any line that ends a sentence.",
   "caption_patterns": [
-    "^\\s*(?:table|figure|fig\\.|chart|graph)\\s*\\d"
+    "^\\s*(?:table|figure|fig\\.|chart|graph)\\s*\\d+(?:\\.\\d+)*[.:]?\\s+(?!(?:shows?|presents?|illustrates?|reveals?|indicates?|summari[sz]es?|lists?|displays?|compares?|demonstrates?|contains?|gives?|provides?|reports?|depicts?|describes?|highlights?|confirms?|suggests?)\\b)"
   ],
   "leading_note_pattern": "^\\([^()]{1,40}\\)\\s+(?=[A-Z])"
 }
