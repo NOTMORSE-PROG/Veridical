@@ -183,10 +183,10 @@ function SharedPairs({ listId, items, open, shown, onToggle, onMore, evidence }:
       {open && <>
         {evidence?.failed && <p className="signal-field-hint">Original pages could not be loaded. The quotations above are what VERIDICAL recorded.</p>}
         <ol className="signal-shared-pairs__grid">{visible.map((group, index) => <li key={`${group.text}|${group.anchor}`} id={`${listId}-objective-${index}`} tabIndex={-1} className="signal-pair-card">
-          <p className="signal-pair-card__tag">Objective {index + 1}{group.anchor.trim() && <span> · {instructorAnchor(group.anchor)}</span>}</p>
+          <p className="signal-pair-card__tag">Objective {index + 1}</p>
           <blockquote className="signal-pair-card__quote">“{group.text}”</blockquote>
           <PairSource evidence={evidence} side="objective" text={group.text} anchor={group.anchor}
-            accessibleName={`Open page, objective ${index + 1}${group.anchor.trim() ? `, ${instructorAnchor(group.anchor)}` : ""}`}
+            accessibleName={`Open ${instructorAnchor(group.anchor)}, objective ${index + 1}`}
             title={`Objective ${index + 1}${group.anchor.trim() ? `, ${instructorAnchor(group.anchor)}` : ""}`}
             counterpart={group.results} />
           {group.results.length > 0
@@ -194,7 +194,7 @@ function SharedPairs({ listId, items, open, shown, onToggle, onMore, evidence }:
               <p className="signal-pair-card__tag">Compared with {group.results.length} {group.results.length === 1 ? "result" : "results"}</p>
               <ul>{group.results.map((result, place) => <li key={`${result.text}|${result.anchor}`}><span>“{result.text}”</span>
                 <PairSource evidence={evidence} side="result" text={result.text} anchor={result.anchor}
-                  accessibleName={`Open page, result ${place + 1} of ${group.results.length} for objective ${index + 1}${result.anchor.trim() ? `, ${instructorAnchor(result.anchor)}` : ""}`}
+                  accessibleName={`Open ${instructorAnchor(result.anchor)}, result ${place + 1} of ${group.results.length} for objective ${index + 1}`}
                   title={`Result compared with objective ${index + 1}${result.anchor.trim() ? `, ${instructorAnchor(result.anchor)}` : ""}`}
                   counterpart={[{ text: group.text, anchor: group.anchor }]} /></li>)}</ul>
             </div>
@@ -226,10 +226,12 @@ function PairSource({ evidence, side, text, anchor, accessibleName, title, count
 }) {
   const roles: readonly string[] = SIDE_ROLES[side];
   const reference = evidence?.manifest?.references.find(ref => roles.includes(ref.role) && ref.quote === text && (ref.anchor ?? "") === anchor);
+  if (!anchor.trim()) return <span className="signal-pair-card__source signal-field-hint">No page was saved for this statement.</span>;
+  const page = instructorAnchor(anchor);
   return <span className="signal-pair-card__source">
-    {anchor.trim() ? <cite>{instructorAnchor(anchor)}</cite> : <span className="signal-field-hint">No page was saved for this statement.</span>}
-    {evidence?.manifest && reference && anchor.trim() && <SharedPageButton token={evidence.token} snapshot={evidence.manifest.snapshot_id} reference={reference}
-      accessibleName={accessibleName} title={title}
+    {!(evidence?.manifest && reference) && <cite>{page}</cite>}
+    {evidence?.manifest && reference && <SharedPageButton token={evidence.token} snapshot={evidence.manifest.snapshot_id} reference={reference}
+      label={`Open ${page}`} className="signal-pair-card__open" accessibleName={accessibleName} title={title}
       context={<section aria-label="Statement and what it was compared with" className="signal-pair-dialog">
         <h3>{side === "objective" ? "Statement selected as an objective" : "Statement selected as a result"}</h3>
         <blockquote>“{text}”</blockquote>

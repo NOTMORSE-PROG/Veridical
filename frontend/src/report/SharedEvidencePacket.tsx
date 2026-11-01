@@ -68,14 +68,15 @@ function SharedPageImage({ query, reference, large }: { query: SharedPageQuery; 
 /** One statement's original page in a dialog, with what it was compared with
  * beside it. Nothing loads until the button is pressed, and the button stays
  * when the page turns out to be gone so focus has somewhere to return. */
-export function SharedPageButton({ token, snapshot, reference, accessibleName, title, context }: {
+export function SharedPageButton({ token, snapshot, reference, accessibleName, title, context, label = "Open page", className }: {
   token: string; snapshot: string; reference: EvidenceReference;
   accessibleName: string; title: string; context: ReactNode;
+  label?: string; className?: string;
 }) {
   const [dialog, setDialog] = useState(false);
   const query = useSharedSourcePage(token, snapshot, reference.reference_id, dialog);
   return <>
-    <Button variant="quiet" aria-label={accessibleName} onClick={() => setDialog(true)}>Open page</Button>
+    <Button variant="quiet" className={className} aria-label={accessibleName} onClick={() => setDialog(true)}>{label}</Button>
     {dialog && <Dialog title={title} wide className="signal-dialog--source-context" onClose={() => setDialog(false)}>
       <EvidenceSourceLayout source={<SharedPageImage query={query} reference={reference} large />} context={context} />
     </Dialog>}

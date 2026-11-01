@@ -119,8 +119,8 @@ it("opens each statement's original page from the adviser's card, with what it w
   showShared(saved, manifestFor(saved));
   fireEvent.click(screen.getByRole("button", { name: "Show the objective" }));
   expect(fetchMock).not.toHaveBeenCalled();
-  expect(screen.getByRole("button", { name: "Open page, result 1 of 1 for objective 1, p. 40" })).toBeInTheDocument();
-  const open = screen.getByRole("button", { name: "Open page, objective 1, p. 3" });
+  expect(screen.getByRole("button", { name: "Open p. 40, result 1 of 1 for objective 1" })).toBeInTheDocument();
+  const open = screen.getByRole("button", { name: "Open p. 3, objective 1" });
   fireEvent.click(open);
   const dialog = await screen.findByRole("dialog", { name: "Objective 1, p. 3" });
   expect(within(dialog).getByText("Statement selected as an objective")).toBeInTheDocument();
@@ -133,7 +133,7 @@ it("keeps the cards as text when the original pages could not be loaded", () => 
   showShared(pairs(1), undefined, true);
   fireEvent.click(screen.getByRole("button", { name: "Show the objective" }));
   expect(screen.getByText("Original pages could not be loaded. The quotations above are what VERIDICAL recorded.")).toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: /^Open page/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /^Open p./ })).not.toBeInTheDocument();
   expect(screen.getByText("“Objective 1”")).toBeInTheDocument();
 });
 
@@ -146,7 +146,7 @@ it("lists the same result once per page, not once per wording, and says when no 
   showShared(saved, manifestFor(saved));
   fireEvent.click(screen.getByRole("button", { name: "Show the objective" }));
   expect(screen.getByText("Compared with 3 results")).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Open page, result 2 of 3 for objective 1, p. 41" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Open p. 41, result 2 of 3 for objective 1" })).toBeInTheDocument();
   expect(screen.getByText("No page was saved for this statement.")).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: /result 3 of 3/ })).not.toBeInTheDocument();
 });

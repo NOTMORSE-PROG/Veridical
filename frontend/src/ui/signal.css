@@ -9260,18 +9260,22 @@
   .signal-shared-pairs__head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--signal-space-3); }
   .signal-shared-pairs__title { font-weight: var(--signal-weight-semibold); }
   .signal-shared-pairs > div[id] { display: grid; gap: var(--signal-space-3); }
-  /* Two cards a row: four shown fill two rows, and no card stretches to its neighbour's height. */
-  .signal-shared-pairs__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: var(--signal-space-3); margin: 0; padding: 0; list-style: none; }
+  /* Two cards a row, each as tall as its neighbour so the rows' edges line up. */
+  .signal-shared-pairs__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: stretch; gap: var(--signal-space-3); margin: 0; padding: 0; list-style: none; }
   .signal-pair-card { display: grid; align-content: start; gap: var(--signal-space-2); padding: var(--signal-space-4); border: var(--signal-border-hairline) solid var(--color-signal-border); border-radius: var(--signal-radius-control); background: var(--color-signal-surface); min-inline-size: 0; }
   .signal-pair-card__tag { font-size: var(--signal-type-label); font-weight: var(--signal-weight-semibold); color: var(--color-signal-ink-secondary); }
   .signal-pair-card__tag span { font-weight: var(--signal-weight-medium); }
   .signal-pair-card__quote { margin: 0; padding-inline-start: var(--signal-space-3); border-inline-start: var(--signal-border-emphasis) solid var(--color-signal-brand); overflow-wrap: anywhere; }
   .signal-pair-card__results { display: grid; gap: var(--signal-space-1); padding-block-start: var(--signal-space-2); border-block-start: var(--signal-border-hairline) solid var(--color-signal-border); }
-  .signal-pair-card__results ul { display: grid; gap: var(--signal-space-2); margin: 0; padding: 0; list-style: none; }
+  .signal-pair-card__results ul { display: grid; gap: var(--signal-space-3); margin: 0; padding: 0; list-style: none; }
   .signal-pair-card__results li { display: grid; gap: var(--signal-space-1); font-size: var(--signal-type-label); overflow-wrap: anywhere; }
   .signal-pair-card__results cite { font-style: normal; color: var(--color-signal-ink-secondary); }
   /* A statement's page with the button that opens it, on one wrapping row. */
-  .signal-pair-card__source { display: flex; flex-wrap: wrap; align-items: center; gap: var(--signal-space-2); font-size: var(--signal-type-label); }
+  .signal-pair-card__source { display: block; font-size: var(--signal-type-label); }
+  /* A text link, flush with the quote above it: no button padding to push it
+     off the card's left edge, but still a full-height target. */
+  .signal-pair-card__source .signal-pair-card__open { min-height: var(--signal-inline-action-min-height); padding: 0; font-size: var(--signal-type-label); text-decoration: underline; text-underline-offset: var(--signal-link-underline-offset); }
+  .signal-pair-card__source .signal-pair-card__open:hover { background: transparent; text-decoration-thickness: var(--signal-border-emphasis); }
   .signal-pair-card__source cite { font-style: normal; color: var(--color-signal-ink-secondary); }
   .signal-pair-dialog { display: grid; gap: var(--signal-space-2); }
   .signal-pair-dialog :is(h3, h4, blockquote, ul, p) { margin: 0; }
