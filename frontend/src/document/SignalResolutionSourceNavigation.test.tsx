@@ -384,11 +384,12 @@ it.each(["explicit return", "browser Back"])("full report restores the exact sav
   await act(async () => { control.release(PARAGRAPHS); });
   await screen.findByText("The requested source paragraph");
   const back = screen.getByRole("link", { name: "Return to saved judgment" });
-  expect(back).toHaveAttribute("href", "/report/5?criterion_record=77&sentinel=kept&review_step=grades#signal-saved-source-5-77-0");
+  // The details dialog the source was opened from is part of the way back.
+  expect(back).toHaveAttribute("href", "/report/5?criterion_record=77&sentinel=kept&review_step=grades&criterion_details=77#signal-saved-source-5-77-0");
   if (mode === "explicit return") { back.focus(); fireEvent.click(back); }
   else await act(async () => { await control.router.navigate(-1); });
   await waitFor(() => expect(document.getElementById("signal-saved-source-5-77-0")).toHaveFocus());
-  expect(document.getElementById("signal-saved-source-5-77-0")?.closest("details")).toHaveProperty("open", true);
+  expect(document.getElementById("signal-saved-source-5-77-0")?.closest("[role=dialog]")).not.toBeNull();
   expect(control.router.state.location.search).toContain("sentinel=kept");
   expect(control.router.state.location.search).toContain("criterion_record=77");
   expect(control.router.state.location.state).toEqual({ notice: "retained" });

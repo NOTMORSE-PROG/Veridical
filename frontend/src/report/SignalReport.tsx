@@ -247,7 +247,7 @@ export function SignalReportPage() {
                   }}>{label}</button>)}
             </div>
             <div role="tabpanel" id="record-panel-grades" aria-labelledby="record-tab-grades" hidden={tab !== "grades"}>
-              <SignalCriteriaResults results={report.results} checkRunId={report.check_run_id} />
+              <SignalCriteriaResults results={report.results} checkRunId={report.check_run_id} detailsInDialog />
             </div>
             <div role="tabpanel" id="record-panel-findings" aria-labelledby="record-tab-findings" hidden={tab !== "findings"}>
               <SignalFlagsPanel checkRunId={report.check_run_id} unresolvedHighFlagCount={report.unresolved_high_flag_count} originalityScope={report.originality_scope} statisticalScope={report.statistical_check_scope} active={tab === "findings"} />

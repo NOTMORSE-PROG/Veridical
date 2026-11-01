@@ -925,15 +925,29 @@ expect(screen.getByText("Not scored. Does not affect readiness or block your dec
     renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
 
     await screen.findByText("Chapter 1 states the research problem");
-    // jsdom doesn't compute an implicit ARIA role for a bare <summary>
-    // (Chromium does: "button"), so query it directly rather than via
-    // getByRole -- the aria-label itself, which real assistive tech
-    // reads, is what this regression test actually needs to prove.
-    const summaries = Array.from(document.querySelectorAll(".signal-result-card summary"));
+    // On the full report the details open in a dialog from a button; its
+    // accessible name still names the criterion.
+    const summaries = Array.from(document.querySelectorAll(".signal-result-card .signal-result-card__details"));
     expect(summaries.map((s) => s.getAttribute("aria-label"))).toEqual([
-      "AI assessment details: source coverage not recorded: Chapter 1 states the research problem",
-      "AI assessment details: source coverage not recorded: Findings answer the stated research questions",
+      "AI assessment details, Chapter 1 states the research problem",
+      "AI assessment details, Findings answer the stated research questions",
     ]);
+  });
+
+  it("BUG-570: opens a criterion's assessment details in a dialog, so no card changes size", async () => {
+    stubReport({ ...BASE_REPORT, results: [{ ...BASE_REPORT.results[0], criterion_id: 1, text: "Chapter 1 states the research problem" }] });
+    renderWithProviders(<SignalReportPage />, { route: "/report/5", path: "/report/:checkRunId" });
+    await screen.findByText("Chapter 1 states the research problem");
+    expect(document.querySelector(".signal-result-card details")).toBeNull();
+    const open = document.querySelector<HTMLButtonElement>(".signal-result-card .signal-result-card__details")!;
+    expect(open).toHaveAttribute("aria-haspopup", "dialog");
+    open.focus();
+    fireEvent.click(open);
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByRole("heading", { level: 2 })).toHaveTextContent("Chapter 1 states the research problem");
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await waitFor(() => expect(document.querySelector(".signal-result-card .signal-result-card__details")).toHaveFocus());
   });
 
   it("BUG-168: states the problem, in the product's own vocabulary, on the card heading -- not just the student's excerpt", async () => {
