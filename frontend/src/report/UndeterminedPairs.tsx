@@ -183,12 +183,14 @@ function SharedPairs({ listId, items, open, shown, onToggle, onMore, evidence }:
       {open && <>
         {evidence?.failed && <p className="signal-field-hint">Original pages could not be loaded. The quotations above are what VERIDICAL recorded.</p>}
         <ol className="signal-shared-pairs__grid">{visible.map((group, index) => <li key={`${group.text}|${group.anchor}`} id={`${listId}-objective-${index}`} tabIndex={-1} className="signal-pair-card">
+          <div className="signal-pair-card__objective">
           <p className="signal-pair-card__tag">Objective {index + 1}</p>
           <blockquote className="signal-pair-card__quote">“{group.text}”</blockquote>
           <PairSource evidence={evidence} side="objective" text={group.text} anchor={group.anchor}
             accessibleName={`Open ${instructorAnchor(group.anchor)}, objective ${index + 1}`}
             title={`Objective ${index + 1}${group.anchor.trim() ? `, ${instructorAnchor(group.anchor)}` : ""}`}
             counterpart={group.results} />
+          </div>
           {group.results.length > 0
             ? <div className="signal-pair-card__results">
               <p className="signal-pair-card__tag">Compared with {group.results.length} {group.results.length === 1 ? "result" : "results"}</p>
@@ -198,7 +200,7 @@ function SharedPairs({ listId, items, open, shown, onToggle, onMore, evidence }:
                   title={`Result compared with objective ${index + 1}${result.anchor.trim() ? `, ${instructorAnchor(result.anchor)}` : ""}`}
                   counterpart={[{ text: group.text, anchor: group.anchor }]} /></li>)}</ul>
             </div>
-            : <p className="signal-field-hint">The result it was compared with was not saved with this link.</p>}
+            : <p className="signal-pair-card__results signal-field-hint">The result it was compared with was not saved with this link.</p>}
         </li>)}</ol>
         {visible.length < all.length && <Button variant="secondary" onClick={onMore}>Show {Math.min(SHARED_GROUPS_SHOWN, all.length - visible.length)} more</Button>}
       </>}
