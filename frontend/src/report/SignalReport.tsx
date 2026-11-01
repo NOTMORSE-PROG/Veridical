@@ -233,7 +233,7 @@ export function SignalReportPage() {
             <div role="tablist" aria-label="Report record sections" className="signal-record-tabs">
               {([["grades", `Criterion records (${report.results.length})`],
                 ["findings", `Integrity findings (${flagsQuery.data ? flagsQuery.data.filter(flag => !isOptionalComparisonLead(flag) && !isUncountedRecencyNote(flag) && !isLegacyUndecided(flag)).length : "…"})`],
-                ["images", `Image readings (${report.figure_readings?.length ?? 0})`],
+                ["images", `Image descriptions (${report.figure_readings?.filter((item) => item.status === "available").length ?? 0} of ${report.figure_readings?.length ?? 0})`],
                 ["limits", `Assessment limits (${limits.length})`]] as const).map(([value, label]) =>
                 <button key={value} type="button" role="tab" id={`record-tab-${value}`} aria-controls={`record-panel-${value}`} aria-selected={tab === value}
                   tabIndex={tab === value ? 0 : -1} onClick={() => selectTab(value)}
@@ -254,7 +254,7 @@ export function SignalReportPage() {
             </div>
             <div role="tabpanel" id="record-panel-images" aria-labelledby="record-tab-images" hidden={tab !== "images"}>
               {report.figure_readings?.length ? <FigureReadingsSummary readings={report.figure_readings} checkRunId={report.check_run_id} />
-                : <EmptyState title="No image readings"><p>This check saved no visual readings. Images that were not read are not treated as passed.</p></EmptyState>}
+                : <EmptyState title="No image descriptions"><p>This check saved no image descriptions. Images without a description are not treated as passed.</p></EmptyState>}
             </div>
             <div role="tabpanel" id="record-panel-limits" aria-labelledby="record-tab-limits" hidden={tab !== "limits"} className="signal-group-flow signal-report-notices">
               {report.previous_status && <section className="signal-report-history" aria-label="Previous check comparison"><span>Previous run</span><ReadinessBand status={report.previous_status} /><span aria-hidden="true">→</span><span>Current run</span><ReadinessBand status={report.status} /><p>Bands come from separate historical runs. Open Audit for the underlying reproducible values.</p></section>}

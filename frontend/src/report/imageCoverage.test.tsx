@@ -42,8 +42,8 @@ describe("saved image assessment coverage", () => {
       { image_index: 1, page: 121, paragraph: null, reason: "size_filter" },
     ] }, 12);
     expect(item.sources!.map((source) => source.label)).toEqual([
-      "Page 120: Outside image-reading size limits (1 image occurrence, drawn in the PDF as 9,100 small touching pieces)",
-      "Page 121: Outside image-reading size limits (1 image occurrence)",
+      "Page 120: Outside the size limits for table and equation reading (1 image occurrence, drawn in the PDF as 9,100 small touching pieces)",
+      "Page 121: Outside the size limits for table and equation reading (1 image occurrence)",
     ]);
     expect(item.subIssues).toContain("1 listed image occurrence is drawn in the PDF as 9,100 small touching pieces. It was combined into one image when the file was prepared; its content was not assessed.");
   });
@@ -55,8 +55,8 @@ describe("saved image assessment coverage", () => {
       { image_index: 2, page: 121, paragraph: null, reason: "size_filter", piece_count: 3 },
     ] }, 12);
     expect(item.sources!.map((source) => source.label)).toEqual([
-      "Page 120: Outside image-reading size limits (2 image occurrences; 1 drawn in the PDF as 9,100 small touching pieces)",
-      "Page 121: Outside image-reading size limits (1 image occurrence, drawn in the PDF as 3 small touching pieces)",
+      "Page 120: Outside the size limits for table and equation reading (2 image occurrences; 1 drawn in the PDF as 9,100 small touching pieces)",
+      "Page 121: Outside the size limits for table and equation reading (1 image occurrence, drawn in the PDF as 3 small touching pieces)",
     ]);
     expect(item.subIssues).toContain("2 listed image occurrences are drawn in the PDF as small touching pieces (9,103 in all). Each was combined into one image when the file was prepared; their content was not assessed.");
   });
@@ -66,7 +66,7 @@ describe("saved image assessment coverage", () => {
       { image_index: 0, page: 120, paragraph: null, reason: "size_filter", piece_count: 9100 },
       { image_index: 1, page: 120, paragraph: null, reason: "size_filter", piece_count: 3 },
     ] }, 12);
-    expect(item.sources![0].label).toBe("Page 120: Outside image-reading size limits (2 image occurrences, each drawn in the PDF as small touching pieces, 9,103 in all)");
+    expect(item.sources![0].label).toBe("Page 120: Outside the size limits for table and equation reading (2 image occurrences, each drawn in the PDF as small touching pieces, 9,103 in all)");
   });
 
   it("does not mention pieces when every image is a single piece", () => {

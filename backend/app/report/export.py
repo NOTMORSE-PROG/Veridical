@@ -2023,14 +2023,18 @@ def _build_report_pdf(data: ReportExportData, image_path) -> bytes:
     if data.report.figure_readings:
         readings = data.report.figure_readings
         available = [item for item in readings if item.status == "available"]
-        flow.append(Paragraph("Saved visual readings", styles["h2"]))
+        flow.append(Paragraph("Saved image descriptions", styles["h2"]))
         flow.append(
             Paragraph(
                 escape(
-                    f"Visual readings are available for {len(available)} of {len(readings)} "
-                    f"image occurrences. {len(readings) - len(available)} remain unassessed. "
-                    "Visual readings do not establish that statistical values in images "
-                    "were checked or that rubric criteria were met."
+                    f"Descriptions of what an image shows are saved for {len(available)} of "
+                    f"{len(readings)} image "
+                    f"{'occurrence' if len(readings) == 1 else 'occurrences'}. "
+                    f"{len(readings) - len(available)} "
+                    f"{'has' if len(readings) - len(available) == 1 else 'have'} "
+                    "no description. They are not table or equation readings and are not "
+                    "counted toward any grade. A description does not show that statistical "
+                    "values in images were checked or that rubric criteria were met."
                 ),
                 styles["body"],
             )
@@ -2065,7 +2069,7 @@ def _build_report_pdf(data: ReportExportData, image_path) -> bytes:
             if item.status != "available":
                 flow.append(
                     Paragraph(
-                        "No saved visual reading is available for "
+                        "No saved description is available for "
                         + (
                             "this image entry."
                             if len(reading_group) == 1

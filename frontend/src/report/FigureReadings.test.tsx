@@ -15,8 +15,8 @@ const READING: FigureReadingOut = {
 describe("saved non-scoring figure readings", () => {
   it("keeps observation, original caption and numeric limitations separate", () => {
     renderWithProviders(<FigureReadingsSummary readings={[READING]} checkRunId={12} />);
-    expect(screen.getByText(/1 of 1 image occurrences/)).toBeInTheDocument();
-    expect(screen.getByText(/do not establish that statistical values/)).toBeInTheDocument();
+    expect(screen.getByText(/1 of 1 image occurrence;/)).toBeInTheDocument();
+    expect(screen.getByText(/does not show that statistical values/)).toBeInTheDocument();
     expect(screen.getByRole("link", { hidden: true, name: /Open Extracted paragraph 71/ }))
       .toHaveAttribute("href", "/report/12/document?anchor=paragraph%2070");
     expect(screen.getByText(/Nearby source caption/)).toBeInTheDocument();
@@ -28,6 +28,6 @@ describe("saved non-scoring figure readings", () => {
   });
   it("reports historical missing readings as not assessed", () => {
     renderWithProviders(<FigureReadingDetails />);
-    expect(screen.getByText(/not recorded for this check/)).toBeInTheDocument();
+    expect(screen.getByText(/No image description was recorded for this check/)).toBeInTheDocument();
   });
 });
