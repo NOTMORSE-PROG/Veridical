@@ -132,6 +132,12 @@ export function AdviserViewPage() {
   const selectedGroup = findingGroups[selectedGroupIndex];
   const selectedFlag = selectedGroup?.flags.find(flag => flag.id === requestedFinding) ?? selectedGroup?.flags[0];
   const selectedLocationIndex = selectedGroup?.flags.findIndex(flag => flag.id === selectedFlag?.id) ?? -1;
+  // A location within the same finding keeps focus where it is.
+  const selectLocation = (id: number) => {
+    const next = new URLSearchParams(params);
+    next.set("finding", String(id));
+    setParams(next);
+  };
   const selectFinding = (trigger: HTMLElement, id: number) => {
     follow(trigger, "shared-selected-finding-heading");
     const next = new URLSearchParams(params);
@@ -221,13 +227,16 @@ export function AdviserViewPage() {
               <div className="signal-field signal-shared-finding-picker"><label htmlFor="shared-finding-choice">Choose a finding or comparison lead</label>
                 <select id="shared-finding-choice" aria-controls="shared-selected-finding" aria-describedby="shared-finding-count" value={selectedGroup.key} onChange={event => {
                   const group = findingGroups.find(item => item.key === event.target.value);
-                  if (group) selectFinding(event.currentTarget, group.flags[0].id);
-                }}>{findingGroups.map((group, index) => <option key={group.key} value={group.key}>{index + 1}. {isOptionalComparisonLead(group.flags[0]) ? "Comparison lead" : problemLabel(group.flags[0].problem_kind) ?? group.flags[0].criterion_text ?? "Possible inconsistency"} - {group.flags.length} saved location{group.flags.length === 1 ? "" : "s"}</option>)}</select>
+                  if (!group) return;
+                  const next = new URLSearchParams(params);
+                  next.set("finding", String(group.flags[0].id));
+                  setParams(next, { replace: true });
+                }}>{findingGroups.map((group, index) => <option key={group.key} value={group.key}>{index + 1}. {isOptionalComparisonLead(group.flags[0]) ? "Comparison lead" : problemLabel(group.flags[0].problem_kind) ?? group.flags[0].criterion_text ?? "Possible inconsistency"}, {group.flags.length > 1 ? `${group.flags.length} locations` : instructorAnchor(group.flags[0].page_anchor ?? "") || "no recorded location"}</option>)}</select>
                 <span id="shared-finding-count" className="signal-field-hint">{findingGroups.length} review item{findingGroups.length === 1 ? "" : "s"} in this check, from {moduleFlags.length} saved record{moduleFlags.length === 1 ? "" : "s"}.</span>
               </div>
               {/* Announced from here, outside the item that is replaced on each move. */}
-              <p role="status" className="sr-only">{noun} {selectedGroupIndex + 1} of {findingGroups.length}: {title}</p>
-              <article id="shared-selected-finding" className="signal-review-item signal-shared-finding" aria-labelledby="shared-selected-finding-heading" key={`${token}:${report.assessment_revision}:${manifest?.snapshot_id}:${selectedFlag.id}`}>
+              <p role="status" className="sr-only">{noun} {selectedGroupIndex + 1} of {findingGroups.length}: {title}{selectedGroup.flags.length > 1 ? `, location ${selectedLocationIndex + 1} of ${selectedGroup.flags.length}` : ""}</p>
+              <article id="shared-selected-finding" className="signal-review-item signal-shared-finding" aria-labelledby="shared-selected-finding-heading" key={`${token}:${report.assessment_revision}:${manifest?.snapshot_id}:${selectedGroup.key}`}>
                 <div className="signal-item-head">
                   <div className="signal-item-head__bar"><span className="signal-section-kicker">{noun} {selectedGroupIndex + 1} of {findingGroups.length}</span>
                     <nav aria-label="Shared finding navigation" className="signal-item-head__nav">
@@ -236,7 +245,7 @@ export function AdviserViewPage() {
                     </nav></div>
                   <h3 id="shared-selected-finding-heading" tabIndex={-1} className="signal-item-head__title">{title}</h3>
                   <div className="signal-item-head__chips">
-                    <span className={`signal-severity signal-severity--${flag.affects_readiness === false ? "low" : flag.severity}`}>{lead ? COMPARISON_LEAD_COPY.badge : flag.affects_readiness === false ? notCountedLabel(flag) : severityLabel(flag.severity)}</span>
+                    <span className={`signal-severity signal-severity--${flag.affects_readiness === false ? "low" : flag.severity}`}>{lead ? "Not scored" : flag.affects_readiness === false ? notCountedLabel(flag) : severityLabel(flag.severity)}</span>
                     {flag.overridden && <span className="signal-resolution-state">Resolved by instructor</span>}
                   </div>
                   {lead ? <p className="signal-field-hint">{COMPARISON_LEAD_COPY.qualification}</p>
@@ -249,14 +258,14 @@ export function AdviserViewPage() {
               <p>{detail?.ai_reasoning ?? "No additional system explanation was saved with this link."}</p>
               {detail?.p_value_comparison && <dl><div><dt>Reported in manuscript</dt><dd>{detail.p_value_comparison.reported}</dd></div><div><dt>Recalculated by the check</dt><dd>{detail.p_value_comparison.recalculated}</dd></div></dl>}
               {detail?.citation_source_locator && <CitationSourceLinks flag={{ check_kind: flag.check_kind, ai_verdict_summary: detail.ai_verdict_summary, citation_source_locator: detail.citation_source_locator }} />}
-              {detail && <CitationComparison flag={{ check_kind: flag.check_kind, ai_verdict_summary: detail.ai_verdict_summary, citation_metadata_comparison: detail.citation_metadata_comparison, citation_metadata_review_warning: detail.citation_metadata_review_warning }} />}
+              {detail && <CitationComparison headingLevel={5} flag={{ check_kind: flag.check_kind, ai_verdict_summary: detail.ai_verdict_summary, citation_metadata_comparison: detail.citation_metadata_comparison, citation_metadata_review_warning: detail.citation_metadata_review_warning }} />}
                 </section>
                 <section className="signal-item-section"><h4 className="signal-item-section__title">Quoted evidence</h4>
                   {selectedGroup.flags.length > 1 && <div className="signal-item-head__bar">
                     <span>Location {selectedLocationIndex + 1} of {selectedGroup.flags.length}: {instructorAnchor(selectedFlag.page_anchor ?? "")}</span>
                     <nav aria-label="Shared finding locations" className="signal-item-head__nav">
-                      <Button variant="secondary" disabled={selectedLocationIndex === 0} onClick={event => selectFinding(event.currentTarget, selectedGroup.flags[selectedLocationIndex - 1].id)}>Previous location</Button>
-                      <Button variant="secondary" disabled={selectedLocationIndex >= selectedGroup.flags.length - 1} onClick={event => selectFinding(event.currentTarget, selectedGroup.flags[selectedLocationIndex + 1].id)}>Next location</Button>
+                      <Button variant="secondary" disabled={selectedLocationIndex === 0} onClick={() => selectLocation(selectedGroup.flags[selectedLocationIndex - 1].id)}>Previous location</Button>
+                      <Button variant="secondary" disabled={selectedLocationIndex >= selectedGroup.flags.length - 1} onClick={() => selectLocation(selectedGroup.flags[selectedLocationIndex + 1].id)}>Next location</Button>
                     </nav></div>}
               <SharedEvidencePacket embedded token={token ?? ""} manifest={manifest} comparison={Boolean(detail?.agreement_pair || detail?.passage_pair)} references={manifest?.references.filter(ref => ref.flag_id === flag.id) ?? []}
                 context={{ title: problemLabel(flag.problem_kind) ?? flag.criterion_text ?? "Possible inconsistency", explanation: detail?.ai_reasoning ?? null, recordedNote: null }}

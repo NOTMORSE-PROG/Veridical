@@ -18,7 +18,8 @@ function safeExternal(value: string | null): string | undefined {
   } catch { return undefined; }
 }
 
-export function CitationComparison({ flag }: { flag: Pick<FlagOut, "check_kind" | "ai_verdict_summary" | "citation_metadata_comparison" | "citation_metadata_review_warning"> }) {
+export function CitationComparison({ flag, headingLevel = 3 }: { flag: Pick<FlagOut, "check_kind" | "ai_verdict_summary" | "citation_metadata_comparison" | "citation_metadata_review_warning">; headingLevel?: 3 | 5 }) {
+  const Heading = headingLevel === 5 ? "h5" : "h3";
   const headingId = useId();
   if (!isCitationMetadataFinding(flag)) return null;
   const evidence = flag.citation_metadata_comparison;
@@ -28,7 +29,7 @@ export function CitationComparison({ flag }: { flag: Pick<FlagOut, "check_kind" 
   const doiUrl = safeExternal(evidence.doi_source_url);
   const recordUrl = safeExternal(evidence.provider_record_url);
   return <section className="signal-reasoning signal-copy-flow signal-citation-comparison" aria-labelledby={headingId}>
-    <h3 id={headingId}>Recorded citation metadata comparison</h3>
+    <Heading id={headingId}>Recorded citation metadata comparison</Heading>
     <p>The check recorded differences between this reference and metadata returned for its DOI. Compare both records before deciding what needs correction. Source existence does not establish support for a manuscript claim.</p>
     <p>{flag.citation_metadata_review_warning ? "Fields marked different by the saved check" : "Fields marked different"}: {marked.join(", ") || "Not recorded"}.</p>
     <table aria-labelledby={headingId}>
