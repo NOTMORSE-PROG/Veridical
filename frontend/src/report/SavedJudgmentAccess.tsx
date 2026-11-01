@@ -1,6 +1,6 @@
 import { hasPendingRouteReturnFocus } from "../routing/useRouteFocus";
 // F8, screens 4h/4w: acknowledgment and retrieval stay distinct from grading.
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useLocation, useSearchParams } from "react-router";
 import type { ResultRowCommon } from "../api/types";
 import { CRITERION_EXCLUSION_COPY } from "../domain/criterionReview";
@@ -11,7 +11,11 @@ import { criterionRecordId, recordedGradeLabel, revealCriterionRecord, atLeastSa
 import { useReport } from "./useReport";
 import { judgmentVersion } from "./judgmentRecord";
 
-export function SavedJudgmentAccess({ checkRunId, hideEmpty = false }: { checkRunId: number; hideEmpty?: boolean }) {
+export function SavedJudgmentAccess({ checkRunId, hideEmpty = false, next }: {
+  checkRunId: number; hideEmpty?: boolean;
+  /** BUG-656: the way on after a save (the next criterion, or back to the list). */
+  next?: ReactNode;
+}) {
   const review = useCriterionReviewScope(checkRunId);
   const query = useReport(checkRunId);
   const [focusedReceipt, setFocusedReceipt] = useState<ReviewCompletion>();
@@ -41,8 +45,11 @@ export function SavedJudgmentAccess({ checkRunId, hideEmpty = false }: { checkRu
       {receipt.result.resolution?.type === "needs_document"
         ? <p>{CRITERION_EXCLUSION_COPY.recorded}. {CRITERION_EXCLUSION_COPY.noGrade}</p>
         : <p><strong>Recorded grade:</strong> {recordedGradeLabel(receipt.result)}</p>}
-      <Button variant="secondary" aria-label={`View saved judgment: ${receipt.result.text}`}
-        onClick={(event) => review.viewSaved(receipt.result.criterion_id, event.currentTarget)}>View saved judgment</Button>
+      <div className="signal-control-cluster">
+        {next}
+        <Button variant="secondary" aria-label={`View saved judgment: ${receipt.result.text}`}
+          onClick={(event) => review.viewSaved(receipt.result.criterion_id, event.currentTarget)}>View saved judgment</Button>
+      </div>
     </div>}
     {count !== undefined && <div className="signal-control-cluster">
       {qualified && <p className="signal-field-hint">Last loaded: {count} saved instructor {count === 1 ? "judgment" : "judgments"}.</p>}
