@@ -9247,12 +9247,16 @@
   .signal-shared-module-status ul { display: grid; gap: var(--signal-space-1); margin: 0; padding: 0; list-style: none; }
   /* What the check left out: under its points, after a hairline, as labelled rows. */
   .signal-shared-module-status__left-out { display: grid; gap: var(--signal-space-2); margin-block-start: var(--signal-space-3); padding-block-start: var(--signal-space-3); border-block-start: var(--signal-border-hairline) solid var(--color-signal-border); }
-  .signal-shared-module-status__subhead { margin: 0; font-size: var(--signal-type-label); font-weight: var(--signal-weight-semibold); color: var(--color-signal-ink-secondary); }
+  .signal-shared-module-status__subhead { margin: 0; }
+  /* Hints on the tinted card need the stronger secondary ink to keep 4.5:1. */
+  .signal-shared-module-status .signal-field-hint { color: var(--color-signal-ink-secondary); }
+  /* The closing line sits as far below the last row as the rows are apart. */
+  .signal-shared-left-out > div:last-child { padding-block-end: var(--signal-space-1); }
   .signal-shared-left-out dd { display: grid; gap: var(--signal-space-1); justify-items: start; }
   .signal-shared-left-out__count { font-variant-numeric: tabular-nums; }
   .signal-shared-left-out__pages { display: grid; gap: var(--signal-space-1); justify-items: start; }
   .signal-shared-left-out__pages .signal-shared-left-out__toggle { min-height: var(--signal-inline-action-min-height); padding: 0; text-decoration: underline; text-underline-offset: var(--signal-link-underline-offset); }
-  .signal-shared-left-out__list { overflow-wrap: anywhere; }
+  .signal-shared-left-out__list { overflow-wrap: anywhere; text-wrap: pretty; }
   /* The check's state as a headline, marked by tone, so the answer reads first. */
   .signal-shared-module-status { gap: var(--signal-space-1); }
   .signal-shared-module-status__kicker { font-size: var(--signal-type-label); font-weight: var(--signal-weight-semibold); letter-spacing: var(--signal-tracking-label); text-transform: uppercase; color: var(--color-signal-ink-secondary); }

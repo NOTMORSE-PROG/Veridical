@@ -136,6 +136,7 @@ export function AdviserViewPage() {
   const sharedStatus = sharedModuleStatus({ kind: selectedModule, state: selectedModuleRecord?.state ?? "not_recorded", findings: findingGroups.length - leadCount, leads: leadCount,
     coverageReason: selectedModuleRecord?.coverage_reason,
     coverageListed: Boolean(selectedCoverage) && leftOut,
+    nothingCompared: Boolean(report.originality_scope?.not_compared_reason),
     coverageShownElsewhere: Boolean(selectedModuleRecord?.agreement_scope) || (selectedModule === "originality_reuse" && Boolean(report.originality_scope)) || (selectedModule === "statistical_forensics" && Boolean(report.statistical_check_scope)),
     detailSnapshot: data.detail_snapshot });
   const requestedFinding = selectedCriterionId(params.get("finding"));

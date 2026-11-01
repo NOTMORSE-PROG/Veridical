@@ -24,7 +24,7 @@ it("lists a long page list behind a button and shows only the counts that are no
   fireEvent.click(toggle);
   expect(screen.getByRole("button", { name: "Hide page numbers" })).toHaveAttribute("aria-expanded", "true");
   expect(screen.getByText("179-181")).toBeVisible();
-  expect(screen.getByText("Images not checked")).toBeInTheDocument();
+  expect(screen.getByText("Pictures not read")).toBeInTheDocument();
   expect(screen.getByText("81")).toBeInTheDocument();
   expect(screen.queryByText("Tables not checked")).not.toBeInTheDocument();
   expect(screen.getByText("Nothing listed here was checked. It is not treated as passed, and it is not a finding.")).toBeInTheDocument();
@@ -38,7 +38,7 @@ it("shows a short page list inline, says when every check left out the same page
   expect(screen.getByText("5-6")).toBeInTheDocument();
   expect(screen.getByText("The same pages were left out by every check.")).toBeInTheDocument();
   expect(screen.getByText("Why")).toBeInTheDocument();
-  expect(screen.getByText(/The reference list could not be separated reliably/)).toBeInTheDocument();
+  expect(screen.getByText(/could not reliably split the reference list into separate entries/)).toBeInTheDocument();
 });
 
 it("does not give a reason that contradicts an originality check that compared nothing", () => {
@@ -47,6 +47,8 @@ it("does not give a reason that contradicts an originality check that compared n
   expect(screen.queryByText("Why")).not.toBeInTheDocument();
   expect(screen.queryByText(/read the rest of the paper/)).not.toBeInTheDocument();
   expect(screen.getByText("None of the text was compared, so these pages did not change this result.")).toBeInTheDocument();
+  expect(screen.getByText("Text compared")).toBeInTheDocument();
+  expect(screen.queryByText("The same pages were left out by every check.")).not.toBeInTheDocument();
 });
 
 it("says where uncompared text starts, and says when a count was saved without its pages", () => {
