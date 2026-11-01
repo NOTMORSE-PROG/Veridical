@@ -10,9 +10,9 @@ from app.checks.reuse.lexical import wording_evidence
 from app.checks.reuse.quotations import (
     cited_quotation_spans,
     load_quotation_rules,
-    pair_wording,
     quotations_in_passage,
 )
+from app.checks.reuse.set_aside import pair_wording
 from app.config import Settings
 
 RULES = load_quotation_rules(Settings().reuse_cited_quotation_rules_file)
@@ -146,7 +146,7 @@ def test_a_stray_quotation_mark_does_not_hide_a_copy_after_it():
         own = stray + COPY_65 + " " + later
         evidence = pair_wording(own, own, COPY_65, COPY_65, SETTINGS)
         assert evidence["confirmed"], stray
-        assert not evidence["cited_quotation_only"]
+        assert evidence["set_aside"] is None
 
 
 def test_an_array_index_is_not_a_citation():
@@ -169,7 +169,7 @@ def test_the_same_quotation_in_both_theses_is_not_compared():
     library = f'Garcia (2023) reported that "{SOURCE}" (p. 14).'
     evidence = pair_wording(own, own, library, library, SETTINGS)
     assert not evidence["confirmed"]
-    assert evidence["cited_quotation_only"]
+    assert evidence["set_aside"] == "cited_quotation"
 
 
 def _filler(prefix: str, n: int) -> str:

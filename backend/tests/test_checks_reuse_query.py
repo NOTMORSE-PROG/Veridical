@@ -2654,3 +2654,108 @@ async def test_a_quotation_with_its_citation_is_counted_not_raised(session_facto
     unquoted_kinds = await _flag_kinds(session_factory, results["unquoted"].id)
     assert any(kind.endswith("_passage") for kind in unquoted_kinds)
     await _assert_counts_match_flags(session_factory, results["quoted"])
+
+
+async def test_a_shared_standard_text_is_counted_and_named_not_raised(session_factory, tmp_path):
+    """BUG-637: two theses carrying the same listed standard text (here a
+    scale legend table) raise nothing; the result counts the pair and names
+    the standard. Copied prose next to it is still raised."""
+    from tests.test_reuse_standard_texts import LIKERT, _list_file
+
+    settings = get_settings().model_copy(
+        update={
+            "reuse_passage_high_similarity_threshold": 0.5,
+            "reuse_public_standard_texts_file": _list_file(tmp_path, {"Scale legend": LIKERT}),
+        }
+    )
+    copied = (
+        "Students who registered online spent less time waiting at the registrar, and the "
+        "staff said the queue was shorter during enrolment week than in the previous term."
+    )
+    other_chapter = "An unrelated chapter on deployment to the campus network."
+    source_id, _ = await _seed_manuscript_and_run(session_factory, group_label="Legend source")
+    await _add_to_library(
+        session_factory, source_id, _extraction(f"Table 2. {LIKERT}. {copied}", CH2)
+    )
+    results = {}
+    for name, chapter in (
+        ("legend", f"The respondents answered on this scale. {LIKERT}."),
+        ("legend and copy", f"The respondents answered on this scale. {LIKERT}. {copied}"),
+        (
+            "legend and quoted copy",
+            f'The respondents answered on this scale. {LIKERT}. Reyes (2019) wrote "{copied}" '
+            "(p. 4).",
+        ),
+    ):
+        own_id, own_run = await _seed_manuscript_and_run(session_factory, group_label=name)
+        async with session_factory() as session:
+            results[name] = await _run_with_saved_source(
+                session, own_id, own_run, _extraction(chapter, other_chapter), settings
+            )
+    # Only leaving out both the legend and the cited quotation stops this
+    # pair, so it is in both counts.
+    both = results["legend and quoted copy"]
+    assert await _flag_kinds(session_factory, both.id) == []
+    assert both.detail["n_shared_wording_only_in_standard_texts"] >= 1
+    assert both.detail["n_shared_wording_only_in_cited_quotations"] >= 1
+    legend = results["legend"]
+    assert await _flag_kinds(session_factory, legend.id) == []
+    assert legend.detail["n_shared_wording_only_in_standard_texts"] >= 1
+    assert legend.detail["standard_texts_set_aside"] == ["Scale legend"]
+    async with session_factory() as session:
+        details = (
+            await session.scalars(
+                text("SELECT detail FROM flag WHERE check_result_id = :id"),
+                {"id": results["legend and copy"].id},
+            )
+        ).all()
+    passage = [d for d in details if d["kind"].endswith("_passage")]
+    section = [d for d in details if not d["kind"].endswith("_passage")]
+    assert passage and section
+    # The raised findings say which standard was not counted, by name only.
+    for detail in passage + section:
+        assert detail["standard_wording_left_out"] == ["Scale legend"]
+
+
+async def test_a_deployment_standard_list_reaches_the_check_and_its_audit(
+    session_factory, tmp_path
+):
+    """BUG-637: a standard text only the deployment list carries is left out
+    of the comparison, and the audit says the deployment list was used."""
+    from tests.test_reuse_standard_texts import LIKERT, MADE_UP_STANDARD, _list_file
+
+    settings = get_settings().model_copy(
+        update={
+            "reuse_passage_high_similarity_threshold": 0.5,
+            "reuse_public_standard_texts_file": _list_file(tmp_path / "pub", {"Legend": LIKERT}),
+            "reuse_standard_texts_file": _list_file(
+                tmp_path / "dep", {"Deployment-only definition": MADE_UP_STANDARD}
+            ),
+        }
+    )
+    other_chapter = "An unrelated chapter on deployment to the campus network."
+    source_id, _ = await _seed_manuscript_and_run(session_factory, group_label="Definition A")
+    await _add_to_library(
+        session_factory, source_id, _extraction(f"We follow it: {MADE_UP_STANDARD}.", CH2)
+    )
+    own_id, own_run = await _seed_manuscript_and_run(session_factory, group_label="Definition B")
+    async with session_factory() as session:
+        result = await _run_with_saved_source(
+            session,
+            own_id,
+            own_run,
+            _extraction(f"This study adopts: {MADE_UP_STANDARD}.", other_chapter),
+            settings,
+        )
+        payload = await session.scalar(
+            text(
+                "SELECT payload FROM audit_log WHERE check_run_id = :run "
+                "AND event_type = 'originality_reuse_check_computed'"
+            ),
+            {"run": result.check_run_id},
+        )
+    assert await _flag_kinds(session_factory, result.id) == []
+    assert result.detail["standard_texts_set_aside"] == ["Deployment-only definition"]
+    lists = payload["standard_text_lists"]
+    assert (lists["public_entries"], lists["deployment_entries"]) == (1, 1)
+    assert lists["deployment"] == "loaded" and len(lists["deployment_sha256"]) == 12

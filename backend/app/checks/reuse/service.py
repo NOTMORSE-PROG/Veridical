@@ -28,8 +28,8 @@ from app.checks.reuse.query import (
     query_similar_manuscripts,
     query_similar_passages,
 )
-from app.checks.reuse.quotations import pair_wording
 from app.checks.reuse.same_work import SameWork, find_same_work, name_rules_fingerprint
+from app.checks.reuse.set_aside import pair_wording, standard_text_lists
 from app.checks.reuse.source import coarse_candidate_supported, passage_match_supported
 from app.checks.source_quality import persist_source_limitation
 from app.config import Settings
@@ -319,11 +319,21 @@ def _wording(evidence: dict) -> dict:
 
 
 def _pair_wording(pair, settings) -> dict:
-    """Shared wording between a passage pair, with quotations marked and
-    cited left out (BUG-632, `quotations.pair_wording`)."""
+    """Shared wording between a passage pair, with cited quotations and
+    standard texts left out (BUG-632, BUG-637, `set_aside.pair_wording`)."""
     return pair_wording(
         pair.own_text, pair.own_context_text, pair.matched_text, pair.matched_context_text, settings
     )
+
+
+def _standard_text_list_counts(settings) -> dict:
+    lists = standard_text_lists(settings)
+    return {
+        "public_entries": lists.public_entries,
+        "deployment_entries": lists.deployment_entries,
+        "deployment": lists.deployment_status,
+        "deployment_sha256": lists.deployment_sha256,
+    }
 
 
 def _withheld_lead(granularity: str, match, level, pair, settings) -> dict:
@@ -336,7 +346,7 @@ def _withheld_lead(granularity: str, match, level, pair, settings) -> dict:
         "matched_manuscript_id": match.matched_manuscript_id,
         "similarity": round(match.similarity, 3),
         "level": level,
-        "reason": "cited_quotation" if evidence["cited_quotation_only"] else "no_shared_wording",
+        "reason": evidence["set_aside"] or "no_shared_wording",
         **evidence,
     }
 
@@ -670,6 +680,8 @@ async def run_originality_reuse_check(
                 **_supporting_passage_detail(supporting),
                 "shared_wording": _wording(lead),
             }
+            if lead["standard_texts"]:
+                detail["standard_wording_left_out"] = lead["standard_texts"]
         elif severity == FlagSeverity.high:
             # Ticket's own fallback clause: "If a finding genuinely cannot
             # be evidenced, it should not be high severity." No real
@@ -751,7 +763,23 @@ async def run_originality_reuse_check(
             # marked and cited in the text. Judged on the nearest Library
             # passage, like the count above.
             "n_shared_wording_only_in_cited_quotations": sum(
-                lead["reason"] == "cited_quotation" for lead in withheld_leads
+                lead["reason"] in ("cited_quotation", "cited_quotation_and_standard_text")
+                for lead in withheld_leads
+            ),
+            # BUG-637: pairs whose shared wording lies only inside listed
+            # standard texts, and which standards they were, by name.
+            # A pair that only both kinds together explain is in both counts.
+            "n_shared_wording_only_in_standard_texts": sum(
+                lead["reason"] in ("standard_text", "cited_quotation_and_standard_text")
+                for lead in withheld_leads
+            ),
+            "standard_texts_set_aside": sorted(
+                {
+                    name
+                    for lead in withheld_leads
+                    if lead["reason"] in ("standard_text", "cited_quotation_and_standard_text")
+                    for name in lead["standard_texts"]
+                }
             ),
             "first_upload_context": first_upload,
             "passages_found": len(passages),
@@ -784,7 +812,12 @@ async def run_originality_reuse_check(
         severity, evidence_excerpt, page_anchor, detail = _passage_match_to_flag_draft(
             passage_match, first_upload=first_upload
         )
-        detail["shared_wording"] = _wording(_pair_wording(passage_match, settings))
+        evidence = _pair_wording(passage_match, settings)
+        detail["shared_wording"] = _wording(evidence)
+        if evidence["standard_texts"]:
+            # BUG-637: named, never quoted, so the instructor can see what
+            # was not counted as shared wording.
+            detail["standard_wording_left_out"] = evidence["standard_texts"]
         session.add(
             Flag(
                 check_result_id=result.id,
@@ -831,6 +864,9 @@ async def run_originality_reuse_check(
             # BUG-620: what was not raised and why, so a past decision can be
             # reconstructed after the Library changes. Opaque ids only.
             "withheld_leads": withheld_leads[: settings.reuse_confirm_audit_limit],
+            # BUG-637: which standard-text lists this check used, by count only,
+            # so a deployment list that failed to load is visible afterwards.
+            "standard_text_lists": _standard_text_list_counts(settings),
             "n_withheld_leads": len(withheld_leads),
             "matched_manuscript_ids": matched_manuscript_ids,
             "resubmission_source_id": same_work.sources[0].manuscript_id
