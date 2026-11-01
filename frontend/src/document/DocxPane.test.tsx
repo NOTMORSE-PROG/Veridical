@@ -195,7 +195,7 @@ describe("recorded DOCX source navigation", () => {
     fireEvent.click(expand);
     const dialog = screen.getByRole("dialog", { name: "Source image 1" });
     expect(dialog).toBeInTheDocument();
-    expect(dialog).toHaveTextContent("Image reading was not recorded for this check.");
+    expect(dialog).toHaveTextContent("No image description was recorded for this check.");
     fireEvent.click(screen.getByRole("button", { name: "Actual size" }));
     expect(screen.getByRole("button", { name: "Actual size" })).toHaveAttribute("aria-pressed", "true");
     fireEvent.keyDown(document, { key: "Escape" });
@@ -234,7 +234,7 @@ describe("recorded DOCX source navigation", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Expand image 1" }));
     expect(screen.getByRole("dialog", { name: "Source image 1" })).toHaveTextContent("Display does not verify the contents.");
     expect(screen.getByText("Image contents are not assessed by this source view.")).toBeInTheDocument();
-    expect(screen.queryByText(/Image reading was not recorded for this check/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/No image description was recorded for this check/)).not.toBeInTheDocument();
     expect(load).toHaveBeenCalledTimes(2);
     fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();

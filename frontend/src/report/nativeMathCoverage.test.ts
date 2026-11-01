@@ -29,7 +29,7 @@ describe("recorded native Word coverage", () => {
     expect(result[0].subIssues?.join(" ")).toContain("2 equations were transcribed from images but not evaluated");
     expect(result[0].subIssues?.join(" ")).toContain("1 native Word equation occurrence remains");
     expect(result[0].sources).toHaveLength(2);
-    expect(result[0].sources?.[1].label).toContain("service was unavailable");
+    expect(result[0].sources?.[1].label).toContain("image reader was unavailable");
   });
 
   it("keeps unsupported, unknown count and unlocated occurrence meanings separate", () => {

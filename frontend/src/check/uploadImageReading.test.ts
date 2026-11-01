@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ImageReadingSummary } from "../api/types";
 import { validateIngestReceipt } from "../api/uploadOutcome";
-import { IMAGE_READING_LIMIT, imageReadingLine } from "./uploadImageReading";
+import { IMAGE_DESCRIPTION_NOTE, IMAGE_READING_LIMIT, imageReadingLine } from "./uploadImageReading";
 
 const none: ImageReadingSummary = {
   checked: 0, with_content: 0, unclear: 0, not_checked: 0, no_cue: 0, too_small: 0,
@@ -13,32 +13,32 @@ const pdf = (images: number, image_reading?: ImageReadingSummary) => ({ images, 
 describe("upload image reading line", () => {
   it("leads with what happened to the images and says why none was read", () => {
     expect(imageReadingLine(pdf(44, reading({ not_checked: 44, no_cue: 44 })))).toBe(
-      `44 images found. None was read for a table or equation: 44 had no recognised table or equation caption beside them. ${IMAGE_READING_LIMIT}`,
+      `44 images found. None was read for a table or equation: 44 had no recognised table or equation caption beside them. ${IMAGE_READING_LIMIT} ${IMAGE_DESCRIPTION_NOTE}`,
     );
   });
 
   it("gives every unread image a reason", () => {
     expect(imageReadingLine(pdf(92, reading({ not_checked: 92, no_cue: 89, too_small: 3 })))).toBe(
-      `92 images found. None was read for a table or equation: 89 had no recognised table or equation caption beside them; 3 were too small, or drawn as small pieces, to be read. ${IMAGE_READING_LIMIT}`,
+      `92 images found. None was read for a table or equation: 89 had no recognised table or equation caption beside them; 3 were too small, or drawn as small pieces, to be read. ${IMAGE_READING_LIMIT} ${IMAGE_DESCRIPTION_NOTE}`,
     );
   });
 
   it("never reports a pass that found nothing, or failed, as done", () => {
     expect(imageReadingLine(pdf(81, reading({ checked: 12, not_checked: 69, over_limit: 60, no_cue: 9 })))).toBe(
-      `81 images found. 12 were read for a table or equation; none contained one. 69 were not read: 9 had no recognised table or equation caption beside them; 60 were over the reading limit for one manuscript. ${IMAGE_READING_LIMIT}`,
+      `81 images found. 12 were read for a table or equation; none contained one. 69 were not read: 9 had no recognised table or equation caption beside them; 60 were over the limit for table and equation reading in one manuscript. ${IMAGE_READING_LIMIT} ${IMAGE_DESCRIPTION_NOTE}`,
     );
-    expect(imageReadingLine(pdf(3, reading({ unclear: 3 })))).toBe(`3 images found. 3 could not be read reliably. ${IMAGE_READING_LIMIT}`);
+    expect(imageReadingLine(pdf(3, reading({ unclear: 3 })))).toBe(`3 images found. 3 could not be read reliably. ${IMAGE_READING_LIMIT} ${IMAGE_DESCRIPTION_NOTE}`);
     expect(imageReadingLine(pdf(3, reading({ checked: 1, not_checked: 2, unavailable: 2 }))))
       .toContain("2 were not read: 2 could not be read this time (the image reader or the image region was unavailable).");
   });
 
   it("adds no limit when every image was read", () => {
-    expect(imageReadingLine(pdf(1, reading({ checked: 1, with_content: 1 })))).toBe("1 image found. 1 was read for a table or equation; 1 contained a table or equation.");
+    expect(imageReadingLine(pdf(1, reading({ checked: 1, with_content: 1 })))).toBe("1 image found. 1 was read for a table or equation; 1 contained a table or equation. The report may also list short descriptions of some images. They are not table or equation readings and are not counted toward any grade.");
   });
 
   it("says Word images are not read, without offering a caption as the reason", () => {
     const line = imageReadingLine({ images: 1, anchor_kind: "paragraph", image_reading: reading({ not_checked: 1, unsupported: 1 }) });
-    expect(line).toBe(`1 image found. Images in Word files are not read for tables or equations. ${IMAGE_READING_LIMIT}`);
+    expect(line).toBe(`1 image found. Images in Word files are not read for tables or equations. ${IMAGE_READING_LIMIT} ${IMAGE_DESCRIPTION_NOTE}`);
     expect(line).not.toContain("caption");
   });
 

@@ -344,12 +344,12 @@ def test_empty_visual_readings_are_omitted_but_nonempty_unassessed_readings_rema
     before = data.model_dump_json()
     text = _text(build_report_pdf(data))
     if state is None:
-        assert "Saved visual readings" not in text
+        assert "Saved image descriptions" not in text
         assert "0 of 0" not in text
     else:
-        assert "Saved visual readings" in text
+        assert "Saved image descriptions" in text
         assert "SAVED_IMAGE_LIMIT" in text and state in text
-        assert "0 of 1 image occurrences. 1 remain unassessed" in text
+        assert "0 of 1 image occurrence. 1 has no description" in text
     assert data.model_dump_json() == before
 
 
@@ -381,11 +381,11 @@ def test_adjacent_unread_figures_share_status_text_without_losing_any_source_ide
     ]
     before = data.model_dump_json()
     whole = _text(build_report_pdf(data))
-    assert "No saved visual reading is available for these 39 image entries." in whole
-    assert whole.count("No saved visual reading is available for this image entry.") == 2
+    assert "No saved description is available for these 39 image entries." in whole
+    assert whole.count("No saved description is available for this image entry.") == 2
     for index in range(41):
         assert whole.count(f"Source image {index + 1} - Extracted paragraph {index + 1}") == 1
     assert whole.count("Recorded status: unavailable. Recorded reason: SAVED_LIMIT_A") == 2
     assert whole.count("Recorded status: needs_review. Recorded reason: SAVED_LIMIT_A") == 1
-    assert "41 remain unassessed" in whole
+    assert "41 have no description" in whole
     assert data.model_dump_json() == before

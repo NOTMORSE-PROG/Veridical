@@ -11,9 +11,9 @@ const NOT_READ: [keyof ImageReadingSummary, (n: number) => string][] = [
   // Also images drawn as many small pieces, which are never read whatever
   // their outline.
   ["too_small", (n) => `${n} ${was(n)} too small, or drawn as small pieces, to be read`],
-  ["over_limit", (n) => `${n} ${was(n)} over the reading limit for one manuscript`],
+  ["over_limit", (n) => `${n} ${was(n)} over the limit for table and equation reading in one manuscript`],
   ["unavailable", (n) => `${n} could not be read this time (the image reader or the image region was unavailable)`],
-  ["not_requested", (n) => `${n} ${was(n)} not requested for reading`],
+  ["not_requested", (n) => `${n} ${was(n)} not requested for table or equation reading`],
   ["unsupported", (n) => `${n} had no page position to read from`],
 ];
 
@@ -39,7 +39,11 @@ export function imageReadingLine(summary: Pick<IngestSummary, "images" | "image_
     }
   }
   if (reading.not_checked > 0 || reading.unclear > 0 || summary.anchor_kind === "paragraph") parts.push(IMAGE_READING_LIMIT);
+  parts.push(IMAGE_DESCRIPTION_NOTE);
   return parts.join(" ");
 }
 
+// The report can also save short descriptions of what some images show, a
+// separate pass; named here so its count never reads as a contradiction.
+export const IMAGE_DESCRIPTION_NOTE = "The report may also list short descriptions of some images. They are not table or equation readings and are not counted toward any grade.";
 export const IMAGE_READING_LIMIT = "Typed tables and text were read as usual. Anything shown only inside an image that was not read is not counted as passed.";
