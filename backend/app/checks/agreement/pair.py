@@ -25,6 +25,7 @@ could not decide are coverage, not findings: they go in the result detail.
 
 import asyncio
 import functools
+import hashlib
 import json
 import re
 from dataclasses import dataclass, field
@@ -157,6 +158,8 @@ class PairingResult:
     # The same for objectives: aims stated outside the thesis's own objectives
     # (another paper's aim in the literature review, a process step).
     objective_sections: dict | None = None
+    # Pairs the batched pass would have raised, judged again alone (BUG-635).
+    judged_alone: dict | None = None
 
     @property
     def n_skipped_total(self) -> int:
@@ -547,6 +550,8 @@ class Judged:
     quotes: VerifiedQuotes | None = None
     # What each re-ask answered, kept so a withheld contradiction can be traced.
     confirmations: list[str] = field(default_factory=list)
+    # The batched answer, when the pair was judged again alone (BUG-635).
+    batched_verdict: str | None = None
 
 
 async def _judge_all(
@@ -609,9 +614,18 @@ async def judge_pairs(
     }
     chunk_size = max(1, settings.agreement_pairing_max_pairs_per_call)
     judged = [Judged(candidate) for candidate in candidates]
-    await _judge_all(
-        llm, judged, check_run_id=check_run_id, chunk_size=chunk_size, counters=counters
+    # The batches are built in an order fixed by each pair's own text, so the
+    # same pairs always share a call; results keep the candidates' order.
+    batched = (
+        sorted(judged, key=lambda item: _pair_key(item.candidate))
+        if settings.agreement_stable_batch_order
+        else judged
     )
+    await _judge_all(
+        llm, batched, check_run_id=check_run_id, chunk_size=chunk_size, counters=counters
+    )
+    if settings.agreement_flagged_pairs_judged_alone and chunk_size > 1:
+        await _judge_flagged_alone(llm, batched, check_run_id=check_run_id, chunk_size=chunk_size)
     for item in judged:
         if item.verdict is None:
             continue
@@ -666,6 +680,53 @@ async def judge_pairs(
             if 1 + original.confirmations.count("contradictory") < 2:
                 _withhold(original)
     return judged, counters
+
+
+def _pair_key(candidate: Candidate) -> str:
+    text = f"{candidate.intent.text}\n{candidate.outcome.text}"
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+FLAGGING_VERDICTS = ("contradictory", "partial")
+
+
+async def _judge_flagged_alone(
+    llm: LLMClient, batched: list[Judged], *, check_run_id: int | None, chunk_size: int
+) -> None:
+    """Judge again, each in a call of its own, every pair the batched pass would
+    raise as a finding while sharing its call with other pairs. The lone answer
+    replaces the batched one; a pair whose lone call gets no answer is not
+    raised on the batched answer alone."""
+    shared = {
+        id(item)
+        for start in range(0, len(batched), chunk_size)
+        if len(batched[start : start + chunk_size]) > 1
+        for item in batched[start : start + chunk_size]
+    }
+    flagged = [
+        item
+        for item in batched
+        if id(item) in shared and item.verdict and item.verdict.verdict in FLAGGING_VERDICTS
+    ]
+    if not flagged:
+        return
+    alone = [Judged(item.candidate) for item in flagged]
+    await _judge_all(
+        llm,
+        alone,
+        check_run_id=check_run_id,
+        chunk_size=1,
+        counters=dict.fromkeys(
+            ("quota", "api_down", "parse_failure", "ai_not_configured", "ai_key_rejected"), 0
+        ),
+    )
+    for item, lone in zip(flagged, alone, strict=True):
+        item.batched_verdict = item.verdict.verdict
+        if lone.verdict is None:
+            item.verdict = item.verdict.model_copy(update={"verdict": "cannot_determine"})
+            item.downgrade = "lone_reading_not_answered"
+        else:
+            item.verdict = lone.verdict
 
 
 def _withhold(item: Judged) -> None:
@@ -853,6 +914,15 @@ async def run_agreement_pairing(
         n_unmatched_intents=len(prepared.unmatched_intents),
         results_sections=prepared.results_sections,
         objective_sections=prepared.objective_sections,
+        judged_alone={
+            "n": sum(1 for item in judged if item.batched_verdict is not None),
+            "answer_changed": sum(
+                1
+                for item in judged
+                if item.batched_verdict is not None
+                and (item.verdict is None or item.verdict.verdict != item.batched_verdict)
+            ),
+        },
         n_skipped_quota=counters["quota"],
         n_skipped_api_down=counters["api_down"],
         n_skipped_parse_failure=counters["parse_failure"],

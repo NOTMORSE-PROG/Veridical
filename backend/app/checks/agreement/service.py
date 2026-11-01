@@ -192,6 +192,9 @@ async def run_internal_agreement_check(
             "results_sections": pairing.results_sections,
             # Objectives set aside the same way (BUG-625).
             "objective_sections": pairing.objective_sections,
+            # Pairs the batched pass would have raised, judged again alone, and how
+            # many of those answered differently (BUG-635).
+            "judged_alone": pairing.judged_alone,
         },
     )
     session.add(result)

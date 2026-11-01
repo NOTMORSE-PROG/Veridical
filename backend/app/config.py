@@ -982,6 +982,13 @@ class Settings(BaseSettings):
     # first re-ask disagrees. Turned on only if, on the sealed holdout,
     # specificity stays at 100% and recall rises by more than the noise.
     agreement_contradiction_majority_of_three: bool = False
+    # A pair's verdict moved with the other pairs in its call (BUG-635): the
+    # same pair was judged differently when the batches were regrouped. Pairs
+    # are batched in an order fixed by their own text, so a re-run repeats,
+    # and a pair the batched pass would raise as a finding is judged again in
+    # a call of its own, whose answer is the one that counts.
+    agreement_stable_batch_order: bool = True
+    agreement_flagged_pairs_judged_alone: bool = True
     # A candidate result shorter than this many words ("implemented
     # features.", a fragment left by a sentence split) cannot show whether an
     # objective was met, and only produced vague "partial" findings.
