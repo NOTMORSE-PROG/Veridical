@@ -36,6 +36,7 @@ import { CITATION_HISTORY_TITLE } from "../domain/citationHistory";
 import { instructorAnchor } from "../domain/sourceAnchor";
 import { resultDisplay } from "./ResultsTable";
 import { claimFocusContinuation, type FocusContinuation } from "../routing/focusContinuation";
+import { QUIET_ROUTE_CHANGE } from "../routing/RouteAnnouncer";
 
 function useNoindexMeta() {
   useEffect(() => {
@@ -228,8 +229,15 @@ export function AdviserViewPage() {
           counts={new Map(["internal_agreement", "citation_integrity", "statistical_forensics", "originality_reuse"].map(kind => [kind, flags.filter(flag => flag.check_kind === kind).length]))}
           onSelect={kind => {
             setCheckShown(null);
-            const next = new URLSearchParams(params); next.set("module", kind); next.delete("finding"); setParams(next);
-            requestAnimationFrame(() => setCheckShown(kind));
+            // The panel says what changed itself, so the route announcer stays quiet.
+            const next = new URLSearchParams(params); next.set("module", kind); next.delete("finding"); setParams(next, { state: QUIET_ROUTE_CHANGE });
+            requestAnimationFrame(() => {
+              setCheckShown(kind);
+              // Zoomed in, the new panel can start below the fold: bring it into
+              // view without moving focus off the button.
+              const panel = document.getElementById("shared-selected-module");
+              if (panel && panel.getBoundingClientRect().top > window.innerHeight) panel.scrollIntoView({ block: "nearest" });
+            });
           }} />
         <p role="status" className="sr-only">{checkShown === selectedModule ? `Showing ${INTEGRITY_MODULES.find(item => item.kind === selectedModule)?.label}: ${sharedStatus.title}.` : ""}</p>
         <div id="shared-selected-module">
