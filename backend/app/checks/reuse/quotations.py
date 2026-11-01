@@ -209,18 +209,19 @@ def quotations_in_passage(passage: str, context: str, rules: QuotationRules) -> 
     ]
 
 
-def pair_wording(
+def quotations_left_out(
     own: str, own_context: str, other: str, other_context: str, settings: Settings
-) -> dict:
-    """Shared wording between the checked passage (`own`) and a Library
-    passage (`other`), with the checked passage's quotations left out as the
-    module docstring says. `cited_quotation_only` is set when the pair shares wording only
-    inside those quotations."""
+) -> list[tuple[int, int]]:
+    """The spans of the checked passage (`own`) that are left out when it is
+    compared with a Library passage (`other`), as the module docstring says."""
     rules = load_quotation_rules(settings.reuse_cited_quotation_rules_file)
     own_quotes = quotations_in_passage(own, own_context, rules)
-    other_quotes = quotations_in_passage(other, other_context, rules)
-    cited_there = [other[q.start : q.end] for q in other_quotes if q.cited]
-    own_out = [
+    cited_there = [
+        other[q.start : q.end]
+        for q in quotations_in_passage(other, other_context, rules)
+        if q.cited
+    ]
+    return [
         (q.start, q.end)
         for q in own_quotes
         if q.cited
@@ -229,16 +230,3 @@ def pair_wording(
             for theirs in cited_there
         )
     ]
-    raw = wording_evidence(own, other, settings)
-    if not own_out:
-        return {**raw, "cited_quotation_only": False}
-    left = wording_evidence(own, other, settings, a_left_out=own_out)
-    return {
-        **left,
-        "confirmed": left["confirmed"] and raw["confirmed"],
-        "cited_quotation_only": raw["confirmed"] and not left["confirmed"],
-        "with_quotations": {
-            "shingle_share": raw["shingle_share"],
-            "longest_run": raw["longest_run"],
-        },
-    }

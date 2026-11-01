@@ -165,6 +165,46 @@ limitations; use newly indexed entries when verifying the corrected selection.
 Embedding-model identity alone does not version the source-selection recipe.
 Similarity results remain non-scoring comparison leads, not originality clearance.
 
+### Standard texts left out of originality matches
+
+Some wording is shared by many theses without being reuse: a standard's
+definitions (ISO/IEC 25010), a Likert scale legend, a school's fixed title-page
+statement. The originality check does not count wording inside a listed
+standard text as shared wording, and records the standard's name instead of
+quoting it. Each list holds every entry's name and source and the hashes of
+its word 5-grams. Overlapping hashes can be chained back into the wording, so
+two lists are used:
+
+- **Public list** (`backend/app/checks/reuse/data/standard_texts.json`), in the
+  repository and always loaded: generic or the school's own wording only
+  (Likert anchors, a title-page statement). No published definitions, not even
+  one an openly licensed paper quotes: the paper's licence does not cover the
+  sentence it quotes.
+- **Deployment list**, optional, never committed: texts whose wording may not
+  be published, such as ISO definitions or a journal article's definitions. Point `REUSE_STANDARD_TEXTS_FILE` at
+  it; it adds to the public list and never replaces it. A deployment list that
+  cannot be read is skipped with a warning, so the check still runs. Without it,
+  those standards are not recognised.
+
+Every originality check's audit event records the entry counts of both lists,
+whether the deployment list loaded (`loaded`, `not_configured`, `unreadable`,
+`malformed` or `incompatible`) and the first characters of its sha256
+(`standard_text_lists`), never wording. The lists are read on the first
+comparison, and a deployment list that is not loaded is logged as a warning.
+
+To add an entry, keep the source wording outside the repository in a `.txt`
+file, one entry per `## name | source` line followed by one line per wording
+(add `| scale` for a comma-separated scale legend, which is also hashed in
+reverse order), then rebuild the list it belongs to:
+
+    uv run --project backend python tools/build_standard_texts.py --source-dir <public sources>
+    uv run --project backend python tools/build_standard_texts.py --source-dir <deployment sources> --out <file outside the repository>
+
+The script's docstring describes the format. Commit the rebuilt public JSON,
+never the source texts or the deployment list. To deploy the deployment list on
+Render, add it as a secret file (it appears under `/etc/secrets/`) and set
+`REUSE_STANDARD_TEXTS_FILE=/etc/secrets/<file name>` on the backend service.
+
 ### Recover legacy exact-file identities
 
 Manuscripts uploaded before the content-identity field was introduced may

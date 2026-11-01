@@ -72,9 +72,11 @@ LIMITATIONS = (
     "Recall depends strongly on the host, and there are five checked hosts, so every recall row "
     "is clustered by host and is indicative only (D-016). The comparable rows leave out plants "
     "whose host or donor has no passage inventory (BUG-622), which no match could find.",
-    "F7 has no handling for inline quotation marks. A silent inline quotation means something "
-    "only beside the short unquoted copies of the same length: if those are missed too, the "
-    "quotation was silent because it was short, not because it was quoted.",
+    "Inline quotations with a citation beside them are left out of the shared-wording test "
+    "(BUG-632). Every quoted plant uses one form (a narrative author and year, straight "
+    "quotation marks, a page), so other citation forms are measured only by the unit tests. A "
+    "silent inline quotation means something only beside the short unquoted copies of the same "
+    "length: if those are missed too, the quotation may have been silent because it was short.",
     "A whole-document or chapter finding is tied to a plant only through the supporting passage "
     "shown with it; one without that passage is left unexplained, never charged to a plant.",
     "Six hosts and ten active Library entries, all PDFs: a small Library, so natural matches "
@@ -95,8 +97,8 @@ LIMITATIONS = (
 )
 SILENT_NOTES = {
     "quoted_inline": (
-        "F7 has no inline-quotation handling: read beside recall short_verbatim. Silence here "
-        "shows quoting works only if short unquoted copies are found."
+        "Quotations with a citation are left out of the shared-wording test (BUG-632): read "
+        "beside recall short_verbatim, the same length unquoted."
     ),
     "block_quote": (
         "Indented quotations are left out by the product's indentation rule; read beside "
@@ -439,7 +441,13 @@ def build_cases(
             low, high = words["short" if plant_type in SHORT_TYPES else "long"]
             for _ in range(config["excerpt"]["attempts"]):
                 excerpt = make_excerpt(
-                    donor, extractions[donor], allowed(donor, split), low, high, rng, config
+                    donor,
+                    extractions[donor],
+                    allowed(donor, split),
+                    low,
+                    high,
+                    rng,
+                    config,
                 )
                 if apart(excerpt, used):
                     break
@@ -489,7 +497,8 @@ def plant_block(extraction, index: int, text: str, left: float, config: dict):
     height = max(bottom - top, 1.0)
     geometry = config["geometry"]
     right = max(
-        anchor.bbox[2] if anchor.bbox else left + geometry["width"], left + geometry["min_width"]
+        anchor.bbox[2] if anchor.bbox else left + geometry["width"],
+        left + geometry["min_width"],
     )
     box = (
         left,
@@ -562,7 +571,10 @@ def place_plants(extraction, case: dict, config: dict) -> list[Plant]:
                 donor=plant.get("donor"),
                 donor_pages=plant.get("donor_pages", []),
                 cluster=plant.get("cluster", ""),
-                extra={**plant.get("extra", {}), **({} if on_page else {"not_placed": True})},
+                extra={
+                    **plant.get("extra", {}),
+                    **({} if on_page else {"not_placed": True}),
+                },
                 source_text=plant.get("source_text") or plant["text"],
             )
         )
@@ -1136,7 +1148,13 @@ async def _measure(ctx: Context, config: dict, url: str, settings) -> dict:
 
         sealed = config.get("holdout_sealed", True)
         twin_flags = [flag for twin in twins.values() for flag in twin["flags"]]
-        records, findings, fresh_total, explained_total, unexplained = [], [], 0, 0, Counter()
+        records, findings, fresh_total, explained_total, unexplained = (
+            [],
+            [],
+            0,
+            0,
+            Counter(),
+        )
         other_passage, hosts_run = 0, set()
         audited, banned = 0, []
         not_run = [c for c in copies if sealed and c["split"] == "holdout"]
@@ -1154,7 +1172,12 @@ async def _measure(ctx: Context, config: dict, url: str, settings) -> dict:
                 p for p in compute_passage_embeddings(extraction, settings) if p.page is not None
             ]
             landings = [
-                _landing(plant, landed_in, library.passages.get(plant.donor, []), config["match"])
+                _landing(
+                    plant,
+                    landed_in,
+                    library.passages.get(plant.donor, []),
+                    config["match"],
+                )
                 for plant in plants
             ]
             _, flags = await library.check(case["host"], extraction, unread)
@@ -1342,7 +1365,10 @@ def twin_rows(twins: dict, library_ids: dict, verify: dict, size: int) -> tuple[
         if item["confirmed"] is None:
             continue
         pair = frozenset(
-            ((item["host"], item.get("page")), (item.get("matched"), item.get("matched_page")))
+            (
+                (item["host"], item.get("page")),
+                (item.get("matched"), item.get("matched_page")),
+            )
         )
         if pair not in seen:
             seen.add(pair)
@@ -1586,6 +1612,14 @@ def run(ctx: Context) -> tuple[list[MetricRow], dict]:
             f"The case set was built in this run and frozen in {config['cases_file']}; later "
             "runs measure the same plants."
         )
+    from app.checks.reuse.set_aside import standard_text_lists
+
+    lists = standard_text_lists(settings)
+    warnings.append(
+        f"Standard-text lists (BUG-637): {lists.public_entries} public entries; deployment list "
+        f"{lists.deployment_status} ({lists.deployment_entries} entries). ISO definitions are "
+        "recognised only when the deployment list (REUSE_STANDARD_TEXTS_FILE) is loaded."
+    )
     warnings.append(
         f"Case set {config['cases_file']} sha256 {measured['cases_sha256'][:12]}; lane seed "
         f"{config['seed']} (the seed in the header is the harness default, not the lane's)."

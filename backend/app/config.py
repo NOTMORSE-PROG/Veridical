@@ -1206,6 +1206,15 @@ class Settings(BaseSettings):
     reuse_cited_quotation_rules_file: Path = (
         Path(__file__).parent / "checks" / "reuse" / "data" / "cited_quotations.json"
     )
+    # BUG-637: standard texts many theses share (a standard's definitions, a
+    # scale legend, a school's fixed statement), as word-shingle hashes with
+    # a name and source; built by tools/build_standard_texts.py. The public
+    # list ships with the code and always loads; a deployment list (texts
+    # whose wording may not be published) adds to it and never replaces it.
+    reuse_public_standard_texts_file: Path = (
+        Path(__file__).parent / "checks" / "reuse" / "data" / "standard_texts.json"
+    )
+    reuse_standard_texts_file: Path | None = None
 
     # --- Library (V-066, F7.1/F7.2 surfaces) -----------------------------------
     # How many chapters' worth of passage excerpt the library shows for a
@@ -1462,6 +1471,7 @@ class Settings(BaseSettings):
         "forensics_sprite_policy_file",
         "forensics_percentage_policy_file",
         "reuse_same_work_names_file",
+        "reuse_standard_texts_file",
         mode="before",
     )
     @classmethod
