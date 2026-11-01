@@ -9212,8 +9212,21 @@
   .signal-evidence-item__quote cite { font-style: normal; font-size: var(--signal-type-label); color: var(--color-signal-ink-secondary); }
   .signal-evidence-item__actions { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--signal-rhythm-control); }
   /* The page actions join the row; their preview or message takes a full line. */
-  .signal-evidence-item__actions .signal-recorded-page-actions { display: contents; }
-  .signal-evidence-item__actions .signal-recorded-page-actions > :not(.signal-button) { flex-basis: 100%; }
+  .signal-evidence-item__actions :is(.signal-recorded-page-actions, .signal-shared-packet__source) { display: contents; }
+  .signal-evidence-item__actions :is(.signal-recorded-page-actions, .signal-shared-packet__source) > :not(.signal-button) { flex-basis: 100%; }
+  /* Adviser view: the selected criterion is one item on the panel's edge,
+     its sections in the same rhythm as the report's details dialog. */
+  #shared-selected-criterion { padding: var(--signal-item-padding); border-block-start: var(--signal-border-hairline) solid var(--color-signal-border); }
+  #shared-selected-criterion .signal-result-list { padding: 0; }
+  #shared-selected-criterion .signal-result-card.signal-review-item { display: grid; gap: var(--signal-space-3); padding: 0; border: 0; background: transparent; }
+  #shared-selected-criterion .signal-item-head__title { margin: 0; }
+  #shared-selected-criterion .signal-criterion-details { margin-block-start: var(--signal-space-5); }
+  /* In an item, a caution is read, not shouted: it never outweighs the title,
+     and every line keeps the same measure. */
+  .signal-review-item .signal-grade-caution { font-weight: var(--signal-weight-medium); }
+  .signal-review-item > :is(p, .signal-grade-caution) { max-inline-size: var(--signal-review-detail-measure); }
+  /* A page that could not load: its message, then Retry, with room between. */
+  .signal-evidence-item__actions :is(.signal-recorded-page-actions, .signal-shared-packet__source) > [role=alert] { display: grid; gap: var(--signal-rhythm-control); justify-items: start; }
   .signal-evidence-item__result { display: grid; gap: var(--signal-rhythm-control); min-inline-size: 0; }
   /* Manuscript review: one text edge for the pane and its criterion card. */
   .signal-document-analysis { padding: var(--signal-item-padding); }
