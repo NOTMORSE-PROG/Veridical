@@ -182,9 +182,11 @@ function ReviewQueue({ findings, legacyUndecided = 0, regions, sourceAvailabilit
           const found = [foundLine(scope), matchedLine(scope)].filter(Boolean).join(" ");
           const compared = agreement?.undetermined?.compared_count ?? null;
           const interrupted = isInterrupted(scope, agreement?.state);
-          const outcome = outcomeLines(scope, { findings: 0, undecided: (agreement?.undetermined?.count ?? 0) + legacyUndecided, compared, interrupted, surface: "document" });
+          const undecided = (agreement?.undetermined?.count ?? 0) + legacyUndecided;
+          const outcome = outcomeLines(scope, { findings: 0, undecided, compared, interrupted, surface: "document" });
           const stopped = interruptedLine(scope, { compared, interrupted, outcomeShown: outcome.length > 0 });
-          const destination = `/report/${report.check_run_id}?module=internal_agreement&review_step=findings`;
+          // Pairs to read open on arrival, so the instructor lands on them, not a closed list.
+          const destination = `/report/${report.check_run_id}?module=internal_agreement&review_step=findings${undecided > 0 ? "&undecided=open" : ""}`;
           return <EmptyState id="workspace-module-empty" title={AGREEMENT_SCOPE_COPY.heading}
             action={<ActionLink to={destination} variant="secondary"
               // Arrive on the card itself, not at the top of the report.
