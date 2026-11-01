@@ -5,6 +5,7 @@ Live Postgres (own scratch DB, same convention as `test_checks_reuse_store.py`)
 — this module's whole point is real pgvector queries across multiple
 manuscripts, which no fake/mock can stand in for."""
 
+import json
 import os
 from datetime import UTC, datetime
 
@@ -26,7 +27,7 @@ from app.groups.service import DEFAULT_GROUP_LABEL, normalize_group_name
 from app.ingest.schemas import ExtractionResult, SectionNode, SectionTree, TextBlock
 from app.ingest.service import _write_raw_store, raw_store_path
 from app.models.enums import LibraryEntrySource, LibraryEntryStatus, ResultOutcome
-from app.models.group import Group
+from app.models.group import Group, GroupMember
 from app.models.instructor import Instructor
 from app.models.library import LibraryEntry
 from app.models.manuscript import Manuscript
@@ -1984,3 +1985,636 @@ async def test_a_nearer_topic_match_does_not_hide_the_real_source(session_factor
             )
     assert source_id in found[5] and decoy_id not in found[5]
     assert source_id not in found[1]
+
+
+# --- BUG-662: another upload of the same work ---------------------------------
+
+
+async def _seed_upload(
+    session_factory,
+    *,
+    instructor_id: int,
+    group_id: int | None,
+    group_label: str = DEFAULT_GROUP_LABEL,
+    original_filename: str | None = None,
+    content_hash: str | None = None,
+) -> tuple[int, int]:
+    async with session_factory() as session:
+        manuscript = Manuscript(
+            instructor_id=instructor_id,
+            group_id=group_id,
+            group_label=group_label,
+            file_ref="test.pdf",
+            original_filename=original_filename,
+            content_hash=content_hash,
+        )
+        session.add(manuscript)
+        await session.commit()
+        rubric = Rubric(instructor_id=instructor_id, title="Format", source_file="r.pdf")
+        session.add(rubric)
+        await session.commit()
+        check_run = CheckRun(manuscript_id=manuscript.id, rubric_id=rubric.id)
+        session.add(check_run)
+        await session.commit()
+        return manuscript.id, check_run.id
+
+
+async def _flags(session_factory, result_id: int):
+    async with session_factory() as session:
+        return (
+            await session.execute(
+                text("SELECT severity, detail FROM flag WHERE check_result_id = :id ORDER BY id"),
+                {"id": result_id},
+            )
+        ).all()
+
+
+def _no_near_exact_rule():
+    # Text identical enough to trip the near-exact rule would hide what the
+    # name rule does on its own; this keeps every match below that bar.
+    return get_settings().model_copy(update={"reuse_exact_duplicate_threshold": 1.01})
+
+
+async def test_ungrouped_reupload_without_a_hash_is_one_low_same_work_lead(session_factory):
+    """Production runs 11/12/17/18: the team's own thesis, uploaded again as
+    "VERIDICAL-DOCUMENTATION (1).pdf" under "Ungrouped", matched the earlier
+    upload (no stored hash) at every passage. Ungrouped siblings are not
+    excluded by group, so the name rule has to recognise it."""
+    settings = _no_near_exact_rule()
+    instructor_id = await _seed_instructor(session_factory)
+    ungrouped = await _make_group(
+        session_factory, instructor_id=instructor_id, name=DEFAULT_GROUP_LABEL
+    )
+    earlier, _ = await _seed_upload(
+        session_factory,
+        instructor_id=instructor_id,
+        group_id=ungrouped,
+        original_filename="VERIDICAL-DOCUMENTATION.pdf",
+    )
+    await _add_to_library(session_factory, earlier, _extraction(CH1, CH2))
+    again, again_run = await _seed_upload(
+        session_factory,
+        instructor_id=instructor_id,
+        group_id=ungrouped,
+        original_filename="VERIDICAL-DOCUMENTATION (1).pdf",
+        content_hash="b" * 64,
+    )
+    async with session_factory() as session:
+        result = await _run_with_saved_source(
+            session,
+            again,
+            again_run,
+            _extraction(CH1, CH2),
+            settings,
+            instructor_id=instructor_id,
+            content_hash="b" * 64,
+        )
+    rows = await _flags(session_factory, result.id)
+    assert [(r.severity, r.detail["kind"]) for r in rows] == [
+        ("low", "reuse_same_instructor_resubmission")
+    ]
+    detail = rows[0].detail
+    assert detail["matched_manuscript_ids"] == [earlier]
+    assert detail["same_work"][0]["basis"] == "same_file_name"
+    assert detail["affects_readiness"] is False
+    assert exclusion_reason("originality_reuse", detail) is not None
+    assert f"#{earlier}" in detail["reason"]
+    assert result.detail["n_flags"] == 1
+    assert result.detail["n_same_work_sources"] == 1
+    # Counted as compared (by name and whole text), so the report never says
+    # "nothing to compare against" beside a lead naming it.
+    assert result.detail["archive_size_n"] == 1
+    assert result.outcome == ResultOutcome.passed
+
+
+async def test_every_copy_of_the_same_work_is_collapsed_not_just_one(session_factory):
+    """Production runs 17/18: the hash rule collapsed one record, while two
+    legacy copies of the same thesis (no hash) still raised 41 high leads.
+    Every own copy is named in the one lead and none raises a lead itself."""
+    settings = get_settings()
+    instructor_id = await _seed_instructor(session_factory)
+    team_a = await _make_group(
+        session_factory, instructor_id=instructor_id, name="VERIDICAL Capstone Team"
+    )
+    team_b = await _make_group(session_factory, instructor_id=instructor_id, name="VERIDICAL")
+    same_file, _ = await _seed_upload(
+        session_factory,
+        instructor_id=instructor_id,
+        group_id=None,
+        original_filename="VERIDICAL-DOCUMENTATION.pdf",
+        content_hash="c" * 64,
+    )
+    legacy_a, _ = await _seed_upload(
+        session_factory,
+        instructor_id=instructor_id,
+        group_id=team_a,
+        group_label="VERIDICAL Capstone Team",
+        original_filename="VERIDICAL-DOCUMENTATION.pdf",
+    )
+    legacy_b, _ = await _seed_upload(
+        session_factory,
+        instructor_id=instructor_id,
+        group_id=team_b,
+        group_label="VERIDICAL",
+        original_filename="VERIDICAL-DOCUMENTATION.pdf",
+    )
+    for record in (same_file, legacy_a, legacy_b):
+        await _add_to_library(session_factory, record, _extraction(CH1, CH2))
+    checked, checked_run = await _seed_upload(
+        session_factory,
+        instructor_id=instructor_id,
+        group_id=None,
+        original_filename="VERIDICAL-DOCUMENTATION (1).pdf",
+        content_hash="c" * 64,
+    )
+    async with session_factory() as session:
+        result = await _run_with_saved_source(
+            session,
+            checked,
+            checked_run,
+            _extraction(CH1, CH2),
+            settings,
+            instructor_id=instructor_id,
+            content_hash="c" * 64,
+        )
+        audit = await session.scalar(
+            text(
+                "SELECT payload FROM audit_log WHERE event_type = "
+                "'originality_reuse_check_computed' AND check_run_id = :id"
+            ),
+            {"id": checked_run},
+        )
+    rows = await _flags(session_factory, result.id)
+    assert [(r.severity, r.detail["kind"]) for r in rows] == [
+        ("low", "reuse_same_instructor_resubmission")
+    ]
+    detail = rows[0].detail
+    assert detail["matched_manuscript_ids"] == [same_file, legacy_a, legacy_b]
+    assert [s["basis"] for s in detail["same_work"]] == [
+        "same_file",
+        "near_identical_text",
+        "near_identical_text",
+    ]
+    for record in (same_file, legacy_a, legacy_b):
+        assert f"#{record}" in detail["reason"]
+    assert audit["same_work_source_ids"] == [same_file, legacy_a, legacy_b]
+    assert audit["matched_manuscript_ids"] == sorted([same_file, legacy_a, legacy_b])
+
+
+async def test_an_own_copy_does_not_hide_a_real_source_behind_it(session_factory):
+    """Whole-document and passage queries keep only the nearest record. Left
+    in, the team's own copy at similarity 1.0 would win every one of them and
+    a real outside source would never be reported."""
+    settings = get_settings()
+    instructor_id = await _seed_instructor(session_factory)
+    own_copy, _ = await _seed_upload(
+        session_factory,
+        instructor_id=instructor_id,
+        group_id=None,
+        original_filename="clinic-queue.pdf",
+    )
+    await _add_to_library(session_factory, own_copy, _extraction(CH1, CH2))
+    outside, _ = await _seed_manuscript_and_run(session_factory, group_label="Another school")
+    await _add_to_library(session_factory, outside, _extraction(CH1, CH2))
+    checked, checked_run = await _seed_upload(
+        session_factory,
+        instructor_id=instructor_id,
+        group_id=None,
+        original_filename="clinic-queue.pdf",
+    )
+    async with session_factory() as session:
+        result = await _run_with_saved_source(
+            session,
+            checked,
+            checked_run,
+            _extraction(CH1, CH2),
+            settings,
+            instructor_id=instructor_id,
+        )
+    rows = await _flags(session_factory, result.id)
+    same_work = [r for r in rows if r.detail["kind"] == "reuse_same_instructor_resubmission"]
+    leads = [r for r in rows if r.detail["kind"] != "reuse_same_instructor_resubmission"]
+    assert [r.detail["matched_manuscript_ids"] for r in same_work] == [[own_copy]]
+    assert leads
+    assert {r.detail["matched_manuscript_id"] for r in leads} == {outside}
+    assert result.detail["archive_size_n"] == 2
+
+
+async def test_different_work_from_the_same_instructor_still_raises_leads(session_factory):
+    """Control: similar text from the same instructor's Library stays a lead
+    when nothing says it is the same work: different file names and teams, a
+    shared but generic file name, both sides "Ungrouped" (a shared bucket, not
+    a team), or another instructor's identically named upload."""
+    settings = _no_near_exact_rule()
+    instructor_id = await _seed_instructor(session_factory)
+    alpha = await _make_group(session_factory, instructor_id=instructor_id, name="Team Alpha")
+    beta = await _make_group(session_factory, instructor_id=instructor_id, name="Team Beta")
+    ungrouped = await _make_group(
+        session_factory, instructor_id=instructor_id, name=DEFAULT_GROUP_LABEL
+    )
+    loose = DEFAULT_GROUP_LABEL
+    cases = [
+        ("alpha-attendance.pdf", "beta-attendance.pdf", alpha, beta, "Team Alpha", "Team Beta"),
+        ("Thesis Final.pdf", "thesis final v2.pdf", alpha, beta, "Team Alpha", "Team Beta"),
+        ("alpha-clinic.pdf", "beta-clinic.pdf", ungrouped, ungrouped, loose, loose),
+    ]
+    for library_name, checked_name, library_group, checked_group, lib_label, label in cases:
+        async with session_factory() as session:
+            await session.execute(
+                text(
+                    "TRUNCATE library_entry, manuscript_archive, manuscript_chapter_archive, "
+                    "manuscript_passage_archive"
+                )
+            )
+            await session.commit()
+        record, _ = await _seed_upload(
+            session_factory,
+            instructor_id=instructor_id,
+            group_id=library_group,
+            group_label=lib_label,
+            original_filename=library_name,
+        )
+        await _add_to_library(session_factory, record, _extraction(CH1, CH2))
+        checked, checked_run = await _seed_upload(
+            session_factory,
+            instructor_id=instructor_id,
+            group_id=checked_group,
+            group_label=label,
+            original_filename=checked_name,
+        )
+        async with session_factory() as session:
+            result = await _run_with_saved_source(
+                session,
+                checked,
+                checked_run,
+                _extraction(CH1, CH2),
+                settings,
+                instructor_id=instructor_id,
+            )
+        rows = await _flags(session_factory, result.id)
+        kinds = {r.detail["kind"] for r in rows}
+        assert "reuse_same_instructor_resubmission" not in kinds, library_name
+        assert rows and all(r.severity in {"high", "med"} for r in rows), library_name
+        assert result.detail["n_same_work_sources"] == 0
+
+    # Another instructor's upload with the same name and text is not this
+    # instructor's own work: it stays a lead.
+    other_record, _ = await _seed_manuscript_and_run(session_factory, group_label="Elsewhere")
+    async with session_factory() as session:
+        await session.execute(
+            text("UPDATE manuscript SET original_filename = 'shared.pdf' WHERE id = :id"),
+            {"id": other_record},
+        )
+        await session.execute(
+            text(
+                "TRUNCATE library_entry, manuscript_archive, manuscript_chapter_archive, "
+                "manuscript_passage_archive"
+            )
+        )
+        await session.commit()
+    await _add_to_library(session_factory, other_record, _extraction(CH1, CH2))
+    checked, checked_run = await _seed_upload(
+        session_factory,
+        instructor_id=instructor_id,
+        group_id=None,
+        original_filename="shared.pdf",
+    )
+    async with session_factory() as session:
+        result = await _run_with_saved_source(
+            session,
+            checked,
+            checked_run,
+            _extraction(CH1, CH2),
+            get_settings(),
+            instructor_id=instructor_id,
+        )
+    rows = await _flags(session_factory, result.id)
+    assert rows and all(r.severity == "high" for r in rows)
+    assert {r.detail["matched_manuscript_id"] for r in rows} == {other_record}
+
+
+async def test_a_shared_file_name_alone_does_not_make_dissimilar_text_the_same_work(
+    session_factory,
+):
+    """The name rule needs the whole text to be similar too: a new project
+    saved under last year's file name is not another upload of it."""
+    instructor_id = await _seed_instructor(session_factory)
+    record, _ = await _seed_upload(
+        session_factory,
+        instructor_id=instructor_id,
+        group_id=None,
+        original_filename="clinic-queue.pdf",
+    )
+    await _add_to_library(
+        session_factory,
+        record,
+        _extraction(
+            "An entirely unrelated introduction about renewable energy policy.",
+            "An entirely unrelated methodology about survey sampling.",
+        ),
+    )
+    checked, checked_run = await _seed_upload(
+        session_factory,
+        instructor_id=instructor_id,
+        group_id=None,
+        original_filename="clinic-queue.pdf",
+    )
+    async with session_factory() as session:
+        result = await _run_with_saved_source(
+            session,
+            checked,
+            checked_run,
+            _extraction(CH1, CH2),
+            get_settings(),
+            instructor_id=instructor_id,
+        )
+    assert await _flags(session_factory, result.id) == []
+    assert result.detail["n_same_work_sources"] == 0
+    assert result.detail["archive_size_n"] == 1
+
+
+def _this_term() -> str:
+    now = datetime.now(UTC)
+    start = now.year if now.month >= get_settings().reuse_school_year_start_month else now.year - 1
+    return f"{start}-{start + 1}"
+
+
+_THIS_TERM = _this_term()
+
+
+def _record(
+    *,
+    team: str = DEFAULT_GROUP_LABEL,
+    file: str | None = None,
+    title: str | None = None,
+    entry_team: str | None = None,
+    authors: list[str] | None = None,
+    members: list[str] | None = None,
+    school_year: str | None = None,
+) -> dict:
+    return {
+        "team": team,
+        "file": file,
+        "title": title,
+        "entry_team": entry_team,
+        "authors": authors or [],
+        "members": members or [],
+        "school_year": school_year,
+    }
+
+
+async def _upload_as(session_factory, instructor_id: int, record: dict) -> tuple[int, int]:
+    """One upload under its group, with the names read from its title page
+    (group members), the way ingestion records them."""
+    async with session_factory() as session:
+        group_id = await session.scalar(
+            text(
+                "SELECT id FROM manuscript_group WHERE instructor_id = :i AND name_normalized = :n"
+            ),
+            {"i": instructor_id, "n": normalize_group_name(record["team"])},
+        )
+    if group_id is None:
+        group_id = await _make_group(
+            session_factory, instructor_id=instructor_id, name=record["team"]
+        )
+    if record["members"]:
+        async with session_factory() as session:
+            session.add_all(GroupMember(group_id=group_id, name=n) for n in record["members"])
+            await session.commit()
+    manuscript_id, run_id = await _seed_upload(
+        session_factory,
+        instructor_id=instructor_id,
+        group_id=group_id,
+        group_label=record["team"],
+        original_filename=record["file"],
+    )
+    return manuscript_id, run_id
+
+
+async def _record_names(session_factory, manuscript_id: int, record: dict):
+    async with session_factory() as session:
+        await session.execute(
+            text(
+                "UPDATE library_entry SET title = :title, team_name = :team, "
+                "authors = CAST(:authors AS jsonb), school_year = :year WHERE manuscript_id = :id"
+            ),
+            {
+                "title": record["title"],
+                "team": record["entry_team"],
+                "authors": json.dumps(record["authors"]),
+                "year": record["school_year"],
+                "id": manuscript_id,
+            },
+        )
+        await session.commit()
+
+
+async def _check_against_one_record(session_factory, own: dict, other: dict, settings):
+    """Library holds `other` (same instructor, same text); `own` is checked.
+    The checked side's own title or authors, when given, sit on a removed
+    Library entry, as on a legacy upload that left the Library."""
+    instructor_id = await _seed_instructor(session_factory)
+    other_id, _ = await _upload_as(session_factory, instructor_id, other)
+    await _add_to_library(session_factory, other_id, _extraction(CH1, CH2))
+    await _record_names(session_factory, other_id, other)
+    own_id, own_run = await _upload_as(session_factory, instructor_id, own)
+    if own["title"] or own["authors"] or own["entry_team"]:
+        async with session_factory() as session:
+            session.add(
+                LibraryEntry(
+                    manuscript_id=own_id,
+                    source=LibraryEntrySource.library_submission,
+                    status=LibraryEntryStatus.removed,
+                )
+            )
+            await session.commit()
+        await _record_names(session_factory, own_id, own)
+    async with session_factory() as session:
+        result = await _run_with_saved_source(
+            session,
+            own_id,
+            own_run,
+            _extraction(CH1, CH2),
+            settings,
+            instructor_id=instructor_id,
+        )
+    return other_id, result, await _flags(session_factory, result.id)
+
+
+@pytest.mark.parametrize(
+    "own,other,basis",
+    [
+        (
+            _record(team="Ungrouped", title="Clinic Queue Notifier"),
+            _record(team="Clinic Squad", title="clinic queue notifier"),
+            "same_title",
+        ),
+        (
+            _record(team="Clinic Squad", file="a.pdf"),
+            _record(team="Ungrouped", entry_team="CLINIC  SQUAD", file="b.pdf"),
+            "same_team",
+        ),
+        (
+            _record(team="Ungrouped", authors=["Ana Cruz", "Ben Reyes"]),
+            _record(team="Ungrouped", authors=["ben reyes", "ana  cruz"]),
+            "same_authors",
+        ),
+        # The team's own earlier version, dated to this school year.
+        (
+            _record(team="Ungrouped", title="Clinic Queue Notifier"),
+            _record(team="Clinic Squad", title="Clinic Queue Notifier", school_year=_THIS_TERM),
+            "same_title",
+        ),
+        # An ordinary check upload has no Library entry; the names read from
+        # its title page stand in for its authors.
+        (
+            _record(team="Byte Builders", members=["Ana Cruz", "Ben Reyes"]),
+            _record(team="Ungrouped", authors=["Ben Reyes", "Ana Cruz"]),
+            "same_authors",
+        ),
+    ],
+)
+async def test_a_recorded_title_team_or_author_list_identifies_the_same_work(
+    session_factory, own, other, basis
+):
+    _, result, rows = await _check_against_one_record(
+        session_factory, own, other, _no_near_exact_rule()
+    )
+    assert [(r.severity, r.detail["kind"]) for r in rows] == [
+        ("low", "reuse_same_instructor_resubmission")
+    ]
+    assert rows[0].detail["same_work"][0]["basis"] == basis
+
+
+@pytest.mark.parametrize(
+    "own,other",
+    [
+        # A different team's sequel: the titles differ, so no name matches.
+        (
+            _record(team="Queue A", title="Smart Queue Management System 2"),
+            _record(team="Queue B", title="Smart Queue Management System"),
+        ),
+        # Section and group codes say nothing about which work it is.
+        (_record(team="IT41S2 G3"), _record(team="IT41S2-G3")),
+        (
+            _record(team="Ungrouped", file="BSIT_Capstone_Manuscript.pdf"),
+            _record(team="Ungrouped", file="BSIT Capstone Manuscript (2).pdf"),
+        ),
+        # The same file name, but the records name different teams.
+        (
+            _record(team="Team Alpha", file="queue.pdf"),
+            _record(team="Ungrouped", entry_team="Team Beta", file="queue.pdf"),
+        ),
+        # The same file name, but no author in common (title-page names on
+        # the checked side).
+        (
+            _record(team="Byte Builders", members=["Ana Cruz"], file="queue.pdf"),
+            _record(team="Ungrouped", authors=["Carla Diaz"], file="queue.pdf"),
+        ),
+        # Titles that share only generic words disagree.
+        (
+            _record(team="Ungrouped", title="Online Enrollment System", file="ols.pdf"),
+            _record(team="Ungrouped", title="Online Attendance System", file="ols.pdf"),
+        ),
+        # Titles that share one identifying word of five still disagree.
+        (
+            _record(team="Ungrouped", title="Clinic Queue Notifier", file="clinic.pdf"),
+            _record(team="Ungrouped", title="Clinic Payroll Tracker", file="clinic.pdf"),
+        ),
+        # A dated past-term submission with the same title is another cohort's.
+        (
+            _record(team="IT41S2-G4", title="Clinic Queue Notifier"),
+            _record(team="Ungrouped", title="Clinic Queue Notifier", school_year="2023-2024"),
+        ),
+    ],
+)
+async def test_a_name_that_says_nothing_or_records_that_disagree_keep_the_leads(
+    session_factory, own, other
+):
+    other_id, result, rows = await _check_against_one_record(
+        session_factory, own, other, _no_near_exact_rule()
+    )
+    assert rows
+    assert all(r.detail["kind"] != "reuse_same_instructor_resubmission" for r in rows)
+    assert all(r.severity in {"high", "med"} for r in rows)
+    assert {r.detail["matched_manuscript_id"] for r in rows} == {other_id}
+    assert result.detail["n_same_work_sources"] == 0
+
+
+@pytest.mark.parametrize(
+    "own,other",
+    [
+        # The team renamed itself and its title after the proposal defense.
+        (
+            _record(team="VERIDICAL", title="Defense Readiness Platform"),
+            _record(team="Team Lambda", title="Automated Integrity Checker"),
+        ),
+        # Or a new team handed in an earlier cohort's thesis.
+        (
+            _record(team="Ungrouped", authors=["Ana Cruz"]),
+            _record(team="Ungrouped", authors=["Carla Diaz"]),
+        ),
+    ],
+)
+async def test_near_identical_text_with_disagreeing_records_is_one_lead_to_confirm(
+    session_factory, own, other
+):
+    """BUG-140 collapses a near-exact duplicate from the same instructor. When
+    the records disagree the system cannot tell a renamed team from a copied
+    past thesis, so it says so in one lead the instructor confirms, instead
+    of either hiding it or raising every passage."""
+    other_id, result, rows = await _check_against_one_record(
+        session_factory, own, other, get_settings()
+    )
+    assert [(r.severity, r.detail["kind"]) for r in rows] == [
+        ("med", "reuse_same_instructor_resubmission")
+    ]
+    detail = rows[0].detail
+    assert detail["same_work"][0]["basis"] == "near_identical_text_names_differ"
+    assert detail["matched_manuscript_ids"] == [other_id]
+    assert (
+        "Please confirm whether it is this manuscript or another team's work" in (detail["reason"])
+    )
+    assert exclusion_reason("originality_reuse", detail) is not None
+
+
+async def test_the_same_file_is_the_same_work_even_when_its_records_disagree(session_factory):
+    instructor_id = await _seed_instructor(session_factory)
+    record, _ = await _upload_as(
+        session_factory, instructor_id, _record(team="Team Beta", file="x.pdf")
+    )
+    async with session_factory() as session:
+        await session.execute(
+            text("UPDATE manuscript SET content_hash = :h WHERE id = :id"),
+            {"h": "d" * 64, "id": record},
+        )
+        await session.commit()
+    await _add_to_library(session_factory, record, _extraction(CH1, CH2))
+    checked, checked_run = await _upload_as(
+        session_factory, instructor_id, _record(team="Team Alpha", file="y.pdf")
+    )
+    async with session_factory() as session:
+        result = await _run_with_saved_source(
+            session,
+            checked,
+            checked_run,
+            _extraction(CH1, CH2),
+            get_settings(),
+            instructor_id=instructor_id,
+            content_hash="d" * 64,
+        )
+        audit = await session.scalar(
+            text(
+                "SELECT payload FROM audit_log WHERE event_type = "
+                "'originality_reuse_check_computed' AND check_run_id = :id"
+            ),
+            {"id": checked_run},
+        )
+    rows = await _flags(session_factory, result.id)
+    assert [r.detail["kind"] for r in rows] == ["reuse_same_instructor_resubmission"]
+    assert audit["same_work"] == [
+        {"manuscript_id": record, "basis": "same_file", "similarity": pytest.approx(1.0)}
+    ]
+    assert audit["same_work_excluded_ids"] == [record]
+    assert audit["same_work_name_rules"]["file"] == "packaged"
+    assert len(audit["same_work_name_rules"]["sha256"]) == 64
