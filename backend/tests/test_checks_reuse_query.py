@@ -1785,3 +1785,202 @@ async def test_a_body_that_cannot_be_told_from_its_references_is_named_not_empty
     assert result.detail["pages_not_compared"] == [1, 2, 3]
     assert result.detail["comparison_ran"] is False
     assert "no embeddable content" not in result.detail["note"].casefold()
+
+
+@pytest.mark.parametrize("level", ["high_similarity", "exact_duplicate"])
+async def test_a_similar_section_with_no_shared_wording_is_counted_not_raised(
+    session_factory, level
+):
+    """BUG-620: with the similarity bars lowered so the vectors match, text on
+    the same topic in different words raises nothing at any granularity or
+    level, and is counted; a real copy of the same Library text is raised."""
+    bars = {
+        "reuse_high_similarity_threshold": 0.3,
+        "reuse_passage_high_similarity_threshold": 0.3,
+    }
+    if level == "exact_duplicate":
+        bars |= {
+            "reuse_exact_duplicate_threshold": 0.31,
+            "reuse_passage_exact_duplicate_threshold": 0.31,
+        }
+    settings = get_settings().model_copy(update=bars)
+    library_text = (
+        "Attendance in most classrooms is still recorded on paper sign-in sheets that the "
+        "instructor tallies by hand after each session, which wastes class time and leads "
+        "to frequent recording mistakes in the final report."
+    )
+    same_topic = (
+        "Many teachers keep track of who came to class with a printed list that students "
+        "initial, then count the marks later; this slows lessons down and errors creep "
+        "into the records that are submitted at the end of the term."
+    )
+    other_chapter = (
+        "Our grading pipeline layers automated rule checks underneath a reviewer model, "
+        "escalating uncertain cases to the instructor rather than deciding on its own."
+    )
+    source_id, source_run = await _seed_manuscript_and_run(
+        session_factory, group_label=f"Source {level}"
+    )
+    await _add_to_library(session_factory, source_id, _extraction(library_text, CH2))
+
+    topic_id, topic_run = await _seed_manuscript_and_run(
+        session_factory, group_label=f"Topic {level}"
+    )
+    async with session_factory() as session:
+        topic = await _run_with_saved_source(
+            session, topic_id, topic_run, _extraction(same_topic, other_chapter), settings
+        )
+    copy_id, copy_run = await _seed_manuscript_and_run(session_factory, group_label=f"Copy {level}")
+    async with session_factory() as session:
+        copied = await _run_with_saved_source(
+            session, copy_id, copy_run, _extraction(library_text, other_chapter), settings
+        )
+    assert topic.detail["n_similar_without_shared_wording"] >= 1
+    # Nothing at all: no passage finding, and no section finding resting on
+    # the topic-only passage the fallback search would otherwise pick.
+    assert await _flag_kinds(session_factory, topic.id) == []
+    assert any(kind.endswith("_passage") for kind in await _flag_kinds(session_factory, copied.id))
+    await _assert_counts_match_flags(session_factory, copied)
+    # A withheld section is in neither count.
+    await _assert_counts_match_flags(session_factory, topic)
+
+
+async def _assert_counts_match_flags(session_factory, result) -> None:
+    """`n_flags` and the audit's matched records are the Flag rows' own."""
+    async with session_factory() as session:
+        rows = (
+            await session.execute(
+                text(
+                    "SELECT (detail->>'matched_manuscript_id')::bigint AS matched FROM flag "
+                    "WHERE check_result_id = :id"
+                ),
+                {"id": result.id},
+            )
+        ).all()
+        payload = await session.scalar(
+            text(
+                "SELECT payload FROM audit_log WHERE check_run_id = :run "
+                "AND event_type = 'originality_reuse_check_computed'"
+            ),
+            {"run": result.check_run_id},
+        )
+    assert result.detail["n_flags"] == len(rows)
+    assert sorted(payload["matched_manuscript_ids"]) == sorted({row.matched for row in rows})
+
+
+async def _flag_kinds(session_factory, result_id: int) -> list[str]:
+    async with session_factory() as session:
+        return list(
+            (
+                await session.scalars(
+                    text("SELECT detail->>'kind' FROM flag WHERE check_result_id = :id"),
+                    {"id": result_id},
+                )
+            ).all()
+        )
+
+
+async def test_a_section_match_whose_only_evidence_is_below_the_passage_bar_is_not_raised(
+    session_factory,
+):
+    """BUG-620: a section sitting near the similarity bar on topic, with a
+    weaker passage (shared standard text) as its only evidence, is counted,
+    not reported as reuse. The same shared sentence is planted on both sides."""
+    shared = (
+        "Usability is the degree to which a product or system can be used by specified "
+        "users to achieve specified goals with effectiveness, efficiency and satisfaction."
+    )
+    settings = get_settings().model_copy(
+        update={
+            "reuse_high_similarity_threshold": 0.3,
+            "reuse_passage_high_similarity_threshold": 0.99,
+            "reuse_passage_exact_duplicate_threshold": 0.995,
+        }
+    )
+    source_id, _ = await _seed_manuscript_and_run(session_factory, group_label="Standard A")
+    await _add_to_library(
+        session_factory,
+        source_id,
+        _extraction(CH1 + " " + shared, "A different second chapter about the server setup."),
+    )
+    own_id, own_run = await _seed_manuscript_and_run(session_factory, group_label="Standard B")
+    async with session_factory() as session:
+        result = await _run_with_saved_source(
+            session,
+            own_id,
+            own_run,
+            _extraction(
+                "Students in the pilot section answered a survey about the timetable. " + shared,
+                "Another unrelated chapter on deployment to the campus network.",
+            ),
+            settings,
+        )
+    kinds = await _flag_kinds(session_factory, result.id)
+    assert not any(kind.startswith("reuse_high_similarity") for kind in kinds)
+    assert result.detail["n_similar_without_shared_wording"] >= 1
+
+
+async def test_a_section_with_no_passage_evidence_keeps_its_existing_path(session_factory):
+    """BUG-620 is about shared wording; a section with no passage to check
+    (a Library record stored without passages) is raised as before, at
+    Medium, not silenced."""
+    settings = get_settings().model_copy(update={"reuse_high_similarity_threshold": 0.3})
+    source_id, _ = await _seed_manuscript_and_run(session_factory, group_label="No passages")
+    await _add_to_library(
+        session_factory, source_id, _extraction(CH1, CH2), legacy_document_only=True
+    )
+    own_id, own_run = await _seed_manuscript_and_run(session_factory, group_label="Checked")
+    async with session_factory() as session:
+        result = await _run_with_saved_source(
+            session, own_id, own_run, _extraction(CH1, CH2), settings
+        )
+    kinds = await _flag_kinds(session_factory, result.id)
+    assert any(not kind.endswith("_passage") for kind in kinds)
+
+
+async def test_a_nearer_topic_match_does_not_hide_the_real_source(session_factory):
+    """BUG-620: the nearest Library passage holds every word in another order
+    (the same vector, no shared runs); the real source ranks below it. The
+    real source is found when the next candidates are tried, and lost when
+    only the nearest is."""
+    copied = (
+        "The clinic queue prototype sent each patient a text message when their turn was "
+        "near, and the nurses reported that the waiting room was calmer during the trial "
+        "weeks than in the month before it started at the barangay health centre."
+    )
+    tokens = copied.split()
+    shuffled = " ".join(tokens[1::2] + tokens[0::2])
+    source_text = copied + " Patients also asked for reminders in Filipino as well as English."
+    settings = get_settings().model_copy(update={"reuse_passage_high_similarity_threshold": 0.5})
+
+    decoy_id, _ = await _seed_manuscript_and_run(session_factory, group_label="Shuffled")
+    await _add_to_library(session_factory, decoy_id, _extraction(shuffled, CH2))
+    source_id, _ = await _seed_manuscript_and_run(session_factory, group_label="Real source")
+    await _add_to_library(session_factory, source_id, _extraction(source_text, CH2.upper()))
+
+    found = {}
+    for candidates in (1, 5):
+        own_id, own_run = await _seed_manuscript_and_run(
+            session_factory, group_label=f"Copier {candidates}"
+        )
+        async with session_factory() as session:
+            result = await _run_with_saved_source(
+                session,
+                own_id,
+                own_run,
+                _extraction(copied, "An unrelated chapter on deployment to the campus network."),
+                settings.model_copy(update={"reuse_confirm_candidates": candidates}),
+            )
+            found[candidates] = set(
+                (
+                    await session.scalars(
+                        text(
+                            "SELECT (detail->>'matched_manuscript_id')::bigint FROM flag "
+                            "WHERE check_result_id = :id AND detail->>'kind' LIKE '%_passage'"
+                        ),
+                        {"id": result.id},
+                    )
+                ).all()
+            )
+    assert source_id in found[5] and decoy_id not in found[5]
+    assert source_id not in found[1]

@@ -1550,10 +1550,13 @@ async def list_reuse_passage_matches(
     it is itself an active Library entry, otherwise recomputes them from
     its stored extraction (V-077: checks no longer write into the corpus).
     Returns only matches the DEFAULT policy would exclude (own or matched
-    side is a reference-list/block-quote passage) — a match between two
-    ordinary body passages is already a real, scored `Flag` and has no
-    business appearing twice here. Never turns any of these into a `Flag`
-    row (module docstring, `app/checks/reuse/query.py`)."""
+    side is a reference-list/block-quote passage). A match between two
+    ordinary body passages is not listed here: when the passages share
+    wording it is already a scored `Flag`, and when they do not it was
+    withheld on purpose (BUG-620). These matches are not checked for shared
+    wording, because the instructor asked to see excluded text. Never turns
+    any of these into a `Flag` row (module docstring,
+    `app/checks/reuse/query.py`)."""
     settings = settings or get_settings()
     check_run = await _owned_check_run(session, check_run_id, instructor_id)
     manuscript = await session.get(Manuscript, check_run.manuscript_id)

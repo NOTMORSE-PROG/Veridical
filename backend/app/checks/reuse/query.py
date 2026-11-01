@@ -35,7 +35,8 @@ family link, wiring that exemption is passing that set in, not
 redesigning this function.
 """
 
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from typing import Literal
 
 from sqlalchemy import Numeric, and_, case, cast, func, or_, select
@@ -578,6 +579,30 @@ async def _best_passage_match_for(
     include_block_quote: bool,
     settings: Settings,
 ) -> PassageMatch | None:
+    candidates = await _passage_candidates_for(
+        session,
+        passage,
+        exclude_manuscript_ids=exclude_manuscript_ids,
+        include_reference_list=include_reference_list,
+        include_block_quote=include_block_quote,
+        settings=settings,
+        limit=1,
+    )
+    return candidates[0] if candidates else None
+
+
+async def _passage_candidates_for(
+    session: AsyncSession,
+    passage: PassageEmbedding,
+    *,
+    exclude_manuscript_ids: set[int],
+    include_reference_list: bool,
+    include_block_quote: bool,
+    settings: Settings,
+    limit: int,
+) -> list[PassageMatch]:
+    """The `limit` nearest Library passages that clear the passage bar,
+    nearest first."""
     distance_expr = ManuscriptPassageArchive.embedding.cosine_distance(passage.embedding)
     conditions = [
         ManuscriptPassageArchive.model_id == settings.embedding_model_id,
@@ -599,7 +624,7 @@ async def _best_passage_match_for(
     if not include_block_quote:
         conditions.append(ManuscriptPassageArchive.is_block_quote.is_(False))
 
-    row = (
+    rows = (
         await session.execute(
             select(
                 ManuscriptPassageArchive,
@@ -610,14 +635,19 @@ async def _best_passage_match_for(
             .join(Manuscript, Manuscript.id == ManuscriptPassageArchive.manuscript_id)
             .where(*conditions)
             .order_by(distance_expr)
-            .limit(1)
+            .limit(limit)
         )
-    ).first()
-    if row is None:
-        return None
-    level = _classify_passage(float(row.similarity), settings)
-    if level is None:
-        return None
+    ).all()
+    found = []
+    for row in rows:
+        level = _classify_passage(float(row.similarity), settings)
+        if level is None:
+            break  # nearest first: every later row is further away
+        found.append(_passage_match(passage, row, level))
+    return found
+
+
+def _passage_match(passage: PassageEmbedding, row, level: MatchLevel) -> PassageMatch:
     archive_row: ManuscriptPassageArchive = row[0]
     return PassageMatch(
         own_passage_index=passage.passage_index,
@@ -785,6 +815,9 @@ class PassageQueryResult:
     # (ticket AC5) — shown even when 0.
     passage_archive_size_n: int
     n_source_candidates_withheld: int = 0
+    # BUG-620: own passages whose nearest supported candidates all failed the
+    # caller's `confirm` test (the nearest of them, for the audit).
+    unconfirmed: list[PassageMatch] = field(default_factory=list)
 
 
 async def query_similar_passages(
@@ -796,6 +829,8 @@ async def query_similar_passages(
     include_reference_list: bool = False,
     include_block_quote: bool = False,
     exclude_manuscript_ids: set[int] | None = None,
+    confirm: Callable[[PassageMatch], bool] | None = None,
+    candidates: int = 1,
 ) -> PassageQueryResult:
     """One query per own passage (see the perf note above for why that's
     fine) — same self/group-sibling exclusion as `query_similar_manuscripts`
@@ -804,7 +839,12 @@ async def query_similar_passages(
     `False` (ticket AC3: "on by default") — the live exploration toggle
     (`app.report.service`) is the only caller that ever passes `True`, and
     it never turns those matches into scored `Flag` rows (see
-    `app.checks.reuse.service`'s own module docstring for that split)."""
+    `app.checks.reuse.service`'s own module docstring for that split).
+
+    With `confirm` (BUG-620), the nearest `candidates` Library passages are
+    tried in order and the first that is supported and passes `confirm` is
+    the match: a nearer passage that shares only a topic must not hide the
+    real source one rank below it."""
     exclude = {manuscript_id, *(exclude_manuscript_ids or set())}
     exclude |= await _group_sibling_manuscript_ids(session, manuscript_id)
     archive_size_n = await passage_archive_size(
@@ -812,6 +852,7 @@ async def query_similar_passages(
     )
 
     matches: list[PassageMatch] = []
+    unconfirmed: list[PassageMatch] = []
     source_cache = {}
     withheld = 0
     for passage in passages:
@@ -819,21 +860,32 @@ async def query_similar_passages(
             continue
         if not include_block_quote and passage.is_block_quote:
             continue
-        match = await _best_passage_match_for(
+        found = await _passage_candidates_for(
             session,
             passage,
             exclude_manuscript_ids=exclude,
             include_reference_list=include_reference_list,
             include_block_quote=include_block_quote,
             settings=settings,
+            limit=max(1, candidates) if confirm is not None else 1,
         )
-        if match is not None:
-            if await passage_match_supported(session, manuscript_id, match, settings, source_cache):
-                matches.append(match)
-            else:
+        supported = []
+        for candidate in found:
+            if await passage_match_supported(
+                session, manuscript_id, candidate, settings, source_cache
+            ):
+                supported.append(candidate)
+                if confirm is None or confirm(candidate):
+                    matches.append(candidate)
+                    break
+        else:
+            if found and not supported:
                 withheld += 1
+            elif supported:
+                unconfirmed.append(supported[0])
     return PassageQueryResult(
         matches=matches,
         passage_archive_size_n=archive_size_n,
         n_source_candidates_withheld=withheld,
+        unconfirmed=unconfirmed,
     )
