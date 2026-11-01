@@ -165,6 +165,9 @@ class FlagOut(BaseModel):
     # check from `ai_verdict_summary` a second time in a different file.
     is_passage_level: bool = False
     # V-072 (F7.4): present only for a passage-level reuse flag.
+    # BUG-637/677: standard texts (by name, never their wording) removed from
+    # this finding's shared wording before it was judged.
+    standard_wording_left_out: list[str] = Field(default_factory=list)
     passage_pair: PassagePairOut | None = None
     # V-077: the matched Library record's number for an F7 finding (the same
     # opaque reference already shown in the finding text and on the report's

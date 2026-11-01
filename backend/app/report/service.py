@@ -732,6 +732,34 @@ async def _source_lock_holds(session: AsyncSession, manuscript_id: int) -> bool:
     return purged_at is None
 
 
+def standard_names(value) -> list[str]:
+    """Names of standard texts as the originality check saved them: strings
+    only, each once, in order. Never their wording."""
+    return (
+        sorted({name for name in value if isinstance(name, str) and name.strip()})
+        if isinstance(value, list)
+        else []
+    )
+
+
+def set_aside_counts(detail: dict) -> dict:
+    """BUG-677: what the originality check decided not to raise, by reason,
+    read from its own saved counts. A count saved in any other shape than a
+    whole number of zero or more is unknown, not zero."""
+
+    def count(key):
+        value = detail.get(key)
+        return value if type(value) is int and value >= 0 else None
+
+    return {
+        "n_set_aside_no_shared_wording": count("n_similar_without_shared_wording"),
+        "n_set_aside_weak_section_evidence": count("n_sections_evidence_below_passage_bar"),
+        "n_set_aside_cited_quotation": count("n_shared_wording_only_in_cited_quotations"),
+        "n_set_aside_standard_text": count("n_shared_wording_only_in_standard_texts"),
+        "standard_texts_set_aside": standard_names(detail.get("standard_texts_set_aside")),
+    }
+
+
 async def report_out_for_check_run(
     session: AsyncSession, check_run: CheckRun, settings: Settings | None = None
 ) -> ReportOut:
@@ -1085,6 +1113,7 @@ async def report_out_for_check_run(
                 )
                 or "no_text"
             ),
+            **set_aside_counts(originality_detail),
         )
 
     # V-069 AC2: `None` whenever no criterion in `rows` is levelled (AC3 —

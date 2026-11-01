@@ -317,6 +317,16 @@ class OriginalityScopeOut(BaseModel):
         ]
         | None
     ) = None
+    # BUG-677: similar passages the check decided not to raise, by reason, as
+    # it counted them. None on runs that did not record a reason. A pair that
+    # both a cited quotation and a standard text explain is in both counts.
+    n_set_aside_no_shared_wording: int | None = None
+    n_set_aside_weak_section_evidence: int | None = None
+    n_set_aside_cited_quotation: int | None = None
+    n_set_aside_standard_text: int | None = None
+    # The standard texts behind that last count, by name only (never their
+    # wording), from the check's own list.
+    standard_texts_set_aside: list[str] = Field(default_factory=list)
 
 
 class UndeterminedPairOut(BaseModel):
