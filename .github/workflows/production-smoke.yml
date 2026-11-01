@@ -54,16 +54,30 @@ jobs:
       - name: Native helper runs main's helper files (BUG-531)
         # The helper bundles its own copy of backend/app; a merge the API gets
         # does not reach it until the helper is deployed too. Its GET reports
-        # the commit it was deployed from. A helper deployed before it could
-        # report one only warns, until its first deploy from CI.
+        # the commit it was deployed from. A helper that does not answer fails.
+        # One that reports no commit predates CI deploys: a warning until CI
+        # deploys are switched on (HELPER_DEPLOY_ENABLED), an error after.
         env:
           HELPER_URL: ${{ vars.HELPER_URL || 'https://veridical-native-compute.vercel.app/api/native_extract' }}
+          DEPLOYS_ON: ${{ vars.HELPER_DEPLOY_ENABLED }}
         run: |
           paths="api backend/app compute-helper/vercel.json compute-helper/requirements.txt"
           expected="$(git log -1 --format=%H -- $paths)"
-          live="$(curl -sS --retry 2 --retry-delay 10 --max-time 90 "$HELPER_URL" | jq -r '.commit // empty')"
+          body="$(curl -fsS --retry 2 --retry-delay 10 --max-time 90 "$HELPER_URL")" || {
+            echo "::error::The native helper did not answer at $HELPER_URL"
+            exit 1
+          }
+          [ "$(echo "$body" | jq -r '.service // empty')" = "native-compute" ] || {
+            echo "::error::$HELPER_URL did not answer as the native helper: $body"
+            exit 1
+          }
+          live="$(echo "$body" | jq -r '.commit // empty')"
           echo "expected $expected, helper ${live:-reports no commit}"
           if [ -z "$live" ]; then
+            if [ "$DEPLOYS_ON" = "true" ]; then
+              echo "::error::The native helper reports no commit although CI deploys it (BUG-531)"
+              exit 1
+            fi
             echo "::warning::The native helper reports no commit; it predates CI deploys (BUG-531)"
             exit 0
           fi

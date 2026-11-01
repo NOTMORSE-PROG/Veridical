@@ -10,9 +10,14 @@ without any backend test noticing:
 Gate 1 loads the staged entrypoint in an interpreter that refuses imports
 outside the standard library, the helper's pins and `app` (the same probe as
 backend/tests/test_helper_imports.py). Gate 2 serves the staged handler in an
-interpreter that has ONLY the helper's pins installed and sends it three signed
-jobs (a PDF, a DOCX and a PDF with an image table) through local storage. Each
-must return 200 with a receipt and no error.
+interpreter that has ONLY the helper's pins installed, and the API's own client
+(`extract_remote`, from this checkout) sends it three signed jobs (a PDF, a
+DOCX and a PDF with an image table) through shared local storage. Each must be
+accepted as the API accepts one in production: a signed receipt for that job,
+then a manifest and an extraction that read back and match.
+
+Run from backend/ (`uv run python ../compute-helper/gate/check_helper.py ...`)
+so the API's code is importable:
 
     python check_helper.py STAGED_DIR --pins-python PATH [--out DIR]
 
@@ -42,38 +47,85 @@ def import_gate(staged: Path) -> tuple[bool, str]:
     probe = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(probe)
     run = subprocess.run(
-        [sys.executable, "-I", "-c", probe.LOAD_HELPER, str(staged)],
+        [sys.executable, "-I", "-B", "-c", probe.LOAD_HELPER, str(staged)],
         capture_output=True,
         text=True,
         timeout=180,
     )
     last = (run.stderr.strip().splitlines() or [""])[-1]
-    return run.returncode == 0, last
+    return run.returncode == 0 and "helper loaded: handler" in run.stdout, last
 
 
 def signed_job_gate(staged: Path, pins_python: str, out: Path) -> tuple[bool, str]:
-    run = subprocess.run(
-        [
-            pins_python,
-            "-I",
-            str(HERE / "e2e_helper.py"),
-            str(staged),
-            str(out),
-            *(str(FIXTURE_DIR / name) for name in FIXTURES),
-        ],
-        capture_output=True,
+    """The API's own client sends each job to the staged helper and accepts
+    the result only as it would in production: signed receipt, matching job,
+    then the manifest and extraction read back and checked from storage."""
+    import os
+    import shutil
+
+    # The API's code, from this checkout (the backend's environment has its
+    # dependencies); the helper's code runs from the staged tree instead.
+    sys.path.insert(0, str(REPO / "backend"))
+    from app.config import Settings
+    from app.ingest.compute_client import extract_remote
+
+    data = out / "data"
+    data.mkdir(parents=True, exist_ok=True)
+    secret = "gate-" + "x" * 43
+    env = {
+        **os.environ,
+        "DATA_DIR": str(data),
+        "STORAGE_BACKEND": "local",
+        "NATIVE_COMPUTE_SECRET": secret,
+    }
+    helper = subprocess.Popen(
+        [pins_python, "-I", "-B", str(HERE / "e2e_helper.py"), str(staged)],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
         text=True,
-        timeout=900,
+        env=env,
     )
-    log = run.stdout + run.stderr
-    ok_lines = [line for line in log.splitlines() if line.endswith(": HTTP 200; error=None")]
-    passed = (
-        run.returncode == 0
-        and len(ok_lines) == len(FIXTURES)
-        and "Traceback" not in log
-        and "ModuleNotFoundError" not in log
-    )
-    return passed, log
+    lines = []
+    try:
+        first = helper.stdout.readline().strip()
+        lines.append(first)
+        if not first.startswith("listening "):
+            helper.stdin.close()
+            lines.append(helper.stdout.read())
+            return False, "\n".join(lines)
+        settings = Settings(
+            _env_file=None,
+            data_dir=data,
+            storage_backend="local",
+            native_compute_url=first.removeprefix("listening "),
+            native_compute_secret=secret,
+        )
+        passed = True
+        for name in FIXTURES:
+            source = data / "uploads" / name
+            source.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(FIXTURE_DIR / name, source)
+            try:
+                result = extract_remote(str(source), settings, owner_id=1)
+                ok = bool(result.blocks)  # a DOCX has no pages, only blocks
+                lines.append(
+                    f"{name}: accepted; {result.page_count} pages, {len(result.blocks)} blocks"
+                )
+            except Exception as exc:  # the gate reports any refusal, whatever its kind
+                ok = False
+                lines.append(f"{name}: refused: {type(exc).__name__}: {exc}")
+            passed = passed and ok
+    finally:
+        if helper.poll() is None:
+            helper.stdin.close()
+            try:
+                helper.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                helper.kill()
+        lines.append(helper.stdout.read().strip())
+    log = "\n".join(line for line in lines if line)
+    return passed and "Traceback" not in log, log
 
 
 def main() -> int:
@@ -94,7 +146,7 @@ def main() -> int:
     print(log.rstrip())
     print(
         "signed-job gate:",
-        f"PASS ({len(FIXTURES)} of {len(FIXTURES)} signed jobs returned 200 with no error)"
+        f"PASS ({len(FIXTURES)} of {len(FIXTURES)} signed jobs accepted by the API's own client)"
         if ok
         else "FAIL",
     )
