@@ -626,12 +626,19 @@ def reference_list_problem(citation_detail: dict | None, data: ReferenceData) ->
         return words["problem_selection"]
     if not citation_detail.get("reference_metadata_coverage"):
         return words["problem_empty"]
-    if citation_detail.get("unread_pages"):
-        pages = ", ".join(str(page) for page in citation_detail["unread_pages"])
-        return words["problem_unread_pages"].format(pages=pages)
+    unread = citation_detail.get("unread_pages") or []
+    start = citation_detail.get("reference_list_page")
+    # Body pages left unread before the list cannot hold its entries; a page
+    # at or after where the list starts, or a list whose start is unknown, can.
+    in_list = [page for page in unread if start is None or page >= start]
+    if in_list:
+        return words["problem_unread_pages"].format(pages=_numbers(in_list))
     if citation_detail.get("reference_membership_status") not in (None, "complete"):
         return words["problem_boundary"]
-    if citation_detail.get("coverage_reason"):
+    # "source_reading_order_partial" is about the body: the check only goes on
+    # to verify entries when the bibliography itself is complete and agrees
+    # with the saved entries. Any other coverage reason leaves the list partial.
+    if citation_detail.get("coverage_reason") not in (None, "source_reading_order_partial"):
         return words["problem_partial"]
     return None
 

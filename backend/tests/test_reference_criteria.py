@@ -265,7 +265,8 @@ def test_reference_list_problems_are_named(data):
 @pytest.mark.parametrize(
     ("extra", "said"),
     [
-        ({"unread_pages": [61, 62]}, "pages 61, 62"),
+        ({"unread_pages": [61, 62, 70]}, "pages 61 to 62, 70"),
+        ({"unread_pages": [12, 61, 62], "reference_list_page": 60}, "pages 61 to 62"),
         ({"reference_membership_status": "partial"}, "starts and ends"),
         ({"reference_membership_status": "not_established"}, "starts and ends"),
         ({"coverage_reason": "reference_source_projection_unbound"}, "whole reference list"),
@@ -530,3 +531,19 @@ def test_an_escalated_row_does_not_show_the_old_passes_as_if_they_graded_it(data
     rc.decide_quality(row, QUALITY, profile(peer_reviewed=103, web=3, unclassified=24), data)
     assert "votes" not in row.detail and "agreement" not in row.detail
     assert row.detail["reference_strategy"]["grader"]["votes"] == ["PROFICIENT", "PROFICIENT"]
+
+
+def test_unread_body_pages_before_the_list_do_not_stop_the_count(data):
+    detail = {
+        "reference_metadata_coverage": [{}],
+        "reference_membership_status": "complete",
+        "reference_list_page": 87,
+        "unread_pages": [63, 64, 65, 66],
+        "coverage_reason": "source_reading_order_partial",
+    }
+    assert rc.reference_list_problem(detail, data) is None
+    assert rc.reference_list_problem({**detail, "unread_pages": [63, 88]}, data) is not None
+    assert (
+        rc.reference_list_problem({**detail, "coverage_reason": "reference_list_unavailable"}, data)
+        is not None
+    )
