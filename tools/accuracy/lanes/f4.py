@@ -438,7 +438,9 @@ def run(ctx: Context) -> tuple[list[MetricRow], dict]:
             Budget.from_golden(ctx.golden),
             config["model"],
             settings.gemini_temperature,
-            folder / "responses",
+            # A stability arm can ask the same prompts afresh into a folder of
+            # its own, so the cached answers stay as they were.
+            folder / config.get("responses_dir", "responses"),
         )
         judged, counters = asyncio.run(
             pair.judge_pairs(
@@ -501,8 +503,8 @@ def run(ctx: Context) -> tuple[list[MetricRow], dict]:
     warnings = []
     if not config.get("dry_run"):
         warnings.append(
-            "Verdicts on identical pairs can change with which other pairs share a model "
-            "call (BUG-635). A difference between this run and another one is evidence of a "
+            "Verdicts on identical pairs can differ between runs when the batches differ "
+            "(BUG-635). A difference between this run and another one is evidence of a "
             "code change only where that change decides the outcome without the model "
             "(a pair no longer reached, a gate); verdict differences on pairs judged in both "
             "runs are not."
@@ -524,6 +526,7 @@ def run(ctx: Context) -> tuple[list[MetricRow], dict]:
         "batch_seed": config.get("batch_seed", "batches"),
         "pairs_per_call": settings.agreement_pairing_max_pairs_per_call,
         "plant_sample": config.get("plant_sample"),
+        "responses_dir": config.get("responses_dir", "responses"),
         "attempts_sent": client.attempts if client else 0,
         "cache_hits": client.cache_hits if client else 0,
         "failed_calls": client.failed_calls if client else 0,
