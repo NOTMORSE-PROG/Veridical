@@ -9216,6 +9216,16 @@
   .signal-review-item .signal-item-head__title { margin: 0; }
   /* The step label sits close above the item it labels. */
   .signal-document-analysis > .signal-workspace-step-kicker { margin-block-end: 0; }
+  /* The saved-judgments link and a saved receipt sit on the pane's text
+     edge, and a receipt reads like an item: its title at the item scale. */
+  .signal-document-analysis .signal-saved-judgment-access { padding: 0; }
+  .signal-document-analysis .signal-saved-judgment-access h3 { margin: 0; font-family: var(--font-signal-display); font-size: var(--signal-item-title-size); font-weight: var(--signal-item-title-weight); line-height: var(--signal-line-section); }
+  /* A title focused after Previous or Next is never left under the pinned steps. */
+  .signal-review-item .signal-item-head__title,
+  .signal-selected-criterion .signal-criterion-navigation { scroll-margin-block-start: calc(var(--signal-workspace-steps-height) + var(--signal-space-4)); }
+  /* "Cannot judge from this manuscript?" takes its own line, so it is never
+     pushed beside the grade buttons and out of a narrow pane. */
+  .signal-document-inspector .signal-resolution-options > .signal-exclusion-help { flex-basis: 100%; min-inline-size: 0; }
   /* A criterion's assessment details in their dialog: sections with real
      headings, the limits set apart at the end. */
   .signal-criterion-details { display: grid; gap: var(--signal-space-6); }
