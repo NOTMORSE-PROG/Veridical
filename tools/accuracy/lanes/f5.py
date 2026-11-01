@@ -120,13 +120,11 @@ LIMITATIONS = (
     "A host production refuses outright (reading order it cannot confine) hosts no plants: "
     "it would show no linkage finding at all, so its intact entries would count as kept "
     "silent for free. It is reported in the coverage details instead.",
-    "Real-manuscript precision covers the 9 missing-reference flags production raises on "
-    "DESTAMP, which name only 6 distinct citations (Yochum 3 times, Young twice), so the "
-    "interval rests on fewer independent judgments than n suggests. This code also raises "
-    "DESTAMP's two uncited-reference flags (Black 2017; Schmitt, Delbosc & Currie 2018), "
-    "which both raters judged correct; they sit in f5/real_judgments_withheld.json and join "
-    "the counted set once this rule is live, so until then the row covers 9 of the 11 flags "
-    "this code raises there. LensMatch, AugmentedRL and MIT raised none.",
+    "Real-manuscript precision covers the 11 flags production raises on DESTAMP: 9 "
+    "missing-reference flags, which name only 6 distinct citations (Yochum 3 times, Young "
+    "twice), and the two uncited-reference flags (Black 2017; Schmitt, Delbosc & Currie "
+    "2018), counted since production raised them live (2026-11-01). The interval rests on "
+    "fewer independent judgments than n suggests. LensMatch, AugmentedRL and MIT raised none.",
     "The existence case set is frozen in f5/existence_cases.json on first build; registry "
     "answers come from the cache, with the fetch dates listed in the details.",
 )
