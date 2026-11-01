@@ -425,7 +425,7 @@ describe("SignalReportPage", () => {
       .map((id) => document.getElementById(id)?.textContent ?? "")
       .join(" ");
     expect(describedByIds.every((id) => document.getElementById(id))).toBe(true);
-    expect(describedText).toContain("Your judgment is needed");
+    expect(describedText).toContain("Needs your judgment");
     expect(describedText).not.toContain("Split vote:");
     expect(describedText).toContain(ESCALATED.reason);
 

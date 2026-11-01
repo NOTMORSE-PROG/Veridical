@@ -341,6 +341,19 @@
   /* Set while the uploads tray is on screen (BUG-558). */
   --signal-upload-tray-height: 0px;
   --signal-prose-width: 72ch;
+  /* BUG-643 review item system: aliases of existing tokens, so every review
+     screen shares one card, heading scale and evidence rhythm. */
+  --signal-item-padding: var(--signal-space-5);
+  --signal-item-radius: var(--signal-radius-panel);
+  --signal-item-head-gap: var(--signal-rhythm-attached);
+  --signal-item-section-gap: var(--signal-space-6);
+  --signal-item-section-inner-gap: var(--signal-space-3);
+  --signal-item-title-size: var(--signal-type-subhead);
+  --signal-item-title-weight: var(--signal-weight-semibold);
+  --signal-item-section-title-size: var(--signal-type-body-lg);
+  --signal-item-section-title-weight: var(--signal-weight-semibold);
+  --signal-evidence-item-gap: var(--signal-rhythm-control);
+  --signal-evidence-list-gap: var(--signal-rhythm-group);
   --signal-form-width: 30rem;
   --signal-workbench-width: 90rem;
   --signal-flag-summary-basis: 20rem;

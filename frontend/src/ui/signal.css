@@ -3097,12 +3097,14 @@
     overflow-wrap: anywhere;
   }
 
+  /* One title scale for criterion and finding items everywhere (BUG-643). */
   .signal-resolution-card h3,
   .signal-flag-row h3,
   .signal-result-card h3 {
     margin: var(--signal-space-2) 0;
     font-family: var(--font-signal-display);
-    font-size: var(--signal-type-body-lg);
+    font-size: var(--signal-item-title-size);
+    font-weight: var(--signal-item-title-weight);
     line-height: var(--signal-line-section);
   }
 
@@ -9183,6 +9185,47 @@
   /* An open dialog hides the page scrollbar; keep its space so nothing
      behind the dialog shifts sideways. */
   html:has(.signal-dialog-backdrop) { scrollbar-gutter: stable; }
+  /* BUG-643 review item system: one header, one section rhythm and one
+     evidence layout for criterion and finding items on every review screen. */
+  .signal-item-head { display: grid; gap: var(--signal-item-head-gap); min-inline-size: 0; }
+  .signal-item-head > p { margin: 0; }
+  .signal-item-head__bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--signal-rhythm-control); }
+  .signal-item-head__nav { display: flex; flex-wrap: wrap; gap: var(--signal-rhythm-control); }
+  .signal-item-head__title { margin: 0; font-family: var(--font-signal-display); font-size: var(--signal-item-title-size); font-weight: var(--signal-item-title-weight); line-height: var(--signal-line-section); overflow-wrap: anywhere; }
+  .signal-item-head__chips { display: flex; flex-wrap: wrap; align-items: center; gap: var(--signal-space-2); }
+  .signal-item-head__meta { margin: 0; font-size: var(--signal-type-meta); color: var(--color-signal-ink-muted); }
+  .signal-item-section { display: grid; gap: var(--signal-item-section-inner-gap); min-inline-size: 0; }
+  .signal-item-section__title { margin: 0; font-family: var(--font-signal-interface); font-size: var(--signal-item-section-title-size); font-weight: var(--signal-item-section-title-weight); line-height: var(--signal-line-section); }
+  .signal-item-section--limits { padding-block-start: var(--signal-space-5); border-block-start: var(--signal-border-hairline) solid var(--color-signal-border); }
+  .signal-item-section :is(p, blockquote) { margin: 0; max-inline-size: var(--signal-review-detail-measure); }
+  .signal-item-section summary { cursor: pointer; color: var(--color-signal-link); }
+  .signal-button--inline { padding-inline: 0; justify-self: start; }
+  .signal-evidence-list { display: grid; gap: var(--signal-evidence-list-gap); min-inline-size: 0; }
+  .signal-evidence-item { display: grid; gap: var(--signal-evidence-item-gap); min-inline-size: 0; }
+  .signal-evidence-item__label { margin: 0; font-size: var(--signal-type-label); font-weight: var(--signal-weight-semibold); line-height: var(--signal-line-label); color: var(--color-signal-ink-secondary); }
+  .signal-evidence-item__quote { margin: 0; display: grid; gap: var(--signal-space-1); border-inline-start: var(--signal-border-emphasis) solid var(--color-signal-brand); padding-inline-start: var(--signal-space-4); overflow-wrap: anywhere; max-inline-size: var(--signal-review-detail-measure); }
+  .signal-evidence-item__quote cite { font-style: normal; font-size: var(--signal-type-label); color: var(--color-signal-ink-secondary); }
+  .signal-evidence-item__actions { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--signal-rhythm-control); }
+  /* The page actions join the row; their preview or message takes a full line. */
+  .signal-evidence-item__actions .signal-recorded-page-actions { display: contents; }
+  .signal-evidence-item__actions .signal-recorded-page-actions > :not(.signal-button) { flex-basis: 100%; }
+  .signal-evidence-item__result { display: grid; gap: var(--signal-rhythm-control); min-inline-size: 0; }
+  /* Manuscript review: one text edge for the pane and its criterion card. */
+  .signal-document-analysis { padding: var(--signal-item-padding); }
+  .signal-document-inspector .signal-resolution-card.signal-review-item { display: grid; gap: var(--signal-item-section-gap); padding: 0; border: 0; }
+  .signal-review-item .signal-item-head__title { margin: 0; }
+  /* The step label sits close above the item it labels. */
+  .signal-document-analysis > .signal-workspace-step-kicker { margin-block-end: 0; }
+  /* The saved-judgments link and a saved receipt sit on the pane's text
+     edge, and a receipt reads like an item: its title at the item scale. */
+  .signal-document-analysis .signal-saved-judgment-access { padding: 0; }
+  .signal-document-analysis .signal-saved-judgment-access h3 { margin: 0; font-family: var(--font-signal-display); font-size: var(--signal-item-title-size); font-weight: var(--signal-item-title-weight); line-height: var(--signal-line-section); }
+  /* A title focused after Previous or Next is never left under the pinned steps. */
+  .signal-review-item .signal-item-head__title,
+  .signal-selected-criterion .signal-criterion-navigation { scroll-margin-block-start: calc(var(--signal-workspace-steps-height) + var(--signal-space-4)); }
+  /* "Cannot judge from this manuscript?" takes its own line, so it is never
+     pushed beside the grade buttons and out of a narrow pane. */
+  .signal-document-inspector .signal-resolution-options > .signal-exclusion-help { flex-basis: 100%; min-inline-size: 0; }
   /* A criterion's assessment details in their dialog: sections with real
      headings, the limits set apart at the end. */
   .signal-criterion-details { display: grid; gap: var(--signal-space-6); }

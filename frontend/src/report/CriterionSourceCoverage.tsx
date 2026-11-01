@@ -4,13 +4,12 @@ import { criterionCoverageLocations } from "../domain/criterionSourceCoverage";
 import { PageRanges } from "./PageRanges";
 import { instructorAnchor } from "../domain/sourceAnchor";
 
-export function CriterionSourceCoverage({ value, sourceAction, firstSlot, criterionText, foldPages = false }: {
+export function CriterionSourceCoverage({ value, sourceAction, firstSlot, criterionText }: {
   value: Coverage; sourceAction: (anchor: string, slot: number) => ReactNode; firstSlot: number; criterionText: string;
-  /** Give the count and keep a long page list behind a disclosure. */
-  foldPages?: boolean;
 }) {
   const count = value.unread_pages?.length ?? 0;
-  const unread = foldPages && count > 1 ? <div className="signal-attached-flow">
+  // The count and what to do are always shown; the list itself is folded.
+  const unread = count > 1 ? <div className="signal-attached-flow">
     <p><strong>{count} pages not read.</strong> They could not be read in a reliable order, so this assessment is based on the other pages. Check them before relying on it.</p>
     <details><summary aria-label={`Show the ${count} pages not read: ${criterionText}`}>Show the {count} pages not read</summary><p><PageRanges pages={value.unread_pages ?? []} /></p></details>
   </div> : value.unread_pages?.length ? <p><strong>Some pages not read.</strong>{" "}

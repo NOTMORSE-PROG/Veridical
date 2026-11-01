@@ -1,5 +1,6 @@
 import { AUTOMATIC_GRADE_COPY, automaticGradeCaution, automaticGradeChip, automaticGradeLines, automaticGradePasses } from "../domain/automaticGrade";
 import { RecordedEvidencePage } from "./RecordedEvidencePage";
+import { EvidenceItem } from "./EvidenceItem";
 import { IntegrityModuleNavigation, selectedIntegrityModule, type IntegrityKind } from "./IntegrityModules";
 import { ActionAssessmentContext, ReportAssessmentContext } from "./ReportAssessmentContext";
 import { criterionAssessmentDetails } from "../domain/criterionAssessment";
@@ -14,7 +15,7 @@ import { clearPdfReading } from "../document/usePdfPageText";
 import { recoverableReadError } from "./reportReadState";
 import { reviewDeskDestination } from "../routing/reviewDeskReturn";
 import { useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { useLocation, useNavigate, useSearchParams } from "react-router";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router";
 import { CITATION_HISTORY_TITLE } from "../domain/citationHistory";
 import type {
   CriterionResultOut,
@@ -830,35 +831,24 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, sourceTarget, 
     .join(" ");
 
   return (
-    <article className="signal-resolution-card">
-      <div className="signal-resolution-card__context">
-        <h3 id={`signal-resolution-heading-${item.check_result_id}`} ref={criterionHeadingRef} tabIndex={-1}>{item.criterion_text}</h3>
-        <strong id={reviewStateId}>{CRITERION_REVIEW_COPY.judgmentNeeded}</strong>
+    <article className="signal-resolution-card signal-review-item">
+      <div className="signal-item-head">
+        <h3 id={`signal-resolution-heading-${item.check_result_id}`} ref={criterionHeadingRef} tabIndex={-1} className="signal-item-head__title">{item.criterion_text}</h3>
+        <div className="signal-item-head__chips"><span id={reviewStateId} className="signal-outcome signal-outcome--review">{CRITERION_REVIEW_COPY.judgmentNeeded}</span></div>
         <p>{item.evidence?.length ? CRITERION_REVIEW_COPY.reviewSavedPassages : CRITERION_REVIEW_COPY.reviewManuscript}</p>
+      </div>
+      <section className="signal-item-section signal-resolution-card__context">
+        <h4 className="signal-item-section__title">{CRITERION_REVIEW_COPY.whySection}</h4>
         {reviewNotices.filter(notice => notice.kind !== "support").map((notice) => <p key={notice.kind} id={noticeId(notice.kind)} className="signal-resolution-card__vote">{notice.text}</p>)}
         {!collapseRecordedReason && !sharedReasonId && item.reason && <p id={reasonId}>{readableNote(item.reason)}</p>}
         {showInjectionSnippet && (
           <blockquote className="signal-unverified-evidence"><strong id={injectionId}>Text addressed at an automated grader</strong><span>“{item.injection_matched_snippet}”</span></blockquote>
         )}
-        {item.unverified_evidence && item.unverified_evidence.length > 0 && (() => {
-          // A quote that is in the manuscript but was already another
-          // criterion's evidence is not a source mismatch; say which it is.
-          const codes = item.reason_codes ?? review?.assessment?.results?.find((row) => row.criterion_id === item.criterion_id)?.reason_codes ?? [];
-          const reusedOnly = codes.includes("evidence_already_used") && !codes.includes("evidence_not_located");
-          return <div className="signal-unverified-evidence">
-            <strong id={unverifiedId}>{reusedOnly ? "Quotes already used for another criterion" : "Could not verify against the source"}</strong>
-            {reusedOnly ? <p>These passages are in the manuscript, but each was already used as evidence for a different criterion, so it was not counted again here.</p>
-              : codes.includes("evidence_already_used") && <p>Some of these passages are in the manuscript but were already used for another criterion; the others could not be located in the source.</p>}
-            {item.unverified_evidence!.map((quote) => <blockquote key={quote}>“{quote}”</blockquote>)}
-          </div>;
-        })()}
         {assessment?.ruleScopeUnconfirmed && <RuleScopeNotice />}
-        {assessment?.sourceCoverage && <CriterionSourceCoverage value={assessment.sourceCoverage} sourceAction={coverageSourceAction} firstSlot={item.evidence?.length ?? 0} criterionText={item.criterion_text} />}
-        {reportHasLimits && <p className="signal-field-hint"><ActionLink to={`/report/${checkRunId}?section=limits`} variant="quiet">See assessment limits on the readiness report</ActionLink></p>}
         {assessment?.ruleFacts && <RuleFactsDetails facts={assessment.ruleFacts} />}
-        {item.reasoning?.trim() && <div className="signal-resolution-context-note"><h4>Assessment and explanation</h4><strong>{assessment?.explanationLabel ?? "Recorded explanation:"}</strong><p>{item.reasoning}</p></div>}
+        {item.reasoning?.trim() && <><p className="signal-field-hint">{(assessment?.explanationLabel ?? "Recorded explanation:").replace(/:$/, "")}</p><p>{item.reasoning}</p></>}
         {(item.votes.length > 0 || reviewNotices.some(notice => notice.kind === "support") || (collapseRecordedReason && Boolean(item.reason)) || Boolean(sharedReasonId)) && <>
-        <Button variant="quiet" aria-expanded={detailsOpen} aria-controls={detailsId}
+        <Button variant="quiet" className="signal-button--inline" aria-expanded={detailsOpen} aria-controls={detailsId}
           aria-label={`${detailsOpen ? "Hide" : "Show"} ${CRITERION_REVIEW_COPY.details} for ${item.criterion_text}`}
           onClick={() => setDetailsOpen((open) => !open)}>
           {detailsOpen ? "Hide" : "Show"} {CRITERION_REVIEW_COPY.details}
@@ -874,12 +864,52 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, sourceTarget, 
           )}</ol> : <p>{CRITERION_REVIEW_COPY.noEntries}</p>}
         </div>
         </>}
+      </section>
+      <section className="signal-item-section signal-criterion-packet" aria-label={`Quoted evidence for ${item.criterion_text}`}>
+        <h4 className="signal-item-section__title">{CRITERION_REVIEW_COPY.evidenceSection}</h4>
         <p id={sourceQualificationId} className="signal-field-hint">{RECORDED_GRADE_BASIS.qualification}</p>
-        <ActionAssessmentContext id={actionContextId} notices={review.assessmentNotices ?? []} />
-      </div>
+        {item.unverified_evidence && item.unverified_evidence.length > 0 && (() => {
+          // A quote that is in the manuscript but was already another
+          // criterion's evidence is not a source mismatch; say which it is.
+          const codes = item.reason_codes ?? review?.assessment?.results?.find((row) => row.criterion_id === item.criterion_id)?.reason_codes ?? [];
+          const reusedOnly = codes.includes("evidence_already_used") && !codes.includes("evidence_not_located");
+          return <div className="signal-unverified-evidence">
+            <strong id={unverifiedId}>{reusedOnly ? "Quotes already used for another criterion" : "Could not verify against the source"}</strong>
+            {reusedOnly ? <p>These passages are in the manuscript, but each was already used as evidence for a different criterion, so it was not counted again here.</p>
+              : codes.includes("evidence_already_used") && <p>Some of these passages are in the manuscript but were already used for another criterion; the others could not be located in the source.</p>}
+            {item.unverified_evidence!.map((quote) => <blockquote key={quote}>“{quote}”</blockquote>)}
+          </div>;
+        })()}
+        <div className="signal-evidence-list" id={`signal-evidence-packet-${item.check_result_id}`}>
+        {item.evidence?.map((entry, index) => {
+          const actionId = `signal-resolution-source-${checkRunId}-${item.check_result_id}-${index}`;
+          const { target, state } = pendingSource(entry.anchor, actionId);
+          const recorded = manifest?.references.find(ref => ref.criterion_id === item.criterion_id
+            && ref.role === "criterion_evidence" && ref.index === index && ref.quote === entry.quote && ref.anchor === entry.anchor);
+          const open = onOpenEvidenceSource
+            ? <Button id={actionId} variant="secondary" disabled={!recorded || !manifest} onClick={() => {
+              if (recorded && manifest) onOpenEvidenceSource({ snapshotId: manifest.snapshot_id, reference: recorded, actionId });
+            }}>Show recorded location</Button>
+            : entry.anchor.trim() ? <ActionLink id={actionId} variant="secondary" state={state} to={target} aria-label={`Open in manuscript: ${instructorAnchor(entry.anchor)}. ${item.criterion_text}`} onClick={event => followPendingSource(event, entry.anchor, actionId)}>Open in manuscript: {instructorAnchor(entry.anchor)}</ActionLink> : null;
+          return <EvidenceItem key={`${entry.anchor}-${index}`}
+            label={(item.evidence?.length ?? 0) > 1 ? `Saved passage ${index + 1}` : undefined}
+            quote={entry.quote} anchor={entry.anchor.trim() ? instructorAnchor(entry.anchor) : RECORDED_GRADE_BASIS.missingLocation}
+            actions={<>{open}{recorded && manifest && <RecordedEvidencePage key={`${manifest.snapshot_id}-${recorded.reference_id}`} checkRunId={checkRunId} snapshot={manifest.snapshot_id} reference={recorded} context={evidenceContext} />}</>} />;
+        })}
+        </div>
+        {onOpenEvidenceSource && manifestQuery.isFetching && <p role="status">Loading recorded source links.</p>}
+        {onOpenEvidenceSource && manifestQuery.isError && <p role="status">Recorded source links could not be verified. <Button variant="quiet" onClick={() => { void manifestQuery.refetch(); }}>Retry source links</Button></p>}
+        {!item.evidence?.length && !assessment?.ruleFacts && <p>{!item.reasoning?.trim() ? "No located source passage or assessment explanation is available. Review the manuscript before grading." : RECORDED_GRADE_BASIS.missingExcerpt}</p>}
 
-      <div className="signal-resolution-card__judgment">
-      <h4>Your grade</h4>
+      </section>
+      {(assessment?.sourceCoverage || reportHasLimits) && <section className="signal-item-section signal-item-section--limits">
+        <h4 className="signal-item-section__title">{CRITERION_REVIEW_COPY.limitsSection}</h4>
+        {assessment?.sourceCoverage && <CriterionSourceCoverage value={assessment.sourceCoverage} sourceAction={coverageSourceAction} firstSlot={item.evidence?.length ?? 0} criterionText={item.criterion_text} />}
+        {reportHasLimits && <p><Link className="signal-text-link" to={`/report/${checkRunId}?section=limits`}>See assessment limits on the readiness report</Link></p>}
+      </section>}
+      <section className="signal-item-section signal-resolution-card__judgment">
+      <h4 className="signal-item-section__title">Your grade</h4>
+      <ActionAssessmentContext id={actionContextId} notices={review.assessmentNotices ?? []} />
       {/* Keep the status region mounted. Only an explicit choice may continue
           focus to its selected heading or required reason. */}
       <div className="signal-resolution-form__pending" role="status" aria-live="polite">
@@ -944,30 +974,6 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, sourceTarget, 
           <div>{draftCurrent && <Button variant="secondary" disabled={saving || pending?.uncertainRevision !== undefined} onClick={event => cancel(event.currentTarget)}>Cancel</Button>}<Button data-criterion-confirm variant="brand" disabled={saving || !draftCurrent} aria-describedby={`${describedBy}${excluding ? ` ${exclusionConsequenceId}` : ""}`} busy={saving} onClick={confirm}>{excluding ? CRITERION_EXCLUSION_COPY.confirm : ordinaryGrade ? "Save grade" : "Confirm resolution"}</Button></div>
         </div>
       )}
-      </div>
-      <section className="signal-criterion-packet" aria-label={`Saved evidence for ${item.criterion_text}`}>
-        <h4>Saved evidence</h4>
-        <p className="signal-field-hint">All passages saved for this criterion. No finer evidence grouping was recorded.</p>
-        <div className="signal-criterion-packet__quotations" id={`signal-evidence-packet-${item.check_result_id}`}>
-        {item.evidence?.map((entry, index) => {
-          const actionId = `signal-resolution-source-${checkRunId}-${item.check_result_id}-${index}`;
-          const { target, state } = pendingSource(entry.anchor, actionId);
-          const recorded = manifest?.references.find(ref => ref.criterion_id === item.criterion_id
-            && ref.role === "criterion_evidence" && ref.index === index && ref.quote === entry.quote && ref.anchor === entry.anchor);
-          if (onOpenEvidenceSource) return <figure key={`${entry.anchor}-${index}`}>
-            <figcaption><strong>Saved passage {index + 1}</strong><span>{entry.anchor.trim() ? instructorAnchor(entry.anchor) : RECORDED_GRADE_BASIS.missingLocation}</span></figcaption><blockquote>“{entry.quote}”</blockquote>
-            {recorded && manifest && <RecordedEvidencePage key={`${manifest.snapshot_id}-${recorded.reference_id}`} checkRunId={checkRunId} snapshot={manifest.snapshot_id} reference={recorded} context={evidenceContext} />}
-            <Button id={actionId} variant="secondary" disabled={!recorded || !manifest} onClick={() => {
-              if (recorded && manifest) onOpenEvidenceSource({ snapshotId: manifest.snapshot_id, reference: recorded, actionId });
-            }}>Show recorded location</Button>
-          </figure>;
-          return <figure key={`${entry.anchor}-${index}`}><figcaption><strong>Saved passage {index + 1}</strong><span>{entry.anchor.trim() ? instructorAnchor(entry.anchor) : RECORDED_GRADE_BASIS.missingLocation}</span></figcaption><blockquote>“{entry.quote}”</blockquote>{recorded && manifest && <RecordedEvidencePage key={`${manifest.snapshot_id}-${recorded.reference_id}`} checkRunId={checkRunId} snapshot={manifest.snapshot_id} reference={recorded} context={evidenceContext} />}{entry.anchor.trim() ? <><ActionLink id={actionId} variant="quiet" state={state} to={target} aria-label={`Open in manuscript: ${instructorAnchor(entry.anchor)}. ${item.criterion_text}`} onClick={event => followPendingSource(event, entry.anchor, actionId)}>Open in manuscript: {instructorAnchor(entry.anchor)}</ActionLink></> : null}</figure>;
-        })}
-        {onOpenEvidenceSource && manifestQuery.isFetching && <p role="status">Loading recorded source links.</p>}
-        {onOpenEvidenceSource && manifestQuery.isError && <p role="status">Recorded source links could not be verified. <Button variant="quiet" onClick={() => { void manifestQuery.refetch(); }}>Retry source links</Button></p>}
-        {!item.evidence?.length && !assessment?.ruleFacts && <p>{!item.reasoning?.trim() ? "No located source passage or assessment explanation is available. Review the manuscript before grading." : RECORDED_GRADE_BASIS.missingExcerpt}</p>}
-
-        </div>
       </section>
     </article>
   );
@@ -1402,7 +1408,7 @@ export function SignalCriteriaResults({ results, checkRunId, publicView = false,
             }}
           >Open in manuscript: {instructorAnchor(anchor)}</ActionLink>;
         };
-        const coverage = assessment.sourceCoverage && <CriterionSourceCoverage value={assessment.sourceCoverage} sourceAction={sourceAction} firstSlot={row.evidence.length + 1} criterionText={row.text} foldPages={detailsInDialog} />;
+        const coverage = assessment.sourceCoverage && <CriterionSourceCoverage value={assessment.sourceCoverage} sourceAction={sourceAction} firstSlot={row.evidence.length + 1} criterionText={row.text} />;
         const excerpts = renderEvidence ? renderEvidence(row) : row.evidence.length ? row.evidence.map((item, evidenceIndex) => {
                   const hasAnchor = Boolean(item.anchor?.trim());
                   const showAction = hasAnchor && !seenAnchors.has(item.anchor);
