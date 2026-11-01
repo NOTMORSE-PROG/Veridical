@@ -69,6 +69,7 @@ from app.checks.citations.support import (
     run_claim_support_check,
 )
 from app.checks.citations.title_policy import TitlePolicy, load_title_policy
+from app.checks.citations.unread_pages import split_by_unread_pages, unread_page_leads
 from app.checks.source_quality import persist_source_limitation, source_limitation_detail
 from app.config import Settings
 from app.errors import ApiDownError
@@ -998,12 +999,40 @@ async def _run_citation_integrity_check(
     scan_gap_covers_all = bool(gaps) and (
         numbered or WITHHELD_SCAN_INCOMPLETE in absence_withheld.values()
     )
-    # Text left unread (native Word equations, pages with unresolved order)
-    # may hold the only citation of a reference, so absence stays unassessed.
-    partial_source = native_source.limited or bool(extraction.unread_pages)
+    # Text left unread may hold the only citation of a reference. Native Word
+    # equations cannot be searched, so they withhold every absence claim.
+    # Pages left unread for their reading order can (BUG-619): only an entry
+    # an unread page names stays unassessed, and it is shown as a lead naming
+    # those pages instead of a finding. Any other reason to withhold every
+    # absence claim keeps the whole-list rule.
+    whole_list_withheld = (
+        metadata_only
+        or membership_partial
+        or projection_reason
+        or scan_gap_covers_all
+        or selection.issues
+        or (not numbered and not cross.linked)
+    )
+    partial_source = native_source.limited
+    unread_withheld = []
+    if extraction.unread_pages and not partial_source and not whole_list_withheld:
+        citing_pages = (
+            {m.page for m in numeric.marks if m.page and m.classification == "citation"}
+            if numbered
+            else {c.page for c in cross.in_text if c.page}
+        )
+        absence_candidates, unread_withheld = split_by_unread_pages(
+            absence_candidates,
+            extraction,
+            numbered=numbered,
+            citing_pages=citing_pages,
+            settings=settings,
+        )
+    elif extraction.unread_pages:
+        partial_source = True
     native_absence_unassessed = (
         {ref.order_index for ref in absence_candidates} if partial_source else set()
-    )
+    ) | {ref.order_index for ref, _pages, _why in unread_withheld}
     # No supported body style or a partial scan cannot prove a reference unused.
     if (
         metadata_only
@@ -1095,7 +1124,7 @@ async def _run_citation_integrity_check(
             *orphan_flags(orphans),
             *uncited_flags(absence_candidates),
         ]
-    )
+    ) + unread_page_leads(unread_withheld, numbered=numbered, settings=settings)
     if (
         metadata_only
         or membership_partial
@@ -1473,6 +1502,8 @@ async def _run_citation_integrity_check(
             "n_orphans": len(cross.orphans),
             "n_orphans_reported": len(orphans),
             "n_uncited": len(absence_candidates),
+            # Entries a page left unread could be citing: shown as leads (BUG-619).
+            "n_uncited_withheld_by_unread_pages": len(unread_withheld),
             "coverage_reason": coverage_reason,
             "n_metadata_skipped_insufficient": len(metadata_unassessed),
             "n_linkage_unassessed": linkage_unassessed,

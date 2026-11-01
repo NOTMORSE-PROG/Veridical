@@ -94,10 +94,17 @@ def readable_pages_copy(
 def without_unread_pages(extraction: ExtractionResult, pages: list[int]) -> ExtractionResult:
     """A copy for analyses that read every page except `pages` (from
     `unread_page_scope`). Their text is dropped; their tables are kept but
-    marked unreliable so table positions stay stable and no check reads them."""
+    marked unreliable so table positions stay stable and no check reads them.
+    Their text is kept aside, unordered, for checks that only need to know
+    whether a page mentions something (BUG-619)."""
     unread = set(pages)
+    unread_text: dict[int, list[str]] = {page: [] for page in sorted(unread)}
+    for block in extraction.blocks:
+        if block.page in unread:
+            unread_text[block.page].append(block.text)
     return extraction.model_copy(
         update={
+            "unread_text": {page: "\n".join(texts) for page, texts in unread_text.items()},
             "blocks": [block for block in extraction.blocks if block.page not in unread],
             "tables": [
                 table.model_copy(update={"low_confidence": True}) if table.page in unread else table

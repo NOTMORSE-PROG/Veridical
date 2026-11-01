@@ -1,0 +1,14 @@
+{
+  "_comment": "BUG-619: which uncited-reference claims a page left unread could change. A page whose reading order is unresolved is left out of the checks, but its text is still there, out of order. An entry is called uncited only when no unread page names it. What stays withheld is shown as a lead naming the pages, which does not change readiness. Kept as data so the wording and the marker form can change without code changes.",
+  "version": "unread-pages-uncited-v1",
+  "_numbered_marker_note": "A numbered entry counts as named on a page when its number appears inside square brackets there, alone or in a list or range of numbers. {number} is replaced by the entry's number.",
+  "numbered_marker_pattern": "\\[[^\\]]{0,40}\\b{number}\\b[^\\]]{0,40}\\]",
+  "entry_author_year": "Reference list entry '{first_author}' ({year})",
+  "entry_numbered": "Reference list entry [{number}]",
+  "lead_named": "{entry} is not cited on any page that was read. The text of {pages} could not be read in order and mentions this entry, so it may be cited there. Please check {pages} before treating the entry as unused. This lead does not change readiness.",
+  "lead_within_citing_text": "{entry} is not cited on any page that was read. {Pages} could not be read in order and {lies} among the pages that cite sources, so it may be cited there. Please check {pages} before treating the entry as unused. This lead does not change readiness.",
+  "page_one": "page {page}",
+  "page_many": "pages {pages}",
+  "lies_one": "lies",
+  "lies_many": "lie"
+}

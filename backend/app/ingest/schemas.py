@@ -538,6 +538,9 @@ class ExtractionResult(BaseModel):
     # Transient: pages an analysis copy leaves out because only their reading
     # order is unresolved (their text is absent from that copy). Never stored.
     unread_pages: list[int] | None = Field(default=None, exclude=True)
+    # Transient: the text of those pages, out of order, kept aside so a check
+    # can ask whether a page it could not read names an entry. Never stored.
+    unread_text: dict[int, str] | None = Field(default=None, exclude=True)
     docx_omitted_image_occurrences: int = Field(default=0, ge=0)
     # NUL characters the document's text carried and extraction dropped (see
     # normalize.NUL). Omitted when zero so existing extractions keep their bytes.

@@ -849,6 +849,9 @@ class Settings(BaseSettings):
     # at least this long. Shorter pieces match ordinary words too often. Used
     # only to withhold linkage findings, never to raise one.
     citation_linkage_name_word_min_chars: int = Field(default=4, ge=2, le=20)
+    # Which uncited claims a page left unread could change, and how the lead
+    # for the ones it could is worded (BUG-619). Packaged default if unset.
+    citation_unread_pages_policy_file: Path | None = None
 
     # Exact-DOI metadata title policy. Packaged default if unset; changing a
     # custom policy requires a process restart. Each comparison saves its hash.
