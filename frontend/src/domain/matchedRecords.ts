@@ -14,8 +14,8 @@ export function matchedRecords(flag: { matched_ref?: number | null; matched_refs
 }
 
 /** "#10", "#10 and #12", "#10, #12 and #14", then "and 2 more" past the cap. */
-export function recordList(refs: number[]): string {
-  const shown = refs.slice(0, MATCHED_RECORDS_SHOWN).map(ref => `#${ref}`);
+export function recordList(refs: number[], cap = MATCHED_RECORDS_SHOWN): string {
+  const shown = refs.slice(0, cap).map(ref => `#${ref}`);
   const more = refs.length - shown.length;
   if (more > 0) return `${shown.join(", ")} and ${more} more`;
   return shown.length <= 1 ? shown.join("") : `${shown.slice(0, -1).join(", ")} and ${shown[shown.length - 1]}`;

@@ -8,6 +8,7 @@ export function MatchedRecordLinks({ records }: { records: number[] }) {
   if (records.length === 1) return <ActionLink to={`/library/${records[0]}`} variant="secondary">Open Library record #{records[0]}</ActionLink>;
   const more = records.length - MATCHED_RECORDS_SHOWN;
   return <>
+    <p className="signal-matched-records__count">{records.length} matching Library records</p>
     <ul className="signal-matched-records" aria-label="Matching Library records">
       {records.slice(0, MATCHED_RECORDS_SHOWN).map(ref => <li key={ref}><ActionLink to={`/library/${ref}`} variant="secondary">Open Library record #{ref}</ActionLink></li>)}
     </ul>
