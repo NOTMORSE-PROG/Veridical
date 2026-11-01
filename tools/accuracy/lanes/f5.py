@@ -106,9 +106,11 @@ LIMITATIONS = (
     "a plant landed on.",
     "Check-output linkage rows run the check on the copy production gives it: the pages "
     "with unresolved reading order are left out by the same function the pipeline calls "
-    "(BUG-507, BUG-616). Every linkage host has such pages, and the check then withholds "
-    "every uncited-reference claim, so check-output uncited recall is 0 by design on these "
-    "theses. The linkage-engine rows run on the same readable pages and count candidates "
+    "(BUG-507, BUG-616). Every linkage host has such pages. An uncited-reference claim is "
+    "withheld only when an unread page names the entry (its first author's surname, or its "
+    "bracket number) and is then shown as a lead naming the pages (BUG-619); an entry with "
+    "no usable name is withheld when an unread page lies among the citing pages. The "
+    "linkage-engine rows run on the same readable pages and count candidates "
     "before the coverage rules withhold them; they do not read the left-out pages, so they "
     "are not what the check would find if those pages could be read.",
     "A host production refuses outright (reading order it cannot confine) hosts no plants: "
@@ -116,10 +118,11 @@ LIMITATIONS = (
     "silent for free. It is reported in the coverage details instead.",
     "Real-manuscript precision covers the 9 missing-reference flags production raises on "
     "DESTAMP, which name only 6 distinct citations (Yochum 3 times, Young twice), so the "
-    "interval rests on fewer independent judgments than n suggests. Two uncited-reference "
-    "flags judged correct when the reading-order refusal was lifted are not counted: "
-    "production withholds them (f5/real_judgments_withheld.json). LensMatch, AugmentedRL and "
-    "MIT raised none.",
+    "interval rests on fewer independent judgments than n suggests. This code also raises "
+    "DESTAMP's two uncited-reference flags (Black 2017; Schmitt, Delbosc & Currie 2018), "
+    "which both raters judged correct; they sit in f5/real_judgments_withheld.json and join "
+    "the counted set once this rule is live, so until then the row covers 9 of the 11 flags "
+    "this code raises there. LensMatch, AugmentedRL and MIT raised none.",
     "The existence case set is frozen in f5/existence_cases.json on first build; registry "
     "answers come from the cache, with the fetch dates listed in the details.",
 )
@@ -303,6 +306,9 @@ def _flag_findings(flags):
     for flag in flags:
         detail = flag.detail or {}
         kind = detail.get("kind")
+        if detail.get("affects_readiness") is False:
+            # A lead asks the instructor to check; it is not a finding (BUG-619).
+            continue
         if kind == "orphan_in_text_citation":
             if "number" in detail:
                 found.add(("orphan", "n", detail["number"]))
@@ -1181,6 +1187,131 @@ def _linkage_rows(tally, new_counts, unmatched):
     return rows
 
 
+async def _unread_page_cases(ctx, config, patterns, settings):
+    """Adversarial cases for the unread-pages rule (BUG-619), on every host whose
+    readable copy leaves pages out and whose list is author-year. For each entry
+    that can be made uncited: the plant alone (it must be reported), and the
+    plant with the entry cited on an unread page in forms the readable text is
+    read in (it must stay withheld, as a lead for that entry): the first
+    author's surname with the year, with another year, in capitals, split by a
+    hyphen at a line break, and by the second author when there is one."""
+    records = []
+    for name, path in ctx.hosts().items():
+        twin = await _host_twin(path, patterns, settings, config)
+        pool, st = twin["pool"], twin["state"]
+        if twin["refused"] or not twin["unread"] or pool["style"] != "author_year":
+            continue
+        page = twin["unread"][0]
+        for pick in pool["uncited"]:
+            entry = st["citations"][pick["order"]]
+            first = (entry.authors or [""])[0]
+            surname = first.split(",", 1)[0].strip() if "," in first else first.strip()
+            year = _year(pick["year"])
+            if not surname or not year:
+                continue
+            variants = [
+                ("plant_only", None),
+                ("named_on_unread_page", f"{surname} ({year})"),
+                ("same_surname_other_year", f"{surname} ({int(year) + 3})"),
+                ("surname_in_capitals", f"{surname.upper()} ({year})"),
+            ]
+            if len(surname) >= 6:
+                cut = len(surname) // 2
+                variants.append(
+                    (
+                        "surname_hyphenated_at_line_break",
+                        f"{surname[:cut]}-\n{surname[cut:]} ({year})",
+                    )
+                )
+            if len(entry.authors or []) > 1:
+                second = entry.authors[1].split(",", 1)[0].strip()
+                variants.append(("second_author", f"{second} et al. ({year})"))
+            for variant, mention in variants:
+                full = load_extraction(path)
+                full.reading_order = None
+                if mention:
+                    full.blocks.append(
+                        TextBlock(
+                            text=f"As {mention} noted, the figures differ by site.",
+                            page=page,
+                            max_font_size=11.0,
+                            bold_ratio=0.0,
+                        )
+                    )
+                copy = without_unread_pages(full, twin["unread"])
+                edits = defaultdict(list)
+                for block, ranges in pick["ranges"].items():
+                    edits[block].extend(ranges)
+                _cut(copy, edits)
+                _drop_empty(copy, edits)
+                result, found, _ = await _shipped(copy, patterns, settings)
+                records.append(
+                    {
+                        "host": name,
+                        "entry": entry.raw_text[:80],
+                        "variant": variant,
+                        "reported_uncited": ("uncited", "ay", entry.raw_text) in found,
+                        # A lead counts only when it is for this entry.
+                        "lead_for_entry": any(
+                            item["reference_order_index"] == entry.order_index
+                            for item in result.detail.get("uncited_withheld_by_unread_pages") or []
+                        ),
+                    }
+                )
+    return records
+
+
+def _unread_page_rows(records):
+    rows = []
+    plain = [r for r in records if r["variant"] == "plant_only"]
+    named = [r for r in records if r["variant"] != "plant_only"]
+    if not records:
+        return rows
+    rows.append(
+        rate_row(
+            LANE,
+            "unread pages: uncited plant reported when no unread page names it",
+            "plant",
+            sum(r["reported_uncited"] for r in plain),
+            len(plain),
+            note="The plant alone, on a host whose readable copy leaves pages out (BUG-619).",
+        )
+    )
+    rows.append(
+        rate_row(
+            LANE,
+            "unread pages: entry named on an unread page is not reported uncited",
+            "plant",
+            sum(not r["reported_uncited"] for r in named),
+            len(named),
+            # The variants of one entry are not independent cases.
+            clusters=len({(r["host"], r["entry"]) for r in named}),
+            note=(
+                "Adversarial: the entry cited on an unread page by its first author with its "
+                "own year or another, in capitals, split by a line-break hyphen, or by its "
+                "second author. Reporting it uncited would be a false finding. All cases "
+                "come from the author-year hosts with unread pages."
+            ),
+        )
+    )
+    # A lead is owed only where the plant alone is reported: elsewhere another
+    # rule already keeps the entry from being called uncited.
+    reported_alone = {(r["host"], r["entry"]) for r in plain if r["reported_uncited"]}
+    owed = [r for r in named if (r["host"], r["entry"]) in reported_alone]
+    rows.append(
+        rate_row(
+            LANE,
+            "unread pages: lead naming the page shown for such an entry",
+            "plant",
+            sum(not r["reported_uncited"] and r["lead_for_entry"] for r in owed),
+            len(owed),
+            clusters=len({(r["host"], r["entry"]) for r in owed}),
+            note="Counted only where the plant alone is reported uncited.",
+        )
+    )
+    return rows
+
+
 def run(ctx: Context) -> tuple[list[MetricRow], dict]:
     config = {**DEFAULTS, **ctx.lane_config(LANE)}
     folder = ctx.golden / LANE
@@ -1200,11 +1331,12 @@ def run(ctx: Context) -> tuple[list[MetricRow], dict]:
             transport=transport, timeout=settings.external_http_timeout_seconds
         ) as client:
             part_a = await _part_a(ctx, config, patterns, settings)
+            unread_cases = await _unread_page_cases(ctx, config, patterns, settings)
             part_b = await _part_b(ctx, config, patterns, settings, client, transport)
-        return part_a, part_b, transport
+        return part_a, unread_cases, part_b, transport
 
-    part_a, (outcomes, notes, counts), transport = asyncio.run(go())
-    rows, details = [], {}
+    part_a, unread_cases, (outcomes, notes, counts), transport = asyncio.run(go())
+    rows, details = [], {"unread_page_cases": unread_cases}
     if isinstance(part_a, tuple):
         tally, new_counts, unmatched, records, coverage = part_a
         rows += _linkage_rows(tally, new_counts, unmatched)
@@ -1217,6 +1349,7 @@ def run(ctx: Context) -> tuple[list[MetricRow], dict]:
         )
     else:
         details["linkage_coverage"] = part_a
+    rows += _unread_page_rows(unread_cases)
     rows += _part_b_rows(outcomes)
     rows += real_precision_rows(ctx.golden, LANE)
     details.update(

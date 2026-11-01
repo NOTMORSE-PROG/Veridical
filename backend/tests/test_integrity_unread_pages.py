@@ -158,21 +158,41 @@ async def _citations(monkeypatch, extraction):
     result = await verify.run_citation_integrity_check(
         session, None, 1, citations, extraction, load_patterns(), Settings(), object()
     )
-    kinds = [row.detail["kind"] for row in session.rows if isinstance(row, Flag)]
-    return result, kinds
+    flags = [row for row in session.rows if isinstance(row, Flag)]
+    # A lead asks the instructor to check and does not count; a finding does.
+    kinds = [
+        row.detail["kind"] for row in flags if row.detail.get("affects_readiness") is not False
+    ]
+    leads = [row.detail for row in flags if row.detail.get("affects_readiness") is False]
+    return result, kinds, leads
 
 
 async def test_a_reference_cited_only_on_an_unread_page_is_not_called_uncited(monkeypatch):
     # Control: when the page is readable and never cites Reyes, it is uncited.
     readable_everywhere = _source("The user test ran for two weeks.", unresolved=())
-    _result, kinds = await _citations(monkeypatch, readable_everywhere)
+    _result, kinds, _leads = await _citations(monkeypatch, readable_everywhere)
     assert "uncited_reference" in kinds
 
     unread = without_unread_pages(_source(CITES_REYES), [2])
-    result, kinds = await _citations(monkeypatch, unread)
+    result, kinds, leads = await _citations(monkeypatch, unread)
     assert "uncited_reference" not in kinds
     assert result.detail["n_uncited"] == 0
     assert result.detail["n_linkage_unassessed"] >= 1
+    # The unread page names Reyes, so the instructor gets a lead to check it.
+    [lead] = leads
+    assert lead["kind"] == "uncited_reference" and lead["unread_pages"] == [2]
+    assert "page 2" in lead["reason"] and "does not change readiness" in lead["reason"]
+    assert result.detail["n_uncited_withheld_by_unread_pages"] == 1
+
+
+async def test_an_unread_page_that_does_not_name_the_entry_does_not_withhold_it(monkeypatch):
+    # Page 2 is unread but is a table of numbers that names no reference, so
+    # Reyes, cited nowhere that was read, is still reported as uncited.
+    unread = without_unread_pages(_source("n = 12, mean 4.4, sd 0.9"), [2])
+    result, kinds, leads = await _citations(monkeypatch, unread)
+    assert "uncited_reference" in kinds
+    assert leads == []
+    assert result.detail["n_uncited_withheld_by_unread_pages"] == 0
 
 
 async def test_check_results_record_the_pages_they_did_not_read(monkeypatch):

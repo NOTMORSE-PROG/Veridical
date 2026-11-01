@@ -166,6 +166,24 @@ def _name_keys(names, settings) -> _NameKeys:
     return _NameKeys(frozenset(phrases), frozenset(words))
 
 
+def name_found_in(reference, text: str, settings) -> str | None:
+    """The first of the entry's names (every author's surname, or a known
+    alias) that `text` contains, compared the way the linkage guard compares
+    them: accents and case removed, hyphens and initialisms joined. None when
+    the text names none of them (BUG-619)."""
+    keys = _name_keys(_surnames(reference), settings)
+    folded = _Folded(text)
+    for key in sorted(keys.phrases, key=len, reverse=True) + sorted(keys.words):
+        if folded.has([key]):
+            return key
+    return None
+
+
+def has_name_keys(reference, settings) -> bool:
+    keys = _name_keys(_surnames(reference), settings)
+    return bool(keys.phrases or keys.words)
+
+
 def _surnames(reference) -> list[str]:
     out = []
     for author in reference.authors or []:
