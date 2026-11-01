@@ -1925,7 +1925,6 @@ async def get_report_export_data(
         expected_flag_ids=membership,
         source_sha256=manuscript.content_hash,
         audience="private",
-        include_undecided=False,
     )
     citation_check = await session.scalar(
         select(CheckResult).where(

@@ -183,7 +183,7 @@ def build_evidence_reference_snapshot(
     expected_flag_ids: Sequence[int],
     source_sha256: str | None,
     audience: Audience,
-    include_undecided: bool = True,
+    include_undecided: bool = False,
 ) -> EvidenceReferenceSnapshot:
     """Copy one coherent aggregate, retaining unplaceable entries explicitly."""
     if audience not in {"private", "public"}:
@@ -330,14 +330,15 @@ def build_evidence_reference_snapshot(
                 flag.evidence_excerpt,
                 flag.page_anchor,
             )
-    # A report saved before the checks recorded their states has no undecided pairs.
-    modules = getattr(report, "integrity_modules", None) or ()
-    agreement = next(
-        (module for module in modules if module.check_kind == "internal_agreement"), None
+    agreement = (
+        next(
+            (m for m in report.integrity_modules if m.check_kind == "internal_agreement"),
+            None,
+        )
+        if include_undecided
+        else None
     )
-    # The PDF prints the undecided pairs as text only, so its export leaves them
-    # out rather than render pages it never prints.
-    if include_undecided and agreement is not None and agreement.undetermined is not None:
+    if agreement is not None and agreement.undetermined is not None:
         for index, pair in enumerate(agreement.undetermined.pairs):
             append(
                 "module",

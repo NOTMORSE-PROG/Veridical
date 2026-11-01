@@ -9270,6 +9270,14 @@
   .signal-pair-card__results ul { display: grid; gap: var(--signal-space-2); margin: 0; padding: 0; list-style: none; }
   .signal-pair-card__results li { display: grid; gap: var(--signal-space-1); font-size: var(--signal-type-label); overflow-wrap: anywhere; }
   .signal-pair-card__results cite { font-style: normal; color: var(--color-signal-ink-secondary); }
+  /* A statement's page with the button that opens it, on one wrapping row. */
+  .signal-pair-card__source { display: flex; flex-wrap: wrap; align-items: center; gap: var(--signal-space-2); font-size: var(--signal-type-label); }
+  .signal-pair-card__source cite { font-style: normal; color: var(--color-signal-ink-secondary); }
+  .signal-pair-dialog { display: grid; gap: var(--signal-space-2); }
+  .signal-pair-dialog :is(h3, h4, blockquote, ul, p) { margin: 0; }
+  .signal-pair-dialog blockquote { padding-inline-start: var(--signal-space-3); border-inline-start: var(--signal-border-emphasis) solid var(--color-signal-brand); overflow-wrap: anywhere; }
+  .signal-pair-dialog ul { display: grid; gap: var(--signal-space-2); padding: 0; list-style: none; overflow-wrap: anywhere; }
+  .signal-pair-dialog cite { font-style: normal; color: var(--color-signal-ink-secondary); }
   /* Counts as tiles to scan: the number large, its label small under it. */
   .signal-fact-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(var(--signal-fact-tile-min), 1fr)); gap: var(--signal-space-3); margin: 0; }
   .signal-shared-module-status__headline::before { outline: var(--signal-border-hairline) solid var(--color-signal-ink-secondary); }

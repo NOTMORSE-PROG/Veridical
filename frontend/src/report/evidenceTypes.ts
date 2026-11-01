@@ -5,7 +5,7 @@ export interface EvidenceReference {
   reference_id: string;
   criterion_id: number | null;
   flag_id: number | null;
-  role: "criterion_evidence" | "criterion_scope" | "agreement_intent" | "agreement_outcome" | "finding_excerpt" | "finding_scope" | "reuse_own" | "reuse_match";
+  role: "criterion_evidence" | "criterion_scope" | "agreement_intent" | "agreement_outcome" | "undecided_intent" | "undecided_outcome" | "finding_excerpt" | "finding_scope" | "reuse_own" | "reuse_match";
   index: number;
   quote: string;
   anchor: string | null;

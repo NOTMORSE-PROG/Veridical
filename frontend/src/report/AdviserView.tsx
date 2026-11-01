@@ -243,7 +243,8 @@ export function AdviserViewPage() {
           {/* The pairs behind the "not decided" count, as evidence to read. */}
           {selectedModule === "internal_agreement" && undecidedCount > 0 && <UndeterminedPairs shared checkRunId={report.check_run_id}
             undetermined={agreementModule?.undetermined} legacy={savedFlags.filter(isLegacyUndecided)}
-            legacyPairs={new Map(details.flatMap(detail => detail.agreement_pair ? [[detail.id, detail.agreement_pair] as const] : []))} />}
+            legacyPairs={new Map(details.flatMap(detail => detail.agreement_pair ? [[detail.id, detail.agreement_pair] as const] : []))}
+            evidence={{ token: token ?? "", manifest, failed: evidence.isError }} />}
           {findingGroups.length > 0 && selectedGroup && selectedFlag && (() => {
             const lead = isOptionalComparisonLead(selectedFlag);
             const noun = findingGroups.some(group => isOptionalComparisonLead(group.flags[0])) ? "Item" : "Finding";

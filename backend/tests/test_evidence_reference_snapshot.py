@@ -373,7 +373,11 @@ def test_undecided_pairs_get_own_manuscript_references_owned_by_the_check():
             undecided_module(("Objective one.", "Result one."), ("Objective one.", "Result two."))
         ]
     )
-    refs = [ref for ref in build(current).references if ref.owner_kind == "module"]
+    refs = [
+        ref
+        for ref in build(current, include_undecided=True).references
+        if ref.owner_kind == "module"
+    ]
     assert [(ref.role, ref.index, ref.quote, ref.anchor) for ref in refs] == [
         ("undecided_intent", 0, "Objective one.", "p. 3"),
         ("undecided_outcome", 0, "Result one.", "p. 40"),
@@ -385,16 +389,17 @@ def test_undecided_pairs_get_own_manuscript_references_owned_by_the_check():
         for ref in refs
     )
     public = [
-        public_evidence_reference(ref) for ref in build(current, audience="public").references
+        public_evidence_reference(ref)
+        for ref in build(current, audience="public", include_undecided=True).references
     ]
     encoded = " ".join(item.model_dump_json() for item in public)
     assert "PRIVATE_UNDECIDED_REASON" not in encoded
     assert all(item.flag_id is None for item in public if item.role.startswith("undecided_"))
 
 
-def test_the_export_leaves_undecided_pairs_out():
+def test_undecided_pairs_are_left_out_unless_asked_for():
     current = report(integrity_modules=[undecided_module(("Objective one.", "Result one."))])
-    refs = build(current, include_undecided=False).references
+    refs = build(current).references
     assert not any(ref.owner_kind == "module" for ref in refs)
 
 
@@ -404,6 +409,7 @@ def test_the_export_leaves_undecided_pairs_out():
         {"role": "finding_excerpt"},
         {"owner_kind": "finding"},
         {"owner_id": 99},
+        {"criterion_id": 5},
     ],
 )
 def test_undecided_roles_belong_only_to_their_own_check(change):
@@ -411,7 +417,7 @@ def test_undecided_roles_belong_only_to_their_own_check(change):
 
     current = report(integrity_modules=[undecided_module(("Objective one.", "Result one."))])
     values = next(
-        ref for ref in build(current).references if ref.owner_kind == "module"
+        ref for ref in build(current, include_undecided=True).references if ref.owner_kind == "module"
     ).model_dump(exclude={"reference_id"})
     values.update(change)
     with pytest.raises(ValidationError):
@@ -426,3 +432,22 @@ def test_public_reference_schema_rejects_any_extra_field(extra):
     values[extra] = "anything"
     with pytest.raises(ValidationError):
         PublicEvidenceReferenceOut.model_validate(values)
+
+
+def test_identical_undecided_pairs_keep_distinct_references():
+    current = report(
+        integrity_modules=[
+            undecided_module(
+                ("Same objective.", "Same result."), ("Same objective.", "Same result.")
+            )
+        ]
+    )
+    for module in current.integrity_modules:
+        for pair in module.undetermined.pairs:
+            pair.intent_anchor, pair.outcome_anchor = "p. 3", "p. 40"
+    refs = [
+        ref
+        for ref in build(current, include_undecided=True).references
+        if ref.owner_kind == "module"
+    ]
+    assert len(refs) == 4 and len({ref.reference_id for ref in refs}) == 4

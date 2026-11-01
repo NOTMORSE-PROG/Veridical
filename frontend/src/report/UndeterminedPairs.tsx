@@ -7,6 +7,8 @@ import { rememberRouteReturnFocus } from "../routing/useRouteFocus";
 import { reviewDeskDestination } from "../routing/reviewDeskReturn";
 import { ActionLink } from "../ui/ActionLink";
 import { Button } from "../ui/Button";
+import type { EvidenceManifest } from "./evidenceTypes";
+import { SharedPageButton } from "./SharedEvidencePacket";
 
 const OPEN_PARAM = "undecided";
 const SHOWN_PARAM = "undecided_shown";
@@ -43,7 +45,9 @@ function pageOf(anchor: string): number {
 /** Objective and result pairs the agreement check compared but could not
  * decide. They make no claim about the manuscript, so they are shown once,
  * after the findings, and never counted as findings. */
-export function UndeterminedPairs({ checkRunId, undetermined, legacy, incomplete = false, shared = false, legacyPairs }: {
+export function UndeterminedPairs({ checkRunId, undetermined, legacy, incomplete = false, shared = false, legacyPairs, evidence }: {
+  /** The shared link's original pages, when the adviser view has them. */
+  evidence?: SharedPairsEvidence;
   /** Saved pairs for older rows, by record id, where the link carries them. */
   legacyPairs?: ReadonlyMap<number, SavedPair>;
   checkRunId: number;
@@ -86,7 +90,7 @@ export function UndeterminedPairs({ checkRunId, undetermined, legacy, incomplete
 
   if (shared) {
     const groupsShown = Math.max(SHARED_GROUPS_SHOWN, Number(params.get(GROUPS_PARAM)) || SHARED_GROUPS_SHOWN);
-    return <SharedPairs listId={listId} items={items} open={open} shown={groupsShown}
+    return <SharedPairs listId={listId} items={items} open={open} shown={groupsShown} evidence={evidence}
       onToggle={() => update((next) => { if (open) { next.delete(OPEN_PARAM); next.delete(GROUPS_PARAM); } else next.set(OPEN_PARAM, "open"); })}
       onMore={() => {
         focusKey.current = `objective-${groupsShown}`;
@@ -153,15 +157,15 @@ const SHARED_GROUPS_SHOWN = 4;
 
 /** The adviser's copy: each objective once, with the results it was compared
  * with under it, as compact cards a few at a time. Read-only. */
-function SharedPairs({ listId, items, open, shown, onToggle, onMore }: {
-  listId: string; items: Item[]; open: boolean; shown: number;
+function SharedPairs({ listId, items, open, shown, onToggle, onMore, evidence }: {
+  listId: string; items: Item[]; open: boolean; shown: number; evidence?: SharedPairsEvidence;
   onToggle: () => void; onMore: () => void;
 }) {
   const groups = new Map<string, { text: string; anchor: string; results: { text: string; anchor: string }[] }>();
   for (const item of items) {
     const key = `${item.intentText}|${item.intentAnchor}`;
     const group = groups.get(key) ?? { text: item.intentText, anchor: item.intentAnchor, results: [] };
-    if (item.kind === "pair" && !group.results.some(result => result.text === item.outcomeText)) group.results.push({ text: item.outcomeText, anchor: item.outcomeAnchor });
+    if (item.kind === "pair" && !group.results.some(result => result.text === item.outcomeText && result.anchor === item.outcomeAnchor)) group.results.push({ text: item.outcomeText, anchor: item.outcomeAnchor });
     groups.set(key, group);
   }
   const all = [...groups.values()];
@@ -177,13 +181,22 @@ function SharedPairs({ listId, items, open, shown, onToggle, onMore }: {
     </div>
     <div id={listId} hidden={!open}>
       {open && <>
+        {evidence?.failed && <p className="signal-field-hint">Original pages could not be loaded. The quotations above are what VERIDICAL recorded.</p>}
         <ol className="signal-shared-pairs__grid">{visible.map((group, index) => <li key={`${group.text}|${group.anchor}`} id={`${listId}-objective-${index}`} tabIndex={-1} className="signal-pair-card">
           <p className="signal-pair-card__tag">Objective {index + 1}{group.anchor.trim() && <span> · {instructorAnchor(group.anchor)}</span>}</p>
           <blockquote className="signal-pair-card__quote">“{group.text}”</blockquote>
+          <PairSource evidence={evidence} side="objective" text={group.text} anchor={group.anchor}
+            accessibleName={`Open page, objective ${index + 1}${group.anchor.trim() ? `, ${instructorAnchor(group.anchor)}` : ""}`}
+            title={`Objective ${index + 1}${group.anchor.trim() ? `, ${instructorAnchor(group.anchor)}` : ""}`}
+            counterpart={group.results} />
           {group.results.length > 0
             ? <div className="signal-pair-card__results">
               <p className="signal-pair-card__tag">Compared with {group.results.length} {group.results.length === 1 ? "result" : "results"}</p>
-              <ul>{group.results.map(result => <li key={result.text}><span>“{result.text}”</span>{result.anchor.trim() && <cite>{instructorAnchor(result.anchor)}</cite>}</li>)}</ul>
+              <ul>{group.results.map((result, place) => <li key={`${result.text}|${result.anchor}`}><span>“{result.text}”</span>
+                <PairSource evidence={evidence} side="result" text={result.text} anchor={result.anchor}
+                  accessibleName={`Open page, result ${place + 1} of ${group.results.length} for objective ${index + 1}${result.anchor.trim() ? `, ${instructorAnchor(result.anchor)}` : ""}`}
+                  title={`Result compared with objective ${index + 1}${result.anchor.trim() ? `, ${instructorAnchor(result.anchor)}` : ""}`}
+                  counterpart={[{ text: group.text, anchor: group.anchor }]} /></li>)}</ul>
             </div>
             : <p className="signal-field-hint">The result it was compared with was not saved with this link.</p>}
         </li>)}</ol>
@@ -191,4 +204,38 @@ function SharedPairs({ listId, items, open, shown, onToggle, onMore }: {
       </>}
     </div>
   </section>;
+}
+
+export interface SharedPairsEvidence {
+  token: string;
+  manifest?: EvidenceManifest;
+  failed: boolean;
+}
+
+const SIDE_ROLES = {
+  objective: ["undecided_intent", "agreement_intent"],
+  result: ["undecided_outcome", "agreement_outcome"],
+} as const;
+
+/** A statement's page and the button that opens it. The reference is found by
+ * its own quote and page, so a statement shown once stands for every pair it
+ * is in. */
+function PairSource({ evidence, side, text, anchor, accessibleName, title, counterpart }: {
+  evidence?: SharedPairsEvidence; side: "objective" | "result"; text: string; anchor: string;
+  accessibleName: string; title: string; counterpart: { text: string; anchor: string }[];
+}) {
+  const roles: readonly string[] = SIDE_ROLES[side];
+  const reference = evidence?.manifest?.references.find(ref => roles.includes(ref.role) && ref.quote === text && (ref.anchor ?? "") === anchor);
+  return <span className="signal-pair-card__source">
+    {anchor.trim() ? <cite>{instructorAnchor(anchor)}</cite> : <span className="signal-field-hint">No page was saved for this statement.</span>}
+    {evidence?.manifest && reference && anchor.trim() && <SharedPageButton token={evidence.token} snapshot={evidence.manifest.snapshot_id} reference={reference}
+      accessibleName={accessibleName} title={title}
+      context={<section aria-label="Statement and what it was compared with" className="signal-pair-dialog">
+        <h3>{side === "objective" ? "Statement selected as an objective" : "Statement selected as a result"}</h3>
+        <blockquote>“{text}”</blockquote>
+        <h4>Compared with</h4>
+        <ul>{counterpart.map(item => <li key={`${item.text}|${item.anchor}`}>“{item.text}”{item.anchor.trim() && <> <cite>{instructorAnchor(item.anchor)}</cite></>}</li>)}</ul>
+        <p>VERIDICAL could not decide whether this result answers this objective. This is not a finding and does not change readiness. The statement roles have not been verified as this study's objective and result.</p>
+      </section>} />}
+  </span>;
 }

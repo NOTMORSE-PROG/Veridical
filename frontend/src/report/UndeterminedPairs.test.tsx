@@ -1,8 +1,10 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
-import { expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import type { FlagSummaryOut, UndeterminedPairsOut } from "../api/types";
 import { isLegacyUndecided } from "../domain/undecidedPairs";
+import { renderWithProviders, stubFetchByPath } from "../test/renderWithProviders";
+import type { EvidenceManifest, EvidenceReference } from "./evidenceTypes";
 import { UndeterminedPairs } from "./UndeterminedPairs";
 
 function pairs(count: number): UndeterminedPairsOut {
@@ -85,4 +87,66 @@ it("shows the adviser's objective cards four more at a time until every objectiv
   fireEvent.click(screen.getByRole("button", { name: "Show 1 more" }));
   expect(cards()).toHaveLength(9);
   expect(screen.queryByRole("button", { name: /more$/ })).not.toBeInTheDocument();
+});
+
+
+afterEach(() => vi.unstubAllGlobals());
+
+const SNAPSHOT = "e".repeat(64);
+
+function reference(role: EvidenceReference["role"], index: number, quote: string, anchor: string, id: string): EvidenceReference {
+  return { reference_id: id.repeat(64), criterion_id: null, flag_id: null, role, index, quote, anchor, source_scope: "own_manuscript", source_state: "not_checked" };
+}
+
+function manifestFor(saved: UndeterminedPairsOut): EvidenceManifest {
+  return { snapshot_id: SNAPSHOT, assessment_revision: 1, llm_mode: "fake", references: saved.pairs.flatMap((pair, index) => [
+    reference("undecided_intent", index, pair.intent_text, pair.intent_anchor, String.fromCharCode(97 + 2 * index)),
+    reference("undecided_outcome", index, pair.outcome_text, pair.outcome_anchor, String.fromCharCode(98 + 2 * index)),
+  ]) };
+}
+
+function showShared(saved: UndeterminedPairsOut, manifest?: EvidenceManifest, failed = false) {
+  return renderWithProviders(<UndeterminedPairs shared checkRunId={7} undetermined={saved} legacy={[]} evidence={{ token: "tok", manifest, failed }} />);
+}
+
+it("opens each statement's original page from the adviser's card, with what it was compared with", async () => {
+  const saved = pairs(1);
+  const fetchMock = stubFetchByPath({ [`/shared/tok/evidence/${"a".repeat(64)}/page`]: {
+    snapshot_id: SNAPSHOT, image_data_url: null, image_sha256: null, caption: "Rendered from the submitted PDF, page 3.",
+    placement: { reference_id: "a".repeat(64), state: "page_only", page: 3, boxes: [], reason: null },
+  } });
+  vi.stubGlobal("fetch", fetchMock);
+  showShared(saved, manifestFor(saved));
+  fireEvent.click(screen.getByRole("button", { name: "Show the objective" }));
+  expect(fetchMock).not.toHaveBeenCalled();
+  expect(screen.getByRole("button", { name: "Open page, result 1 of 1 for objective 1, p. 40" })).toBeInTheDocument();
+  const open = screen.getByRole("button", { name: "Open page, objective 1, p. 3" });
+  fireEvent.click(open);
+  const dialog = await screen.findByRole("dialog", { name: "Objective 1, p. 3" });
+  expect(within(dialog).getByText("Statement selected as an objective")).toBeInTheDocument();
+  expect(within(dialog).getByText("“Result 1”")).toBeInTheDocument();
+  expect(within(dialog).getByText(/This is not a finding and does not change readiness/)).toBeInTheDocument();
+  expect(await within(dialog).findByText("Rendered from the submitted PDF, page 3.")).toBeInTheDocument();
+});
+
+it("keeps the cards as text when the original pages could not be loaded", () => {
+  showShared(pairs(1), undefined, true);
+  fireEvent.click(screen.getByRole("button", { name: "Show the objective" }));
+  expect(screen.getByText("Original pages could not be loaded. The quotations above are what VERIDICAL recorded.")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /^Open page/ })).not.toBeInTheDocument();
+  expect(screen.getByText("“Objective 1”")).toBeInTheDocument();
+});
+
+it("lists the same result once per page, not once per wording, and says when no page was saved", () => {
+  const saved: UndeterminedPairsOut = { count: 3, compared_count: 3, pairs: [
+    { intent_text: "Objective", intent_anchor: "p. 2", outcome_text: "Same result", outcome_anchor: "p. 40", reason: null },
+    { intent_text: "Objective", intent_anchor: "p. 2", outcome_text: "Same result", outcome_anchor: "p. 41", reason: null },
+    { intent_text: "Objective", intent_anchor: "p. 2", outcome_text: "Unplaced result", outcome_anchor: "", reason: null },
+  ] };
+  showShared(saved, manifestFor(saved));
+  fireEvent.click(screen.getByRole("button", { name: "Show the objective" }));
+  expect(screen.getByText("Compared with 3 results")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Open page, result 2 of 3 for objective 1, p. 41" })).toBeInTheDocument();
+  expect(screen.getByText("No page was saved for this statement.")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /result 3 of 3/ })).not.toBeInTheDocument();
 });
