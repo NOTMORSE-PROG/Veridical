@@ -554,6 +554,21 @@ describe("SignalDocumentViewerPage", () => {
     expect(await screen.findByRole("list", { name: "Findings on this page" })).toBeInTheDocument();
   });
 
+  it("keeps an older run's undecided agreement rows out of the findings, as the report does", async () => {
+    const undecided = (id: number): FlagSummaryOut => ({ ...SUMMARY, id, severity: "low", problem_kind: "agreement_cannot_determine" });
+    vi.stubGlobal("fetch", stubFetchByPath({
+      "/check-runs/5/document": VIEWER,
+      "/check-runs/5/report": REPORT,
+      "/check-runs/5/escalated": [],
+      "/check-runs/5/flags": [undecided(21), undecided(22)],
+      "/check-runs/5/document/reuse-matches": { passage_archive_size_n: 8, matches: [] },
+    }));
+    renderWithProviders(<SignalDocumentViewerPage />, { route: "/report/5/document?view=queue&module=internal_agreement&pane=review", path: "/report/:checkRunId/document" });
+    expect(await screen.findByText("2 objective and result pairs could not be decided. They are not findings; read them on the readiness report.")).toBeInTheDocument();
+    expect(screen.queryByRole("list", { name: "Findings on this page" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Internal agreement/ })).toHaveTextContent("0 saved records");
+  });
+
   it("leads back to the report findings the finding was opened from", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({
       "/check-runs/5/document": VIEWER,
