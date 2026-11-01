@@ -1277,6 +1277,13 @@ export function SignalPublicFlags({
 // `readOnly` is the readiness report's record view: grades are shown but
 // changed only in manuscript review, beside the manuscript.
 /** The criterion whose assessment details are open in a dialog. */
+// "AI assessment details: some pages not read, image content not assessed"
+// splits into the button's label and a note shown above it.
+const detailsLabel = (summary: string) => summary.split(": ")[0];
+const detailsNote = (summary: string) => {
+  const note = summary.split(": ").slice(1).join(": ").trim();
+  return note ? `${note.charAt(0).toUpperCase()}${note.slice(1)}.` : null;
+};
 const DETAILS_PARAM = "criterion_details";
 
 export function SignalCriteriaResults({ results, checkRunId, publicView = false, readOnly = false, sourceTarget, onOpenSource, renderEvidence, publicSelection, detailsInDialog = false }: {
@@ -1293,16 +1300,25 @@ export function SignalCriteriaResults({ results, checkRunId, publicView = false,
   detailsInDialog?: boolean;
 }) {
   const AssessmentBody = publicSelection ? "section" : "details";
+  const location = useLocation();
   // The open dialog lives in the address, so a return from a source opened
   // inside it finds the dialog, and the control it left from, again.
   const [detailsParams, setDetailsParams] = useSearchParams();
   const openDetails = Number(detailsParams.get(DETAILS_PARAM)) || null;
+  useEffect(() => {
+    // Arriving with the address naming a control inside the open dialog
+    // (a return from a source opened there) puts focus back on it; this
+    // runs after the dialog's own first focus.
+    if (!openDetails || !location.hash) return;
+    let target: HTMLElement | null = null;
+    try { target = document.getElementById(decodeURIComponent(location.hash.slice(1))); } catch { return; }
+    if (target?.closest("[role=dialog]")) target.focus();
+  }, [openDetails, location.hash]);
   const setOpenDetails = (criterionId: number | null) => {
     const next = new URLSearchParams(detailsParams);
     if (criterionId === null) next.delete(DETAILS_PARAM); else next.set(DETAILS_PARAM, String(criterionId));
     setDetailsParams(next, { replace: true, state: location.state, preventScrollReset: true });
   };
-  const location = useLocation();
   const navigate = useNavigate();
   const review = useContext(ReviewContext);
   const privateScope = !publicView && review?.checkRunId === checkRunId;
@@ -1385,17 +1401,8 @@ export function SignalCriteriaResults({ results, checkRunId, publicView = false,
             }}
           >Open in manuscript: {instructorAnchor(anchor)}</ActionLink>;
         };
-        const evidenceBody = <div className="signal-result-card__evidence">
-                {assessment.relationship && <p>{assessment.relationship}</p>}
-                {assessment.sourceCoverage && <CriterionSourceCoverage value={assessment.sourceCoverage} sourceAction={sourceAction} firstSlot={row.evidence.length + 1} criterionText={row.text} />}
-                {unresolvedAi && <><p><strong>No grade accepted</strong></p><p>{RECORDED_GRADE_BASIS.review}</p><p>{RECORDED_GRADE_BASIS.qualification}</p></>}
-                {!assessment.hasDetails ? <p>No assessment details are available in this record.</p> : <>
-                {assessment.ruleFacts && <RuleFactsDetails facts={assessment.ruleFacts} earlier={assessment.instructorRecorded} />}
-                {row.reasoning?.trim() ? <p><strong>{assessment.explanationLabel}</strong> {row.reasoning}</p> : !assessment.ruleFacts && (unresolvedAi || !row.reason?.trim()) && <p>{unresolvedAi ? RECORDED_GRADE_BASIS.missingExplanation : assessment.missingExplanation}</p>}
-                {row.reason?.trim() && <p><strong>Recorded system note:</strong> {row.reason}</p>}
-                {!publicSelection && row.evidence.length > 0 && <h4>Recorded manuscript excerpts</h4>}
-                {!unresolvedAi && assessment.hasLocations && <p>{RECORDED_GRADE_BASIS.qualification}</p>}
-                {renderEvidence ? renderEvidence(row) : row.evidence.length ? row.evidence.map((item, evidenceIndex) => {
+        const coverage = assessment.sourceCoverage && <CriterionSourceCoverage value={assessment.sourceCoverage} sourceAction={sourceAction} firstSlot={row.evidence.length + 1} criterionText={row.text} foldPages={detailsInDialog} />;
+        const excerpts = renderEvidence ? renderEvidence(row) : row.evidence.length ? row.evidence.map((item, evidenceIndex) => {
                   const hasAnchor = Boolean(item.anchor?.trim());
                   const showAction = hasAnchor && !seenAnchors.has(item.anchor);
                   if (hasAnchor) seenAnchors.add(item.anchor);
@@ -1411,11 +1418,43 @@ export function SignalCriteriaResults({ results, checkRunId, publicView = false,
                     }} />}
 
                   </div>;
-                }) : !assessment.ruleFacts && <p>{unresolvedAi ? RECORDED_GRADE_BASIS.missingExcerpt : "No excerpt is available in this assessment record."}</p>}
-                {!publicView && row.anchor?.trim() && !excerptAnchors.has(row.anchor) && <div className="signal-attached-flow"><p>Recorded criterion location: {row.anchor}</p>{sourceAction(row.anchor)}</div>}
+                }) : !assessment.ruleFacts && <p>{unresolvedAi ? RECORDED_GRADE_BASIS.missingExcerpt : "No excerpt is available in this assessment record."}</p>;
+        const criterionLocation = !publicView && row.anchor?.trim() && !excerptAnchors.has(row.anchor) && <div className="signal-attached-flow"><p>Recorded criterion location: {row.anchor}</p>{sourceAction(row.anchor)}</div>;
+        const evidenceBody = <div className="signal-result-card__evidence">
+                {assessment.relationship && <p>{assessment.relationship}</p>}
+                {coverage}
+                {unresolvedAi && <><p><strong>No grade accepted</strong></p><p>{RECORDED_GRADE_BASIS.review}</p><p>{RECORDED_GRADE_BASIS.qualification}</p></>}
+                {!assessment.hasDetails ? <p>No assessment details are available in this record.</p> : <>
+                {assessment.ruleFacts && <RuleFactsDetails facts={assessment.ruleFacts} earlier={assessment.instructorRecorded} />}
+                {row.reasoning?.trim() ? <p><strong>{assessment.explanationLabel}</strong> {row.reasoning}</p> : !assessment.ruleFacts && (unresolvedAi || !row.reason?.trim()) && <p>{unresolvedAi ? RECORDED_GRADE_BASIS.missingExplanation : assessment.missingExplanation}</p>}
+                {row.reason?.trim() && <p><strong>Recorded system note:</strong> {row.reason}</p>}
+                {!publicSelection && row.evidence.length > 0 && <h4>Recorded manuscript excerpts</h4>}
+                {!unresolvedAi && assessment.hasLocations && <p>{RECORDED_GRADE_BASIS.qualification}</p>}
+                {excerpts}
+                {criterionLocation}
 
                 </>}
               </div>;
+        // In the dialog the same record reads in sections: why, the quoted
+        // evidence, then what this assessment could not take into account.
+        const dialogBody = <div className="signal-result-card__evidence signal-criterion-details">
+          {assessment.relationship && <p>{assessment.relationship}</p>}
+          {unresolvedAi && <section><h3>No grade accepted</h3><p>{RECORDED_GRADE_BASIS.review}</p><p>{RECORDED_GRADE_BASIS.qualification}</p></section>}
+          {!assessment.hasDetails ? <p>No assessment details are available in this record.</p> : <>
+            <section><h3>Why this grade</h3>
+              {assessment.ruleFacts && <RuleFactsDetails facts={assessment.ruleFacts} earlier={assessment.instructorRecorded} />}
+              {row.reasoning?.trim() ? <><p className="signal-field-hint">{(assessment.explanationLabel ?? "Recorded explanation:").replace(/:$/, "")}</p><p>{row.reasoning}</p></>
+                : !assessment.ruleFacts && (unresolvedAi || !row.reason?.trim()) && <p>{unresolvedAi ? RECORDED_GRADE_BASIS.missingExplanation : assessment.missingExplanation}</p>}
+              {row.reason?.trim() && <p><strong>Recorded system note:</strong> {row.reason}</p>}
+            </section>
+            <section><h3>Quoted evidence</h3>
+              {!unresolvedAi && assessment.hasLocations && <p className="signal-field-hint">{RECORDED_GRADE_BASIS.qualification}</p>}
+              {excerpts}
+              {criterionLocation}
+            </section>
+          </>}
+          {coverage && <section className="signal-criterion-details__limits"><h3>Limits of this assessment</h3>{coverage}</section>}
+        </div>;
         return <li key={row.criterion_id} className="signal-result-card"><div className="signal-result-card__top"><span className="signal-result-card__number">{publicSelection?.position ?? index + 1}</span><span className={`signal-outcome signal-outcome--${assessment.ruleScopeUnconfirmed && !assessment.instructorRecorded ? "neutral" : gradeCaution ? "warning" : outcome.tone}`}>{assessment.ruleScopeUnconfirmed && !assessment.instructorRecorded ? "Previously recorded: " : ""}{outcome.label}{gradeCaution && <> · {automaticGradeChip(row as CriterionResultOut)}</>}</span><span className={`signal-importance signal-importance--${row.weight_importance === "med" ? "medium" : row.weight_importance}`}>{row.weight_importance === "med" ? "Medium" : `${row.weight_importance.slice(0, 1).toUpperCase()}${row.weight_importance.slice(1)}`} importance</span></div><h3 id={criterionRecordId(checkRunId, row.criterion_id)} tabIndex={-1}>{row.text}</h3>{automaticRow && automaticGradeLines(row as CriterionResultOut).map((line) => <p key={line} className="signal-resolution-note">{line}</p>)}{!publicView && !row.resolution && automaticGradeLines(row as CriterionResultOut).length > 0 && automaticGradePasses(row as CriterionResultOut) && <p className="signal-resolution-note">{automaticGradePasses(row as CriterionResultOut)}</p>}{gradeCaution && <p className="signal-grade-caution"><span aria-hidden="true">{"⚠"}</span>{gradeCaution}</p>}{!publicView && !row.resolution && flagsQuery.data && automaticGradeLines(row as CriterionResultOut).length > 0 && <RelatedFindings evidence={row.evidence} flags={flagsQuery.data} findingsTo={findingsTo} criterionText={row.text} />}{assessment.ruleScopeUnconfirmed && !assessment.instructorRecorded && <RuleScopeNotice />}{!publicView && row.resolution && <p className="signal-resolution-note"><strong>Instructor judgment</strong></p>}{!publicView && row.resolution?.type === "needs_document" && <p className="signal-resolution-note">{CRITERION_EXCLUSION_COPY.recorded}. {CRITERION_EXCLUSION_COPY.noGrade}</p>}{!publicView && row.resolution && <>{row.resolution.type !== "needs_document" && <p className="signal-resolution-note"><strong>Recorded grade:</strong> {recordedGradeLabel(row)}</p>}<p className="signal-resolution-note"><strong>Instructor reason:</strong> {recordedInstructorComment(row.resolution.type, row.resolution.reason) ?? "No instructor reason is available in this record."}</p></>}{/* BUG-065: this summary repeats verbatim once per row -- a screen-reader
                 links/buttons list can't tell them apart without a per-criterion
                 accessible name, same fix already applied to the flag "Review
@@ -1425,11 +1464,12 @@ export function SignalCriteriaResults({ results, checkRunId, publicView = false,
                 && <RecordedJudgmentTools checkRunId={checkRunId} criterionId={row.criterion_id} criterionText={row.text} canonical={row} />}
               {assessment.ruleScopeUnconfirmed && assessment.instructorRecorded && <RuleScopeNotice earlier />}
               {detailsInDialog && !publicSelection ? <>
+                {detailsNote(assessment.summary) && <p className="signal-field-hint signal-result-card__details-note">{detailsNote(assessment.summary)}</p>}
                 <Button id={evidenceSummaryId} variant="secondary" className="signal-result-card__details" aria-haspopup="dialog"
-                  aria-label={`${assessment.summary}: ${row.text}`} onClick={() => setOpenDetails(row.criterion_id)}>{assessment.summary}</Button>
-                {openDetails === row.criterion_id && <Dialog wide title={<>{assessment.summary.split(":")[0]}<span className="signal-dialog__subtitle">{row.text}</span></>}
+                  aria-label={`${detailsLabel(assessment.summary)}, ${row.text}`} onClick={() => setOpenDetails(row.criterion_id)}>{detailsLabel(assessment.summary)}</Button>
+                {openDetails === row.criterion_id && <Dialog wide className="signal-criterion-details-dialog" title={<>{detailsLabel(assessment.summary)}<span className="signal-dialog__subtitle">{row.text}</span></>}
                   returnFocusTarget={() => document.getElementById(evidenceSummaryId)}
-                  onClose={() => setOpenDetails(null)}>{evidenceBody}</Dialog>}
+                  onClose={() => setOpenDetails(null)}>{dialogBody}</Dialog>}
               </> : <AssessmentBody className={publicSelection ? "signal-public-criterion-assessment" : undefined}>{publicSelection ? <><h4>Why this grade</h4><p id={evidenceSummaryId} className="signal-field-hint">{assessment.summary}</p></> : <summary id={evidenceSummaryId} aria-label={`${assessment.summary}: ${row.text}`}>{assessment.summary}</summary>}{evidenceBody}</AssessmentBody>}</li>;
       })}</ol> : updating ? <p>Recorded results are updating.</p> : <div className="signal-desk-empty"><h3>No criterion records in this section</h3><p>No criterion records are shown here. Review the other report sections for unresolved criteria and assessment limits.</p></div>}
     </section>

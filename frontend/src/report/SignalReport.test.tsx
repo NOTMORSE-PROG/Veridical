@@ -929,8 +929,8 @@ expect(screen.getByText("Not scored. Does not affect readiness or block your dec
     // accessible name still names the criterion.
     const summaries = Array.from(document.querySelectorAll(".signal-result-card .signal-result-card__details"));
     expect(summaries.map((s) => s.getAttribute("aria-label"))).toEqual([
-      "AI assessment details: source coverage not recorded: Chapter 1 states the research problem",
-      "AI assessment details: source coverage not recorded: Findings answer the stated research questions",
+      "AI assessment details, Chapter 1 states the research problem",
+      "AI assessment details, Findings answer the stated research questions",
     ]);
   });
 
