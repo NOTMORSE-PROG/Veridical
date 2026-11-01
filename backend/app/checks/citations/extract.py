@@ -961,6 +961,14 @@ NUMERIC_ORPHAN_WORDING = _WORDING["numeric_orphan"]
 NUMERIC_UNCITED_WORDING = _WORDING["numeric_uncited"]
 
 
+def current_linkage_wording(text: str) -> str:
+    """A saved finding's wording as it reads today: findings saved before a
+    wording change keep the old text, and are shown with the new one."""
+    for old, new in _WORDING.get("saved_wording_replacements", []):
+        text = text.replace(old, new)
+    return text
+
+
 def numeric_linkage_flags(
     orphan_marks: list, uncited: list[ReferenceLike], n_entries: int
 ) -> list[CitationFlagDraft]:
