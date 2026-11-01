@@ -92,9 +92,7 @@ def test_the_evidence_request_never_guards_on_its_own(requirement, capability):
     batch = SimpleNamespace(label="whole document", scope_patterns_file=None)
     assert _capability_failure(batch, item, {"verdict": "Exceptional"}) is None
     matched = scope_obligations(item, "Exceptional")
-    assert matched == [
-        {"key": "evidence_request", "capabilities": [capability], "decides": False}
-    ]
+    assert matched == [{"key": "evidence_request", "capabilities": [capability], "decides": False}]
 
 
 @pytest.mark.parametrize("term", ["few-shot learning", "majority-vote algorithm"])
