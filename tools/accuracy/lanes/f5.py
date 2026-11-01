@@ -1110,15 +1110,11 @@ async def _openalex_retraction_part(ctx, config, patterns, settings, client):
         for work in (data or {}).get("results") or []:
             entry = _openalex_entry(work)
             if entry:
-                title = _clean(work.get("display_name")).casefold()
                 cases.append(
                     {
                         "openalex_id": work.get("id"),
                         "entry": entry,
                         "record_type": work.get("type"),
-                        # By construction: a record typed or titled as a notice.
-                        "is_notice": (work.get("type") or "") == "retraction"
-                        or title.startswith(("retracted", "retraction")),
                     }
                 )
         built = {"built_on": datetime.now(UTC).date().isoformat(), "cases": cases}
@@ -1153,13 +1149,13 @@ async def _openalex_retraction_part(ctx, config, patterns, settings, client):
                     ),
                 }
             )
-    return outcomes, notes
+    return outcomes, notes, len(cases)
 
 
 RETRACTION_LEADS = {"possible_retraction_unconfirmed", "retraction_notice_cited"}
 
 
-def _openalex_retraction_rows(outcomes):
+def _openalex_retraction_rows(outcomes, notes, total):
     reached = [
         o
         for o in outcomes
@@ -1177,16 +1173,22 @@ def _openalex_retraction_rows(outcomes):
             len(reached),
             note="Works OpenAlex marks retracted, without a DOI, cited by title (BUG-640). "
             "Only an entry OpenAlex's title search identified can carry the lead; the rest "
-            "are answered by Crossref first or not found (see the details).",
+            f"are answered by Crossref first or not found. {len(outcomes)} of {total} frozen "
+            "cases were run"
+            + (f" ({'; '.join(notes)})" if notes else "")
+            + ".",
         ),
         rate_row(
             LANE,
             "a retraction notice described as a notice, a retracted work as a work",
             "lead",
-            sum((o["flag_kind"] == "retraction_notice_cited") == o["is_notice"] for o in leads),
+            sum(
+                (o["flag_kind"] == "retraction_notice_cited") == (o["record_type"] == "retraction")
+                for o in leads
+            ),
             len(leads),
-            note="Notice by construction: OpenAlex types it a retraction, or its title opens "
-            "with 'Retracted' or 'Retraction'.",
+            note="Notice by OpenAlex's own record type, not by a title rule. A record titled "
+            "'Retracted: ...' is usually the retracted work itself, never to be called a notice.",
         ),
         rate_row(
             LANE,
@@ -1474,7 +1476,7 @@ def run(ctx: Context) -> tuple[list[MetricRow], dict]:
 
     part_a, unread_cases, part_b, oa_part, transport = asyncio.run(go())
     outcomes, notes, counts = part_b
-    oa_outcomes, oa_notes = oa_part
+    oa_outcomes, oa_notes, oa_total = oa_part
     rows, details = [], {"unread_page_cases": unread_cases}
     if isinstance(part_a, tuple):
         tally, new_counts, unmatched, records, coverage = part_a
@@ -1490,7 +1492,7 @@ def run(ctx: Context) -> tuple[list[MetricRow], dict]:
         details["linkage_coverage"] = part_a
     rows += _unread_page_rows(unread_cases)
     rows += _part_b_rows(outcomes)
-    rows += _openalex_retraction_rows(oa_outcomes)
+    rows += _openalex_retraction_rows(oa_outcomes, oa_notes, oa_total)
     rows += real_precision_rows(ctx.golden, LANE)
     details.update(
         {
