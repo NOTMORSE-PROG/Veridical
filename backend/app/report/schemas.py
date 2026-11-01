@@ -120,7 +120,6 @@ class CriterionResultOut(BaseModel):
             "middle_of_three",
             "reference_counts",
             "reference_profile",
-            "reference_ranges",
         ]
         | None
     ) = None
@@ -528,7 +527,6 @@ class PublicCriterionResultOut(BaseModel):
             "middle_of_three",
             "reference_counts",
             "reference_profile",
-            "reference_ranges",
         ]
         | None
     ) = None

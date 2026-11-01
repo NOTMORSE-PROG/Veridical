@@ -72,10 +72,6 @@
       "gbooks:book"
     ]
   },
-  "major_classes": [
-    "peer_reviewed",
-    "book"
-  ],
   "_confirmed_note": "Only a lookup whose identity was confirmed says what the entry is.",
   "confirmed_statuses": [
     "existence_confirmed",
@@ -163,5 +159,33 @@
       "pattern": "\\bprimarily\\b[^.;]{0,20}\\bpeer",
       "min_share": 0.5
     }
-  ]
+  ],
+  "_wording_note": "Every sentence this step writes on a criterion row. {placeholders} are filled from the counts. Entries typed from citation text as web pages are only ever information: they may be journal articles retrieved online, so they never decide a level.",
+  "wording": {
+    "counts": "Reference list of {entries} entries: {major} journal or conference papers and books{from_text}, {web} that appear to be web sources, {repositories}{other}and {unclassified} of unknown type.",
+    "counts_from_text": " ({n} of them classified from how the entry is written)",
+    "counts_repositories": "{n} preprints, repository copies or theses, ",
+    "counts_lookup_unavailable": "{n} of those could not be looked up because a catalogue was unreachable; a later check may identify them.",
+    "web_note": "Every level, including the lowest, allows at most {limit} internet sites, and {web} entries appear to be web sources. Decide whether they count as internet sites under this format, then choose a grade.",
+    "inventory_short": "Even counting every entry a catalogue did not confirm as a major reference, no level of this format fits these counts, so VERIDICAL did not choose one. Please check the reference list.",
+    "inventory_open": "Only entries a catalogue confirmed can count against the list, so these counts allow anything from {low} to {high}. The rest of each level's wording, such as how many formatting errors there are, is not something the counts show, so VERIDICAL did not choose one.",
+    "inventory_ungraded": "The counts fit one level, but the formatting part of this criterion was not graded automatically. Please check the reference list.",
+    "inventory_lowered": "These counts allow no higher level than this one, so the grader's higher level for the formatting was lowered to it.",
+    "inventory_same": "These counts allow this level, and the formatting was graded the same.",
+    "inventory_formatting": "The counts would allow a higher level; the formatting grade sets this one.",
+    "quality_none": "These counts do not confirm any one level's wording however the entries a catalogue did not confirm turn out, so VERIDICAL did not choose one. Please check the reference list.",
+    "quality_several": "These counts fit more than one level ({levels}); what separates them is not something the counts show, so VERIDICAL did not choose one. Please check the reference list.",
+    "quality_decided": "Only this level's wording fits these counts, however the entries a catalogue did not confirm turn out.",
+    "no_entries": "No reference entries were available to judge.",
+    "problem_not_finished": "The citation check did not finish, so the reference list could not be judged.",
+    "problem_selection": "VERIDICAL could not separate the reference list reliably, so it could not be counted or judged. Please check the reference list.",
+    "problem_empty": "No reference list was found to count or judge. Please check the manuscript.",
+    "problem_unread_pages": "Some pages could not be read (pages {pages}), so the reference list may be incomplete and was not counted or judged. Please check the reference list.",
+    "problem_boundary": "VERIDICAL could not confirm where the reference list starts and ends, so it was not counted or judged. Please check the reference list.",
+    "problem_partial": "The citation check could not read the whole reference list, so it was not counted or judged. Please check the reference list.",
+    "counts_other": "{n} other works, ",
+    "no_level": "no level",
+    "entries_to_check": "Entries to check, by their place in the reference list: {numbers}.",
+    "quality_share": "Between {low} and {high} of the {entries} entries can be journal or conference papers or books."
+  }
 }

@@ -106,7 +106,11 @@ def profile(**counts):
     [
         ({"peer_reviewed": 4, "book": 3}, (4, 4)),
         ({"peer_reviewed": 5}, (3, 3)),
-        ({"peer_reviewed": 7, "web": 3}, (None, None)),
+        # Apparent web sources might still be major references: only a
+        # catalogue's confirmation counts against the list.
+        ({"peer_reviewed": 7, "web": 3}, (None, 4)),
+        ({"peer_reviewed": 4, "repository_text": 2}, (2, 4)),
+        ({"peer_reviewed": 4, "other_identified": 2}, (2, 4)),
         ({"peer_reviewed": 7, "unclassified": 2}, (4, 4)),
         ({"peer_reviewed": 7, "unclassified": 3}, (None, 4)),
         ({"peer_reviewed": 4, "unclassified": 1}, (2, 3)),
@@ -142,47 +146,89 @@ def test_counts_never_raise_the_formatting_grade(data):
     assert row.detail["verdict"] == "ACCEPTABLE"
 
 
-def test_counts_no_level_allows_go_to_the_instructor_with_the_counts(data):
+def test_apparent_web_sources_are_named_but_never_decide_the_level(data):
     row = graded_row("EXEMPLARY")
     rc.decide_inventory(row, BIBLIOGRAPHY, profile(peer_reviewed=30, web=9), data)
     assert row.outcome == ResultOutcome.escalated
     assert row.score is None
-    assert "9 web sources" in row.detail["reason"]
     assert row.detail["proposed_verdict"] == "EXEMPLARY"
     assert "verdict" not in row.detail
-    # The reason names the format's own limit the list breaks.
-    assert "allows at most 2 internet sites, and 9 entries are web sources" in row.detail["reason"]
+    # Information only: they may be journal articles retrieved online.
+    reason = row.detail["reason"]
+    assert "allows at most 2 internet sites, and 9 entries appear to be web sources" in reason
+    assert "Decide whether they count as internet sites under this format" in reason
+    # The counts allow anything from no level to the top.
+    assert "anything from no level to EXEMPLARY" in reason
 
 
-def test_a_list_short_of_major_references_is_not_blamed_on_internet_sites(data):
+@pytest.mark.parametrize(
+    "counts",
+    [
+        {"peer_reviewed": 4, "repository_text": 2},
+        {"peer_reviewed": 4, "other_identified": 2},
+        {"peer_reviewed": 4, "web": 2},
+    ],
+)
+def test_an_entry_no_catalogue_ruled_out_never_lowers_a_grade(data, counts):
+    # 4 journals plus 2 copies of journal articles on a repository: the counts
+    # must not lower an EXEMPLARY formatting grade on that.
+    row = graded_row("EXEMPLARY")
+    rc.decide_inventory(row, BIBLIOGRAPHY, profile(**counts), data)
+    assert row.outcome == ResultOutcome.escalated
+    assert row.detail.get("verdict") is None
+
+
+def test_a_list_short_of_major_references_even_at_best_goes_to_the_instructor(data):
     row = graded_row("EXEMPLARY")
     rc.decide_inventory(row, BIBLIOGRAPHY, profile(peer_reviewed=1, web=1), data)
     assert row.outcome == ResultOutcome.escalated
-    assert "internet sites, and" not in row.detail["reason"]
-    assert "No level of this format allows these counts" in row.detail["reason"]
+    assert "appear to be web sources. Decide" not in row.detail["reason"]
+    assert "Even counting every entry a catalogue did not confirm" in row.detail["reason"]
 
 
 def test_unidentified_entries_that_could_change_the_level_escalate(data):
     row = graded_row("EXEMPLARY")
     rc.decide_inventory(row, BIBLIOGRAPHY, profile(peer_reviewed=4, unclassified=1), data)
     assert row.outcome == ResultOutcome.escalated
-    assert "unidentified" in row.detail["reason"]
+    assert "anything from ACCEPTABLE to PROFICIENT" in row.detail["reason"]
+    assert "formatting errors" in row.detail["reason"]
+
+
+def test_the_formatting_grade_keeps_its_caution_where_it_sets_the_level(data):
+    row = graded_row("ACCEPTABLE")
+    row.detail["support_caution"] = "Quotes cannot confirm this grade."
+    rc.decide_inventory(row, BIBLIOGRAPHY, profile(peer_reviewed=20), data)
+    assert row.detail["verdict"] == "ACCEPTABLE"
+    assert row.detail["support_caution"] == "Quotes cannot confirm this grade."
+    lowered = graded_row("EXEMPLARY")
+    lowered.detail["support_caution"] = "Quotes cannot confirm this grade."
+    rc.decide_inventory(lowered, BIBLIOGRAPHY, profile(peer_reviewed=4), data)
+    assert lowered.detail["verdict"] == "ACCEPTABLE"
+    assert "support_caution" not in lowered.detail
+
+
+@pytest.mark.parametrize(
+    "unread",
+    ["Includes at least five major references.", "Includes 5-7 major references."],
+)
+def test_a_level_whose_major_count_is_not_read_skips_the_counts(data, unread):
+    scale = SimpleNamespace(
+        id=12,
+        text="Bibliography",
+        levels=levels(
+            "Includes three major references and no more than two internet sites.",
+            "Includes four major references and no more than two internet sites.",
+            unread + " No more than two internet sites.",
+            "Includes more than five major references and no more than two internet sites.",
+        ),
+    )
+    assert rc.count_conditions(scale, data) is None
 
 
 def test_an_ungraded_formatting_part_is_not_decided_by_counts_alone(data):
     row = graded_row("EXEMPLARY", outcome=ResultOutcome.escalated)
     rc.decide_inventory(row, BIBLIOGRAPHY, profile(peer_reviewed=20), data)
     assert row.outcome == ResultOutcome.escalated
-
-
-def test_ranges_set_by_the_format_decide_without_a_model():
-    ranges = {"1": [0, 0.1], "2": [0.1, 0.5], "3": [0.5, 0.8], "4": [0.8, 1.0]}
-    assert rc.quality_from_ranges(QUALITY, profile(peer_reviewed=9, web=1), ranges) == (4, "ranges")
-    assert rc.quality_from_ranges(QUALITY, profile(peer_reviewed=7, unclassified=3), ranges) == (
-        None,
-        "ranges_inconclusive",
-    )
-    assert rc.quality_from_ranges(QUALITY, profile(peer_reviewed=9), None) is None
 
 
 def test_entries_are_classified_only_from_confirmed_lookups_or_their_own_text(data):
@@ -204,11 +250,32 @@ def test_entries_are_classified_only_from_confirmed_lookups_or_their_own_text(da
     ) == ("unclassified")
 
 
-def test_reference_list_problems_are_named():
-    assert "did not finish" in rc.reference_list_problem(None)
-    assert "separate" in rc.reference_list_problem({"reference_selection_issues": ["x"]})
-    assert "No reference list" in rc.reference_list_problem({"reference_metadata_coverage": []})
-    assert rc.reference_list_problem({"reference_metadata_coverage": [{}]}) is None
+def test_reference_list_problems_are_named(data):
+    def problem(detail):
+        return rc.reference_list_problem(detail, data)
+
+    listed = {"reference_metadata_coverage": [{}]}
+    assert "did not finish" in problem(None)
+    assert "separate" in problem({"reference_selection_issues": ["x"]})
+    assert "No reference list" in problem({"reference_metadata_coverage": []})
+    assert problem({**listed, "reference_membership_status": "complete"}) is None
+    assert problem(listed) is None
+
+
+@pytest.mark.parametrize(
+    ("extra", "said"),
+    [
+        ({"unread_pages": [61, 62]}, "pages 61, 62"),
+        ({"reference_membership_status": "partial"}, "starts and ends"),
+        ({"reference_membership_status": "not_established"}, "starts and ends"),
+        ({"coverage_reason": "reference_source_projection_unbound"}, "whole reference list"),
+    ],
+)
+def test_a_partly_read_list_is_never_counted(data, extra, said):
+    # Entries on an unread page or past an unconfirmed boundary would be
+    # missing from the counts, and fewer major references can lower a grade.
+    problem = rc.reference_list_problem({"reference_metadata_coverage": [{}], **extra}, data)
+    assert problem is not None and said in problem
 
 
 # --- unconfirmed entries typed from their own citation text ---------------------
@@ -315,11 +382,16 @@ def test_the_profile_and_counts_say_which_entries_were_typed_from_their_text(dat
     assert detail["entry_numbers_typed_by_citation_text"] == {
         "journal_or_conference_text": [1],
         "repository_text": [2],
+        "web": [3],
     }
-    sentence = rc._counts_sentence(profile)
-    assert "1 of them typed from the entry's own citation details" in sentence
+    sentence = rc._counts_sentence(profile, data)
+    assert sentence.startswith("Reference list of 4 entries: 1 journal or conference papers")
+    assert "(1 of them classified from how the entry is written)" in sentence
     assert "1 preprints, repository copies or theses" in sentence
-    assert "1 entries that could not be identified" in sentence
+    assert "and 1 of unknown type." in sentence
+    # Nothing in the wording doubts that a source exists.
+    assert "catalogue" not in sentence and "identified" not in sentence
+    assert profile.uncertain_entries == [2, 3, 4]
 
 
 def test_majors_read_from_citation_text_count_toward_the_inventory(data):
@@ -331,45 +403,55 @@ def test_majors_read_from_citation_text_count_toward_the_inventory(data):
 # --- quality: decided only where the counts prove one level --------------------
 
 
-def test_counts_that_fit_only_one_level_decide_quality(data):
-    # 2 papers, 11 web pages, 2 repository copies, 4 unidentified: at most 6 of 19
-    # can be papers or books, so only "most ... not peer-reviewed" holds.
-    row = graded_row("PROFICIENT")
-    typed = profile(journal_or_conference_text=2, web=11, repository_text=2, unclassified=4)
-    rc.decide_quality(row, QUALITY, typed, None, data)
-    assert row.outcome == ResultOutcome.passed
-    assert row.detail["verdict"] == "ACCEPTABLE"
-    assert row.detail["decision_basis"] == "reference_profile"
-    assert row.detail["reference_strategy"]["strategy"] == rc.QUALITY
-    assert "Only this level's wording fits these counts" in row.detail["reasoning"]
+def test_on_the_format_the_quality_levels_are_never_proven_by_counts_alone(data):
+    # Every entry a catalogue did not confirm could be a paper, so the share can
+    # always reach the top: "most ... not peer-reviewed" is never proven, and a
+    # mostly-paper list fits both "most legitimate" and "primarily peer-reviewed".
+    for counts in (
+        {"journal_or_conference_text": 2, "web": 11, "repository_text": 2, "unclassified": 4},
+        {"peer_reviewed": 103, "web": 3, "unclassified": 24},
+        {"journal_or_conference_text": 11, "repository_text": 3, "unclassified": 7},
+        {"peer_reviewed": 8, "web": 12},
+    ):
+        row = graded_row("EXEMPLARY")
+        rc.decide_quality(row, QUALITY, profile(**counts), data)
+        assert row.outcome == ResultOutcome.escalated, counts
+        assert row.detail.get("verdict") is None
 
 
 def test_counts_that_fit_two_levels_go_to_the_instructor_naming_both(data):
-    # A list that is mostly papers fits "most are legitimate" and "primarily
-    # peer-reviewed" alike; what separates them is not in the counts.
     row = graded_row("EXEMPLARY")
-    rc.decide_quality(row, QUALITY, profile(peer_reviewed=103, web=3, unclassified=24), None, data)
-    assert row.outcome == ResultOutcome.escalated and row.score is None
+    rc.decide_quality(row, QUALITY, profile(peer_reviewed=103, web=3, unclassified=24), data)
     assert "PROFICIENT and EXEMPLARY" in row.detail["reason"]
     checks = row.detail["reference_strategy"]["level_checks"]
     assert [ordinal for ordinal, check in checks.items() if check["fits"]] == ["3", "4"]
 
 
-def test_a_half_paper_list_with_unidentified_entries_is_not_called_mostly_unreviewed(data):
-    # 11 of 21 are journal papers typed from their citation details: "most are not
-    # peer-reviewed" cannot hold, whatever the 7 unidentified entries are.
-    row = graded_row("PROFICIENT")
-    typed = profile(journal_or_conference_text=11, repository_text=3, unclassified=7)
-    rc.decide_quality(row, QUALITY, typed, None, data)
-    assert row.outcome == ResultOutcome.escalated
-    assert row.detail.get("verdict") != "ACCEPTABLE"
-
-
 def test_counts_that_confirm_no_level_go_to_the_instructor(data):
     row = graded_row("PROFICIENT")
-    rc.decide_quality(row, QUALITY, profile(peer_reviewed=4, web=4, unclassified=12), None, data)
+    rc.decide_quality(row, QUALITY, profile(peer_reviewed=4, web=4, unclassified=12), data)
     assert row.outcome == ResultOutcome.escalated
     assert "do not confirm any one level" in row.detail["reason"]
+
+
+def test_counts_that_fit_exactly_one_level_decide_it(data):
+    # A scale where only one level's words imply a share.
+    scale = SimpleNamespace(
+        id=13,
+        text="Sources",
+        levels=levels(
+            "Weak sources.",
+            "Fair sources.",
+            "Most of the references are professionally legitimate.",
+            "Excellent sources.",
+        ),
+    )
+    row = graded_row("EXEMPLARY")
+    rc.decide_quality(row, scale, profile(peer_reviewed=15, unclassified=5), data)
+    assert row.detail["verdict"] == "PROFICIENT"
+    assert row.detail["decision_basis"] == "reference_profile"
+    assert row.detail["reference_strategy"]["strategy"] == rc.QUALITY
+    assert "Only this level's wording fits these counts" in row.detail["reasoning"]
 
 
 def test_a_scale_whose_words_imply_no_share_is_never_decided(data):
@@ -379,8 +461,15 @@ def test_a_scale_whose_words_imply_no_share_is_never_decided(data):
         levels=levels("Weak sources.", "Fair sources.", "Good sources.", "Excellent sources."),
     )
     row = graded_row("PROFICIENT")
-    rc.decide_quality(row, vague, profile(peer_reviewed=30), None, data)
+    rc.decide_quality(row, vague, profile(peer_reviewed=30), data)
     assert row.outcome == ResultOutcome.escalated
+
+
+def test_a_share_of_exactly_one_half_proves_neither_side(data):
+    # 10 papers and 10 unconfirmed entries: "more than half" is not proven.
+    ordinal = next(int(lv["level"]) for lv in QUALITY.levels if lv["name"] == "PROFICIENT")
+    check = rc.quality_level_fits(QUALITY, ordinal, profile(peer_reviewed=10, web=10), data)
+    assert check["fits"] is False and check["share_bounds"] == [0.5, 1.0]
 
 
 def test_quality_never_calls_a_model(data):
@@ -394,11 +483,10 @@ def test_quality_never_calls_a_model(data):
 @pytest.mark.parametrize(
     ("level", "counts", "fits"),
     [
-        ("BEGINNER", {"web": 19, "journal_or_conference_text": 1}, True),
-        ("BEGINNER", {"web": 17, "journal_or_conference_text": 3}, False),
+        # Apparent web pages could still be papers, so "virtually no" is unproven.
+        ("BEGINNER", {"web": 19, "journal_or_conference_text": 1}, False),
         ("EXEMPLARY", {"peer_reviewed": 15, "unclassified": 5}, True),
         ("EXEMPLARY", {"peer_reviewed": 8, "unclassified": 12}, False),
-        # Other identified works (datasets, standards) could go either way.
         ("ACCEPTABLE", {"web": 8, "other_identified": 4, "peer_reviewed": 8}, False),
     ],
 )
@@ -420,3 +508,25 @@ def test_a_stored_rows_decimal_score_can_be_saved_with_the_record(data, decided)
     rc.decide_inventory(row, BIBLIOGRAPHY, counts, data)
     json.dumps(row.detail)
     assert row.detail["reference_strategy"]["grader"]["score"] == 3.0
+
+
+def test_entry_numbers_run_together_without_dashes():
+    assert rc._numbers([3, 5, 6, 7, 9, 12, 13]) == "3, 5 to 7, 9, 12 to 13"
+
+
+def test_every_quality_message_shows_the_range_it_used(data):
+    row = graded_row("EXEMPLARY")
+    rc.decide_quality(row, QUALITY, profile(peer_reviewed=103, web=3, unclassified=24), data)
+    assert (
+        "Between 103 and 130 of the 130 entries can be journal or conference papers"
+        in (row.detail["reason"])
+    )
+
+
+def test_an_escalated_row_does_not_show_the_old_passes_as_if_they_graded_it(data):
+    row = graded_row("PROFICIENT")
+    row.detail["votes"] = ["PROFICIENT", "PROFICIENT"]
+    row.detail["agreement"] = 1.0
+    rc.decide_quality(row, QUALITY, profile(peer_reviewed=103, web=3, unclassified=24), data)
+    assert "votes" not in row.detail and "agreement" not in row.detail
+    assert row.detail["reference_strategy"]["grader"]["votes"] == ["PROFICIENT", "PROFICIENT"]

@@ -801,7 +801,6 @@ async def _apply_reference_criteria(
             await session.scalars(select(Citation).where(Citation.manuscript_id == manuscript.id))
         ).all()
     )
-    rubric = await session.get(Rubric, check_run.rubric_id)
     await apply_reference_strategies(
         session,
         check_run.id,
@@ -809,7 +808,6 @@ async def _apply_reference_criteria(
         citation_result,
         citations,
         data,
-        quality_ranges=getattr(rubric, "reference_quality_ranges", None),
     )
 
 

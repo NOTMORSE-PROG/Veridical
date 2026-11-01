@@ -396,7 +396,6 @@ _DECISION_BASES = frozenset(
         # V-098: a level set from the reference list rather than by the passes.
         "reference_counts",
         "reference_profile",
-        "reference_ranges",
     }
 )
 

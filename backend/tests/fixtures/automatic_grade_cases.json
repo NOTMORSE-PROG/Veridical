@@ -59,7 +59,7 @@
     "name": "a level set from the reference list's counts is named as such",
     "row": {"decision_basis": "reference_counts", "agreeing_passes": 2, "grading_passes": 2},
     "lines": [
-      "Graded automatically: the reference list's counts of major references and internet sites allow no higher level than this; the grading passes judged the formatting."
+      "Graded automatically: the lower of the formatting grade and the highest level the reference list's counts allow."
     ],
     "caution": null
   },
