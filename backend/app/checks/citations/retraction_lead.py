@@ -43,14 +43,21 @@ class _PolicyData(BaseModel):
     def templates_fill(self):
         # A template naming a field this code does not supply would fail on
         # every lead; refuse the file instead, so no lead is raised at all.
-        for template in (
-            self.retracted_work_reason,
-            self.retracted_work_reason_crossref_not_asked,
-            self.notice_reason,
-        ):
-            template.format(**_REASON_FIELDS)
-        for template in (self.link_doi, self.link_record, self.link_unknown):
-            template.format(**_LINK_FIELDS)
+        templates = [
+            (t, _REASON_FIELDS)
+            for t in (
+                self.retracted_work_reason,
+                self.retracted_work_reason_crossref_not_asked,
+                self.notice_reason,
+            )
+        ] + [(t, _LINK_FIELDS) for t in (self.link_doi, self.link_record, self.link_unknown)]
+        for template, fields in templates:
+            # Filled with empty values too, as an empty title would be.
+            for values in (fields, dict.fromkeys(fields, "")):
+                try:
+                    template.format(**values)
+                except Exception as exc:  # any template the lead cannot fill
+                    raise ValueError(f"Unusable template: {template!r}") from exc
         for pattern in self.notice_title_patterns:
             try:
                 re.compile(pattern)
@@ -74,12 +81,9 @@ class RetractionLeadPolicy:
 
 @lru_cache(maxsize=4)
 def load_retraction_lead_policy(path: Path | None = None) -> RetractionLeadPolicy:
-    try:
-        raw = _PolicyData.model_validate(
-            json.loads((path or _DEFAULT_FILE).read_text(encoding="utf-8"))
-        )
-    except (KeyError, IndexError) as exc:
-        raise ValueError("Retraction lead policy has an unknown template field.") from exc
+    raw = _PolicyData.model_validate(
+        json.loads((path or _DEFAULT_FILE).read_text(encoding="utf-8"))
+    )
     return RetractionLeadPolicy(
         frozenset(t.casefold() for t in raw.notice_types),
         tuple(re.compile(p, re.IGNORECASE) for p in raw.notice_title_patterns),
