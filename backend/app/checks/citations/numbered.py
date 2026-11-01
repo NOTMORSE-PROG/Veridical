@@ -218,6 +218,18 @@ def bracket_numbers_in_text(
                 numbers.update(range(low + 1, high))
         numbers.update(found)
         prior, prior_end = found, match.end()
+    # Marks glued to the word before them ("compared[7-10]") and marks with a
+    # locator ("[8, p. 3]") count as possibly cited on a readable page too.
+    for match in _GLUED_BRACKET.finditer(text):
+        found = _numbers_in_mark(match.group(), max_range_span=max_range_span, context=context)
+        unreadable = unreadable or found is None
+        numbers.update(found or ())
+    for match in _LOCATOR_BRACKET.finditer(text):
+        found = _numbers_in_mark(
+            f"[{match.group('numbers')}]", max_range_span=max_range_span, context=context
+        )
+        unreadable = unreadable or found is None
+        numbers.update(found or ())
     return numbers, unreadable
 
 

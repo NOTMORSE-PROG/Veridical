@@ -1284,9 +1284,13 @@ def _unread_page_rows(records):
             "plant",
             sum(not r["reported_uncited"] for r in named),
             len(named),
+            # The variants of one entry are not independent cases.
+            clusters=len({(r["host"], r["entry"]) for r in named}),
             note=(
-                "Adversarial: the entry's surname written on an unread page, with its own "
-                "year or another one. Reporting it uncited would be a false finding."
+                "Adversarial: the entry cited on an unread page by its first author with its "
+                "own year or another, in capitals, split by a line-break hyphen, or by its "
+                "second author. Reporting it uncited would be a false finding. All cases "
+                "come from the author-year hosts with unread pages."
             ),
         )
     )
@@ -1301,6 +1305,7 @@ def _unread_page_rows(records):
             "plant",
             sum(not r["reported_uncited"] and r["lead_for_entry"] for r in owed),
             len(owed),
+            clusters=len({(r["host"], r["entry"]) for r in owed}),
             note="Counted only where the plant alone is reported uncited.",
         )
     )

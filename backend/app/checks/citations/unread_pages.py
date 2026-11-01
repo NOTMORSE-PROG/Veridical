@@ -85,7 +85,7 @@ def split_by_unread_pages(
         if numbered:
             number = _number(ref)
             named = [p for p in unread if number is not None and number in marks[p][0]]
-            found = f"[{number}]" if named else None
+            found = str(number) if named else None
             usable = number is not None and not any(unreadable for _, unreadable in marks.values())
         else:
             named = []

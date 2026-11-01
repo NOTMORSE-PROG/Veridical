@@ -148,3 +148,16 @@ def test_the_lead_prints_n_d_for_an_entry_that_says_it_has_no_date():
         [(undated, [18], "named", "google")], numbered=False, settings=SETTINGS
     )
     assert "'Google' (n.d.)" in lead.detail["reason"]
+
+
+def test_glued_and_page_locator_marks_withhold_numbered_entries():
+    # The readable path counts these as possible citations too.
+    refs = [_numbered(n) for n in (7, 8, 9, 10, 11)]
+    for text in (
+        "compared[7-10] across clinics.",
+        "compared[7],[8],[9],[10] across clinics.",
+        "reported in [7, p. 3], [8, p. 4], [9, p. 5] and [10, p. 6].",
+    ):
+        released, withheld = _split(refs, {5: text}, numbered=True)
+        assert [r.order_index + 1 for r, *_ in withheld] == [7, 8, 9, 10], text
+        assert [r.order_index + 1 for r in released] == [11], text
