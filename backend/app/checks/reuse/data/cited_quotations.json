@@ -1,0 +1,22 @@
+{
+  "_note": "Quotations marked and cited in the text (BUG-632). Wording shared only inside such a quotation does not confirm an originality match: quoting a source with its citation is the honest way to use it. A quotation counts only when a citation sits beside it, because most quotation marks in a thesis are not quotations (button labels, section titles, code). Symmetric marks (\") are paired by orientation: an opening mark follows a space or bracket and precedes a word; a closing mark follows a word. Single quotation marks are not listed: they cannot be told apart from apostrophes. after_words / before_words: how many words may separate the quotation from the start of a citation after it, or from the end of a citation before it. Patterns are Python regular expressions.",
+  "quote_pairs": [
+    ["\u201c", "\u201d"],
+    ["\"", "\""],
+    ["\u00ab", "\u00bb"]
+  ],
+  "min_quote_words": 3,
+  "max_quote_words": 150,
+  "after_words": 4,
+  "before_words": 25,
+  "citations_after": {
+    "parenthetical_with_year": "\\([^()]{0,160}?\\b(?:(?:1[6-9]|20)\\d{2}[a-z]?|n\\.\\s?d\\.)[^()]{0,80}\\)",
+    "page_locator": "\\(\\s*(?:p|pp|para|paras)\\.\\s*\\d+",
+    "numeric": "\\[\\s*\\d{1,4}(?:\\s*[,\u2013\u2014-]\\s*\\d{1,4})*(?:\\s*,\\s*(?:p|pp)\\.\\s*\\d+(?:\\s*[\u2013-]\\s*\\d+)?)?\\s*\\]",
+    "narrative": "\\b[A-Z][\\w\u2019'-]*(?:\\s+et\\s+al\\.?)?(?:,?\\s+(?:and|&)\\s+[A-Z][\\w\u2019'-]*)?(?:\u2019s|'s)?\\s*\\(\\s*(?:(?:1[6-9]|20)\\d{2}[a-z]?|n\\.\\s?d\\.)"
+  },
+  "citations_before": {
+    "narrative": "\\b[A-Z][\\w\u2019'-]*(?:\\s+et\\s+al\\.?)?(?:,?\\s+(?:and|&)\\s+[A-Z][\\w\u2019'-]*)?(?:\u2019s|'s)?\\s*\\(\\s*(?:(?:1[6-9]|20)\\d{2}[a-z]?|n\\.\\s?d\\.)[^()]{0,40}\\)",
+    "numeric": "\\[\\s*\\d{1,4}(?:\\s*[,\u2013\u2014-]\\s*\\d{1,4})*\\s*\\]"
+  }
+}

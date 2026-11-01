@@ -2618,3 +2618,39 @@ async def test_the_same_file_is_the_same_work_even_when_its_records_disagree(ses
     assert audit["same_work_excluded_ids"] == [record]
     assert audit["same_work_name_rules"]["file"] == "packaged"
     assert len(audit["same_work_name_rules"]["sha256"]) == 64
+
+
+async def test_a_quotation_with_its_citation_is_counted_not_raised(session_factory):
+    """BUG-632: a Library passage quoted in quotation marks with a citation
+    beside it raises nothing and is counted apart; the same words copied
+    without quotation marks are raised."""
+    settings = get_settings().model_copy(update={"reuse_passage_high_similarity_threshold": 0.5})
+    source_text = (
+        "The clinic queue prototype sent each patient a text message when their turn was "
+        "near, and the nurses reported that the waiting room was calmer during the trial "
+        "weeks than in the month before it started at the barangay health centre."
+    )
+    own_words = (
+        "Our study instead asks how students choose an elective when two sections clash "
+        "in the timetable."
+    )
+    other_chapter = "An unrelated chapter on deployment to the campus network."
+    source_id, _ = await _seed_manuscript_and_run(session_factory, group_label="Quoted source")
+    await _add_to_library(session_factory, source_id, _extraction(source_text, CH2))
+
+    results = {}
+    for name, chapter in (
+        ("quoted", f'Garcia (2023) reported that "{source_text}" (p. 14). {own_words}'),
+        ("unquoted", f"{source_text} {own_words}"),
+    ):
+        own_id, own_run = await _seed_manuscript_and_run(session_factory, group_label=name)
+        async with session_factory() as session:
+            results[name] = await _run_with_saved_source(
+                session, own_id, own_run, _extraction(chapter, other_chapter), settings
+            )
+    assert await _flag_kinds(session_factory, results["quoted"].id) == []
+    assert results["quoted"].detail["n_shared_wording_only_in_cited_quotations"] >= 1
+    assert results["quoted"].detail["n_similar_without_shared_wording"] == 0
+    unquoted_kinds = await _flag_kinds(session_factory, results["unquoted"].id)
+    assert any(kind.endswith("_passage") for kind in unquoted_kinds)
+    await _assert_counts_match_flags(session_factory, results["quoted"])
