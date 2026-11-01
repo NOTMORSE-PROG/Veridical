@@ -724,11 +724,11 @@ async def run_originality_reuse_check(
             else ("no_comparison_archive" if no_comparisons else None),
             # The pages left out: after an unclear list end, or the unresolved
             # text after the list (BUG-622), which is tagged and never matched.
-            "pages_not_compared": not_compared.pages
-            if not_compared
-            else _protected_pages(selection)
-            if membership_partial
-            else [],
+            # Both can apply at once, so both sets of pages are named.
+            "pages_not_compared": sorted(
+                set(not_compared.pages if not_compared else [])
+                | set(_protected_pages(selection) if membership_partial else [])
+            ),
             "not_compared_from": not_compared.start if not_compared else None,
             "comparison_ran": True,
             # BUG-662: own records of the same work were compared too (by

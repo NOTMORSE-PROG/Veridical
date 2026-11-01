@@ -2620,6 +2620,37 @@ async def test_the_same_file_is_the_same_work_even_when_its_records_disagree(ses
     assert len(audit["same_work_name_rules"]["sha256"]) == 64
 
 
+def _thesis_with_unresolved_appendix(body_copy: str, tail_copy: str) -> ExtractionResult:
+    """A body page, a clear reference list, then an appendix whose own
+    numbered entry leaves the text after the list unresolved."""
+    blocks = [
+        _block("Chapter 1: Introduction", page=1),
+        _block(body_copy, page=1),
+        _block("REFERENCES", page=2),
+        _block("Reyes, J. (2024). First complete source. Journal of Examples.", page=2),
+        _block("Santos, M. (2023). Second complete source. Journal of Examples.", page=2),
+        _block("APPENDIX A", page=3),
+        _block("[1] Cruz, A. (2022). A secondary appendix source. Example Journal.", page=3),
+        _block(tail_copy, page=3),
+    ]
+    return ExtractionResult(
+        page_count=3,
+        anchor_kind="page",
+        image_only=False,
+        text_chars=sum(len(b.text) for b in blocks),
+        blocks=blocks,
+        images=[],
+        section_tree=SectionTree(
+            source="heuristics",
+            nodes=[
+                SectionNode(title="Chapter 1: Introduction", level=1, page=1),
+                SectionNode(title="REFERENCES", level=1, page=2),
+                SectionNode(title="APPENDIX A", level=1, page=3),
+            ],
+        ),
+    )
+
+
 async def test_a_copy_in_the_body_is_raised_but_one_in_the_unresolved_appendix_is_not(
     session_factory,
 ):
@@ -2635,32 +2666,7 @@ async def test_a_copy_in_the_body_is_raised_but_one_in_the_unresolved_appendix_i
         "appointment before the system existed and what they found most frustrating."
     )
     library = _extraction(body_copy, tail_copy)
-    own_blocks = [
-        _block("Chapter 1: Introduction", page=1),
-        _block(body_copy, page=1),
-        _block("REFERENCES", page=2),
-        _block("Reyes, J. (2024). First complete source. Journal of Examples.", page=2),
-        _block("Santos, M. (2023). Second complete source. Journal of Examples.", page=2),
-        _block("APPENDIX A", page=3),
-        _block("[1] Cruz, A. (2022). A secondary appendix source. Example Journal.", page=3),
-        _block(tail_copy, page=3),
-    ]
-    own = ExtractionResult(
-        page_count=3,
-        anchor_kind="page",
-        image_only=False,
-        text_chars=sum(len(b.text) for b in own_blocks),
-        blocks=own_blocks,
-        images=[],
-        section_tree=SectionTree(
-            source="heuristics",
-            nodes=[
-                SectionNode(title="Chapter 1: Introduction", level=1, page=1),
-                SectionNode(title="REFERENCES", level=1, page=2),
-                SectionNode(title="APPENDIX A", level=1, page=3),
-            ],
-        ),
-    )
+    own = _thesis_with_unresolved_appendix(body_copy, tail_copy)
     source_id, _ = await _seed_manuscript_and_run(session_factory, group_label="Clinic source")
     await _add_to_library(session_factory, source_id, library)
     own_id, own_run = await _seed_manuscript_and_run(session_factory, group_label="Clinic copy")
@@ -2679,3 +2685,25 @@ async def test_a_copy_in_the_body_is_raised_but_one_in_the_unresolved_appendix_i
     assert result.detail["coverage_reason"] == "reference_membership_partial"
     assert result.detail["pages_not_compared"] == [3]
     assert "p. 1" in passage_pages and "p. 3" not in passage_pages
+
+
+async def test_both_left_out_regions_are_named_when_both_apply(session_factory, monkeypatch):
+    """An unclear list end and unresolved text after the list can apply to one
+    thesis; the pages of both are named, not only those after the unclear end."""
+    from app.checks.reuse import service as reuse_service
+    from app.ingest.references import RegionNotAssessed
+
+    monkeypatch.setattr(
+        reuse_service,
+        "reference_region_not_assessed",
+        lambda extraction, selection: RegionNotAssessed(start="p. 2", pages=[2]),
+    )
+    own = _thesis_with_unresolved_appendix(
+        "The clinic booking prototype shortened the queue at the front desk.",
+        "The interview guide asked each respondent how they booked an appointment.",
+    )
+    own_id, own_run = await _seed_manuscript_and_run(session_factory, group_label="Both regions")
+    async with session_factory() as session:
+        result = await _run_with_saved_source(session, own_id, own_run, own, get_settings())
+    assert result.detail["coverage_reason"] == "reference_membership_partial"
+    assert result.detail["pages_not_compared"] == [2, 3]
