@@ -309,3 +309,39 @@ def test_without_line_geometry_a_capital_line_does_not_continue_a_sentence():
     assert not any(
         t.startswith("The kiosk reduced the average queue time for Walk-in") for t in texts
     )
+
+
+def test_count_cells_between_table_rows_keep_the_rows_apart():
+    rows = [
+        (1, "Results", 60),
+        (1, "The system reduced the waiting time", 460),
+        (1, "12", 20),
+        (1, "20", 20),
+        (1, "3", 20),
+        (1, "The kiosk improved the accuracy of records.", 460),
+    ]
+    texts = [text for _a, text in _outcomes(lines_on_pages(rows))]
+    assert not any("waiting time The kiosk" in t for t in texts)
+    assert "The kiosk improved the accuracy of records." in texts
+
+
+@pytest.mark.parametrize(
+    "opening",
+    [
+        "Table 4.2 showed that the kiosk reduced the average queue time",
+        "Table 4.2 above shows that the kiosk reduced the average queue time",
+        "Table 4.2  shows that the kiosk reduced the average queue time",
+    ],
+)
+def test_a_reporting_verb_in_any_tense_after_a_table_number_is_prose(opening):
+    rows = [(1, "Results", 60), (1, opening, 460), (1, "by 30% in every clinic.", 300)]
+    texts = [text for _a, text in _outcomes(lines_on_pages(rows))]
+    assert any(t.endswith("average queue time by 30% in every clinic.") for t in texts)
+
+
+def test_a_caption_that_ends_in_a_period_is_not_a_result():
+    rows = [
+        (1, "Results", 60),
+        (1, "Table 4.5. The system reduced the processing time of requests.", 460),
+    ]
+    assert _outcomes(lines_on_pages(rows)) == []

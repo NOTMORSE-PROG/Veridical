@@ -232,9 +232,9 @@
     "OpenAPI"
   ],
   "_source_bug626": "BUG-626 (2026-11-01): result sentences are read across wrapped lines. A caption line is not prose, so a sentence never continues through one; and a short note in brackets that closes the previous sentence, such as '(Appendix 5)', is not part of the next one.",
-  "_caption_patterns_note": "A caption line: 'Table 4.3 weighted mean of the respondents' evaluation'. A line where a reporting verb follows the number ('Table 4.2 shows that ...') is a sentence, not a caption, and so is any line that ends a sentence.",
+  "_caption_patterns_note": "A caption line: 'Table 4.3 weighted mean of the respondents' evaluation'. A line where a reporting verb follows the number, in any tense and after 'above' or 'below' ('Table 4.2 shows that ...', 'Table 4.2 above showed ...'), is a sentence, not a caption. A caption that ends in a period ('Table 4.5. The system ...') is still a caption.",
   "caption_patterns": [
-    "^\\s*(?:table|figure|fig\\.|chart|graph)\\s*\\d+(?:\\.\\d+)*[.:]?\\s+(?!(?:shows?|presents?|illustrates?|reveals?|indicates?|summari[sz]es?|lists?|displays?|compares?|demonstrates?|contains?|gives?|provides?|reports?|depicts?|describes?|highlights?|confirms?|suggests?)\\b)"
+    "^\\s*(?:table|figure|fig\\.|chart|graph)\\s*\\d+(?:\\.\\d+)*[.:]?\\s+(?!\\s)(?!(?:(?:above|below)\\s+)?(?:shows?|showed|presents?|presented|illustrates?|illustrated|reveals?|revealed|indicates?|indicated|summari[sz]e[sd]?|lists?|listed|displays?|displayed|compares?|compared|demonstrates?|demonstrated|contains?|contained|gives?|gave|provides?|provided|reports?|reported|depicts?|depicted|describes?|described|highlights?|highlighted|confirms?|confirmed|suggests?|suggested)\\b)"
   ],
   "leading_note_pattern": "^\\([^()]{1,40}\\)\\s+(?=[A-Z])"
 }
