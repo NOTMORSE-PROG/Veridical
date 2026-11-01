@@ -437,3 +437,14 @@ def test_the_shared_coverage_schema_rejects_extra_fields():
     for extra in ("reason", "image_coverage_items", "outcome", "source_pages_unassessed"):
         with pytest.raises(ValidationError):
             PublicCoverageOut.model_validate({**values, extra: "anything"})
+
+
+@pytest.mark.parametrize("bad", [-1, True, 2.0, "3"])
+def test_a_badly_saved_count_shows_as_zero_and_never_breaks_the_link(bad):
+    from app.report.module_scope import public_coverage
+
+    status = _status()
+    status = status.model_copy(update={"n_linkage_unassessed": bad, "n_images_unassessed": bad})
+    [out] = public_coverage([status])
+    assert out.n_citation_links_unchecked == 0 and out.n_images_unchecked == 0
+    assert out.n_tables_unchecked == 8 and out.pages_not_read == [12, 13, 14]

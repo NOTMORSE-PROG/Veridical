@@ -253,24 +253,26 @@ _PUBLIC_KINDS = {
 def public_coverage(statuses: list[IntegrityCheckStatusOut]) -> list[PublicCoverageOut]:
     """What each integrity check left out, as the adviser may see it: the
     recorded code, page numbers and counts, copied field by field from the
-    report's coverage record. Nothing else in that record crosses."""
+    report's coverage record. Nothing else in that record crosses. A count saved
+    in any other shape than a whole number of zero or more shows as 0, so one
+    bad record never stops the link from opening."""
     return [
         PublicCoverageOut(
             check_kind=status.check_kind,
             coverage_reason=_known_reason(status.coverage_reason),
-            n_pages_not_read=status.n_source_pages_unassessed,
+            n_pages_not_read=_count(status.n_source_pages_unassessed) or 0,
             pages_not_read=_pages(status.source_pages_unassessed),
             pages_not_compared=_pages(status.pages_not_compared),
             not_compared_from=_location(status.not_compared_from),
-            n_skipped_service=status.n_skipped_api_down,
-            n_skipped_capacity=status.n_skipped_quota,
-            n_skipped_unreadable=status.n_skipped_parse_failure,
-            n_references_unverified=status.n_metadata_skipped_insufficient,
-            n_citation_links_unchecked=status.n_linkage_unassessed,
-            n_claims_unchecked=status.n_claim_support_unassessed,
-            n_images_unchecked=status.n_images_unassessed,
-            n_tables_unchecked=status.n_recovery_tables_unassessed,
-            n_equations_unchecked=status.n_equations_unassessed,
+            n_skipped_service=_count(status.n_skipped_api_down) or 0,
+            n_skipped_capacity=_count(status.n_skipped_quota) or 0,
+            n_skipped_unreadable=_count(status.n_skipped_parse_failure) or 0,
+            n_references_unverified=_count(status.n_metadata_skipped_insufficient) or 0,
+            n_citation_links_unchecked=_count(status.n_linkage_unassessed) or 0,
+            n_claims_unchecked=_count(status.n_claim_support_unassessed) or 0,
+            n_images_unchecked=_count(status.n_images_unassessed) or 0,
+            n_tables_unchecked=_count(status.n_recovery_tables_unassessed) or 0,
+            n_equations_unchecked=_count(status.n_equations_unassessed) or 0,
         )
         for status in statuses
         if status.check_kind in _PUBLIC_KINDS
