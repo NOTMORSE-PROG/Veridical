@@ -28,7 +28,12 @@ export const CRITERION_EXCLUSION_COPY = {
 } as const;
 
 export const CRITERION_REVIEW_COPY = {
-  judgmentNeeded: "Your judgment is needed",
+  judgmentNeeded: "Needs your judgment",
+  // The card reads in sections: why no grade was accepted, the quoted
+  // evidence, what the assessment could not take into account, your grade.
+  whySection: "No grade accepted",
+  evidenceSection: "Quoted evidence",
+  limitsSection: "Limits of this assessment",
   reviewSavedPassages: "No grade was accepted for this criterion. Review the saved passages and level descriptions, then choose a grade.",
   reviewManuscript: "No grade was accepted for this criterion. Review the manuscript and level descriptions, then choose a grade.",
   supportIncomplete: "The separate evidence review did not finish.",

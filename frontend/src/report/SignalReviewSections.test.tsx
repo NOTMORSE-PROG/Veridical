@@ -225,7 +225,7 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
     }
     expect(screen.getByText(item.reason)).toBeVisible();
     expect(screen.queryByText("Recorded AI explanation")).not.toBeInTheDocument();
-    expect(screen.getByText("Your judgment is needed")).toBeVisible();
+    expect(screen.getByText("Needs your judgment")).toBeVisible();
   });
 
   it.each([true, false])("places omitted source coverage beside the pending judgment only for the current epoch (%s)", async matching => {
@@ -256,7 +256,7 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
     const row = { ...savedRow(item, ""), check_result_id: item.check_result_id, outcome: "escalated", resolution: null };
     vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/escalated": [item], "/check-runs/5/report": reportWith({ assessment_revision: 4, results: [row] }) }));
     renderSelected(REAL_MAJORITY.criterion_id);
-    expect(await screen.findByText("Recorded AI explanation:")).toBeVisible();
+    expect(await screen.findByText("Recorded AI explanation")).toBeVisible();
     expect(screen.getByText(item.reasoning)).toBeVisible();
   });
 
@@ -287,7 +287,7 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
     };
     vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/5/escalated": [item] }));
     renderSelected(LEVELLED_ITEM.criterion_id);
-    expect(await screen.findByText("Your judgment is needed")).toBeInTheDocument();
+    expect(await screen.findByText("Needs your judgment")).toBeInTheDocument();
     expect(screen.queryByText(/Split vote:/)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Accept AI suggestion/ })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Exemplary" })).toBeEnabled();

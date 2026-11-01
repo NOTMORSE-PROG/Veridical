@@ -29,7 +29,7 @@ describe("instructor assessment interpretation", () => {
   });
   it("does not turn one suggestion and one missing answer into disagreement", async () => {
     await show(record());
-    expect(screen.getByText("Your judgment is needed")).toBeVisible();
+    expect(screen.getByText("Needs your judgment")).toBeVisible();
     expect(screen.queryByText(/Split vote:/)).not.toBeInTheDocument();
     expect(screen.getByText("The actual recorded explanation.")).toBeVisible();
   });
