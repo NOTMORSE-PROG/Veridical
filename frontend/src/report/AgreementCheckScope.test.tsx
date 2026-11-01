@@ -85,8 +85,8 @@ it("says when the report did not record how many pairs were compared", () => {
 it("gives the adviser the counts without the statements or list controls", () => {
   render(<AgreementScopeSummary scope={scope({ set_aside: [] })} findings={0} undecided={2} compared={9} interrupted={false} />);
   expect(screen.getByRole("heading", { level: 4, name: "What this check compared" })).toBeInTheDocument();
-  expect(screen.getByText(/The instructor's report lists the results set aside/)).toBeInTheDocument();
+  expect(screen.getByText(/This link counts these statements but does not quote them/)).toBeInTheDocument();
   expect(screen.getByText("Among the 9 pairs VERIDICAL matched, the comparison found no possible inconsistency in the pairs it could decide. "
-    + "2 pairs could not be decided. They are not findings; the instructor's report lists them.")).toBeInTheDocument();
+    + "2 pairs could not be decided. They are not findings and do not change readiness.")).toBeInTheDocument();
   expect(screen.queryByRole("button")).not.toBeInTheDocument();
 });

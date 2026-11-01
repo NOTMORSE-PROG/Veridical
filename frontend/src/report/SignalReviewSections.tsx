@@ -1,6 +1,7 @@
 import { AUTOMATIC_GRADE_COPY, automaticGradeCaution, automaticGradeChip, automaticGradeLines, automaticGradePasses } from "../domain/automaticGrade";
 import { RecordedEvidencePage } from "./RecordedEvidencePage";
 import { EvidenceItem } from "./EvidenceItem";
+import { sharedFindingsIntro } from "./sharedModuleStatus";
 import { IntegrityModuleNavigation, selectedIntegrityModule, type IntegrityKind } from "./IntegrityModules";
 import { ActionAssessmentContext, ReportAssessmentContext } from "./ReportAssessmentContext";
 import { criterionAssessmentDetails } from "../domain/criterionAssessment";
@@ -1250,7 +1251,9 @@ export function SignalPublicFlags({
   selectedModule,
   selectedRecordId,
   framingOnly = false,
+  detailSnapshot,
 }: {
+  detailSnapshot?: "current" | "stale" | "not_recorded";
   /** The page shows one finding as its own item: give only the honest
    * framing and the check's scope, no list or filters. */
   framingOnly?: boolean;
@@ -1271,9 +1274,9 @@ export function SignalPublicFlags({
   const hasOptional = Boolean(optional.snapshot?.total);
   const onlyOptional = hasOptional && otherFlags.length === 0;
   return (
-    <section id="integrity-signals" tabIndex={-1} className="signal-review-section" aria-labelledby="flags-heading">
+    <section id="integrity-signals" tabIndex={-1} className={framingOnly ? "signal-shared-scope" : "signal-review-section"} aria-labelledby="flags-heading">
       <div className="signal-review-section__heading"><div><p className="signal-section-kicker">Integrity record</p><h2 id="flags-heading">Possible inconsistencies</h2></div>{!onlyOptional && <span>{findingCount} {hasOptional ? "other " : ""}finding{findingCount === 1 ? "" : "s"}{sourceAgeNotes > 0 && ` · ${sourceAgeNotesLabel(sourceAgeNotes)}`}</span>}</div>
-      {!onlyOptional && <p className="signal-review-section__intro">These are possible inconsistencies, not accusations. This shared view shows the bounded evidence the instructor chose to share; it does not expose the private Audit trail.</p>}
+      {!onlyOptional && !framingOnly && <p className="signal-review-section__intro">{sharedFindingsIntro(detailSnapshot)}</p>}
       {(!selectedModule || selectedModule === "statistical_forensics") && <StatisticalCheckScope scope={statisticalScope} />}
       {(!selectedModule || selectedModule === "originality_reuse") && <OriginalityScope scope={originalityScope} />}
       {framingOnly ? null : visibleOtherFlags.length
@@ -1453,7 +1456,7 @@ export function SignalCriteriaResults({ results, checkRunId, publicView = false,
         const SectionTitle = publicSelection ? "h4" : "h3";
         const dialogBody = <div className="signal-result-card__evidence signal-criterion-details">
           {assessment.relationship && <p>{assessment.relationship}</p>}
-          {unresolvedAi && <section className="signal-item-section"><SectionTitle className="signal-item-section__title">No grade accepted</SectionTitle><p>{RECORDED_GRADE_BASIS.review}</p>{assessment.hasLocations && <p>{RECORDED_GRADE_BASIS.qualification}</p>}</section>}
+          {unresolvedAi && <section className="signal-item-section"><SectionTitle className="signal-item-section__title">{publicView ? "Not graded yet" : "No grade accepted"}</SectionTitle><p>{publicView ? RECORDED_GRADE_BASIS.reviewShared : RECORDED_GRADE_BASIS.review}</p>{assessment.hasLocations && <p>{RECORDED_GRADE_BASIS.qualification}</p>}</section>}
           {!assessment.hasDetails ? <p>No assessment details are available in this record.</p> : <>
             <section className="signal-item-section"><SectionTitle className="signal-item-section__title">Why this grade</SectionTitle>
               {assessment.ruleFacts && <RuleFactsDetails facts={assessment.ruleFacts} earlier={assessment.instructorRecorded} />}

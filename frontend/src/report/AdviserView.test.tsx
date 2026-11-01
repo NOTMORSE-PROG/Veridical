@@ -84,14 +84,14 @@ function shared(overrides: Partial<SharedReportOut> = {}): SharedReportOut {
 
 describe("shared statistical applicability", () => {
   it.each([
-    ["completed", "Completion recorded."],
-    ["not_applicable", "Not applicable."],
-    ["incomplete", "Not fully assessed."],
+    ["completed", "Completed"],
+    ["not_applicable", "Not applicable"],
+    ["incomplete", "Not fully run"],
   ] as const)("shows safe %s status alongside the existing shared warning", async (state, label) => {
     const payload = shared({ report: { ...BASE_REPORT, statistical_check_scope: { state }, historical_native_math_unverified: true } });
     vi.stubGlobal("fetch", stubFetchByPath({ "/shared/scope-control/report": payload }));
     renderWithProviders(<AdviserViewPage />, { route: "/shared/scope-control?section=findings&module=statistical_forensics", path: "/shared/:token" });
-    expect(await screen.findByText(`Statistical checks: ${label}`)).toBeVisible();
+    expect(await screen.findByRole("region", { name: "What the statistical check covered" })).toHaveTextContent(label);
     expect(screen.getAllByText("Saved native Word coverage is unverified")[0]).toBeVisible();
   });
 });
@@ -119,8 +119,10 @@ describe("AdviserViewPage", () => {
     } }) }));
     render();
     expect(await screen.findByRole("heading", { level: 1, name: "Recorded manuscript title" })).toBeVisible();
-    expect(screen.getByText("Group members: First Member, Second Member.")).toBeVisible();
-    expect(screen.getByText("Required format: TIP Format")).toBeVisible();
+    expect(screen.getByText("Group members", { selector: "dt" })).toBeVisible();
+    expect(screen.getByText(/First Member, Second Member/, { selector: "dd" })).toBeVisible();
+    expect(screen.getByText("Required format", { selector: "dt" })).toBeVisible();
+    expect(screen.getByText("TIP Format", { selector: "dd" })).toBeVisible();
     expect(screen.getAllByRole("heading", { name: "Recorded manuscript title" })).toHaveLength(1);
     expect(screen.getByRole("heading", { name: "Conditionally Ready" })).toBeVisible();
     expect(screen.getByText("Not recorded", { selector: "dd" })).toBeVisible();
@@ -184,7 +186,8 @@ describe("AdviserViewPage", () => {
     await screen.findByRole("heading", { name: "Criterion records" });
     expect(screen.queryByRole("complementary", { name: "Assessment context" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: "Findings" }));
-    expect(screen.getByText("No shared integrity signals are shown in this module.")).toBeVisible();
+    // An empty check never reads as clean unless it completed.
+    expect(screen.getByRole("note")).toHaveTextContent(/does not mean there are none|No possible inconsistencies were recorded/);
     expect(screen.queryByText(/All checks passed/)).not.toBeInTheDocument();
   });
 
@@ -411,7 +414,7 @@ describe("AdviserViewPage", () => {
     expect(screen.queryByRole("navigation", { name: "Shared finding locations" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Read final decision" })).toHaveAttribute("href", "/shared/tok123?section=findings&module=originality_reuse&finding=99&reader=faculty#shared-decision-heading");
     fireEvent.click(screen.getByRole("button", { name: /Citation integrity/ }));
-    expect(screen.getByText("No shared integrity signals are shown in this module.")).toBeVisible();
+    expect(screen.getByRole("note")).toHaveTextContent(/does not mean there are none|No possible inconsistencies were recorded/);
     expect(document.querySelector("#shared-selected-finding")).toBeNull();
     expect(screen.queryByText(/Requested finding is unavailable/)).not.toBeInTheDocument();
   });
@@ -427,7 +430,7 @@ describe("AdviserViewPage", () => {
     expect(document.querySelectorAll("#shared-selected-finding")).toHaveLength(1);
     expect(screen.getByText(/COMPLETE_LEAD_QUOTE_20/)).toBeVisible();
     expect(screen.queryByText(/COMPLETE_LEAD_QUOTE_10/)).not.toBeInTheDocument();
-    expect(screen.getByText("Not scored. Does not affect readiness or block your decision.")).toBeVisible();
+    expect(screen.getByText("Not scored. It does not affect readiness or the final decision.")).toBeVisible();
     expect(screen.queryByRole("group", { name: "Filter comparison leads" })).not.toBeInTheDocument();
     expect(screen.queryByRole("group", { name: "Filter integrity signals" })).not.toBeInTheDocument();
   });

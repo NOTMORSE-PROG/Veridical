@@ -335,7 +335,7 @@ def test_public_scope_only_projects_safe_reconstruction_counts():
     assert scope.reconstruction.state == "candidate_found"
     public = scope.model_dump()
     assert "histogram" not in json.dumps(public) and "cells" not in json.dumps(public)
-    assert "not recovered or verified original data" in statistical_scope_copy(scope)[1]
+    assert "not that they are the real data" in statistical_scope_copy(scope)[1]
     legacy = statistical_check_scope(["passed"], [{"n_descriptive_stats": 3}])
     assert legacy.state == "incomplete" and legacy.reconstruction.state == "not_recorded"
 

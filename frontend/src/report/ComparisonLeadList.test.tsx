@@ -106,7 +106,7 @@ describe("optional comparison list", () => {
     expect(screen.getByText("31 records")).toBeVisible();
     expect(screen.queryByText(/Marked viewed:/)).not.toBeInTheDocument();
     expect(screen.getAllByText("Viewed")).toHaveLength(2);
-    expect(screen.getByText("Not scored. Does not affect readiness or block your decision.")).toBeVisible();
+    expect(screen.getByText("Not scored. It does not affect readiness or the final decision.")).toBeVisible();
     expect(screen.queryByText(/High severity|36 tasks/)).not.toBeInTheDocument();
     const filters = within(screen.getByRole("group", { name: "Filter comparison leads" }));
     expect(filters.getByRole("button", { name: "All" })).toHaveAttribute("aria-pressed", "true");

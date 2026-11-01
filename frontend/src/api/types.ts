@@ -755,6 +755,8 @@ export interface IntegrityModuleOut {
   undetermined?: UndeterminedPairsOut | null;
   /** internal_agreement only: what the check covered (BUG-617). Absent for older runs. */
   agreement_scope?: AgreementScopeOut | null;
+  /** Why the check covered less than everything, as a recorded code. */
+  coverage_reason?: string | null;
 }
 
 export interface UndeterminedPairsOut {

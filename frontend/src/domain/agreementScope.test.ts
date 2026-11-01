@@ -65,7 +65,7 @@ describe("agreement scope copy", () => {
       "2 pairs could not be decided. They are listed below for you to read.",
     ]);
     expect(outcomeLines(scope(), { findings: 0, undecided: 2, compared: 9, surface: "adviser" })[1])
-      .toBe("2 pairs could not be decided. They are not findings; the instructor's report lists them.");
+      .toBe("2 pairs could not be decided. They are not findings and do not change readiness.");
     expect(outcomeLines(scope(), { findings: 0, undecided: 2, compared: 9, surface: "document" })[1])
       .toBe("2 pairs could not be decided. Read them on the readiness report.");
     expect(outcomeLines(scope(), { findings: 0, undecided: 2, compared: 2, surface: "screen" })).toEqual([

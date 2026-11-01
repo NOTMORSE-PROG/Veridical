@@ -383,6 +383,9 @@ class IntegrityModuleOut(BaseModel):
     undetermined: UndeterminedPairsOut | None = None
     # internal_agreement only; None for runs saved before it was recorded.
     agreement_scope: AgreementScopeOut | None = None
+    # Why the check covered less than everything, as a code from
+    # COVERAGE_REASONS only (never free text); None when none was recorded.
+    coverage_reason: str | None = None
 
 
 class ReportOut(BaseModel):
