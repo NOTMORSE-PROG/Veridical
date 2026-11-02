@@ -61,11 +61,17 @@
     "biography": "describes the researchers",
     "references": "lists other works",
     "appendix": "holds supporting material",
-    "future_work": "suggests later studies"
+    "future_work": "suggests later studies",
+    "results": "reports what the study found",
+    "conclusion": "sums up what the study found"
   },
   "objective_other": "does not state this study's own objectives",
   "objective_set_aside_list_heading": "Objectives set aside",
   "objective_set_aside_list_intro": "These statements read like objectives but are in parts of the paper that usually do not state this study's own objectives. Open one to check it yourself.",
   "objectives_kept_despite_role": "Every possible objective was in a part of the paper that usually does not state this study's objectives, so all {n} were kept and compared anyway. Some may be other studies' aims or steps of the method.",
-  "objectives_not_identified": "The chapter that states the objectives could not be found, so possible objectives were taken from every part of the paper. Some may be other studies' aims."
+  "objectives_not_identified": "The chapter that states the objectives could not be found, so possible objectives were taken from every part of the paper. Some may be other studies' aims.",
+  "objective_places": {
+    "results": "results chapter",
+    "conclusion": "conclusion"
+  }
 }

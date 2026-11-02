@@ -34,7 +34,18 @@ const OBJECTIVE_ROLE_REASONS: Record<string, string> = {
   references: "lists other works",
   appendix: "holds supporting material",
   future_work: "suggests later studies",
+  results: "reports what the study found",
+  conclusion: "sums up what the study found",
 };
+
+// Parts objectives can be set aside from but results never are, so
+// ROLE_PHRASES does not name them (agreement_scope.json's objective_places).
+const OBJECTIVE_PLACES: Record<string, string> = { results: "results chapter", conclusion: "conclusion" };
+
+/** Where a set-aside objective sat, in words. */
+export function objectivePlace(role: string): string {
+  return ROLE_PHRASES[role]?.[0] ?? OBJECTIVE_PLACES[role] ?? "another part of the paper";
+}
 
 // With this many parts or more, the first few are named and the rest summed.
 const ROLE_FOLDING = { foldAt: 4, shown: 2 } as const;
@@ -94,7 +105,7 @@ export function objectiveSetAsideLines(scope: AgreementScopeOut): string[] {
   const roles = scope.objectives_set_aside_by_role ?? [];
   const fold = roles.length >= ROLE_FOLDING.foldAt;
   const lines = roles.slice(0, fold ? ROLE_FOLDING.shown : roles.length).map(({ role, count }) => {
-    const place = ROLE_PHRASES[role]?.[0];
+    const place = ROLE_PHRASES[role]?.[0] ?? OBJECTIVE_PLACES[role];
     const reason = OBJECTIVE_ROLE_REASONS[role] ?? AGREEMENT_SCOPE_COPY.objectiveOther;
     const subject = `${count} possible ${plural(count, "objective", "objectives")}`;
     const verb = plural(count, "was", "were");

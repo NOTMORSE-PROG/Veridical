@@ -64,7 +64,9 @@ def objective_set_aside_lines(scope: AgreementScopeOut) -> list[str]:
     fold = len(roles) >= folding["fold_at"]
     lines = []
     for item in roles[: folding["shown"]] if fold else roles:
-        place = copy["roles"].get(item.role, [""])[0] or None
+        place = (
+            copy["roles"].get(item.role, [""])[0] or copy["objective_places"].get(item.role) or None
+        )
         reason = copy["objective_roles"].get(item.role, copy["objective_other"])
         subject = f"{item.count} possible {_plural(item.count, 'objective', 'objectives')}"
         verb = _plural(item.count, "was", "were")
