@@ -728,6 +728,8 @@ export interface AgreementSetAsideOut {
   text: string;
   page_anchor?: string | null;
   role: string;
+  /** BUG-639: the chapter it sits in, as titled in the manuscript. */
+  chapter?: string | null;
 }
 
 /** What the agreement check covered (BUG-617). Coverage only: no verdict
@@ -746,6 +748,14 @@ export interface AgreementScopeOut {
   absence_leads_withheld: boolean;
   /** Pairs the check could not judge; null when the run recorded none of these. */
   n_pairs_skipped?: number | null;
+  /** BUG-639: aim-like statements found before the filter; n_objectives is those kept. */
+  n_objectives_extracted?: number | null;
+  objectives_section_identified?: boolean | null;
+  n_objectives_set_aside?: number | null;
+  objectives_set_aside_by_role?: { role: string; count: number }[];
+  /** Empty on shared (adviser) copies. */
+  objectives_set_aside?: AgreementSetAsideOut[];
+  n_objectives_kept_despite_role?: number | null;
 }
 
 export interface IntegrityModuleOut {

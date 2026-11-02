@@ -90,3 +90,37 @@ it("gives the adviser the counts without the statements or list controls", () =>
     + "2 pairs could not be decided. They are not findings and do not change readiness.")).toBeInTheDocument();
   expect(screen.queryByRole("button")).not.toBeInTheDocument();
 });
+
+const objectives = scope({
+  n_objectives: 5, n_objectives_extracted: 9, n_objectives_set_aside: 4, objectives_section_identified: true,
+  objectives_set_aside_by_role: [{ role: "literature", count: 3 }, { role: "appendix", count: 1 }],
+  objectives_set_aside: [
+    ...Array.from({ length: 3 }, (_, i) => ({ text: `Smith aimed to measure ${i + 1}.`, page_anchor: `p. ${12 + i}`, role: "literature", chapter: "Chapter 2: Review of Related Literature" })),
+    { text: "To record the sessions.", page_anchor: "p. 80", role: "appendix", chapter: null },
+  ],
+});
+
+it("lists the objectives set aside first, by place, with the found count matching the list", () => {
+  show(objectives);
+  const card = screen.getByRole("region", { name: "What this check compared" });
+  expect(within(card).getByText(/^Found 9 possible objectives and 34 possible results\. Of the objectives, 5 were kept to compare and 4 were set aside\./)).toBeInTheDocument();
+  expect(within(card).getByText(/3 possible objectives from the literature review were set aside, because that part of a paper usually describes other studies\./)).toBeInTheDocument();
+  const buttons = within(card).getAllByRole("button").map((b) => b.textContent);
+  expect(buttons.slice(0, 2)).toEqual(["Show the 4 objectives from other parts of the paper", "Show the 10 results from other parts of the paper"]);
+  fireEvent.click(screen.getByRole("button", { name: "Show the 4 objectives from other parts of the paper" }));
+  expect(screen.getByRole("heading", { name: "Objectives set aside" })).toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "Results set aside" })).not.toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Objective 1 of 4, Chapter 2: Review of Related Literature" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Objective 4 of 4, appendices" })).toBeInTheDocument();
+  expect(screen.getByText("Showing 4 of 4 objectives set aside.")).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Open location, p. 80, set-aside objective 4 of 4" }).getAttribute("href")).toContain("anchor=p.%2080");
+});
+
+it("gives the adviser the objective counts without the statements", () => {
+  render(<AgreementScopeSummary scope={{ ...objectives, set_aside: [], objectives_set_aside: [] }} findings={0} undecided={0} compared={9} interrupted={false} />);
+  expect(screen.getByText(/^3 possible objectives from the literature review were set aside/)).toBeInTheDocument();
+  // Said once, after both counts.
+  expect(screen.getAllByText("This link counts these statements but does not quote them.")).toHaveLength(1);
+  expect(screen.queryByText(/Smith aimed/)).not.toBeInTheDocument();
+  expect(screen.queryByRole("button")).not.toBeInTheDocument();
+});

@@ -5,7 +5,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.report.agreement_scope import outcome_lines, scope_paragraphs, set_aside_lines
+from app.report.agreement_scope import (
+    objective_set_aside_lines,
+    outcome_lines,
+    scope_paragraphs,
+    set_aside_lines,
+)
 from app.report.export import _agreement_scope_flowables, _styles
 from app.report.schemas import AgreementScopeOut, IntegrityModuleOut, UndeterminedPairsOut
 
@@ -415,3 +420,88 @@ async def test_a_share_snapshot_never_carries_set_aside_statements(monkeypatch):
     assert module["agreement_scope"]["n_results_set_aside"] == 3
     assert module["agreement_scope"]["set_aside"] == []
     assert "Smith found" not in str(payload)
+
+
+def test_the_pdf_says_how_many_objectives_were_set_aside_and_why():
+    # BUG-639: the found count matches what was kept plus what was set aside,
+    # and each part of the paper gives its reason, in the same words as the screen.
+    scope = AgreementScopeOut.model_validate(
+        SCOPE_44.model_dump()
+        | {
+            "n_objectives": 5,
+            "n_objectives_extracted": 9,
+            "n_objectives_set_aside": 4,
+            "objectives_section_identified": True,
+            "objectives_set_aside_by_role": [
+                {"role": "literature", "count": 3},
+                {"role": "appendix", "count": 1},
+            ],
+        }
+    )
+    text = " ".join(
+        scope_paragraphs(scope, findings=0, undecided=0, compared=31, interrupted=False)
+    )
+    assert (
+        "Found 9 possible objectives and 34 possible results. Of the objectives, 5 were kept "
+        "to compare and 4 were set aside."
+    ) in text
+    assert (
+        "3 possible objectives from the literature review were set aside, because that part "
+        "of a paper usually describes other studies."
+    ) in text
+    assert "1 possible objective from the appendices was set aside" in text
+
+
+def test_objectives_kept_despite_their_place_and_older_runs():
+    kept = SCOPE_44.model_copy(update={"n_objectives": 4, "n_objectives_kept_despite_role": 4})
+    assert objective_set_aside_lines(kept) == [
+        "Every possible objective was in a part of the paper that usually does not state this "
+        "study's objectives, so all 4 were kept and compared anyway. Some may be other studies' "
+        "aims or steps of the method."
+    ]
+    assert objective_set_aside_lines(SCOPE_44) == []
+    assert "Of the objectives" not in " ".join(
+        scope_paragraphs(SCOPE_44, findings=0, undecided=0, compared=31, interrupted=False)
+    )
+
+
+def test_every_part_objectives_are_set_aside_from_has_a_place_and_a_reason():
+    # Every chapter role the gate can set an objective aside from is named and
+    # explained, so no line falls back to "another part of the paper".
+    from app.checks.section_roles import load_section_roles
+    from app.report.agreement_scope import agreement_scope_copy
+
+    copy = agreement_scope_copy()
+    for role in load_section_roles().objectives_excluded:
+        assert role in copy["roles"] or role in copy["objective_places"], role
+        assert role in copy["objective_roles"], role
+
+
+def test_objective_lines_fold_and_word_an_unknown_part_like_the_screen():
+    # Same sentences as agreementScope.test.ts's objective folding test.
+    roles = ["literature", "methodology", "appendix", "zzz", "front_matter"]
+    folded = AgreementScopeOut.model_validate(
+        SCOPE_44.model_dump()
+        | {
+            "n_objectives_set_aside": 5,
+            "objectives_set_aside_by_role": [{"role": r, "count": 1} for r in roles],
+        }
+    )
+    assert objective_set_aside_lines(folded) == [
+        "1 possible objective from the literature review was set aside, because that part of "
+        "a paper usually describes other studies.",
+        "1 possible objective from the methodology was set aside, because that part of a "
+        "paper usually describes how the study was done.",
+        "3 more were set aside from other parts of the paper.",
+    ]
+    unknown = AgreementScopeOut.model_validate(
+        SCOPE_44.model_dump()
+        | {
+            "n_objectives_set_aside": 1,
+            "objectives_set_aside_by_role": [{"role": "zzz", "count": 1}],
+        }
+    )
+    assert objective_set_aside_lines(unknown) == [
+        "1 possible objective from another part of the paper was set aside, because that part "
+        "does not state this study's own objectives."
+    ]
