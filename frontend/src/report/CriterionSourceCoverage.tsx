@@ -3,6 +3,7 @@ import type { CriterionSourceCoverage as Coverage } from "../api/types";
 import { criterionCoverageLocations } from "../domain/criterionSourceCoverage";
 import { PageRanges } from "./PageRanges";
 import { instructorAnchor } from "../domain/sourceAnchor";
+import { PDF_PAGE_NUMBERING_HINT } from "../domain/sourceAnchor";
 
 export function CriterionSourceCoverage({ value, sourceAction, firstSlot, criterionText }: {
   value: Coverage; sourceAction: (anchor: string, slot: number) => ReactNode; firstSlot: number; criterionText: string;
@@ -10,10 +11,10 @@ export function CriterionSourceCoverage({ value, sourceAction, firstSlot, criter
   const count = value.unread_pages?.length ?? 0;
   // The count and what to do are always shown; the list itself is folded.
   const unread = count > 1 ? <div className="signal-attached-flow">
-    <p><strong>{count} pages not read.</strong> They could not be read in a reliable order, so this assessment is based on the other pages. Check them before relying on it.</p>
-    <details><summary aria-label={`Show the ${count} pages not read: ${criterionText}`}>Show the {count} pages not read</summary><p><PageRanges pages={value.unread_pages ?? []} /></p></details>
+    <p><strong>{count} PDF pages not read.</strong> They could not be read in a reliable order, so this assessment is based on the other pages. Check them before relying on it.</p>
+    <details><summary aria-label={`Show the ${count} PDF pages not read: ${criterionText}`}>Show the {count} PDF pages not read</summary><p>PDF pages <PageRanges pages={value.unread_pages ?? []} /></p><p className="signal-field-hint">{PDF_PAGE_NUMBERING_HINT}</p></details>
   </div> : value.unread_pages?.length ? <p><strong>Some pages not read.</strong>{" "}
-    {value.unread_pages.length === 1 ? "Page" : "Pages"} <PageRanges pages={value.unread_pages} /> could not be read in a reliable order, so this
+    {value.unread_pages.length === 1 ? "PDF page" : "PDF pages"} <PageRanges pages={value.unread_pages} /> could not be read in a reliable order, so this
     assessment is based on the other pages. Check {value.unread_pages.length === 1 ? "that page" : "those pages"} before relying on it.</p> : null;
   // Same wording as the PDF export.
   const images = value.images_not_assessed ? <p><strong>Image content not assessed.</strong>{" "}

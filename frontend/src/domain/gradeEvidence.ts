@@ -9,8 +9,8 @@ export const GRADE_EVIDENCE_COPY = {
   none: "none recorded",
   one: "1 passage",
   many: "{count} passages",
-  page: "page {pages}",
-  pages: "pages {pages}",
+  page: "PDF p. {pages}",
+  pages: "PDF pp. {pages}",
   paragraph: "extracted paragraph {paragraphs}",
   paragraphs: "extracted paragraphs {paragraphs}",
   more: "and {count} more",
@@ -32,7 +32,7 @@ function runs(numbers: number[]): string {
 
 const UNPLACED = "Reconstructed text (location unavailable)";
 
-/** "1 passage (page 2)", "3 passages (pages 3, 7, 12)", "none recorded". */
+/** "1 passage (PDF p. 2)", "3 passages (PDF pp. 3, 7, 12)", "none recorded". */
 export function gradeEvidenceValue(evidence: readonly { anchor: string | null | undefined }[]): string {
   if (evidence.length === 0) return GRADE_EVIDENCE_COPY.none;
   const pages = new Set<number>();
