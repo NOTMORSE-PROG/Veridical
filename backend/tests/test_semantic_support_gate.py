@@ -211,6 +211,15 @@ async def test_evidence_request_alone_does_not_require_body_evidence(runner):
         ("Documentation", "Inspect it", "Complete in-text documentation", "decides"),
         ("Documentation", "In-text attributions", "Complete documentation", "advisory"),
         ("Documentation", "Reference list", "Complete documentation", None),
+        (
+            "Use of References: Presence of supporting references and clarity of "
+            "attributions for claim",
+            None,
+            "Complete documentation",
+            "decides",
+        ),
+        ("Clear attribution of the claims", None, "Complete documentation", "decides"),
+        ("Attribution of authorship is stated", None, "Complete documentation", None),
     ],
 )
 def test_only_the_formats_own_words_decide_the_body_obligation(

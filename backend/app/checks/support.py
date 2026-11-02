@@ -253,9 +253,9 @@ def _scope_failure(batch, criterion, detail):
     # passages appearing in both scopes cannot establish that distinction.
     if not any(quote and quote in body and quote not in references for quote in quotes):
         return (
-            "The criterion mentions in-text documentation, but its submitted quotes do not "
-            "establish distinct manuscript-body evidence. Review the criterion's intended "
-            "scope and manuscript body before assigning a level.",
+            "The criterion asks for in-text documentation or attribution, but its submitted "
+            "quotes do not establish distinct manuscript-body evidence. Review the criterion's "
+            "intended scope and manuscript body before assigning a level.",
             "The criterion asks for evidence in the manuscript body, which the quoted "
             "passages do not establish. Check the body yourself before relying on this grade.",
         )
