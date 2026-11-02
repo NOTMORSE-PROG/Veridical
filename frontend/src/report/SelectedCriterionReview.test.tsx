@@ -107,3 +107,47 @@ describe("one selected desktop criterion", () => {
     expect(screen.getByRole("link", { name: "Back to criteria" })).toBeVisible();
   });
 });
+
+describe("grading one criterion at a time", () => {
+  it("asks before Cancel throws away a typed comment, and cancels at once without one", async () => {
+    setup();
+    fireEvent.click(await screen.findByRole("link", { name: "Review criterion: Custom criterion 13" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Meets criterion" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Comment (optional)" }), { target: { value: "Worth keeping" } });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.getByText("Discard your comment?")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save grade" })).toBeDisabled();
+    fireEvent.keyDown(screen.getByRole("button", { name: "Keep editing" }), { key: "Escape" });
+    expect(screen.queryByText("Discard your comment?")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Keep editing" })).toHaveFocus());
+    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
+    expect(screen.getByRole("textbox", { name: "Comment (optional)" })).toHaveValue("Worth keeping");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Discard and cancel" }));
+    await waitFor(() => expect(screen.queryByRole("textbox", { name: "Comment (optional)" })).not.toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Meets criterion" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByText("Discard your comment?")).not.toBeInTheDocument();
+  });
+
+  it("offers the next criterion right after a grade is saved", async () => {
+    setup();
+    fireEvent.click(await screen.findByRole("link", { name: "Review criterion: Custom criterion 13" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Meets criterion" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save grade" }));
+    const next = await screen.findByRole("link", { name: "Next ungraded: Custom criterion 14" });
+    expect(next).toHaveAttribute("href", "/report/5/document?view=decision&pane=review&criterion=14");
+    fireEvent.click(next);
+    await screen.findByRole("button", { name: "Meets criterion" });
+    await waitFor(() => expect(screen.queryByText("Judgment saved")).not.toBeInTheDocument());
+    expect(screen.queryByRole("link", { name: /Next ungraded/ })).not.toBeInTheDocument();
+  });
+
+  it("points Previous back, against the direction of Next", async () => {
+    setup("view=decision&pane=review&criterion=14");
+    const previous = await screen.findByRole("link", { name: "Previous criterion" });
+    expect(previous.querySelector("svg")).not.toBeNull();
+    expect(previous.firstElementChild?.tagName.toLowerCase()).toBe("svg");
+  });
+});
