@@ -856,6 +856,9 @@ class Settings(BaseSettings):
     # Exact-DOI metadata title policy. Packaged default if unset; changing a
     # custom policy requires a process restart. Each comparison saves its hash.
     citation_metadata_title_policy_file: Path | None = None
+    # When a differing title is so unlike the registry's that the DOI leads to a
+    # different work, and how that is worded (BUG-664). Packaged default if unset.
+    citation_metadata_different_work_file: Path | None = None
     citation_doi_source_url_template: str = "https://doi.org/{doi}"
     citation_registry_record_url_templates: dict[str, str] = {
         "crossref": "https://api.crossref.org/works/{doi}",
