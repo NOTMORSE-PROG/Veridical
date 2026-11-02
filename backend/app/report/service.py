@@ -957,6 +957,13 @@ async def report_out_for_check_run(
             n_linkage_unassessed=detail.get("n_linkage_unassessed", 0),
             n_source_pages_unassessed=detail.get("n_source_pages_unassessed", 0),
             source_pages_unassessed=source_pages_unassessed(detail),
+            pages_compared=detail.get("pages_compared")
+            if type(detail.get("pages_compared")) is int
+            else None,
+            pages_with_text=detail.get("pages_with_text")
+            if type(detail.get("pages_with_text")) is int
+            else None,
+            page_count=detail.get("page_count") if type(detail.get("page_count")) is int else None,
             pages_not_compared=[
                 page for page in detail.get("pages_not_compared") or [] if isinstance(page, int)
             ]
@@ -1589,6 +1596,8 @@ async def list_reuse_passage_matches(
         .scalars()
         .all()
     )
+    # Rebuilt from Library rows, which store no page list: `pages` stays
+    # empty here, so `compared_pages` must never be called on these.
     passages = [
         PassageEmbedding(
             passage_index=r.passage_index,

@@ -2618,3 +2618,92 @@ async def test_the_same_file_is_the_same_work_even_when_its_records_disagree(ses
     assert audit["same_work_excluded_ids"] == [record]
     assert audit["same_work_name_rules"]["file"] == "packaged"
     assert len(audit["same_work_name_rules"]["sha256"]) == 64
+
+
+async def test_the_result_counts_the_pages_it_compared(session_factory):
+    """BUG-687: both chapters are compared here (pages 1 and 5, the two pages
+    with text, of 5); a Word file has no pages, so it carries no count."""
+    source_id, _ = await _seed_manuscript_and_run(session_factory, group_label="Count source")
+    await _add_to_library(session_factory, source_id, _extraction(CH1, CH2))
+    manuscript_id, run_id = await _seed_manuscript_and_run(session_factory, group_label="Count")
+    async with session_factory() as session:
+        result = await _run_with_saved_source(
+            session, manuscript_id, run_id, _extraction(CH1, CH2), get_settings()
+        )
+    counts = [result.detail[k] for k in ("pages_compared", "pages_with_text", "page_count")]
+    assert counts == [2, 2, 5]
+
+    from tests.test_ingest_reference_boundaries import as_word_document
+
+    word_id, word_run = await _seed_manuscript_and_run(session_factory, group_label="Count docx")
+    async with session_factory() as session:
+        word = await _run_with_saved_source(
+            session, word_id, word_run, as_word_document(_extraction(CH1, CH2)), get_settings()
+        )
+    assert "pages_compared" not in word.detail and "page_count" not in word.detail
+
+
+async def test_no_count_is_recorded_when_the_library_is_empty(session_factory):
+    """Pages embedded with nothing to compare against were not compared."""
+    manuscript_id, run_id = await _seed_manuscript_and_run(session_factory, group_label="Alone")
+    async with session_factory() as session:
+        result = await _run_with_saved_source(
+            session, manuscript_id, run_id, _extraction(CH1, CH2), get_settings()
+        )
+    assert result.outcome == ResultOutcome.not_applicable
+    assert "pages_compared" not in result.detail
+
+
+async def test_the_count_follows_each_way_text_is_left_out(session_factory):
+    """A chapter headed as the reference list is never counted, even when no
+    text in it reads as an entry; a thesis with no chapters is counted from
+    its body; a refused passage inventory counts nothing."""
+    source_id, _ = await _seed_manuscript_and_run(session_factory, group_label="Ways source")
+    await _add_to_library(session_factory, source_id, _extraction(CH1, CH2))
+
+    # A References chapter left with only its heading (BUG-114's shape): the
+    # heading is no entry, so only the chapter's title marks it.
+    forced = _extraction(CH1, "")
+    forced.section_tree.nodes[1].title = "References"
+    forced.blocks[2].text = "References"
+    flat = _extraction_flat_no_chapters(CH1)
+    refused_blocks = [
+        _block("Chapter 1: Introduction", page=1),
+        _block(CH1, page=1),
+        _block("REFERENCES", page=2),
+        _block("Reyes, J. (2024). First complete source. Journal of Examples.", page=2),
+        _block("Santos, M. (2023). Second complete source. Journal of Examples.", page=2),
+        _block("APPENDIX A", page=3),
+        _block("[1] Cruz, A. (2022). A secondary appendix source. Example Journal.", page=3),
+        _block(CH2, page=3),
+    ]
+    refused = ExtractionResult(
+        page_count=3,
+        anchor_kind="page",
+        image_only=False,
+        text_chars=sum(len(b.text) for b in refused_blocks),
+        blocks=refused_blocks,
+        images=[],
+        section_tree=SectionTree(
+            source="heuristics",
+            nodes=[
+                SectionNode(title="Chapter 1: Introduction", level=1, page=1),
+                SectionNode(title="REFERENCES", level=1, page=2),
+                SectionNode(title="APPENDIX A", level=1, page=3),
+            ],
+        ),
+    )
+    details = {}
+    for name, extraction in (("forced", forced), ("flat", flat), ("refused", refused)):
+        own_id, own_run = await _seed_manuscript_and_run(session_factory, group_label=name)
+        async with session_factory() as session:
+            result = await _run_with_saved_source(
+                session, own_id, own_run, extraction, get_settings()
+            )
+        details[name] = result.detail
+    assert details["forced"]["pages_compared"] == 1  # page 1 only, not the References page
+    assert details["flat"]["pages_compared"] == 1
+    refused_detail = details["refused"]
+    if refused_detail["passages_found"] == 0:
+        assert refused_detail["pages_compared"] == 0
+    assert refused_detail["pages_compared"] < refused_detail["pages_with_text"]

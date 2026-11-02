@@ -1162,3 +1162,37 @@ async def test_a_clean_manuscript_adds_nothing_to_its_criteria(session_factory):
         assert semantic.source_coverage.images_not_assessed is False
         assert "unread_pages" not in semantic.source_coverage.model_dump()
         assert "images_not_assessed" not in semantic.source_coverage.model_dump()
+
+
+async def test_the_report_carries_the_pages_originality_compared(session_factory):
+    """BUG-687: the count comes from the check itself; a row without it (an
+    older result, a Word file) says nothing rather than an estimate."""
+    for detail, expected in (
+        ({"pages_compared": 124, "pages_with_text": 211, "page_count": 312}, (124, 211, 312)),
+        ({}, (None, None, None)),
+        ({"pages_compared": "124", "pages_with_text": None, "page_count": 312.0}, (None,) * 3),
+    ):
+        async with session_factory() as session:
+            instructor, check_run = await _seed_decidable_run(session)
+            session.add(
+                CheckResult(
+                    check_run_id=check_run.id,
+                    criterion_id=None,
+                    kind=CheckKind.originality_reuse,
+                    outcome=ResultOutcome.escalated,
+                    detail={
+                        "archive_size_n": 4,
+                        "corpus": "library",
+                        "comparison_ran": True,
+                        "n_flags": 0,
+                        "coverage_reason": "source_reading_order_partial",
+                        **detail,
+                    },
+                )
+            )
+            await session.commit()
+            report = await get_report(session, check_run.id, instructor.id)
+            status = next(
+                s for s in report.integrity_check_status if s.check_kind == "originality_reuse"
+            )
+            assert (status.pages_compared, status.pages_with_text, status.page_count) == expected
