@@ -130,3 +130,21 @@ def test_a_notice_whose_wording_is_unreadable_is_disclosed_as_unassessed(tmp_pat
     assert _describable_notice(notice, Settings(_env_file=None)).kind == (
         VerdictKind.retraction_notice
     )
+
+
+def test_every_exclusion_reason_has_wording_on_the_report():
+    # The report shows each reason's own sentence; a reason the frontend does
+    # not know would show "Not counted for readiness." with no reason at all.
+    import inspect
+    import re
+    from pathlib import Path
+
+    from app.findings import policy
+
+    returned = set(re.findall(r'return "(\w+)"', inspect.getsource(policy.exclusion_reason)))
+    copy = (
+        Path(__file__).parents[2] / "frontend" / "src" / "domain" / "readinessExclusion.ts"
+    ).read_text(encoding="utf-8")
+    known = set(re.findall(r"^\s+(\w+): \"", copy, re.MULTILINE))
+    assert {"retraction_notice_not_counted", "retraction_lead_not_counted"} <= returned
+    assert returned <= known

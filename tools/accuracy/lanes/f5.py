@@ -1441,12 +1441,15 @@ def _retraction_notice_rows(outcomes, notes, total):
     intact = [o for o in outcomes if o["parsed_with_doi_intact"]]
     notices = [o for o in intact if o["label"] == "notice"]
     works = [o for o in intact if o["label"] == "retracted_work"]
-    left_out = len(outcomes) - len(intact)
-    run_note = (
-        f"{len(outcomes)} of {total} frozen cases were run"
-        + (f" ({'; '.join(notes)})" if notes else "")
-        + (f"; {left_out} left out: their DOI did not parse from the entry" if left_out else "")
-    )
+    def run_note(label):
+        left_out = sum(
+            o["label"] == label and not o["parsed_with_doi_intact"] for o in outcomes
+        )
+        return (
+            f"{len(outcomes)} of {total} frozen cases were run"
+            + (f" ({'; '.join(notes)})" if notes else "")
+            + (f"; {left_out} left out: their DOI did not parse from the entry" if left_out else "")
+        )
     return [
         rate_row(
             LANE,
@@ -1462,7 +1465,7 @@ def _retraction_notice_rows(outcomes, notes, total):
             note="Notices from Crossref's retraction records (a retraction link to another DOI), "
             "each cross-checked against the retracted work's record. Crossref writes both links "
             "from one deposit, so the cross-check shows Crossref agrees with itself; it is not an "
-            f"independent label (BUG-683). {run_note}.",
+            f"independent label (BUG-683). {run_note('notice')}.",
         ),
         rate_row(
             LANE,
@@ -1473,7 +1476,7 @@ def _retraction_notice_rows(outcomes, notes, total):
             note="Decoys: retracted works whose titles open 'RETRACTED', 'Notice of "
             "Retraction' or 'WITHDRAWN', retracted in place (no retraction link to another DOI). "
             "They show such titles keep the High; they cannot include a work whose only "
-            f"retraction link points at another DOI. {run_note}.",
+            f"retraction link points at another DOI. {run_note('retracted_work')}.",
         ),
         rate_row(
             LANE,
