@@ -9204,6 +9204,21 @@
   #shared-selected-criterion .signal-result-card.signal-review-item { display: grid; gap: var(--signal-space-3); padding: 0; border: 0; background: transparent; }
   #shared-selected-criterion .signal-item-head__title { margin: 0; }
   #shared-selected-criterion .signal-criterion-details { margin-block-start: var(--signal-space-5); }
+  /* Wide screens: the quoted evidence and its page take the right half from
+     the top, and the grade, notes and explanation run down the left beside it,
+     so the card uses its width; the navigation ends at the card's edge. One
+     column on narrower screens, the evidence after the explanation as before. */
+  #shared-selected-criterion .signal-result-card.signal-review-item { display: flow-root; }
+  #shared-selected-criterion .signal-result-card.signal-review-item > * + * { margin-block-start: var(--signal-space-3); }
+  #shared-selected-criterion .signal-criterion-quoted-aside { float: inline-end; inline-size: calc(50% - var(--signal-space-3)); margin-inline-start: var(--signal-space-6); }
+  #shared-selected-criterion .signal-criterion-details { display: grid; }
+  #shared-selected-criterion .signal-item-head__bar { max-inline-size: none; }
+  @media (max-width: 1199px) {
+    #shared-selected-criterion .signal-result-card.signal-review-item { display: grid; }
+    #shared-selected-criterion .signal-result-card.signal-review-item > * + * { margin-block-start: 0; }
+    #shared-selected-criterion .signal-criterion-quoted-aside { float: none; inline-size: auto; margin-inline-start: 0; order: 1; }
+    #shared-selected-criterion .signal-item-head__bar { max-inline-size: var(--signal-review-detail-measure); }
+  }
   /* In an item, a caution is read, not shouted: it never outweighs the title,
      and every line keeps the same measure. */
   .signal-review-item .signal-grade-caution { font-weight: var(--signal-weight-medium); }
@@ -9273,7 +9288,7 @@
   .signal-shared-finding { display: grid; gap: var(--signal-item-section-gap); padding-block-start: var(--signal-space-5); border-block-start: var(--signal-border-hairline) solid var(--color-signal-border); }
   .signal-shared-finding .signal-item-head__title { margin: 0; }
   /* Navigation ends where the text column ends, not at the far edge. */
-  :is(.signal-shared-finding, #shared-selected-criterion) .signal-item-head__bar { max-inline-size: var(--signal-review-detail-measure); }
+  .signal-shared-finding .signal-item-head__bar { max-inline-size: var(--signal-review-detail-measure); }
   .signal-shared-finding > .signal-item-head > p { max-inline-size: var(--signal-review-detail-measure); }
   /* A page that could not load: its message, then Retry, with room between. */
   .signal-evidence-item__actions :is(.signal-recorded-page-actions, .signal-shared-packet__source) > [role=alert] { display: grid; gap: var(--signal-rhythm-control); justify-items: start; }

@@ -209,7 +209,7 @@ export function AdviserViewPage() {
               <SignalCriteriaResults results={[selectedCriterion]} checkRunId={report.check_run_id} publicView publicSelection={{ position: selectedIndex + 1, total: report.results.length, nav: <nav aria-label="Shared criterion navigation" className="signal-item-head__nav">
                 <Button variant="secondary" disabled={selectedIndex === 0} onClick={event => selectCriterion(event.currentTarget, selectedIndex - 1)}>Previous criterion</Button>
                 <Button variant="secondary" disabled={selectedIndex >= report.results.length - 1} onClick={event => selectCriterion(event.currentTarget, selectedIndex + 1)}>Next criterion</Button>
-              </nav> }} renderEvidence={row => <SharedEvidencePacket embedded key={`${token}:${manifest?.snapshot_id}:${row.criterion_id}`} token={token ?? ""} manifest={manifest} references={manifest?.references.filter(ref => ref.criterion_id === row.criterion_id) ?? []} fallback={row.evidence} context={{title: row.text, explanation: row.reasoning, recordedNote: row.reason}} />} />
+              </nav> }} renderEvidence={row => <SharedEvidencePacket embedded previewClosed key={`${token}:${manifest?.snapshot_id}:${row.criterion_id}`} token={token ?? ""} manifest={manifest} references={manifest?.references.filter(ref => ref.criterion_id === row.criterion_id) ?? []} fallback={row.evidence} context={{title: row.text, explanation: row.reasoning, recordedNote: row.reason}} />} />
             </div>
           </> : <p>No criterion records were shared.</p>}
         </section> : <section className="signal-review-section signal-shared-findings-panel" aria-labelledby="shared-findings-heading">
