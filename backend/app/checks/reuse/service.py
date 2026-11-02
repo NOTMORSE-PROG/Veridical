@@ -357,6 +357,10 @@ async def _same_work_audit(session: AsyncSession, same_work: SameWork, settings)
     }
 
 
+def _protected_pages(selection) -> list[int]:
+    return sorted({f.page for f in selection.protected_span if f.page is not None})
+
+
 def _has_text(extraction: ExtractionResult) -> bool:
     return any(not block.is_furniture and block.text.strip() for block in extraction.blocks)
 
@@ -707,7 +711,9 @@ async def run_originality_reuse_check(
         detail={
             **source.detail(),
             "reference_membership_issues": list(selection.membership_issues),
-            "passage_inventory_status": "not_captured" if membership_partial else "available",
+            # The protected text after the list is left out of passage matching
+            # (tagged reference list); the body around it is compared.
+            "passage_inventory_status": "available",
             "n_source_candidates_withheld": withheld,
             "coverage_reason": "native_math_comparison_incomplete"
             if native_limited
@@ -716,7 +722,13 @@ async def run_originality_reuse_check(
             else "reference_end_unclear"
             if not_compared
             else ("no_comparison_archive" if no_comparisons else None),
-            "pages_not_compared": not_compared.pages if not_compared else [],
+            # The pages left out: after an unclear list end, or the unresolved
+            # text after the list (BUG-622), which is tagged and never matched.
+            # Both can apply at once, so both sets of pages are named.
+            "pages_not_compared": sorted(
+                set(not_compared.pages if not_compared else [])
+                | set(_protected_pages(selection) if membership_partial else [])
+            ),
             "not_compared_from": not_compared.start if not_compared else None,
             "comparison_ran": True,
             # BUG-662: own records of the same work were compared too (by
