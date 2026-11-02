@@ -38,7 +38,49 @@ def found_line(scope: AgreementScopeOut) -> str | None:
         if results == 0
         else f"{results} possible {_plural(results, 'result', 'results')}"
     )
+    extracted, set_aside = scope.n_objectives_extracted, scope.n_objectives_set_aside
+    if extracted is not None and set_aside:
+        # BUG-639: what was found, then what was kept and set aside, so the
+        # count matches the objectives listed.
+        e = f"{extracted} possible {_plural(extracted, 'objective', 'objectives')}"
+        return (
+            f"Found {e} and {r}. Of the objectives, {objectives} "
+            f"{_plural(objectives, 'was', 'were')} kept to compare and {set_aside} "
+            f"{_plural(set_aside, 'was', 'were')} set aside."
+        )
     return f"Found {o} and {r}."
+
+
+def objective_set_aside_lines(scope: AgreementScopeOut) -> list[str]:
+    """BUG-639: one sentence per part of the paper objectives were set aside
+    from, or why none was; nothing for a run saved before it recorded them."""
+    copy = agreement_scope_copy()
+    if scope.n_objectives_kept_despite_role:
+        return [copy["objectives_kept_despite_role"].replace("{n}", str(scope.n_objectives or 0))]
+    if scope.objectives_section_identified is False:
+        return [copy["objectives_not_identified"]]
+    roles = scope.objectives_set_aside_by_role
+    folding = copy["role_folding"]
+    fold = len(roles) >= folding["fold_at"]
+    lines = []
+    for item in roles[: folding["shown"]] if fold else roles:
+        place = copy["roles"].get(item.role, [""])[0] or None
+        reason = copy["objective_roles"].get(item.role, copy["objective_other"])
+        subject = f"{item.count} possible {_plural(item.count, 'objective', 'objectives')}"
+        verb = _plural(item.count, "was", "were")
+        where = f"the {place}" if place else "another part of the paper"
+        lines.append(
+            f"{subject} from {where} {verb} set aside, because that part of a paper usually "
+            f"{reason}."
+            if place
+            else f"{subject} from {where} {verb} set aside, because that part {reason}."
+        )
+    if fold:
+        rest = sum(item.count for item in roles[folding["shown"] :])
+        lines.append(
+            f"{rest} more {_plural(rest, 'was', 'were')} set aside from other parts of the paper."
+        )
+    return lines
 
 
 def set_aside_lines(scope: AgreementScopeOut) -> list[str]:
@@ -190,6 +232,8 @@ def scope_paragraphs(
     found = " ".join(line for line in (found_line(scope), matched_line(scope)) if line)
     if found:
         lines.append(found)
+    if objectives := objective_set_aside_lines(scope):
+        lines.append(" ".join(objectives))
     setaside = set_aside_lines(scope)
     if scope.results_section_identified is False:
         # No section was found, so nothing was set aside by its part; only
