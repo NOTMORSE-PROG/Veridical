@@ -392,10 +392,13 @@ async def check_support(
         patterns_file = getattr(batch, "scope_patterns_file", None)
         if (
             patterns_file is not None
+            and results[criterion.id].get("scope_guard") != "required_body_evidence_unconfirmed"
             and body_evidence_obligation(criterion, detail["verdict"], patterns_file) == "advisory"
         ):
             # Kept for the audit trail: only the parser's evidence request
-            # asked for in-text evidence, so it did not guard this grade.
+            # asked for in-text evidence, so it did not guard this grade. Not
+            # on a result the body-scope guard rejected for another reason
+            # (a quote that only identifies a source).
             results[criterion.id]["advisory_body_evidence"] = True
     return results
 

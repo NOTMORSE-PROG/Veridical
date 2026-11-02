@@ -220,6 +220,12 @@ async def test_evidence_request_alone_does_not_require_body_evidence(runner):
         ),
         ("Clear attribution of the claims", None, "Complete documentation", "decides"),
         ("Attribution of authorship is stated", None, "Complete documentation", None),
+        (
+            "Documentation",
+            "Clarity of attributions for claims",
+            "Complete documentation",
+            "advisory",
+        ),
     ],
 )
 def test_only_the_formats_own_words_decide_the_body_obligation(
