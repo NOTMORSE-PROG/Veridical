@@ -73,5 +73,6 @@
   "objective_places": {
     "results": "results chapter",
     "conclusion": "conclusion"
-  }
+  },
+  "objectives_set_aside_unlisted": "Where these were set aside from was not recorded, so they cannot be listed here."
 }

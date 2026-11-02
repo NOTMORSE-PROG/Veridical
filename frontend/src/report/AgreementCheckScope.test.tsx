@@ -118,7 +118,9 @@ it("lists the objectives set aside first, by place, with the found count matchin
 
 it("gives the adviser the objective counts without the statements", () => {
   render(<AgreementScopeSummary scope={{ ...objectives, set_aside: [], objectives_set_aside: [] }} findings={0} undecided={0} compared={9} interrupted={false} />);
-  expect(screen.getByText(/3 possible objectives from the literature review were set aside.*This link counts these statements but does not quote them\.$/)).toBeInTheDocument();
+  expect(screen.getByText(/^3 possible objectives from the literature review were set aside/)).toBeInTheDocument();
+  // Said once, after both counts.
+  expect(screen.getAllByText("This link counts these statements but does not quote them.")).toHaveLength(1);
   expect(screen.queryByText(/Smith aimed/)).not.toBeInTheDocument();
   expect(screen.queryByRole("button")).not.toBeInTheDocument();
 });

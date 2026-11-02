@@ -9070,6 +9070,9 @@
   .signal-agreement-scope__set-aside :is(h4, h5) { font-weight: var(--signal-weight-semibold); }
   .signal-agreement-scope__set-aside > ol { justify-self: stretch; }
   .signal-agreement-scope__list .signal-button--quiet { padding-inline: 0; }
+  /* Items sit further apart than their parts, and every quote shares one right edge. */
+  .signal-agreement-scope__set-aside .signal-agreement-scope__list { gap: var(--signal-space-5); }
+  .signal-agreement-scope__list .signal-evidence-quote { box-sizing: border-box; inline-size: 100%; max-inline-size: var(--signal-prose-width); margin: 0; }
   .signal-integrity-review-notes { display: grid; gap: var(--signal-space-3); min-inline-size: 0; }
   .signal-integrity-review-notes summary { cursor: pointer; font-size: var(--signal-type-label); color: var(--color-signal-ink-secondary); }
 

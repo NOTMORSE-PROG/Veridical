@@ -475,3 +475,33 @@ def test_every_part_objectives_are_set_aside_from_has_a_place_and_a_reason():
     for role in load_section_roles().objectives_excluded:
         assert role in copy["roles"] or role in copy["objective_places"], role
         assert role in copy["objective_roles"], role
+
+
+def test_objective_lines_fold_and_word_an_unknown_part_like_the_screen():
+    # Same sentences as agreementScope.test.ts's objective folding test.
+    roles = ["literature", "methodology", "appendix", "zzz", "front_matter"]
+    folded = AgreementScopeOut.model_validate(
+        SCOPE_44.model_dump()
+        | {
+            "n_objectives_set_aside": 5,
+            "objectives_set_aside_by_role": [{"role": r, "count": 1} for r in roles],
+        }
+    )
+    assert objective_set_aside_lines(folded) == [
+        "1 possible objective from the literature review was set aside, because that part of "
+        "a paper usually describes other studies.",
+        "1 possible objective from the methodology was set aside, because that part of a "
+        "paper usually describes how the study was done.",
+        "3 more were set aside from other parts of the paper.",
+    ]
+    unknown = AgreementScopeOut.model_validate(
+        SCOPE_44.model_dump()
+        | {
+            "n_objectives_set_aside": 1,
+            "objectives_set_aside_by_role": [{"role": "zzz", "count": 1}],
+        }
+    )
+    assert objective_set_aside_lines(unknown) == [
+        "1 possible objective from another part of the paper was set aside, because that part "
+        "does not state this study's own objectives."
+    ]

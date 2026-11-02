@@ -60,6 +60,8 @@ def objective_set_aside_lines(scope: AgreementScopeOut) -> list[str]:
     if scope.objectives_section_identified is False:
         return [copy["objectives_not_identified"]]
     roles = scope.objectives_set_aside_by_role
+    if not roles:
+        return [copy["objectives_set_aside_unlisted"]] if scope.n_objectives_set_aside else []
     folding = copy["role_folding"]
     fold = len(roles) >= folding["fold_at"]
     lines = []

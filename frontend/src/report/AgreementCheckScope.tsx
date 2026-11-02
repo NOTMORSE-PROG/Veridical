@@ -68,9 +68,11 @@ function ScopeLines({ scope, outcome, compared, interrupted, adviser = false }: 
     {outcome.length > 0 && <p className="signal-agreement-scope__outcome">{adviser ? outcome.join(" ") : <strong>{outcome.join(" ")}</strong>}</p>}
     {stopped && <p>{stopped}</p>}
     {found && !adviser && <p>{found}</p>}
-    {objectiveSetAsideLines(scope).length > 0 && <p>{objectiveSetAsideLines(scope).join(" ")}{adviser && scope.n_objectives_set_aside ? ` ${AGREEMENT_SCOPE_COPY.adviserSetAside}` : ""}</p>}
+    {objectiveSetAsideLines(scope).length > 0 && <p>{objectiveSetAsideLines(scope).join(" ")}</p>}
     {adviser && matchedLine(scope) && <p>{matchedLine(scope)}</p>}
-    {setAside.length > 0 && <p>{setAside.join(" ")}{adviser && !notIdentified && scope.n_results_set_aside ? ` ${AGREEMENT_SCOPE_COPY.adviserSetAside}` : ""}</p>}
+    {setAside.length > 0 && <p>{setAside.join(" ")}</p>}
+    {/* Said once, after both counts, however many lists were set aside. */}
+    {adviser && (Boolean(scope.n_objectives_set_aside) || (!notIdentified && Boolean(scope.n_results_set_aside))) && <p>{AGREEMENT_SCOPE_COPY.adviserSetAside}</p>}
     {notIdentified && <p>{AGREEMENT_SCOPE_COPY.notIdentified}</p>}
     <p>{AGREEMENT_SCOPE_COPY.limit}</p>
     {scope.absence_leads_withheld && <p>{AGREEMENT_SCOPE_COPY.absence}</p>}

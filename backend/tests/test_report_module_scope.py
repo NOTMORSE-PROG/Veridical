@@ -347,7 +347,7 @@ async def test_a_link_without_saved_detail_still_says_whether_each_check_ran(mon
 
 LENSMATCH_LIKE = {
     "n_intents": 4,
-    "n_intents_extracted": 17,
+    "n_intents_extracted": 7,
     "n_outcomes": 9,
     "objective_sections": {
         "objectives_section_identified": True,
@@ -381,7 +381,7 @@ def test_objectives_set_aside_reach_the_report_by_role_with_their_chapters():
     value = scope(LENSMATCH_LIKE)
     assert (value.n_objectives, value.n_objectives_extracted, value.n_objectives_set_aside) == (
         4,
-        17,
+        7,
         3,
     )
     assert value.objectives_section_identified is True
@@ -416,14 +416,32 @@ def test_a_run_that_kept_every_aim_anyway_says_how_many_it_would_have_set_aside(
     assert value.n_objectives_kept_despite_role == 2 and value.objectives_set_aside == []
 
 
-@pytest.mark.parametrize("bad", [[{"anchor": "p. 3"}], ["text"], [{"text": 4}]])
-def test_a_malformed_objective_entry_makes_that_part_unknown(bad):
+@pytest.mark.parametrize(
+    "bad",
+    [
+        [{"anchor": "p. 3"}],
+        ["text"],
+        [{"text": 4}],
+        None,
+        [{"text": "Only one of the three.", "chapter_role": "literature"}],
+    ],
+)
+def test_a_list_that_does_not_account_for_the_count_is_not_shown(bad):
+    # The count still adds up in the found line; where they came from is
+    # said to be unknown rather than listed in part.
+    from app.report.agreement_scope import found_line, objective_set_aside_lines
+
     detail = {
         **LENSMATCH_LIKE,
         "objective_sections": {**LENSMATCH_LIKE["objective_sections"], "set_aside": bad},
     }
     value = scope(detail)
-    assert value.n_objectives_set_aside is None and value.objectives_set_aside == []
+    assert value.n_objectives_set_aside == 3
+    assert value.objectives_set_aside == [] and value.objectives_set_aside_by_role == []
+    assert found_line(value).endswith("4 were kept to compare and 3 were set aside.")
+    assert objective_set_aside_lines(value) == [
+        "Where these were set aside from was not recorded, so they cannot be listed here."
+    ]
 
 
 def test_an_older_run_without_objective_sections_says_nothing_new():
