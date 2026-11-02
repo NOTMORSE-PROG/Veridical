@@ -84,6 +84,10 @@ DEFAULTS = {
     # (e.g. a DataCite record with every author packed into one creator).
     # Each item: {"doi", "entry", "registry", "why"}.
     "extra_valid_doi_controls": [],
+    # BUG-640: works OpenAlex marks retracted and lists without a DOI, cited
+    # by title alone, so a lookup can reach OpenAlex's title search.
+    "openalex_retraction_rows": 25,
+    "openalex_retraction_seed": 640,
     "notice_title_pattern": r"notice of|retraction|withdrawn|expression of concern",
     "accusation_words": r"fake|fabricat|fraud|forg|plagiar|dishonest|false",
 }
@@ -116,13 +120,11 @@ LIMITATIONS = (
     "A host production refuses outright (reading order it cannot confine) hosts no plants: "
     "it would show no linkage finding at all, so its intact entries would count as kept "
     "silent for free. It is reported in the coverage details instead.",
-    "Real-manuscript precision covers the 9 missing-reference flags production raises on "
-    "DESTAMP, which name only 6 distinct citations (Yochum 3 times, Young twice), so the "
-    "interval rests on fewer independent judgments than n suggests. This code also raises "
-    "DESTAMP's two uncited-reference flags (Black 2017; Schmitt, Delbosc & Currie 2018), "
-    "which both raters judged correct; they sit in f5/real_judgments_withheld.json and join "
-    "the counted set once this rule is live, so until then the row covers 9 of the 11 flags "
-    "this code raises there. LensMatch, AugmentedRL and MIT raised none.",
+    "Real-manuscript precision covers the 11 flags production raises on DESTAMP: 9 "
+    "missing-reference flags, which name only 6 distinct citations (Yochum 3 times, Young "
+    "twice), and the two uncited-reference flags (Black 2017; Schmitt, Delbosc & Currie "
+    "2018), counted since production raised them live (2026-11-01). The interval rests on "
+    "fewer independent judgments than n suggests. LensMatch, AugmentedRL and MIT raised none.",
     "The existence case set is frozen in f5/existence_cases.json on first build; registry "
     "answers come from the cache, with the fetch dates listed in the details.",
 )
@@ -1063,6 +1065,140 @@ async def _part_b(ctx, config, patterns, settings, client, cache_stats):
     return outcomes, notes, drafts_by_type
 
 
+def _openalex_entry(work):
+    """An APA-shaped entry, without a DOI, from an OpenAlex work."""
+    names = []
+    for authorship in work.get("authorships") or []:
+        display = _clean((authorship.get("author") or {}).get("display_name"))
+        parts = display.split()
+        if len(parts) >= 2:
+            initials = " ".join(f"{p[0]}." for p in parts[:-1])
+            names.append(f"{parts[-1]}, {initials}")
+    location = (work.get("primary_location") or {}).get("source") or {}
+    source = _clean(location.get("display_name"))
+    title = _clean(work.get("display_name")).rstrip(".")
+    year = work.get("publication_year")
+    if not (names and source and title and year):
+        return None
+    authors = names[0] if len(names) == 1 else ", ".join(names[:-1]) + ", & " + names[-1]
+    return f"{authors} ({year}). {title}. {source}."
+
+
+async def _openalex_retraction_part(ctx, config, patterns, settings, client):
+    """Entries for works OpenAlex alone marks retracted, cited without a DOI.
+
+    The case list is frozen on first build, like the existence cases. Each
+    entry runs the product's own lookup: Crossref's title search first, then
+    OpenAlex's. Only where OpenAlex answers can the lead appear."""
+    frozen = ctx.golden / LANE / "openalex_retraction_cases.json"
+    notes = []
+    if not frozen.exists():
+        data = await _json(
+            client,
+            "https://api.openalex.org/works",
+            {
+                "filter": "is_retracted:true,has_doi:false",
+                "sample": str(config["openalex_retraction_rows"]),
+                "seed": str(config["openalex_retraction_seed"]),
+                "per_page": str(config["openalex_retraction_rows"]),
+                "select": "id,display_name,publication_year,type,authorships,primary_location",
+            },
+        )
+        cases = []
+        for work in (data or {}).get("results") or []:
+            entry = _openalex_entry(work)
+            if entry:
+                cases.append(
+                    {
+                        "openalex_id": work.get("id"),
+                        "entry": entry,
+                        "record_type": work.get("type"),
+                    }
+                )
+        built = {"built_on": datetime.now(UTC).date().isoformat(), "cases": cases}
+        frozen.write_text(json.dumps(built, indent=1), encoding="utf-8")
+    cases = json.loads(frozen.read_text(encoding="utf-8"))["cases"]
+    outcomes = []
+    for start in range(0, len(cases), config["plants_per_copy"]):
+        chunk = cases[start : start + config["plants_per_copy"]]
+        host = load_extraction(ctx.extractions / f"{config['host_for_entries']}.json")
+        drafts = _plant_entries(host, patterns, [c["entry"] for c in chunk])
+        try:
+            verdicts = await _verify_entries(client, settings, drafts)
+        except RateLimited as stop:
+            notes.append(f"stopped early: {stop}")
+            break
+        for case, draft, (verdict, flag) in zip(chunk, drafts, verdicts, strict=False):
+            reason = (flag.detail.get("reason") if flag else "") or ""
+            parsed = draft.parse_status == CitationParseStatus.parsed and bool(draft.title)
+            outcomes.append(
+                {
+                    **case,
+                    "parsed": parsed,
+                    "verdict": verdict.kind.value,
+                    "answered_by": verdict.result.provider if verdict.result else None,
+                    "search_matched": verdict.search_identity is not None,
+                    "flag_kind": flag.detail.get("kind") if flag else None,
+                    "flag_severity": str(flag.severity) if flag else None,
+                    "counted": bool(flag) and flag.detail.get("affects_readiness") is not False,
+                    "flag_reason": reason or None,
+                    "accusation_wording": bool(
+                        re.search(config["accusation_words"], reason, re.IGNORECASE)
+                    ),
+                }
+            )
+    return outcomes, notes, len(cases)
+
+
+RETRACTION_LEADS = {"possible_retraction_unconfirmed", "retraction_notice_cited"}
+
+
+def _openalex_retraction_rows(outcomes, notes, total):
+    reached = [
+        o
+        for o in outcomes
+        if o["parsed"] and o["answered_by"] == "openalex" and o["search_matched"]
+    ]
+    leads = [o for o in reached if o["flag_kind"] in RETRACTION_LEADS]
+    offered = [o for o in leads if o["flag_severity"] == "low" and not o["counted"]]
+    all_leads = [o for o in outcomes if o["flag_kind"] in RETRACTION_LEADS]
+    return [
+        rate_row(
+            LANE,
+            "OpenAlex-only retraction offered as an uncounted Low lead",
+            "entry",
+            len(offered),
+            len(reached),
+            note="Works OpenAlex marks retracted, without a DOI, cited by title (BUG-640). "
+            "Only an entry OpenAlex's title search identified can carry the lead; the rest "
+            f"are answered by Crossref first or not found. {len(outcomes)} of {total} frozen "
+            "cases were run"
+            + (f" ({'; '.join(notes)})" if notes else "")
+            + ".",
+        ),
+        rate_row(
+            LANE,
+            "a retraction notice described as a notice, a retracted work as a work",
+            "lead",
+            sum(
+                (o["flag_kind"] == "retraction_notice_cited") == (o["record_type"] == "retraction")
+                for o in leads
+            ),
+            len(leads),
+            note="Notice by OpenAlex's own record type, not by a title rule. A record titled "
+            "'Retracted: ...' is usually the retracted work itself, never to be called a notice.",
+        ),
+        rate_row(
+            LANE,
+            "wording check OpenAlex retraction leads",
+            "lead",
+            sum(not o["accusation_wording"] for o in all_leads),
+            len(all_leads),
+            note="Leads with no accusation word in their text.",
+        ),
+    ]
+
+
 def _part_b_rows(outcomes):
     rows = []
     expected = {
@@ -1333,9 +1469,12 @@ def run(ctx: Context) -> tuple[list[MetricRow], dict]:
             part_a = await _part_a(ctx, config, patterns, settings)
             unread_cases = await _unread_page_cases(ctx, config, patterns, settings)
             part_b = await _part_b(ctx, config, patterns, settings, client, transport)
-        return part_a, unread_cases, part_b, transport
+            oa_part = await _openalex_retraction_part(ctx, config, patterns, settings, client)
+        return part_a, unread_cases, part_b, oa_part, transport
 
-    part_a, unread_cases, (outcomes, notes, counts), transport = asyncio.run(go())
+    part_a, unread_cases, part_b, oa_part, transport = asyncio.run(go())
+    outcomes, notes, counts = part_b
+    oa_outcomes, oa_notes, oa_total = oa_part
     rows, details = [], {"unread_page_cases": unread_cases}
     if isinstance(part_a, tuple):
         tally, new_counts, unmatched, records, coverage = part_a
@@ -1351,12 +1490,18 @@ def run(ctx: Context) -> tuple[list[MetricRow], dict]:
         details["linkage_coverage"] = part_a
     rows += _unread_page_rows(unread_cases)
     rows += _part_b_rows(outcomes)
+    rows += _openalex_retraction_rows(oa_outcomes, oa_notes, oa_total)
     rows += real_precision_rows(ctx.golden, LANE)
     details.update(
         {
             "existence_plants": outcomes,
             "existence_candidates": counts,
             "existence_notes": notes,
+            "openalex_retraction_plants": oa_outcomes,
+            "openalex_retraction_answered_by": dict(
+                Counter(str(o["answered_by"]) for o in oa_outcomes)
+            ),
+            "openalex_retraction_notes": oa_notes,
             "registry_requests_sent": transport.sent,
             "registry_cache_hits": transport.hits,
             "registry_answers_fetched_on": sorted(transport.fetched_on),
