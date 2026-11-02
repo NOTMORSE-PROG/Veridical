@@ -59,7 +59,7 @@
     "name": "a level set from the reference list's counts is named as such",
     "row": {"decision_basis": "reference_counts", "agreeing_passes": 2, "grading_passes": 2},
     "lines": [
-      "Graded automatically: the lower of the formatting grade and the highest level the reference list's counts allow."
+      "Graded automatically: the AI graded the formatting; the reference list's counts can only lower that grade."
     ],
     "caution": null
   },
@@ -67,7 +67,7 @@
     "name": "a quality level the counts prove is named as such",
     "row": {"decision_basis": "reference_profile"},
     "lines": [
-      "Graded automatically: the reference list's counts fit only this level's wording."
+      "Graded automatically: only this level's share of papers or books fits the reference list's counts."
     ],
     "caution": null
   }

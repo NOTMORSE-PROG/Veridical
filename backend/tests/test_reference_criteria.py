@@ -155,10 +155,10 @@ def test_apparent_web_sources_are_named_but_never_decide_the_level(data):
     assert "verdict" not in row.detail
     # Information only: they may be journal articles retrieved online.
     reason = row.detail["reason"]
-    assert "allows at most 2 internet sites, and 9 entries appear to be web sources" in reason
-    assert "Decide whether they count as internet sites under this format" in reason
+    assert "Entries that look like web pages: 9. Every level of this format allows no more than 2" in reason
+    assert "Decide whether these entries count as internet sites under this format" in reason
     # The counts allow anything from no level to the top.
-    assert "anything from no level to EXEMPLARY" in reason
+    assert "anything from below BEGINNER up to EXEMPLARY" in reason
 
 
 @pytest.mark.parametrize(
@@ -182,15 +182,16 @@ def test_a_list_short_of_major_references_even_at_best_goes_to_the_instructor(da
     row = graded_row("EXEMPLARY")
     rc.decide_inventory(row, BIBLIOGRAPHY, profile(peer_reviewed=1, web=1), data)
     assert row.outcome == ResultOutcome.escalated
-    assert "appear to be web sources. Decide" not in row.detail["reason"]
-    assert "Even counting every entry a catalogue did not confirm" in row.detail["reason"]
+    assert "look like web pages: 1. Every level" not in row.detail["reason"]
+    assert "Even if every unconfirmed entry were a journal or conference paper" in row.detail["reason"]
+    assert "the lowest level, BEGINNER, needs at least 3" in row.detail["reason"]
 
 
 def test_unidentified_entries_that_could_change_the_level_escalate(data):
     row = graded_row("EXEMPLARY")
     rc.decide_inventory(row, BIBLIOGRAPHY, profile(peer_reviewed=4, unclassified=1), data)
     assert row.outcome == ResultOutcome.escalated
-    assert "anything from ACCEPTABLE to PROFICIENT" in row.detail["reason"]
+    assert "anything from ACCEPTABLE up to PROFICIENT" in row.detail["reason"]
     assert "formatting errors" in row.detail["reason"]
 
 
@@ -256,7 +257,7 @@ def test_reference_list_problems_are_named(data):
 
     listed = {"reference_metadata_coverage": [{}]}
     assert "did not finish" in problem(None)
-    assert "separate" in problem({"reference_selection_issues": ["x"]})
+    assert "starts and ends" in problem({"reference_selection_issues": ["x"]})
     assert "No reference list" in problem({"reference_metadata_coverage": []})
     assert problem({**listed, "reference_membership_status": "complete"}) is None
     assert problem(listed) is None
@@ -386,10 +387,10 @@ def test_the_profile_and_counts_say_which_entries_were_typed_from_their_text(dat
         "web": [3],
     }
     sentence = rc._counts_sentence(profile, data)
-    assert sentence.startswith("Reference list of 4 entries: 1 journal or conference papers")
-    assert "(1 of them classified from how the entry is written)" in sentence
-    assert "1 preprints, repository copies or theses" in sentence
-    assert "and 1 of unknown type." in sentence
+    assert sentence.startswith("Reference list: 4 entries. Journal or conference papers or books: 1")
+    assert "(1 classified from how the entry is written)" in sentence
+    assert "Preprints, repository copies or theses: 1." in sentence
+    assert sentence.endswith("Type not known: 1.")
     # Nothing in the wording doubts that a source exists.
     assert "catalogue" not in sentence and "identified" not in sentence
     assert profile.uncertain_entries == [2, 3, 4]
@@ -432,7 +433,7 @@ def test_counts_that_confirm_no_level_go_to_the_instructor(data):
     row = graded_row("PROFICIENT")
     rc.decide_quality(row, QUALITY, profile(peer_reviewed=4, web=4, unclassified=12), data)
     assert row.outcome == ResultOutcome.escalated
-    assert "do not confirm any one level" in row.detail["reason"]
+    assert "could fit ACCEPTABLE, PROFICIENT and EXEMPLARY" in row.detail["reason"]
 
 
 def test_a_level_the_counts_cannot_check_is_never_treated_as_ruled_out(data):
@@ -470,7 +471,10 @@ def test_counts_that_fit_exactly_one_checkable_level_decide_it(data):
     assert row.detail["verdict"] == "ACCEPTABLE"
     assert row.detail["decision_basis"] == "reference_profile"
     assert row.detail["reference_strategy"]["strategy"] == rc.QUALITY
-    assert "Only this level's wording fits these counts" in row.detail["reasoning"]
+    assert "Only this level's share of journal or conference papers or books fits" in (
+        row.detail["reasoning"]
+    )
+    assert "do not check the rest of the level's wording" in row.detail["reasoning"]
 
 
 def test_a_scale_whose_words_imply_no_share_is_never_decided(data):
@@ -537,7 +541,7 @@ def test_every_quality_message_shows_the_range_it_used(data):
     row = graded_row("EXEMPLARY")
     rc.decide_quality(row, QUALITY, profile(peer_reviewed=103, web=3, unclassified=24), data)
     assert (
-        "Between 103 and 130 of the 130 entries can be journal or conference papers"
+        "Entries that can be journal or conference papers or books: 103 to 130 of 130."
         in (row.detail["reason"])
     )
 

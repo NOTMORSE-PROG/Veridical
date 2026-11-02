@@ -207,7 +207,8 @@ async def test_both_criteria_are_written_to_the_stored_rows_with_their_audit_eve
     assert "reason_codes" not in bibliography.detail
     assert bibliography.detail["proposed_verdict"] == "EXEMPLARY"
     assert (
-        "Entries to check, by their place in the reference list: 5 to 6."
+        "Entries to check, by their place in the reference list: look like web pages: 6; "
+        "preprints, repository copies or theses: 5."
         in (bibliography.detail["reason"])
     )
     quality = rows[quality_id]
@@ -259,5 +260,5 @@ async def test_a_partly_read_list_escalates_without_counting(session_factory, da
     await _apply(session_factory, run_id, data)
     row = (await _rows(session_factory, run_id))[bibliography_id]
     assert row.outcome == ResultOutcome.escalated
-    assert "pages 61" in row.detail["reason"]
+    assert "(page 61)" in row.detail["reason"]
     assert "profile" not in row.detail["reference_strategy"]

@@ -383,8 +383,16 @@ def quality_level_fits(criterion: Any, ordinal: int, profile: Profile, data: Ref
         (min_share is None or low > min_share) and (max_share is None or high < max_share)
         for min_share, max_share in implied
     )
+    # Ruled out only when no possible share satisfies one of its bounds: a
+    # level that merely is not proven may still be the true one.
+    ruled_out = bool(implied) and any(
+        (min_share is not None and high <= min_share)
+        or (max_share is not None and low >= max_share)
+        for min_share, max_share in implied
+    )
     return {
         "fits": fits,
+        "ruled_out": ruled_out,
         "share_bounds": [round(low, 3), round(high, 3)],
         "implied_shares": implied,
     }
@@ -424,6 +432,10 @@ def _escalate(row: CheckResult, reason: str, record: dict) -> None:
         if key in detail:
             detail[f"proposed_{key}"] = detail.pop(key)
     detail.pop("support_caution", None)
+    # A withheld grader rating would make the report show its generic
+    # evidence sentence instead of these counts; the instructor needs the
+    # counts. The grader's record keeps it.
+    detail.pop("support_withheld", None)
     # The grader's own reason, codes and passes stay in the kept grader
     # result; on the row they would describe a different decision from this
     # one, and passes that agreed would read as a grade.
@@ -485,6 +497,29 @@ def _numbers(values: list[int]) -> str:
     return ", ".join(str(run[0]) if len(run) == 1 else f"{run[0]} to {run[-1]}" for run in runs)
 
 
+def _level_list(names: list[str], data: ReferenceData) -> str:
+    words = data.wording
+    if len(names) < 2:
+        return "".join(names)
+    return words["level_list_sep"].join(names[:-1]) + words["level_list_last"] + names[-1]
+
+
+def _pages(pages: list[int], data: ReferenceData) -> str:
+    words = data.wording
+    if len(pages) == 1:
+        return words["page_one"].format(n=pages[0])
+    return words["page_many"].format(pages=_numbers(pages))
+
+
+def _needed(conditions: list[tuple[str, int]], data: ReferenceData) -> str | None:
+    for kind, number in conditions:
+        if kind == "major_at_least":
+            return data.wording["needed_at_least"].format(n=number)
+        if kind == "major_more_than":
+            return data.wording["needed_more_than"].format(n=number)
+    return None
+
+
 def _counts_sentence(profile: Profile, data: ReferenceData) -> str:
     words = data.wording
     from_text = (
@@ -526,17 +561,36 @@ def _web_note(conditions: dict[int, list[tuple[str, int]]], profile: Profile, da
 
 
 def _entries_to_check(profile: Profile, data: ReferenceData) -> str:
+    """The unconfirmed entries, by what they look like, so the instructor
+    knows which to open first."""
     if not profile.uncertain_entries:
         return ""
-    return " " + data.wording["entries_to_check"].format(
-        numbers=_numbers(profile.uncertain_entries)
-    )
+    words = data.wording
+    web = profile.text_typed_entries.get("web", [])
+    repositories = profile.text_typed_entries.get("repository_text", [])
+    unknown = profile.unclassified_entries
+    named = set(web) | set(repositories) | set(unknown)
+    other = [n for n in profile.uncertain_entries if n not in named]
+    groups = [
+        words["entries_group"].format(label=words[label], numbers=_numbers(numbers))
+        for label, numbers in (
+            ("entries_web", web),
+            ("entries_repository", repositories),
+            ("entries_other", other),
+            ("entries_unknown", unknown),
+        )
+        if numbers
+    ]
+    return " " + words["entries_to_check"].format(groups=words["entries_group_sep"].join(groups))
 
 
 def _share_sentence(profile: Profile, data: ReferenceData) -> str:
     low = profile.major
     high = profile.major + profile.uncertain
-    return data.wording["quality_share"].format(low=low, high=high, entries=profile.entries)
+    share = (
+        str(low) if low == high else data.wording["quality_share_range"].format(low=low, high=high)
+    )
+    return data.wording["quality_share"].format(share=share, entries=profile.entries)
 
 
 def decide_inventory(
@@ -554,30 +608,42 @@ def decide_inventory(
     record["count_level_bounds"] = [worst, best]
     counts = _counts_sentence(profile, data) + _web_note(conditions, profile, data)
     names = {int(level["level"]): level["name"] for level in _levels(criterion)}
+    lowest = min(names)
     if best is None:
-        _escalate(row, f"{counts} {words['inventory_short']}", record)
+        reason = words["inventory_short"].format(
+            best_major=profile.major + profile.uncertain,
+            lowest=names[lowest],
+            needed=_needed(conditions[lowest], data) or "",
+        )
+        _escalate(row, f"{counts} {reason}", record)
         return
     if worst != best:
-        low = names[worst] if worst is not None else words["no_level"]
-        reason = words["inventory_open"].format(low=low, high=names[best])
+        low = names[worst] if worst is not None else words["no_level"].format(lowest=names[lowest])
+        reason = words["inventory_open"].format(
+            uncertain=profile.uncertain, low=low, high=names[best]
+        )
         _escalate(row, f"{counts} {reason}{_entries_to_check(profile, data)}", record)
         return
     grader = _grader_ordinal(criterion, row)
     if grader is None:
         # The grader did not settle the format part; the counts alone are not
         # the whole descriptor, so the instructor decides.
-        _escalate(row, f"{counts} {words['inventory_ungraded']}", record)
+        reason = words["inventory_ungraded"].format(level=names[worst])
+        _escalate(row, f"{counts} {reason}", record)
         return
     final = min(grader, worst)
     record["decision_basis"] = "reference_counts"
+    # Say that the formatting half is the AI's judgment and which level it
+    # chose, so a lowered or kept grade can be checked.
     if grader > worst:
-        reasoning = f"{counts} {words['inventory_lowered']}"
+        reasoning = words["inventory_lowered"].format(grader=names[grader], level=names[worst])
     elif grader == worst:
-        reasoning = f"{counts} {words['inventory_same']}"
+        reasoning = words["inventory_same"].format(level=names[worst])
     else:
-        reasoning = f"{counts} {words['inventory_formatting']}"
-    # Where the formatting grade sets the level, its own evidence caution
-    # still applies to it.
+        reasoning = words["inventory_formatting"].format(
+            count_level=names[worst], level=names[grader]
+        )
+    reasoning = f"{counts} {reasoning}"
     _decide(row, criterion, final, reasoning, record, keep_caution=final == grader)
 
 
@@ -604,22 +670,32 @@ def decide_quality(
         for level in _levels(criterion)
     }
     record["level_checks"] = {str(ordinal): check for ordinal, check in checks.items()}
-    fitting = [ordinal for ordinal, check in checks.items() if check["fits"]]
+    proven = [ordinal for ordinal, check in checks.items() if check["fits"]]
+    possible = [ordinal for ordinal, check in checks.items() if not check["ruled_out"]]
     names = {int(level["level"]): level["name"] for level in _levels(criterion)}
+    to_check = _entries_to_check(profile, data)
     # A level whose words imply no share cannot be ruled out by counts, so no
     # other level can be shown to be the only one that fits.
     if any(not check["implied_shares"] for check in checks.values()):
-        _escalate(row, f"{counts} {words['quality_unverifiable']}", record)
+        _escalate(row, f"{counts} {words['quality_unverifiable']}{to_check}", record)
         return
-    if not fitting:
-        _escalate(row, f"{counts} {words['quality_none']}", record)
+    if not possible:
+        _escalate(row, f"{counts} {words['quality_none']}{to_check}", record)
         return
-    if len(fitting) > 1:
-        levels = " and ".join(names[ordinal] for ordinal in fitting)
-        _escalate(row, f"{counts} {words['quality_several'].format(levels=levels)}", record)
+    if len(proven) > 1:
+        levels = _level_list([names[o] for o in sorted(proven)], data)
+        reason = words["quality_several"].format(levels=levels)
+        _escalate(row, f"{counts} {reason}{to_check}", record)
+        return
+    # Decided only when one level is proven AND every other level is ruled
+    # out: a level that is merely not proven may still be the true one.
+    if proven != possible:
+        levels = _level_list([names[o] for o in sorted(possible)], data)
+        reason = words["quality_open"].format(levels=levels)
+        _escalate(row, f"{counts} {reason}{to_check}", record)
         return
     record["decision_basis"] = "reference_profile"
-    _decide(row, criterion, fitting[0], f"{counts} {words['quality_decided']}", record)
+    _decide(row, criterion, proven[0], f"{counts} {words['quality_decided']}", record)
 
 
 def reference_list_problem(citation_detail: dict | None, data: ReferenceData) -> str | None:
@@ -633,6 +709,12 @@ def reference_list_problem(citation_detail: dict | None, data: ReferenceData) ->
     if citation_detail.get("reference_selection_issues"):
         return words["problem_selection"]
     if not citation_detail.get("reference_metadata_coverage"):
+        # A check stopped at the source gate saved no coverage: the list may
+        # well be there, unread, which is not the same as absent.
+        if citation_detail.get("source_issues") or str(
+            citation_detail.get("coverage_reason") or ""
+        ).startswith("source_"):
+            return words["problem_unreadable"]
         return words["problem_empty"]
     unread = citation_detail.get("unread_pages") or []
     start = citation_detail.get("reference_list_page")
@@ -640,7 +722,7 @@ def reference_list_problem(citation_detail: dict | None, data: ReferenceData) ->
     # at or after where the list starts, or a list whose start is unknown, can.
     in_list = [page for page in unread if start is None or page >= start]
     if in_list:
-        return words["problem_unread_pages"].format(pages=_numbers(in_list))
+        return words["problem_unread_pages"].format(pages=_pages(in_list, data))
     if citation_detail.get("reference_membership_status") not in (None, "complete"):
         return words["problem_boundary"]
     # Only some coverage reasons mean entries are missing from the list; the
