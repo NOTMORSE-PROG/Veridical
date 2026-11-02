@@ -67,6 +67,9 @@ class ReferencePageImage:
     image_png: bytes | None
     # Conservative reservation, retained even if the encoded image is withheld.
     charged_pixels: int = 0
+    # BUG-684: where each drawn mark sits, as (x, y, width, height) fractions of
+    # the final image, so a screen can scroll to it. Empty when nothing is marked.
+    marks: tuple[tuple[float, float, float, float], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -312,6 +315,7 @@ def render_pdf_evidence(
             settings=render_settings,
             print_content_width=print_content_width,
         )
+        drawn: list[tuple[float, float, float, float]] = []
         image = _render_page_png(
             source.document[placement.page - 1],
             placement.boxes if placement.state == "text_layer_match" else (),
@@ -319,6 +323,7 @@ def render_pdf_evidence(
             settings=render_settings,
             box_coordinates="pdf_points",
             print_content_width=print_content_width,
+            marks=drawn,
         )
     except PageImageUnavailable:
         return ReferencePageImage(
@@ -342,4 +347,14 @@ def render_pdf_evidence(
             None,
             max(rendered_pixels, width * height),
         )
-    return ReferencePageImage(placement, image, max(rendered_pixels, width * height))
+    marks = tuple(
+        (
+            round(x0 / width, 4),
+            round(y0 / height, 4),
+            round((x1 - x0) / width, 4),
+            round((y1 - y0) / height, 4),
+        )
+        for x0, y0, x1, y1 in drawn
+        if x1 > x0 and y1 > y0
+    )
+    return ReferencePageImage(placement, image, max(rendered_pixels, width * height), marks)

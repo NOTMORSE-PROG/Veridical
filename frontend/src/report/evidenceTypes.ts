@@ -48,6 +48,8 @@ export interface EvidencePage {
   image_data_url: string | null;
   image_sha256?: string | null;
   caption: string;
+  /** BUG-684: where each drawn mark sits on the image, as fractions of its size. */
+  marks?: { x: number; y: number; width: number; height: number }[];
 }
 
 export interface EvidenceSourceRequest {
