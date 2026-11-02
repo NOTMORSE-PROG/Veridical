@@ -20,7 +20,11 @@ export function SavedJudgmentAccess({ checkRunId, hideEmpty = false, next }: {
   const query = useReport(checkRunId);
   const [focusedReceipt, setFocusedReceipt] = useState<ReviewCompletion>();
   const retainedReceipt = focusedReceipt ?? review.completion;
-  const receipt = retainedReceipt && !review.revisions.records.get(retainedReceipt.result.criterion_id)?.unavailable ? retainedReceipt : undefined;
+  // Moving on from a receipt with its own Next leaves it behind, so it never
+  // sits above the next criterion's form offering the way there again.
+  const [movedOnFrom, setMovedOnFrom] = useState<number>();
+  const receipt = retainedReceipt && retainedReceipt.result.criterion_id !== movedOnFrom
+    && !review.revisions.records.get(retainedReceipt.result.criterion_id)?.unavailable ? retainedReceipt : undefined;
   const results = Array.isArray(query.data?.results) ? query.data.results : undefined;
   const count = results?.filter((row) => row.resolution != null).length;
   const refreshing = query.fetchStatus !== "idle";
@@ -45,8 +49,12 @@ export function SavedJudgmentAccess({ checkRunId, hideEmpty = false, next }: {
       {receipt.result.resolution?.type === "needs_document"
         ? <p>{CRITERION_EXCLUSION_COPY.recorded}. {CRITERION_EXCLUSION_COPY.noGrade}</p>
         : <p><strong>Recorded grade:</strong> {recordedGradeLabel(receipt.result)}</p>}
-      <div className="signal-control-cluster">
-        {next}
+      <div className="signal-receipt-actions">
+        {next && <span className="signal-receipt-next" onClickCapture={() => {
+          // After the move has handed focus on, so the link is not removed mid-click.
+          const id = receipt.result.criterion_id;
+          requestAnimationFrame(() => { setFocusedReceipt(undefined); setMovedOnFrom(id); });
+        }}>{next}</span>}
         <Button variant="secondary" aria-label={`View saved judgment: ${receipt.result.text}`}
           onClick={(event) => review.viewSaved(receipt.result.criterion_id, event.currentTarget)}>View saved judgment</Button>
       </div>

@@ -983,11 +983,12 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, sourceTarget, 
           {saving && <p role="status">{REVIEW_DRAFT_COPY.saving}</p>}
           {Boolean(pending.error) && <Alert title="Saving could not be confirmed" tone="error" role="alert">Your entered reason is kept. Review the current criterion before trying again.</Alert>}
 
-          {confirmDiscard && draftCurrent && <div className="signal-copy-flow signal-discard-confirm" role="group" aria-labelledby={`signal-discard-${item.check_result_id}`}>
+          {confirmDiscard && draftCurrent && <div className="signal-copy-flow signal-discard-confirm" role="group" aria-labelledby={`signal-discard-${item.check_result_id}`}
+            onKeyDown={event => { if (event.key === "Escape") { event.stopPropagation(); keepEditing(); } }}>
             <p id={`signal-discard-${item.check_result_id}`}><strong>Discard your {requiresReason ? "reason" : "comment"}?</strong> It has not been saved.</p>
             <div><Button ref={keepEditingRef} variant="secondary" onClick={keepEditing}>Keep editing</Button><Button variant="quiet" onClick={event => cancel(event.currentTarget)}>Discard and cancel</Button></div>
           </div>}
-          <div>{draftCurrent && !confirmDiscard && <Button variant="secondary" disabled={saving || pending?.uncertainRevision !== undefined} onClick={event => cancel(event.currentTarget)}>Cancel</Button>}<Button data-criterion-confirm variant="brand" disabled={saving || !draftCurrent} aria-describedby={`${describedBy}${excluding ? ` ${exclusionConsequenceId}` : ""}`} busy={saving} onClick={confirm}>{excluding ? CRITERION_EXCLUSION_COPY.confirm : ordinaryGrade ? "Save grade" : "Confirm resolution"}</Button></div>
+          <div>{draftCurrent && !confirmDiscard && <Button variant="secondary" disabled={saving || pending?.uncertainRevision !== undefined} onClick={event => cancel(event.currentTarget)}>Cancel</Button>}<Button data-criterion-confirm variant="brand" disabled={saving || !draftCurrent || confirmDiscard} aria-describedby={`${describedBy}${excluding ? ` ${exclusionConsequenceId}` : ""}`} busy={saving} onClick={confirm}>{excluding ? CRITERION_EXCLUSION_COPY.confirm : ordinaryGrade ? "Save grade" : "Confirm resolution"}</Button></div>
         </div>
       )}
       </section>
@@ -1064,7 +1065,7 @@ export function SignalEscalatedPanel({ checkRunId, focused = false, sourceTarget
   // BUG-656: after a save the next criterion is one step away, or the list
   // when none is left.
   const nextAfterSave = items === undefined ? null : items.length
-    ? <ActionLink variant="brand" state={location.state} to={reviewLink(items[0].criterion_id)} onClick={event => select(event, items[0].criterion_id)}>Next criterion: {items[0].criterion_text}</ActionLink>
+    ? <ActionLink variant="brand" state={location.state} to={reviewLink(items[0].criterion_id)} onClick={event => select(event, items[0].criterion_id)}><span className="signal-receipt-next__label">Next ungraded: {items[0].criterion_text}</span></ActionLink>
     : <ActionLink variant="secondary" direction="back" state={location.state} to={reviewLink()} onClick={event => select(event)}>Back to the criteria list</ActionLink>;
   return (
     <section id="review-criteria" tabIndex={-1} data-tour="escalated-panel" className={focused ? "signal-review-section signal-review-section--attention signal-selected-criterion signal-selected-criterion--focused" : selectedView ? "signal-review-section signal-selected-criterion" : "signal-review-section signal-review-section--attention"} aria-labelledby="escalated-heading">

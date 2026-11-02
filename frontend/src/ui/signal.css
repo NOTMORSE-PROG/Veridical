@@ -9285,6 +9285,14 @@
   .signal-fact-rows > div { display: grid; grid-template-columns: minmax(var(--signal-fact-row-label-min), var(--signal-fact-row-label-max)) minmax(0, 1fr); gap: var(--signal-space-4); padding-block: var(--signal-space-3); border-block-start: var(--signal-border-hairline) solid var(--color-signal-border); }
   .signal-fact-rows > div:first-child { border-block-start: 0; padding-block-start: var(--signal-space-1); }
   .signal-fact-rows dt { font-weight: var(--signal-weight-semibold); }
+  /* BUG-655: the discard question is part of the form: framed, left-aligned. */
+  .signal-discard-confirm { justify-self: stretch; text-align: start; padding: var(--signal-space-3) var(--signal-space-4); border: var(--signal-border-hairline) solid var(--color-signal-border-strong); border-radius: var(--signal-radius-control); background: var(--color-signal-surface-muted); }
+  .signal-discard-confirm > div { display: flex; flex-wrap: wrap; gap: var(--signal-space-2); }
+  /* BUG-656: the receipt's actions stack at one width; a long name wraps. */
+  .signal-receipt-actions { display: grid; grid-template-columns: minmax(0, max-content); gap: var(--signal-space-2); }
+  .signal-receipt-actions > .signal-button, .signal-receipt-next > .signal-button { inline-size: 100%; justify-content: flex-start; }
+  .signal-receipt-next { display: grid; }
+  .signal-receipt-next__label { overflow-wrap: anywhere; text-align: start; }
   .signal-fact-rows dd { margin: 0; max-inline-size: var(--signal-review-detail-measure); }
   @media (max-width: 1023px) {
     .signal-fact-rows > div { grid-template-columns: minmax(0, 1fr); gap: var(--signal-space-1); }
