@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import copy from "../../../backend/app/report/data/agreement_scope.json";
 import type { AgreementScopeOut } from "../api/types";
-import { AGREEMENT_SCOPE_COPY, countInconsistencies, foundLine, interruptedLine, matchedLine, objectiveSetAsideLines, outcomeLines, rolePhrase, setAsideLines } from "./agreementScope";
+import { AGREEMENT_SCOPE_COPY, countInconsistencies, foundLine, interruptedLine, matchedLine, objectivePlace, objectiveSetAsideLines, outcomeLines, rolePhrase, setAsideLines } from "./agreementScope";
 
 const scope = (patch: Partial<AgreementScopeOut> = {}): AgreementScopeOut => ({
   n_objectives: 17, n_results: 34, results_section_identified: true, n_results_set_aside: 3, n_results_too_short: 2,
@@ -36,6 +36,7 @@ describe("agreement scope copy", () => {
     expect(AGREEMENT_SCOPE_COPY.objectiveSetAsideListIntro).toBe(copy.objective_set_aside_list_intro);
     expect(AGREEMENT_SCOPE_COPY.objectivesKeptDespiteRole).toBe(copy.objectives_kept_despite_role);
     expect(AGREEMENT_SCOPE_COPY.objectivesNotIdentified).toBe(copy.objectives_not_identified);
+    for (const [role, place] of Object.entries(copy.objective_places)) expect(objectivePlace(role)).toBe(place);
     for (const [role, reason] of Object.entries(copy.objective_roles)) {
       expect(objectiveSetAsideLines(scope({ n_objectives_set_aside: 2, objectives_set_aside_by_role: [{ role, count: 2 }] }))[0]).toContain(`usually ${reason}.`);
     }

@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { useLocation, useSearchParams } from "react-router";
 import type { AgreementScopeOut, AgreementSetAsideOut } from "../api/types";
 import { FLAG_LIST_INITIAL_COUNT } from "../config/ui";
-import { AGREEMENT_SCOPE_COPY, foundLine, interruptedLine, matchedLine, objectiveSetAsideLines, outcomeLines, rolePhrase, setAsideLines } from "../domain/agreementScope";
+import { AGREEMENT_SCOPE_COPY, foundLine, interruptedLine, matchedLine, objectivePlace, objectiveSetAsideLines, outcomeLines, rolePhrase, setAsideLines } from "../domain/agreementScope";
 import { instructorAnchor } from "../domain/sourceAnchor";
 import { rememberRouteReturnFocus } from "../routing/useRouteFocus";
 import { reviewDeskDestination } from "../routing/reviewDeskReturn";
@@ -152,7 +152,7 @@ function SetAsideList({ id, kind, items, checkRunId, openParam, shownParam }: {
   if (!count) return null;
   const copy = LIST_COPY[kind];
   const visible = items.slice(0, shown);
-  return <div id={`${id}-list`} hidden={!open}>
+  return <div id={`${id}-list`} className="signal-agreement-scope__set-aside" hidden={!open}>
     {open && <>
       <h4>{copy.heading}</h4>
       <p>{copy.intro}</p>
@@ -160,7 +160,7 @@ function SetAsideList({ id, kind, items, checkRunId, openParam, shownParam }: {
         const anchor = item.page_anchor?.trim() ?? "";
         const controlId = `${id}-open-${index}`;
         const sourcePath = reviewDeskDestination(`/report/${checkRunId}/document?anchor=${encodeURIComponent(anchor)}`, location);
-        const place = item.chapter?.trim() || rolePhrase(item.role);
+        const place = item.chapter?.trim() || (kind === "objective" ? objectivePlace(item.role) : rolePhrase(item.role));
         return <li key={`${index}:${item.text}`}>
           <h5 id={`${id}-item-${index}`} tabIndex={-1}>{copy.item} {index + 1} of {count}, {place}</h5>
           <blockquote className="signal-evidence-quote"><span>“{item.text}”</span>{anchor && <cite>{instructorAnchor(anchor)}</cite>}</blockquote>

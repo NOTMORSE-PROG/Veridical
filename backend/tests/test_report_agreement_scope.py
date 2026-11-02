@@ -503,3 +503,15 @@ def test_objectives_kept_despite_their_place_and_older_runs():
     assert "Of the objectives" not in " ".join(
         scope_paragraphs(SCOPE_44, findings=0, undecided=0, compared=31, interrupted=False)
     )
+
+
+def test_every_part_objectives_are_set_aside_from_has_a_place_and_a_reason():
+    # Every chapter role the gate can set an objective aside from is named and
+    # explained, so no line falls back to "another part of the paper".
+    from app.checks.section_roles import load_section_roles
+    from app.report.agreement_scope import agreement_scope_copy
+
+    copy = agreement_scope_copy()
+    for role in load_section_roles().objectives_excluded:
+        assert role in copy["roles"] or role in copy["objective_places"], role
+        assert role in copy["objective_roles"], role
