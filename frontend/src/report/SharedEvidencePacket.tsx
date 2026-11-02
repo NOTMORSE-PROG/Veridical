@@ -1,6 +1,6 @@
 // F8/4l: token-authorized public source associations, never private source URLs.
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useLocation } from "react-router";
 import { ApiError, api } from "../api/client";
 import { instructorAnchor } from "../domain/sourceAnchor";
@@ -18,6 +18,7 @@ const ROLE_LABEL: Record<EvidenceReference["role"], string> = {
   criterion_evidence: "Recorded criterion passage", criterion_scope: "Recorded assessment scope",
   finding_excerpt: "Recorded finding passage", finding_scope: "Recorded finding location",
   agreement_intent: "Statement A, selected as an objective", agreement_outcome: "Statement B, selected as a result",
+  undecided_intent: "Possible objective", undecided_outcome: "Possible result it was compared with",
   reuse_own: "Passage in the checked manuscript", reuse_match: "Saved comparison excerpt",
 };
 interface SharedEvidenceContext { title: string; explanation: string | null; recordedNote: string | null }
@@ -35,6 +36,52 @@ export function useSharedEvidenceManifest(token: string, enabled: boolean) {
       return out;
     },
   });
+}
+
+type SharedPageQuery = ReturnType<typeof useSharedSourcePage>;
+
+function useSharedSourcePage(token: string, snapshot: string, referenceId: string, enabled: boolean) {
+  return useQuery({ queryKey: ["shared-source-page", token, snapshot, referenceId],
+    enabled, gcTime: 0, retry: false,
+    queryFn: async ({ signal }) => {
+      await Promise.resolve(); signal.throwIfAborted();
+      const page = await api.getPublic<EvidencePage>(`/shared/${encodeURIComponent(token)}/evidence/${referenceId}/page?snapshot_id=${snapshot}`, { signal });
+      return verifyEvidencePage(page, snapshot, referenceId);
+    },
+  });
+}
+
+function SharedPageImage({ query, reference, large }: { query: SharedPageQuery; reference: EvidenceReference; large: boolean }) {
+  const page = !query.isError && query.fetchStatus === "idle" ? query.data : undefined;
+  return <>
+    {query.isFetching && <p role="status">Loading original page.</p>}
+    {query.isError && (isPermanentSourceError(query.error)
+      ? <p role="status">{SHARED_PAGE_GONE}</p>
+      : <div role="alert"><p>{query.error instanceof ApiError ? query.error.message : "The original page could not be loaded."}</p><Button disabled={query.isFetching} variant="secondary" onClick={() => { void query.refetch(); }}>Retry original page</Button></div>)}
+    {page && <figure className={large ? "signal-evidence-dialog__page" : "signal-criterion-packet__preview"}>
+      {page.image_data_url ? <img src={page.image_data_url} alt={`Original source, ${instructorAnchor(reference.anchor ?? "")}`} /> : <p>No original-page image is available for this evidence.</p>}
+      <figcaption>{page.caption}</figcaption>
+    </figure>}
+  </>;
+}
+
+/** One statement's original page in a dialog, with what it was compared with
+ * beside it. Nothing loads until the button is pressed, and the button stays
+ * when the page turns out to be gone so focus has somewhere to return. */
+export function SharedPageButton({ token, snapshot, reference, accessibleName, title, context, label = "Open page", className }: {
+  token: string; snapshot: string; reference: EvidenceReference;
+  accessibleName: string; title: string; context: ReactNode;
+  label?: string; className?: string;
+}) {
+  const [dialog, setDialog] = useState(false);
+  const query = useSharedSourcePage(token, snapshot, reference.reference_id, dialog);
+  return <>
+    <Button variant="quiet" className={className} aria-label={accessibleName} aria-haspopup="dialog" onClick={() => setDialog(true)}>{label}</Button>
+    {dialog && <Dialog title={title} wide className="signal-dialog--source-context signal-dialog--statement-page" onClose={() => setDialog(false)}>
+      {/* Focusable so the page can be scrolled from the keyboard. */}
+      <EvidenceSourceLayout source={<div className="signal-statement-page" tabIndex={0} role="region" aria-label={`Original page, ${instructorAnchor(reference.anchor ?? "")}`}><SharedPageImage query={query} reference={reference} large /></div>} context={context} />
+    </Dialog>}
+  </>;
 }
 
 function SharedSourcePage({ token, snapshot, reference, context, references, initialPreview = false }: {
@@ -55,25 +102,8 @@ function SharedPageSession({ token, snapshot, reference, context, references, in
   // otherwise each request a page at once.
   const [preview, setPreview] = useState(initialPreview);
   const [dialog, setDialog] = useState(false);
-  const query = useQuery({ queryKey: ["shared-source-page", token, snapshot, reference.reference_id],
-    enabled: preview || dialog, gcTime: 0, retry: false,
-    queryFn: async ({ signal }) => {
-      await Promise.resolve(); signal.throwIfAborted();
-      const page = await api.getPublic<EvidencePage>(`/shared/${encodeURIComponent(token)}/evidence/${reference.reference_id}/page?snapshot_id=${snapshot}`, { signal });
-      return verifyEvidencePage(page, snapshot, reference.reference_id);
-    },
-  });
-  const page = !query.isError && query.fetchStatus === "idle" ? query.data : undefined;
-  const image = (large: boolean) => <>
-    {query.isFetching && <p role="status">Loading original page.</p>}
-    {query.isError && (isPermanentSourceError(query.error)
-      ? <p role="status">{SHARED_PAGE_GONE}</p>
-      : <div role="alert"><p>{query.error instanceof ApiError ? query.error.message : "The original page could not be loaded."}</p><Button disabled={query.isFetching} variant="secondary" onClick={() => { void query.refetch(); }}>Retry original page</Button></div>)}
-    {page && <figure className={large ? "signal-evidence-dialog__page" : "signal-criterion-packet__preview"}>
-      {page.image_data_url ? <img src={page.image_data_url} alt={`Original source, ${instructorAnchor(reference.anchor ?? "")}`} /> : <p>No original-page image is available for this evidence.</p>}
-      <figcaption>{page.caption}</figcaption>
-    </figure>}
-  </>;
+  const query = useSharedSourcePage(token, snapshot, reference.reference_id, preview || dialog);
+  const image = (large: boolean) => <SharedPageImage query={query} reference={reference} large={large} />;
   // Once the page is known to be gone, its buttons go too: only the message stays.
   if (isPermanentSourceError(query.error)) return <div className="signal-shared-packet__source"><p role="status">{SHARED_PAGE_GONE}</p></div>;
   return <div className="signal-shared-packet__source">

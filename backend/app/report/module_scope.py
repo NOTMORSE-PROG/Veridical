@@ -197,8 +197,10 @@ def _skipped(detail: dict) -> int | None:
 
 
 def module_states(modules: list[IntegrityModuleOut]) -> list[IntegrityModuleOut]:
-    """Each check's state and coverage code only: what a shared link may show
-    when it holds no saved detail of its own. No counts, pairs or statements."""
+    """Each check's state and coverage code only: what a shared link's report
+    shows when it holds no saved detail of its own. No counts, pairs or
+    statements. (The live evidence manifest still lists every quotation with
+    its page, findings and undecided pairs alike; this screen has none to show.)"""
     return [
         IntegrityModuleOut(
             check_kind=module.check_kind,
@@ -210,13 +212,18 @@ def module_states(modules: list[IntegrityModuleOut]) -> list[IntegrityModuleOut]
 
 
 def public_modules(modules: list[IntegrityModuleOut]) -> list[IntegrityModuleOut]:
-    """Shared (adviser) copies keep the agreement counts but not the quoted
-    statements or their locations."""
-    return [
-        module.model_copy(
-            update={"agreement_scope": module.agreement_scope.model_copy(update={"set_aside": []})}
-        )
-        if module.agreement_scope is not None
-        else module
-        for module in modules
-    ]
+    """Shared (adviser) copies keep the agreement counts and the undecided
+    pairs' statements, but not the set-aside statements or the reason saved for
+    each undecided pair: that reason is unreviewed working text from the check,
+    not an explanation the instructor chose to share."""
+    return [_public_module(module) for module in modules]
+
+
+def _public_module(module: IntegrityModuleOut) -> IntegrityModuleOut:
+    update = {}
+    if module.agreement_scope is not None:
+        update["agreement_scope"] = module.agreement_scope.model_copy(update={"set_aside": []})
+    if module.undetermined is not None:
+        pairs = [pair.model_copy(update={"reason": None}) for pair in module.undetermined.pairs]
+        update["undetermined"] = module.undetermined.model_copy(update={"pairs": pairs})
+    return module.model_copy(update=update) if update else module

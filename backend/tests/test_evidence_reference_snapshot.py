@@ -56,6 +56,7 @@ def report(**changes):
             "manuscript_id": 8,
             "assessment_revision": 3,
             "results": [criterion()],
+            "integrity_modules": [],
             "decision_note": "PRIVATE_FIELD_NOT_SELECTED",
             **changes,
         }
@@ -346,3 +347,109 @@ def test_shared_summary_policy_does_not_crash_on_unrecognized_recorded_json(kind
     from app.findings.policy import is_reuse_summary
 
     assert is_reuse_summary(kind) is False
+
+
+def undecided_module(*pairs):
+    return Row(
+        check_kind="internal_agreement",
+        undetermined=Row(
+            pairs=[
+                Row(
+                    intent_text=intent,
+                    intent_anchor=f"p. {index + 3}",
+                    outcome_text=outcome,
+                    outcome_anchor=f"p. {index + 40}",
+                    reason="PRIVATE_UNDECIDED_REASON",
+                )
+                for index, (intent, outcome) in enumerate(pairs)
+            ]
+        ),
+    )
+
+
+def test_undecided_pairs_get_own_manuscript_references_owned_by_the_check():
+    current = report(
+        integrity_modules=[
+            undecided_module(("Objective one.", "Result one."), ("Objective one.", "Result two."))
+        ]
+    )
+    refs = [
+        ref
+        for ref in build(current, include_undecided=True).references
+        if ref.owner_kind == "module"
+    ]
+    assert [(ref.role, ref.index, ref.quote, ref.anchor) for ref in refs] == [
+        ("undecided_intent", 0, "Objective one.", "p. 3"),
+        ("undecided_outcome", 0, "Result one.", "p. 40"),
+        ("undecided_intent", 1, "Objective one.", "p. 4"),
+        ("undecided_outcome", 1, "Result two.", "p. 41"),
+    ]
+    assert all(
+        ref.owner_id == 7 and ref.criterion_id is None and ref.source_scope == "own_manuscript"
+        for ref in refs
+    )
+    public = [
+        public_evidence_reference(ref)
+        for ref in build(current, audience="public", include_undecided=True).references
+    ]
+    encoded = " ".join(item.model_dump_json() for item in public)
+    assert "PRIVATE_UNDECIDED_REASON" not in encoded
+    assert all(item.flag_id is None for item in public if item.role.startswith("undecided_"))
+
+
+def test_undecided_pairs_are_left_out_unless_asked_for():
+    current = report(integrity_modules=[undecided_module(("Objective one.", "Result one."))])
+    refs = build(current).references
+    assert not any(ref.owner_kind == "module" for ref in refs)
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"role": "finding_excerpt"},
+        {"owner_kind": "finding"},
+        {"owner_id": 99},
+        {"criterion_id": 5},
+    ],
+)
+def test_undecided_roles_belong_only_to_their_own_check(change):
+    from app.report.evidence_references import _reference_id
+
+    current = report(integrity_modules=[undecided_module(("Objective one.", "Result one."))])
+    values = next(
+        ref
+        for ref in build(current, include_undecided=True).references
+        if ref.owner_kind == "module"
+    ).model_dump(exclude={"reference_id"})
+    values.update(change)
+    with pytest.raises(ValidationError):
+        EvidenceSourceReference(reference_id=_reference_id(values), **values)
+
+
+@pytest.mark.parametrize("extra", ["reason", "rater", "verdict", "owner_id", "source_sha256"])
+def test_public_reference_schema_rejects_any_extra_field(extra):
+    from app.report.evidence_references import PublicEvidenceReferenceOut
+
+    values = public_evidence_reference(build(audience="public").references[0]).model_dump()
+    values[extra] = "anything"
+    with pytest.raises(ValidationError):
+        PublicEvidenceReferenceOut.model_validate(values)
+
+
+def test_identical_undecided_pairs_keep_distinct_references():
+    current = report(
+        integrity_modules=[
+            undecided_module(
+                ("Same objective.", "Same result."), ("Same objective.", "Same result.")
+            )
+        ]
+    )
+    for module in current.integrity_modules:
+        for pair in module.undetermined.pairs:
+            pair.intent_anchor, pair.outcome_anchor = "p. 3", "p. 40"
+    refs = [
+        ref
+        for ref in build(current, include_undecided=True).references
+        if ref.owner_kind == "module"
+    ]
+    assert len(refs) == 4 and len({ref.reference_id for ref in refs}) == 4

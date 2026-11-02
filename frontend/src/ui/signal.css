@@ -9254,22 +9254,49 @@
   .signal-shared-pairs__head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--signal-space-3); }
   .signal-shared-pairs__title { font-weight: var(--signal-weight-semibold); }
   .signal-shared-pairs > div[id] { display: grid; gap: var(--signal-space-3); }
-  /* Two cards a row: four shown fill two rows, and no card stretches to its neighbour's height. */
-  .signal-shared-pairs__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: var(--signal-space-3); margin: 0; padding: 0; list-style: none; }
-  .signal-pair-card { display: grid; align-content: start; gap: var(--signal-space-2); padding: var(--signal-space-4); border: var(--signal-border-hairline) solid var(--color-signal-border); border-radius: var(--signal-radius-control); background: var(--color-signal-surface); min-inline-size: 0; }
+  /* One objective a row, full width: the objective across the top, the results
+     it was compared with side by side under it. Nothing is paired with an
+     unrelated card, so no card is left half empty. */
+  .signal-shared-pairs__grid { display: grid; gap: var(--signal-space-3); margin: 0; padding: 0; list-style: none; }
+  .signal-pair-card { display: grid; gap: var(--signal-space-3); padding: var(--signal-space-4); border: var(--signal-border-hairline) solid var(--color-signal-border); border-radius: var(--signal-radius-control); background: var(--color-signal-surface); min-inline-size: 0; }
   .signal-pair-card__tag { font-size: var(--signal-type-label); font-weight: var(--signal-weight-semibold); color: var(--color-signal-ink-secondary); }
   .signal-pair-card__tag span { font-weight: var(--signal-weight-medium); }
   .signal-pair-card__quote { margin: 0; padding-inline-start: var(--signal-space-3); border-inline-start: var(--signal-border-emphasis) solid var(--color-signal-brand); overflow-wrap: anywhere; }
-  .signal-pair-card__results { display: grid; gap: var(--signal-space-1); padding-block-start: var(--signal-space-2); border-block-start: var(--signal-border-hairline) solid var(--color-signal-border); }
-  .signal-pair-card__results ul { display: grid; gap: var(--signal-space-2); margin: 0; padding: 0; list-style: none; }
-  .signal-pair-card__results li { display: grid; gap: var(--signal-space-1); font-size: var(--signal-type-label); overflow-wrap: anywhere; }
+  .signal-pair-card__objective { display: grid; gap: var(--signal-space-2); min-inline-size: 0; }
+  /* The objective's link starts where its quote's text starts, like the results' links. */
+  .signal-pair-card__objective .signal-pair-card__source { padding-inline-start: calc(var(--signal-border-emphasis) + var(--signal-space-3)); }
+  .signal-pair-card__results { display: grid; gap: var(--signal-space-2); margin: 0; padding-block-start: var(--signal-space-3); border-block-start: var(--signal-border-hairline) solid var(--color-signal-border); min-inline-size: 0; }
+  /* Results as equal cells in a row; each cell's page link sits on its bottom
+     edge so the links in a row line up. */
+  .signal-pair-card__results ul { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--signal-space-3); margin: 0; padding: 0; list-style: none; }
+  .signal-pair-card__results ul[data-columns="2"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  /* A single result keeps its own width rather than a mostly empty full-width box. */
+  .signal-pair-card__results ul[data-columns="1"] { grid-template-columns: minmax(0, max-content); }
+  .signal-pair-card__results li { display: grid; grid-template-rows: 1fr auto; gap: var(--signal-space-2); padding: var(--signal-space-3); border: var(--signal-border-hairline) solid var(--color-signal-border); border-radius: var(--signal-radius-control); background: var(--color-signal-canvas); font-size: var(--signal-type-label); overflow-wrap: anywhere; }
   .signal-pair-card__results cite { font-style: normal; color: var(--color-signal-ink-secondary); }
+  /* A statement's page with the button that opens it, on one wrapping row. */
+  .signal-pair-card__source { display: block; font-size: var(--signal-type-label); }
+  /* A text link, flush with the quote above it: no button padding to push it
+     off the card's left edge, but still a full-height target. */
+  .signal-pair-card__source .signal-pair-card__open { min-height: var(--signal-inline-action-min-height); padding: 0; font-size: var(--signal-type-label); text-decoration: underline; text-underline-offset: var(--signal-link-underline-offset); }
+  .signal-pair-card__source .signal-pair-card__open:hover { background: transparent; text-decoration-thickness: var(--signal-border-emphasis); }
+  .signal-pair-card__source cite { font-style: normal; color: var(--color-signal-ink-secondary); }
+  .signal-pair-dialog { display: grid; gap: var(--signal-space-2); }
+  .signal-statement-page:focus-visible { outline: var(--signal-border-emphasis) solid var(--color-signal-focus); outline-offset: var(--signal-space-1); }
+  /* Beside the page, the statement stays in view while the page scrolls; when
+     stacked, it comes first so the not-a-finding line is read before the page. */
+  .signal-dialog--statement-page .signal-source-context[data-layout="split"] .signal-source-context__explanation { position: sticky; inset-block-start: 0; }
+  .signal-dialog--statement-page .signal-source-context[data-layout="stacked"] .signal-source-context__explanation { order: -1; }
+  .signal-pair-dialog :is(h3, h4, blockquote, ul, p) { margin: 0; }
+  .signal-pair-dialog blockquote { padding-inline-start: var(--signal-space-3); border-inline-start: var(--signal-border-emphasis) solid var(--color-signal-brand); overflow-wrap: anywhere; }
+  .signal-pair-dialog ul { display: grid; gap: var(--signal-space-2); padding: 0; list-style: none; overflow-wrap: anywhere; }
+  .signal-pair-dialog cite { font-style: normal; color: var(--color-signal-ink-secondary); }
   /* Counts as tiles to scan: the number large, its label small under it. */
   .signal-fact-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(var(--signal-fact-tile-min), 1fr)); gap: var(--signal-space-3); margin: 0; }
   .signal-shared-module-status__headline::before { outline: var(--signal-border-hairline) solid var(--color-signal-ink-secondary); }
   @media (max-width: 1023px) {
-    .signal-shared-pairs__grid { grid-template-columns: minmax(0, 1fr); }
     .signal-fact-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .signal-pair-card__results ul[data-columns="3"] { grid-template-columns: minmax(0, 1fr); }
   }
   .signal-fact-tiles > div { display: flex; flex-direction: column-reverse; gap: var(--signal-space-1); padding: var(--signal-space-3) var(--signal-space-4); border: var(--signal-border-hairline) solid var(--color-signal-border); border-radius: var(--signal-radius-control); background: var(--color-signal-surface); }
   .signal-fact-tiles dt { font-size: var(--signal-type-label); color: var(--color-signal-ink-secondary); }

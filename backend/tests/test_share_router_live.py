@@ -670,7 +670,21 @@ def test_new_link_details_are_allowlisted_and_revision_bound(
                         kind=CheckKind.internal_agreement,
                         outcome=ResultOutcome.escalated,
                         score=None,
-                        detail={},
+                        detail={
+                            "undetermined": {
+                                "count": 1,
+                                "compared_count": 2,
+                                "pairs": [
+                                    {
+                                        "intent_text": "The saved objective.",
+                                        "intent_anchor": "page 1",
+                                        "outcome_text": "The saved result.",
+                                        "outcome_anchor": "page 3",
+                                        "reason": "PRIVATE_UNDECIDED_REASON_NEVER_SHARED",
+                                    }
+                                ],
+                            }
+                        },
                     )
                     session.add(result)
                     await session.flush()
@@ -722,6 +736,13 @@ def test_new_link_details_are_allowlisted_and_revision_bound(
     }
     assert "PRIVATE_" not in response.text
     assert len(body["report"]["integrity_modules"]) == 4
+    agreement = next(
+        module
+        for module in body["report"]["integrity_modules"]
+        if module["check_kind"] == "internal_agreement"
+    )
+    assert agreement["undetermined"]["pairs"][0]["intent_text"] == "The saved objective."
+    assert agreement["undetermined"]["pairs"][0]["reason"] is None
     asyncio.run(change(revision=True))
     stale = client.get(f"/shared/{token}/report").json()
     assert stale["detail_snapshot"] == "stale"
@@ -790,3 +811,61 @@ def test_public_projection_rechecks_token_after_inflight_database_change(
     assert response.status_code == 410
     assert response.json()["error"]["code"] == "gone"
     assert "finding_details" not in response.text
+
+
+def test_a_link_saved_before_pair_reasons_were_withheld_still_hides_them(
+    logged_in_with_a_done_run, api_scratch_url, monkeypatch
+):
+    import asyncio
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    import app.share.service as share_service
+    from app.db import sqlalchemy_url
+    from app.models.enums import CheckKind, ResultOutcome
+    from app.models.run import CheckResult
+
+    client, run_id = logged_in_with_a_done_run
+
+    async def add_pair():
+        engine = create_async_engine(sqlalchemy_url(api_scratch_url))
+        try:
+            async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                session.add(
+                    CheckResult(
+                        check_run_id=run_id,
+                        criterion_id=None,
+                        kind=CheckKind.internal_agreement,
+                        outcome=ResultOutcome.passed,
+                        score=None,
+                        detail={
+                            "undetermined": {
+                                "count": 1,
+                                "compared_count": 1,
+                                "pairs": [
+                                    {
+                                        "intent_text": "Objective.",
+                                        "intent_anchor": "page 1",
+                                        "outcome_text": "Result.",
+                                        "outcome_anchor": "page 2",
+                                        "reason": "PRIVATE_SAVED_BY_AN_OLDER_LINK",
+                                    }
+                                ],
+                            }
+                        },
+                    )
+                )
+                await session.commit()
+        finally:
+            await engine.dispose()
+
+    asyncio.run(add_pair())
+    # The link is saved the way it was before the reason was withheld.
+    original = share_service.public_modules
+    monkeypatch.setattr(share_service, "public_modules", lambda modules: modules)
+    token = client.post(f"/check-runs/{run_id}/share", json={}).json()["token"]
+    monkeypatch.setattr(share_service, "public_modules", original)
+    response = client.get(f"/shared/{token}/report")
+    assert response.status_code == 200
+    assert response.json()["detail_snapshot"] == "current"
+    assert "PRIVATE_SAVED_BY_AN_OLDER_LINK" not in response.text

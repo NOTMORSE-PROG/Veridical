@@ -497,10 +497,12 @@
   --signal-review-selected-ring-width: var(--signal-focus-ring-width);
   --signal-review-detail-measure: 42rem;
   /* Adviser check panel: pair cards, count tiles, labelled fact rows. */
-  --signal-pair-card-min: 18rem;
+  --signal-pair-result-min: 16rem;
   --signal-fact-tile-min: 9rem;
   --signal-fact-row-label-min: 10rem;
   --signal-fact-row-label-max: 14rem;
+  /* An inline text action still meets the 24px target minimum (WCAG 2.5.8). */
+  --signal-inline-action-min-height: 1.5rem;
   --signal-review-queue-row-min-height: 4.5rem;
   --signal-border-hairline: 1px;
   --signal-border-emphasis: 2px;

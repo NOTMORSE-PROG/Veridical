@@ -353,10 +353,13 @@ async def get_shared_report(session: AsyncSession, token: str) -> SharedReportOu
     public = _to_public_report(report)
     if snapshot is not None:
         public.subject = snapshot.subject
-        public.integrity_modules = snapshot.integrity_modules
+        # Filtered again on read: links saved before a field was withheld
+        # still hold it in their snapshot.
+        public.integrity_modules = public_modules(snapshot.integrity_modules)
     else:
         # Without saved detail the link still says whether each check ran,
-        # from the live report, and nothing more: no counts, pairs or quotes.
+        # from the live report, and nothing more in this report: no counts,
+        # pairs or quotes.
         public.integrity_modules = module_states(report.integrity_modules)
     # Recheck after every asynchronous projection; revocation can win in flight.
     from app.report.evidence_service import authorize_evidence_run

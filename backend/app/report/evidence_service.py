@@ -200,6 +200,7 @@ async def recorded_evidence_assessment(
         expected_flag_ids=membership,
         source_sha256=manuscript.content_hash,
         audience=audience,
+        include_undecided=True,
     )
     mode = report.llm_mode if report.llm_mode in {"fake", "real", "unknown"} else "unknown"
     identity = json.dumps(

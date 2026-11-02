@@ -23,6 +23,7 @@ def assessment(audience="private", *, mode="real", identity="a" * 64):
         check_run_id=7,
         manuscript_id=8,
         assessment_revision=3,
+        integrity_modules=[],
         results=[
             Row(
                 check_result_id=11,

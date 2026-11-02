@@ -28,6 +28,8 @@ Role = Literal[
     "finding_scope",
     "agreement_intent",
     "agreement_outcome",
+    "undecided_intent",
+    "undecided_outcome",
     "reuse_own",
     "reuse_match",
 ]
@@ -74,7 +76,7 @@ class EvidenceSourceReference(BaseModel):
     source_sha256: str | None = Field(pattern=r"^[a-f0-9]{64}$")
     audience: Audience
     render_policy: RenderPolicy
-    owner_kind: Literal["criterion", "finding"]
+    owner_kind: Literal["criterion", "finding", "module"]
     owner_id: int = Field(gt=0)
     criterion_id: int | None = Field(gt=0)
     role: Role
@@ -100,6 +102,12 @@ class EvidenceSourceReference(BaseModel):
         if criterion != (self.role in {"criterion_evidence", "criterion_scope"}) or criterion != (
             self.criterion_id is not None
         ):
+            raise ValueError("Evidence owner and role are inconsistent")
+        # A pair the agreement check could not decide belongs to the check, not
+        # to a criterion or a saved finding, and is always the manuscript's own text.
+        if (self.owner_kind == "module") != (
+            self.role in {"undecided_intent", "undecided_outcome"}
+        ) or (self.owner_kind == "module" and self.owner_id != self.check_run_id):
             raise ValueError("Evidence owner and role are inconsistent")
         if foreign != (self.role == "reuse_match") or (foreign and self.source_sha256 is not None):
             raise ValueError("A comparison excerpt cannot acquire an original source binding")
@@ -175,6 +183,7 @@ def build_evidence_reference_snapshot(
     expected_flag_ids: Sequence[int],
     source_sha256: str | None,
     audience: Audience,
+    include_undecided: bool = False,
 ) -> EvidenceReferenceSnapshot:
     """Copy one coherent aggregate, retaining unplaceable entries explicitly."""
     if audience not in {"private", "public"}:
@@ -320,6 +329,34 @@ def build_evidence_reference_snapshot(
                 0,
                 flag.evidence_excerpt,
                 flag.page_anchor,
+            )
+    agreement = (
+        next(
+            (m for m in report.integrity_modules if m.check_kind == "internal_agreement"),
+            None,
+        )
+        if include_undecided
+        else None
+    )
+    if agreement is not None and agreement.undetermined is not None:
+        for index, pair in enumerate(agreement.undetermined.pairs):
+            append(
+                "module",
+                report.check_run_id,
+                None,
+                "undecided_intent",
+                index,
+                pair.intent_text,
+                pair.intent_anchor,
+            )
+            append(
+                "module",
+                report.check_run_id,
+                None,
+                "undecided_outcome",
+                index,
+                pair.outcome_text,
+                pair.outcome_anchor,
             )
     return EvidenceReferenceSnapshot(
         schema_version="evidence-reference-v1",
