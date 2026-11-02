@@ -361,3 +361,111 @@ async def test_a_link_without_saved_detail_still_says_whether_each_check_ran(mon
         ("citation_integrity", "partial", "source_reading_order_unresolved"),
     ]
     assert all(m.undetermined is None and m.agreement_scope is None for m in states)
+
+
+LENSMATCH_LIKE = {
+    "n_intents": 4,
+    "n_intents_extracted": 17,
+    "n_outcomes": 9,
+    "objective_sections": {
+        "objectives_section_identified": True,
+        "n_objectives_kept": 4,
+        "n_objectives_set_aside": 3,
+        "set_aside": [
+            {
+                "text": "Smith aimed to measure trust.",
+                "anchor": "p. 21",
+                "chapter": "Chapter 2: Review of Related Literature",
+                "chapter_role": "literature",
+            },
+            {
+                "text": "Jones sought to reduce error.",
+                "anchor": "p. 24",
+                "chapter": "Chapter 2: Review of Related Literature",
+                "chapter_role": "literature",
+            },
+            {
+                "text": "To collect the survey data.",
+                "anchor": "p. 40",
+                "chapter": "Chapter 3: Methodology",
+                "chapter_role": "methodology",
+            },
+        ],
+    },
+}
+
+
+def test_objectives_set_aside_reach_the_report_by_role_with_their_chapters():
+    value = scope(LENSMATCH_LIKE)
+    assert (value.n_objectives, value.n_objectives_extracted, value.n_objectives_set_aside) == (
+        4,
+        17,
+        3,
+    )
+    assert value.objectives_section_identified is True
+    assert [(r.role, r.count) for r in value.objectives_set_aside_by_role] == [
+        ("literature", 2),
+        ("methodology", 1),
+    ]
+    first = value.objectives_set_aside[0]
+    assert (first.text, first.page_anchor, first.role, first.chapter) == (
+        "Smith aimed to measure trust.",
+        "p. 21",
+        "literature",
+        "Chapter 2: Review of Related Literature",
+    )
+    assert value.n_objectives_kept_despite_role is None
+
+
+def test_a_run_that_kept_every_aim_anyway_says_how_many_it_would_have_set_aside():
+    detail = {
+        "n_intents": 2,
+        "n_intents_extracted": 2,
+        "n_outcomes": 3,
+        "objective_sections": {
+            "objectives_section_identified": True,
+            "n_objectives_kept": 2,
+            "n_objectives_set_aside": 0,
+            "set_aside": [],
+            "kept_despite_role": [{"text": "a"}, {"text": "b"}],
+        },
+    }
+    value = scope(detail)
+    assert value.n_objectives_kept_despite_role == 2 and value.objectives_set_aside == []
+
+
+@pytest.mark.parametrize("bad", [[{"anchor": "p. 3"}], ["text"], [{"text": 4}]])
+def test_a_malformed_objective_entry_makes_that_part_unknown(bad):
+    detail = {
+        **LENSMATCH_LIKE,
+        "objective_sections": {**LENSMATCH_LIKE["objective_sections"], "set_aside": bad},
+    }
+    value = scope(detail)
+    assert value.n_objectives_set_aside is None and value.objectives_set_aside == []
+
+
+def test_an_older_run_without_objective_sections_says_nothing_new():
+    value = scope({"n_intents": 4, "n_outcomes": 6})
+    assert value.n_objectives_extracted is None and value.n_objectives_set_aside is None
+    assert value.objectives_set_aside == [] and value.objectives_set_aside_by_role == []
+
+
+def test_a_shared_copy_keeps_the_objective_counts_but_not_the_statements():
+    from app.report.module_scope import public_modules
+
+    rows = [
+        SimpleNamespace(
+            kind=CheckKind.internal_agreement,
+            criterion_id=None,
+            outcome=ResultOutcome.escalated,
+            detail=LENSMATCH_LIKE,
+        )
+    ]
+    [shared] = [
+        m
+        for m in public_modules(integrity_modules(rows, set()))
+        if m.check_kind == "internal_agreement"
+    ]
+    assert shared.agreement_scope.n_objectives_set_aside == 3
+    assert shared.agreement_scope.objectives_set_aside == []
+    assert "Smith aimed" not in shared.model_dump_json()

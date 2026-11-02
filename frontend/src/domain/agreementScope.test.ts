@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import copy from "../../../backend/app/report/data/agreement_scope.json";
 import type { AgreementScopeOut } from "../api/types";
-import { AGREEMENT_SCOPE_COPY, countInconsistencies, foundLine, interruptedLine, matchedLine, outcomeLines, rolePhrase, setAsideLines } from "./agreementScope";
+import { AGREEMENT_SCOPE_COPY, countInconsistencies, foundLine, interruptedLine, matchedLine, objectiveSetAsideLines, outcomeLines, rolePhrase, setAsideLines } from "./agreementScope";
 
 const scope = (patch: Partial<AgreementScopeOut> = {}): AgreementScopeOut => ({
   n_objectives: 17, n_results: 34, results_section_identified: true, n_results_set_aside: 3, n_results_too_short: 2,
@@ -31,6 +31,32 @@ describe("agreement scope copy", () => {
     for (const [role, [phrase]] of Object.entries(copy.roles)) expect(rolePhrase(role)).toBe(phrase);
     const folded = scope({ set_aside_by_role: Array.from({ length: copy.role_folding.fold_at }, (_, i) => ({ role: `part${i}`, count: 1 })), n_results_too_short: 0 });
     expect(setAsideLines(folded)).toHaveLength(copy.role_folding.shown + 1);
+    expect(AGREEMENT_SCOPE_COPY.objectiveOther).toBe(copy.objective_other);
+    expect(AGREEMENT_SCOPE_COPY.objectiveSetAsideListHeading).toBe(copy.objective_set_aside_list_heading);
+    expect(AGREEMENT_SCOPE_COPY.objectiveSetAsideListIntro).toBe(copy.objective_set_aside_list_intro);
+    expect(AGREEMENT_SCOPE_COPY.objectivesKeptDespiteRole).toBe(copy.objectives_kept_despite_role);
+    expect(AGREEMENT_SCOPE_COPY.objectivesNotIdentified).toBe(copy.objectives_not_identified);
+    for (const [role, reason] of Object.entries(copy.objective_roles)) {
+      expect(objectiveSetAsideLines(scope({ n_objectives_set_aside: 2, objectives_set_aside_by_role: [{ role, count: 2 }] }))[0]).toContain(`usually ${reason}.`);
+    }
+  });
+
+  it("lists the objectives set aside by part of the paper, with why", () => {
+    const s = scope({ n_objectives: 5, n_objectives_extracted: 9, n_objectives_set_aside: 4, objectives_section_identified: true,
+      objectives_set_aside_by_role: [{ role: "literature", count: 3 }, { role: "appendix", count: 1 }] });
+    expect(foundLine(s)).toBe("Found 9 possible objectives and 34 possible results. Of the objectives, 5 were kept to compare and 4 were set aside.");
+    expect(objectiveSetAsideLines(s)).toEqual([
+      "3 possible objectives from the literature review were set aside, because that part of a paper usually describes other studies.",
+      "1 possible objective from the appendices was set aside, because that part of a paper usually holds supporting material.",
+    ]);
+  });
+
+  it("says why no objective was set aside, and nothing for an older run", () => {
+    expect(objectiveSetAsideLines(scope({ n_objectives: 4, n_objectives_kept_despite_role: 4 })))
+      .toEqual([copy.objectives_kept_despite_role.replace("{n}", "4")]);
+    expect(objectiveSetAsideLines(scope({ objectives_section_identified: false }))).toEqual([copy.objectives_not_identified]);
+    expect(objectiveSetAsideLines(scope())).toEqual([]);
+    expect(foundLine(scope())).toBe("Found 17 possible objectives and 34 possible results.");
   });
 
   it("reads report 44 as coverage, with the compared count and never an agreeing count", () => {
