@@ -1,0 +1,23 @@
+{
+  "_note": "BUG-648: the report summary's 'Criteria needing your judgment' block (screen 4h). Two counts that mean different things: criteria with no accepted grade (escalated, the instructor must grade them) and automatic grades kept with a caution or a later note (the instructor should check them before relying on them). Never say nothing is waiting while a row asks to be checked. Counts are row counts, not judgments.",
+  "kicker_grade": "Waiting for you",
+  "kicker_check": "Check first",
+  "kicker_none": "Criteria",
+  "heading": "Criteria needing your judgment",
+  "badge": "{grade} to grade · {check} to check",
+  "grade_none": "No criterion needs a grade from you.",
+  "grade_one": "1 criterion needs a grade from you.",
+  "grade_many": "{count} criteria need a grade from you.",
+  "grade_hint_one": "It has no accepted grade yet. Grade it in manuscript review, beside the manuscript.",
+  "grade_hint_many": "These have no accepted grade yet. Grade them in manuscript review, beside the manuscript.",
+  "check_none": "No automatic grade asks you to check it first.",
+  "check_one": "1 automatic grade asks you to check it before relying on it.",
+  "check_many": "{count} automatic grades ask you to check them before relying on them.",
+  "check_hint_one": "Its card in Criterion records says what to check.",
+  "check_hint_many": "Each card in Criterion records says what to check.",
+  "check_list_label": "Automatic grades to check first",
+  "none_title": "No criterion needs a grade from you",
+  "none_body": "Every criterion has a recorded grade or assessment limit, and no automatic grade asks you to check it first.",
+  "kpi_label": "Automatic grades to check first",
+  "kpi_link_label": "Automatic grades to check first: {count}. Go to the list."
+}

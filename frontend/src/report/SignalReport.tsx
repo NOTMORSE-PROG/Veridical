@@ -38,6 +38,9 @@ import { uncountedHighLine } from "../domain/readinessExclusion";
 import { needsReviewReason } from "../domain/readinessHeadline";
 import { isUncountedRecencyNote } from "../domain/findingSummary";
 import { isLegacyUndecided } from "../domain/undecidedPairs";
+import { checkFirstRows, JUDGMENT_SUMMARY_COPY, judgmentSummary } from "../domain/reportJudgmentSummary";
+import { automaticGradeChip } from "../domain/automaticGrade";
+import { criterionRecordId } from "./savedJudgment";
 
 type RecordTab = "grades" | "findings" | "images" | "limits";
 const RECORD_TAB_PARAM = "section";
@@ -126,6 +129,8 @@ export function SignalReportPage() {
 
   const identity = report ? manuscriptIdentity(report.manuscript_group_label, report.manuscript_original_filename) : undefined;
   const limits = report ? coverageItems(report) : [];
+  const checkFirst = report ? checkFirstRows(report.results) : [];
+  const judgment = judgmentSummary(report?.pending_review_count ?? 0, checkFirst.length);
   const scopeUnconfirmed = report ? unconfirmedAutomaticRuleRows(report.results).length > 0 : false;
   const findingsCurrent = flagsQuery.isSuccess && !flagsQuery.isError && flagsQuery.fetchStatus === "idle";
   const hasOpenFindings = findingsCurrent && flagsQuery.data?.some(flag => !isOptionalComparisonLead(flag) && !flag.overridden);
@@ -180,6 +185,17 @@ export function SignalReportPage() {
             <dl>
               <div><dt>Unresolved criteria</dt><dd>{report.pending_review_count}</dd></div>
               <div>
+                <dt>{JUDGMENT_SUMMARY_COPY.kpi_label}</dt>
+                <dd>
+                  {checkFirst.length > 0 ? (
+                    <Link to={jumpTo("review-criteria")} onClick={focusReportJumpTarget} className="signal-report-hero__kpi-link" aria-label={judgment.kpiLinkLabel}>
+                      {checkFirst.length}
+                      <span aria-hidden="true"> →</span>
+                    </Link>
+                  ) : 0}
+                </dd>
+              </div>
+              <div>
                 <dt>Open high-severity findings counted for readiness</dt>
                 <dd>
                   {report.unresolved_high_flag_count > 0 ? (
@@ -218,12 +234,23 @@ export function SignalReportPage() {
           <ReportAssessmentContext notices={reportAssessmentNotices(report, "report")} />
           <div className="signal-report-summary-row">
           <section id="review-criteria" tabIndex={-1} className={report.pending_review_count > 0 ? "signal-review-section signal-review-section--attention" : "signal-review-section"} aria-labelledby="report-pending-heading">
-            <div className="signal-review-section__heading"><div><p className="signal-section-kicker">{report.pending_review_count > 0 ? "Waiting for you" : "Criteria"}</p><h2 id="report-pending-heading">Criteria needing your judgment</h2></div><span>{report.pending_review_count} {report.pending_review_count === 1 ? "criterion" : "criteria"}</span></div>
+            <div className="signal-review-section__heading"><div><p className="signal-section-kicker">{judgment.kicker}</p><h2 id="report-pending-heading">{JUDGMENT_SUMMARY_COPY.heading}</h2></div><span>{judgment.badge}</span></div>
             <div className="signal-review-section__body">
-              {report.pending_review_count > 0 ? <>
-                <p className="signal-field-hint">These have no accepted grade yet. Grade them in manuscript review, beside the manuscript.</p>
-                {pendingReviewQuery.data && pendingReviewQuery.data.length > 0 && <ul className="signal-chip-list">{pendingReviewQuery.data.map(item => <li key={item.check_result_id}>{item.criterion_text}</li>)}</ul>}
-              </> : <EmptyState title="Nothing waiting for you"><p>Every criterion has a recorded grade or assessment limit.</p></EmptyState>}
+              {report.pending_review_count > 0 || checkFirst.length > 0 ? <>
+                <p><strong>{judgment.grade}</strong></p>
+                {report.pending_review_count > 0 && <>
+                  <p className="signal-field-hint">{judgment.gradeHint}</p>
+                  {pendingReviewQuery.data && pendingReviewQuery.data.length > 0 && <ul className="signal-chip-list">{pendingReviewQuery.data.map(item => <li key={item.check_result_id}>{item.criterion_text}</li>)}</ul>}
+                </>}
+                <p><strong>{judgment.check}</strong></p>
+                {checkFirst.length > 0 && <>
+                  <p className="signal-field-hint">{judgment.checkHint}</p>
+                  <ul className="signal-chip-list" aria-label={JUDGMENT_SUMMARY_COPY.check_list_label}>{checkFirst.map(row => <li key={row.criterion_id}>
+                    <Link to={jumpTo(criterionRecordId(id, row.criterion_id))} onClick={focusReportJumpTarget}>{row.text}</Link>{" "}
+                    <span className="signal-field-hint">{automaticGradeChip(row)}</span>
+                  </li>)}</ul>
+                </>}
+              </> : <EmptyState title={JUDGMENT_SUMMARY_COPY.none_title}><p>{JUDGMENT_SUMMARY_COPY.none_body}</p></EmptyState>}
             </div>
           </section>
           <SignalDecisionPanel report={report} manuscriptLabel={identity?.primary ?? report.manuscript_group_label} readFailed={readFailed} retrying={fetchStatus === "fetching"}
