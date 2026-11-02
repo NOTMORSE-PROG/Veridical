@@ -1,6 +1,6 @@
 // Screen 4l — public, read-only adviser view (F8.7). This is deliberately
 // outside the authenticated workspace and exposes only the public contract.
-import { type MouseEvent, type ReactNode, useEffect, useLayoutEffect, useRef } from "react";
+import { type MouseEvent, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link, useLocation, useParams, useSearchParams } from "react-router";
 import { ApiError } from "../api/client";
 import { DECISION_LABEL } from "../domain/decisionTone";
@@ -36,6 +36,7 @@ import { CITATION_HISTORY_TITLE } from "../domain/citationHistory";
 import { instructorAnchor } from "../domain/sourceAnchor";
 import { resultDisplay } from "./ResultsTable";
 import { claimFocusContinuation, type FocusContinuation } from "../routing/focusContinuation";
+import { QUIET_ROUTE_CHANGE } from "../routing/RouteAnnouncer";
 
 function useNoindexMeta() {
   useEffect(() => {
@@ -71,6 +72,10 @@ export function AdviserViewPage() {
   const selectedSection = params.get("section") === "findings" ? "findings" : "grades";
   const requestedCriterion = selectedCriterionId(params.get("criterion"));
   const pendingFocus = useRef<{ target: string; claim: FocusContinuation } | undefined>(undefined);
+  // BUG-680: choosing a check keeps focus on its button; this says what the
+  // panel below now shows. Cleared first so pressing the same check again
+  // is announced again.
+  const [checkShown, setCheckShown] = useState<string | null>(null);
   useLayoutEffect(() => {
     const pending = pendingFocus.current;
     if (!pending) return;
@@ -223,9 +228,18 @@ export function AdviserViewPage() {
           }))}
           counts={new Map(["internal_agreement", "citation_integrity", "statistical_forensics", "originality_reuse"].map(kind => [kind, flags.filter(flag => flag.check_kind === kind).length]))}
           onSelect={kind => {
-            if (document.activeElement instanceof HTMLElement) follow(document.activeElement, "shared-findings-heading");
-            const next = new URLSearchParams(params); next.set("module", kind); next.delete("finding"); setParams(next);
+            setCheckShown(null);
+            // The panel says what changed itself, so the route announcer stays quiet.
+            const next = new URLSearchParams(params); next.set("module", kind); next.delete("finding"); setParams(next, { state: QUIET_ROUTE_CHANGE });
+            requestAnimationFrame(() => {
+              setCheckShown(kind);
+              // Zoomed in, the new panel can start below the fold: bring it into
+              // view without moving focus off the button.
+              const panel = document.getElementById("shared-selected-module");
+              if (panel && panel.getBoundingClientRect().top > window.innerHeight) panel.scrollIntoView({ block: "nearest" });
+            });
           }} />
+        <p role="status" className="sr-only">{checkShown === selectedModule ? `Showing ${INTEGRITY_MODULES.find(item => item.kind === selectedModule)?.label}: ${sharedStatus.title}.` : ""}</p>
         <div id="shared-selected-module">
           {/* What to verify is said only when there is something to verify. */}
           {findingGroups.length > 0 ? <IntegrityModuleSummary kind={selectedModule} /> : <h3 className="signal-shared-check-title">{INTEGRITY_MODULES.find(item => item.kind === selectedModule)?.label}</h3>}
