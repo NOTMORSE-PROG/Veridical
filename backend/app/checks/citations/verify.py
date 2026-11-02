@@ -67,6 +67,7 @@ from app.checks.citations.recency import (
     unassessed_summary,
 )
 from app.checks.citations.retraction_lead import (
+    doi_notice_lead,
     load_retraction_lead_policy,
     openalex_retraction_lead,
 )
@@ -132,6 +133,9 @@ class VerdictKind(StrEnum):
     # as `existence_confirmed`, never re-flagged.
     instructor_confirmed = "instructor_confirmed"
     metadata_mismatch = "metadata_mismatch"
+    # BUG-683: the cited DOI's own record is a retraction notice, not the
+    # retracted work. Named as a notice, never counted as a retraction.
+    retraction_notice = "retraction_notice"
 
 
 @dataclass(frozen=True)
@@ -249,7 +253,11 @@ async def verify_citation(
         if verdict.result and verdict.result.found:
             if not same_doi(returned_doi(verdict.result), citation.doi):
                 return CitationVerdict(VerdictKind.unassessed, verdict.result)
-            if verdict.kind in (VerdictKind.retracted, VerdictKind.corrected):
+            if verdict.kind in (
+                VerdictKind.retracted,
+                VerdictKind.corrected,
+                VerdictKind.retraction_notice,
+            ):
                 return verdict
             comparison = compare_metadata(
                 citation, verdict.result, policy=title_policy, settings=settings
@@ -599,6 +607,10 @@ def _verdict_from_result(
 ) -> CitationVerdict:
     if not result.found:
         return CitationVerdict(VerdictKind.not_found, result, key_kind, key_value)
+    if result.provider == "crossref" and crossref_client.retraction_notice_targets(result.raw):
+        # Read from the stored record, so a notice cached before this rule
+        # existed (and stored as retracted) is told apart too.
+        return CitationVerdict(VerdictKind.retraction_notice, result)
     if result.retracted:
         return CitationVerdict(VerdictKind.retracted, result)
     if result.is_correction:
@@ -679,6 +691,27 @@ def _verdict_flag_draft(
                 if verdict.metadata_comparison
                 else None,
             },
+        )
+    if verdict.kind == VerdictKind.retraction_notice:
+        try:
+            notice_policy = load_retraction_lead_policy(
+                (settings or get_settings()).citation_openalex_retraction_lead_file
+            )
+        except (OSError, ValueError, UnicodeError):
+            notice_policy = None
+        if notice_policy is None:
+            # Without the wording the notice cannot be described, and it must
+            # never fall through to a counted retraction.
+            return None
+        return CitationFlagDraft(
+            severity=FlagSeverity(notice_policy.severity),
+            evidence_excerpt=citation.raw_text,
+            page_anchor=anchor,
+            detail=doi_notice_lead(
+                verdict.result,
+                crossref_client.retraction_notice_targets(verdict.result.raw),
+                notice_policy,
+            ),
         )
     if verdict.kind == VerdictKind.retracted:
         detail = (verdict.result and verdict.result.retraction_detail) or "retracted"

@@ -14,6 +14,10 @@
   "retracted_work_reason": "OpenAlex lists this work ('{title}') as possibly retracted. Crossref's title search did not find it, so this could not be confirmed there. Please check {link}.",
   "retracted_work_reason_crossref_not_asked": "OpenAlex lists this work ('{title}') as possibly retracted. Crossref was not searched for it, so this is not confirmed. Please check {link}.",
   "notice_reason": "This entry matches a retraction notice ('{title}'), not the research paper it retracts. Please check which one the entry means to cite ({link}).",
+  "_doi_notice_note": "BUG-683: an entry whose DOI's own Crossref record is a retraction notice (its retraction relation points at another DOI). Same kind and label as a notice OpenAlex lists; {retracted} names the retracted paper's link(s).",
+  "doi_notice_reason": "This entry's DOI leads to a retraction notice ('{title}'), not to the research paper it retracts ({retracted}). Please check which one the entry means to cite.",
+  "retracted_link": "https://doi.org/{doi}",
+  "retracted_link_separator": " and ",
   "link_doi": "the publisher's page: {url}",
   "link_record": "the OpenAlex record: {url}",
   "link_unknown": "the title on the publisher's site (the record could not be linked)"
