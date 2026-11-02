@@ -155,7 +155,10 @@ def test_apparent_web_sources_are_named_but_never_decide_the_level(data):
     assert "verdict" not in row.detail
     # Information only: they may be journal articles retrieved online.
     reason = row.detail["reason"]
-    assert "Entries that look like web pages: 9. Every level of this format allows no more than 2" in reason
+    assert (
+        "Entries that look like web pages: 9. Every level of this format allows no more than 2"
+        in reason
+    )
     assert "Decide whether these entries count as internet sites under this format" in reason
     # The counts allow anything from no level to the top.
     assert "anything from below BEGINNER up to EXEMPLARY" in reason
@@ -183,7 +186,9 @@ def test_a_list_short_of_major_references_even_at_best_goes_to_the_instructor(da
     rc.decide_inventory(row, BIBLIOGRAPHY, profile(peer_reviewed=1, web=1), data)
     assert row.outcome == ResultOutcome.escalated
     assert "look like web pages: 1. Every level" not in row.detail["reason"]
-    assert "Even if every unconfirmed entry were a journal or conference paper" in row.detail["reason"]
+    assert (
+        "Even if every unconfirmed entry were a journal or conference paper" in row.detail["reason"]
+    )
     assert "the lowest level, BEGINNER, needs at least 3" in row.detail["reason"]
 
 
@@ -387,7 +392,9 @@ def test_the_profile_and_counts_say_which_entries_were_typed_from_their_text(dat
         "web": [3],
     }
     sentence = rc._counts_sentence(profile, data)
-    assert sentence.startswith("Reference list: 4 entries. Journal or conference papers or books: 1")
+    assert sentence.startswith(
+        "Reference list: 4 entries. Journal or conference papers or books: 1"
+    )
     assert "(1 classified from how the entry is written)" in sentence
     assert "Preprints, repository copies or theses: 1." in sentence
     assert sentence.endswith("Type not known: 1.")
@@ -471,8 +478,9 @@ def test_counts_that_fit_exactly_one_checkable_level_decide_it(data):
     assert row.detail["verdict"] == "ACCEPTABLE"
     assert row.detail["decision_basis"] == "reference_profile"
     assert row.detail["reference_strategy"]["strategy"] == rc.QUALITY
-    assert "Only this level's share of journal or conference papers or books fits" in (
-        row.detail["reasoning"]
+    assert (
+        "Only this level's share of journal or conference papers or books fits"
+        in (row.detail["reasoning"])
     )
     assert "do not check the rest of the level's wording" in row.detail["reasoning"]
 

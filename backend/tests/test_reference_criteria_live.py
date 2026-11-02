@@ -208,8 +208,7 @@ async def test_both_criteria_are_written_to_the_stored_rows_with_their_audit_eve
     assert bibliography.detail["proposed_verdict"] == "EXEMPLARY"
     assert (
         "Entries to check, by their place in the reference list: look like web pages: 6; "
-        "preprints, repository copies or theses: 5."
-        in (bibliography.detail["reason"])
+        "preprints, repository copies or theses: 5." in (bibliography.detail["reason"])
     )
     quality = rows[quality_id]
     assert quality.outcome == ResultOutcome.escalated

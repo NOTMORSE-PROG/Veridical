@@ -16,6 +16,7 @@ const AUTOMATED_EVENTS: ReadonlySet<string> = new Set([
   "library_entry_needs_decision", "internal_agreement_source_scope_recorded",
   "citation_integrity_source_scope_recorded", "statistical_forensics_source_scope_recorded",
   "originality_reuse_source_scope_recorded", "check_subject_recorded",
+  "reference_criterion_decided", "reference_criterion_skipped",
 ]);
 
 export function auditEventOrigin(eventType: string): AuditEventOrigin {
