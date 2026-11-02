@@ -780,6 +780,10 @@ class FlagSummaryOut(BaseModel):
     # same non-identifying reference already disclosed by F7 evidence; never
     # expose `matched_group_label` or any other instructor-private metadata.
     matched_ref: int | None = None
+    # BUG-674: every Library record a finding matched, in match order (a
+    # resubmission can match several of the instructor's own records). The
+    # first is `matched_ref`; older findings list only that one.
+    matched_refs: list[int] = Field(default_factory=list)
 
 
 class FlagRegionOut(BaseModel):

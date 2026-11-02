@@ -86,6 +86,8 @@ import { OriginalityCoverageNotice } from "../report/OriginalityCoverageNotice";
 import { originalityCoverageNote } from "../report/originalityCoverage";
 import { CitationRecencySummary } from "../report/CitationRecencySummary";
 import { isUncountedRecencyNote, notCountedLabel } from "../domain/findingSummary";
+import { matchedRecords } from "../domain/matchedRecords";
+import { MatchedRecordLinks } from "../report/MatchedRecordLinks";
 
 type ReviewFilter = "open" | "resolved" | "all";
 const FINDINGS_PAGE_PARAM = "findings_page";
@@ -384,7 +386,8 @@ function SelectedFindingEvidence({ comparisonHost, comparisonVisible, finding, f
   return <>
 
       {wholeComparisonWithoutPair
-        ? <p className="signal-document-precision-note"><strong>Whole-manuscript comparison.</strong> No passage pair was saved.</p>
+        ? <><p className="signal-document-precision-note"><strong>Whole-manuscript comparison.</strong> No passage pair was saved.</p>
+          <MatchedRecordLinks records={matchedRecords(flag)} /></>
         : <p className="signal-field-hint">{instructorAnchor(sourceAnchor ?? flag.page_anchor)} · {precision.label}.</p>}
       {finding.flags.length > 1 && (
         <section className="signal-document-locations" aria-labelledby="finding-locations-heading">

@@ -1015,6 +1015,8 @@ export interface FlagOut {
   passage_pair: PassagePairOut | null;
   /** V-077: the matched Library record for an F7 finding, so it can be opened. */
   matched_ref?: number | null;
+  /** BUG-674: every Library record the finding matched, in match order. */
+  matched_refs?: number[];
   /** BUG-517: the citation a citation-integrity finding is about, as written. */
   cited_text?: string | null;
   cited_authors?: string[] | null;
@@ -1087,6 +1089,8 @@ export interface FlagSummaryOut {
   // manuscript locations. Optional for rolling-deploy responses from an older
   // backend; never a private group label or student identity.
   matched_ref?: number | null;
+  /** BUG-674: every Library record the finding matched, in match order. */
+  matched_refs?: number[];
   /** BUG-517: the citation a citation-integrity finding is about, as written. */
   cited_text?: string | null;
   cited_authors?: string[] | null;

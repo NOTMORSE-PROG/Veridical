@@ -171,6 +171,10 @@ class FlagOut(BaseModel):
     # `FlagSummaryOut.matched_ref`), so the instructor can open the record and
     # verify instead of only agreeing. None for every other check.
     matched_ref: int | None = None
+    # BUG-674: every Library record a finding matched, in match order (a
+    # resubmission can match several of the instructor's own records). The
+    # first is `matched_ref`; older findings list only that one.
+    matched_refs: list[int] = Field(default_factory=list)
     # BUG-518: the instructor confirmed this finding as a real issue.
     finding_confirmed: bool = False
     finding_confirm_note: str | None = None

@@ -48,7 +48,12 @@ from app.models.run import CheckResult, CheckRun, Flag
 from app.report.assessment import assessment_write, lock_assessment
 from app.report.cited_work import cited_work
 from app.report.scoring import flag_ai_verdict_summary
-from app.report.service import aggregate_and_score, flags_for_check_run, get_report
+from app.report.service import (
+    aggregate_and_score,
+    flags_for_check_run,
+    get_report,
+    matched_refs,
+)
 
 
 def _passage_pair_from_detail(evidence_excerpt: str, detail: dict) -> PassagePairOut | None:
@@ -298,6 +303,7 @@ async def _to_flag_out(
         is_passage_level=bool((flag.detail or {}).get("kind", "").endswith("_passage")),
         passage_pair=passage_pair,
         matched_ref=detail.get("matched_manuscript_id"),
+        matched_refs=matched_refs(detail),
         first_upload_context=bool(detail.get("first_upload_context")),
         evidence_unavailable=bool(detail.get("evidence_unavailable"))
         or (result.kind.value == "originality_reuse" and has_stored_pair and passage_pair is None),
