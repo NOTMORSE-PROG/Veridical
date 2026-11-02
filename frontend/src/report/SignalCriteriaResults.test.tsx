@@ -62,7 +62,7 @@ describe("Signal criterion judgment presentation", () => {
     fireEvent.click(screen.getByText("Recorded assessment details"));
     const actions = screen.getAllByRole("link");
     expect(actions).toHaveLength(2);
-    expect(actions[0]).toHaveAccessibleName("Open in manuscript: page 1. Criterion 1: The source criterion");
+    expect(actions[0]).toHaveAccessibleName("Open in manuscript: PDF p. 1. Criterion 1: The source criterion");
     expect(actions[0]).toHaveAttribute("href", "/report/3/document?anchor=page%201");
     expect(actions[1]).toHaveAttribute("href", "/report/3/document?anchor=page%202");
     expect(screen.getByText("“Another quote on the same page”")).toBeInTheDocument();

@@ -623,7 +623,7 @@ describe("SignalReportPage", () => {
     // unresolved before overridden, so array position moves as flags get
     // resolved) -- UX review live-reproduced that claiming "first" would
     // assert a fact the system can't back up.
-    expect(screen.getByRole("link", { name: "Review evidence at p. 1 (one of 12 locations)" })).toHaveAttribute("href", "/flags/1");
+    expect(screen.getByRole("link", { name: "Review evidence at PDF p. 1 (one of 12 locations)" })).toHaveAttribute("href", "/flags/1");
     expect(screen.queryByRole("link", { name: /, location \d+ of 12/ })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Show 12 locations" }));
@@ -634,10 +634,10 @@ describe("SignalReportPage", () => {
     const locationLinks = screen.getAllByRole("link", { name: /, location \d+ of 12/ });
     expect(locationLinks).toHaveLength(12);
     expect(new Set(locationLinks.map((link) => link.getAttribute("aria-label"))).size).toBe(12);
-    expect(screen.getByRole("link", { name: "Review evidence at p. 1, location 2 of 12" })).toHaveAttribute("href", "/flags/2");
+    expect(screen.getByRole("link", { name: "Review evidence at PDF p. 1, location 2 of 12" })).toHaveAttribute("href", "/flags/2");
     // The pre-expansion summary link is still present and un-duplicated
     // by the per-location list -- distinct aria-label, same href.
-    expect(screen.getByRole("link", { name: "Review evidence at p. 1 (one of 12 locations)" })).toHaveAttribute("href", "/flags/1");
+    expect(screen.getByRole("link", { name: "Review evidence at PDF p. 1 (one of 12 locations)" })).toHaveAttribute("href", "/flags/1");
     expect(screen.getByText(/open and resolved locations, so those two filter counts may overlap/i)).toBeInTheDocument();
     expect(screen.getByText(/Distinct manuscript passage 12\./)).toBeInTheDocument();
   });
@@ -666,7 +666,7 @@ describe("SignalReportPage", () => {
     // present summary link (BUG-169) by the per-location-only ", location
     // N of" phrasing.
     expect(screen.getAllByRole("link", { name: /, location \d+ of 3/ })).toHaveLength(3);
-    expect(screen.getByRole("link", { name: "Review evidence at p. 1 (one of 3 locations)" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Review evidence at PDF p. 1 (one of 3 locations)" })).toBeInTheDocument();
   });
 
   it("BUG-167: restores how many findings were revealed ('Show N more') from report URL state, not just the filter", async () => {
@@ -1016,7 +1016,7 @@ expect(screen.getByText("Not scored. It does not affect readiness or the final d
 
     await screen.findByText("Showing 1 of 1 open finding across 2 locations.");
     expect(
-      screen.getByRole("link", { name: "Review evidence at p. 3 (one of 2 locations)" }),
+      screen.getByRole("link", { name: "Review evidence at PDF p. 3 (one of 2 locations)" }),
     ).toHaveAttribute("href", "/flags/40");
   });
 
@@ -1036,7 +1036,7 @@ expect(screen.getByText("Not scored. It does not affect readiness or the final d
 
     await screen.findByText("Showing 1 of 1 open finding across 2 locations.");
     expect(
-      screen.getByRole("link", { name: "Review evidence at p. 9 (one of 2 locations)" }),
+      screen.getByRole("link", { name: "Review evidence at PDF p. 9 (one of 2 locations)" }),
     ).toHaveAttribute("href", "/flags/41");
     expect(screen.queryByRole("link", { name: /first of/ })).not.toBeInTheDocument();
   });

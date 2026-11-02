@@ -223,14 +223,14 @@ describe("SignalDocumentViewerPage", () => {
     await screen.findByRole("heading", { name: "Criterion records" });
     const details = document.getElementById("signal-criterion-evidence-5-1");
     expect(details).not.toBeNull(); fireEvent.click(details!);
-    const open = await screen.findByRole("link", { name: "Open in manuscript: page 4. Criterion 1: Recorded source control" });
+    const open = await screen.findByRole("link", { name: "Open in manuscript: PDF p. 4. Criterion 1: Recorded source control" });
     open.focus(); fireEvent.click(open);
     expect(await screen.findByRole("button", { name: "Return to criterion record" })).toBeInTheDocument();
     const read = screen.getByRole("button", { name: "Read text" }); read.focus(); fireEvent.click(read);
     await screen.findByText("Verified page-four reading text.");
     const back = screen.getByRole("button", { name: "Return to criterion record" });
     back.focus(); fireEvent.click(back);
-    expect(screen.getByRole("link", { name: "Open in manuscript: page 4. Criterion 1: Recorded source control" })).toHaveFocus();
+    expect(screen.getByRole("link", { name: "Open in manuscript: PDF p. 4. Criterion 1: Recorded source control" })).toHaveFocus();
     expect(fetch.mock.calls.every(([, init]) => !init?.method || init.method === "GET")).toBe(true);
   });
   it.each([undefined, false, true])("shows one record-based support notice and no age/rerun warning when flagged=%s", async (flag) => {
