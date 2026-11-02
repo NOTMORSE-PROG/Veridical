@@ -18,7 +18,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.service import write_audit_event
 from app.checks.reuse.embed import compute_document_embeddings, compute_passage_embeddings
-from app.checks.reuse.lexical import wording_evidence
 from app.checks.reuse.query import (
     PassageMatch,
     SimilarityMatch,
@@ -29,6 +28,7 @@ from app.checks.reuse.query import (
     query_similar_manuscripts,
     query_similar_passages,
 )
+from app.checks.reuse.quotations import pair_wording
 from app.checks.reuse.same_work import SameWork, find_same_work, name_rules_fingerprint
 from app.checks.reuse.source import coarse_candidate_supported, passage_match_supported
 from app.checks.source_quality import persist_source_limitation
@@ -318,16 +318,25 @@ def _wording(evidence: dict) -> dict:
     return {"shingle_share": evidence["shingle_share"], "longest_run": evidence["longest_run"]}
 
 
-def _withheld_lead(granularity: str, match, level, own: str, other: str, settings) -> dict:
+def _pair_wording(pair, settings) -> dict:
+    """Shared wording between a passage pair, with quotations marked and
+    cited left out (BUG-632, `quotations.pair_wording`)."""
+    return pair_wording(
+        pair.own_text, pair.own_context_text, pair.matched_text, pair.matched_context_text, settings
+    )
+
+
+def _withheld_lead(granularity: str, match, level, pair, settings) -> dict:
     """A match that was not raised, with the wording evidence it was judged
-    on (BUG-620). Only the opaque matched record id, as everywhere in audit."""
-    evidence = wording_evidence(own, other, settings)
+    on (BUG-620), from `pair`, the passage pair behind it. Only the opaque
+    matched record id, as everywhere in audit."""
+    evidence = _pair_wording(pair, settings)
     return {
         "granularity": granularity,
         "matched_manuscript_id": match.matched_manuscript_id,
         "similarity": round(match.similarity, 3),
         "level": level,
-        "reason": "no_shared_wording",
+        "reason": "cited_quotation" if evidence["cited_quotation_only"] else "no_shared_wording",
         **evidence,
     }
 
@@ -548,7 +557,8 @@ async def run_originality_reuse_check(
         settings,
         # BUG-620: a passage match needs shared wording, tried over the
         # nearest few candidates so a topic match cannot hide the real source.
-        confirm=lambda m: wording_evidence(m.own_text, m.matched_text, settings)["confirmed"],
+        # A quotation marked and cited is left out of that test (BUG-632).
+        confirm=lambda m: _pair_wording(m, settings)["confirmed"],
         candidates=settings.reuse_confirm_candidates,
         exclude_manuscript_ids=same_work.excluded_ids,
     )
@@ -611,8 +621,7 @@ async def run_originality_reuse_check(
     # signature blocks) sits close in the static embedding with no words in
     # common; those leads are counted and audited, not raised.
     withheld_leads = [
-        _withheld_lead("passage", m, m.level, m.own_text, m.matched_text, settings)
-        for m in passage_query_result.unconfirmed
+        _withheld_lead("passage", m, m.level, m, settings) for m in passage_query_result.unconfirmed
     ]
 
     coarse_drafts = []
@@ -645,14 +654,7 @@ async def run_originality_reuse_check(
                 matched_chapter_index=match.matched_chapter_index,
             )
         if supporting is not None:
-            lead = _withheld_lead(
-                "section",
-                match,
-                match.level,
-                supporting.own_text,
-                supporting.matched_text,
-                settings,
-            )
+            lead = _withheld_lead("section", match, match.level, supporting, settings)
             # BUG-620: a section is reported as reused only when its best
             # evidence is itself a match: it shares wording and, for a
             # high-similarity section, clears the passage bar on its own. A
@@ -745,6 +747,12 @@ async def run_originality_reuse_check(
             "n_sections_evidence_below_passage_bar": sum(
                 lead["reason"] == "evidence_below_passage_bar" for lead in withheld_leads
             ),
+            # BUG-632: pairs whose shared wording lies only inside quotations
+            # marked and cited in the text. Judged on the nearest Library
+            # passage, like the count above.
+            "n_shared_wording_only_in_cited_quotations": sum(
+                lead["reason"] == "cited_quotation" for lead in withheld_leads
+            ),
             "first_upload_context": first_upload,
             "passages_found": len(passages),
         },
@@ -776,9 +784,7 @@ async def run_originality_reuse_check(
         severity, evidence_excerpt, page_anchor, detail = _passage_match_to_flag_draft(
             passage_match, first_upload=first_upload
         )
-        detail["shared_wording"] = _wording(
-            wording_evidence(passage_match.own_text, passage_match.matched_text, settings)
-        )
+        detail["shared_wording"] = _wording(_pair_wording(passage_match, settings))
         session.add(
             Flag(
                 check_result_id=result.id,

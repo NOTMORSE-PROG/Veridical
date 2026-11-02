@@ -1201,6 +1201,12 @@ class Settings(BaseSettings):
     reuse_school_year_start_month: int = Field(default=8, ge=1, le=12)
     reuse_school_year_pattern: str = r"(?:19|20)\d{2}"
 
+    # BUG-632: quotations in quotation marks with a citation beside them are
+    # left out of the shared-wording comparison; what counts as either is data.
+    reuse_cited_quotation_rules_file: Path = (
+        Path(__file__).parent / "checks" / "reuse" / "data" / "cited_quotations.json"
+    )
+
     # --- Library (V-066, F7.1/F7.2 surfaces) -----------------------------------
     # How many chapters' worth of passage excerpt the library shows for a
     # manuscript the viewing instructor does NOT own -- the bounded,
