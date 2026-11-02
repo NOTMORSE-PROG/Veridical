@@ -7,6 +7,7 @@ import pytest
 
 from app.checks.consistency import run_semantic_checks_with_consistency
 from app.checks.semantic import build_semantic_batches, run_semantic_checks
+from app.checks.support import body_evidence_obligation
 from app.config import Settings
 from app.errors import QuotaExhaustedError
 from app.ingest.schemas import ExtractionResult, SectionNode, SectionTree, TextBlock
@@ -124,7 +125,9 @@ async def test_locatable_bibliography_cannot_establish_complete_documentation(ru
 @pytest.mark.parametrize("runner", [run_semantic_checks, run_semantic_checks_with_consistency])
 async def test_agreeing_support_model_cannot_override_explicit_body_evidence_obligation(runner):
     client = Client("supported")
-    result = (await runner(Session(), 1, [criterion()], extraction(), client, Settings()))[0]
+    item = criterion()
+    item.text = "Sources and in-text documentation completeness and relevance of references"
+    result = (await runner(Session(), 1, [item], extraction(), client, Settings()))[0]
     assert result.outcome == ResultOutcome.escalated and result.score is None
     assert result.detail["support_check"]["scope_guard"] == "required_body_evidence_unconfirmed"
     assert "in-text documentation" in result.detail["reason"]
@@ -138,14 +141,15 @@ async def test_agreeing_support_model_cannot_override_explicit_body_evidence_obl
 )
 async def test_body_scope_guard_handles_uncertain_boundaries_and_requirement_forms(runner, variant):
     item, source = criterion(), extraction()
+    item.evidence = "Inspect documentation"
     if variant == "unknown_boundary":
+        item.text = "Sources and in-text documentation"
         source.blocks.pop(1)
     elif variant == "descriptor_only":
-        item.evidence = "Inspect documentation"
         item.levels[-1]["descriptor"] = "Complete in-text documentation"
     else:
-        item.evidence = (
-            "Reference list and in"
+        item.text = (
+            "Sources and in"
             + ("\u2011" if variant == "unicode_hyphen" else "\u2013")
             + "text documentation"
         )
@@ -173,13 +177,49 @@ async def test_distinct_body_passage_can_satisfy_necessary_source_scope(runner):
             return answer
 
     item = criterion()
-    item.text = "One attributed body passage identifies the reference used"
-    item.evidence = "An in-text citation in the manuscript body"
+    item.text = "One in-text attributed body passage identifies the reference used"
+    item.evidence = "A citation in the manuscript body"
     item.levels[-1]["descriptor"] = "The cited source is identified in the body passage"
     result = (await runner(Session(), 1, [item], source, BodyClient("supported"), Settings()))[0]
     assert result.outcome == ResultOutcome.passed
     assert result.detail["support_check"]["status"] == "supported"
     assert result.detail["evidence"][0]["quote"] == body
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("runner", [run_semantic_checks, run_semantic_checks_with_consistency])
+async def test_evidence_request_alone_does_not_require_body_evidence(runner):
+    # The request is the format parser's paraphrase; another parse of the same
+    # format may not mention in-text evidence at all, so it cannot decide.
+    item = criterion()
+    # Wording no other guard reacts to, so only the body obligation is tested.
+    item.text = "The paper names the source of its reference format"
+    item.levels[-1]["descriptor"] = "The source is named"
+    assert "in-text" in item.evidence and "in-text" not in item.text
+    assert body_evidence_obligation(item, "Exceptional") == "advisory"
+    result = (await runner(Session(), 1, [item], extraction(), Client("supported"), Settings()))[0]
+    assert result.outcome == ResultOutcome.passed
+    assert result.detail["support_check"]["status"] == "supported"
+    assert "scope_guard" not in result.detail["support_check"]
+    assert result.detail["support_check"]["advisory_body_evidence"] is True
+
+
+@pytest.mark.parametrize(
+    ("text", "evidence", "descriptor", "expected"),
+    [
+        ("In-text documentation", None, "Complete documentation", "decides"),
+        ("Documentation", "Inspect it", "Complete in-text documentation", "decides"),
+        ("Documentation", "In-text attributions", "Complete documentation", "advisory"),
+        ("Documentation", "Reference list", "Complete documentation", None),
+    ],
+)
+def test_only_the_formats_own_words_decide_the_body_obligation(
+    text, evidence, descriptor, expected
+):
+    item = criterion()
+    item.text, item.evidence = text, evidence
+    item.levels[-1]["descriptor"] = descriptor
+    assert body_evidence_obligation(item, "Exceptional") == expected
 
 
 @pytest.mark.asyncio

@@ -186,6 +186,33 @@ def _capability_failure(batch, criterion, detail):
     return failure
 
 
+def body_evidence_obligation(criterion, verdict, patterns_file=None) -> str | None:
+    """Whether the grade must rest on a quote from the manuscript body.
+
+    "decides" when the criterion line or the claimed level's descriptor asks
+    for in-text evidence: that wording comes from the format itself.
+    "advisory" when only the evidence request does. The request is the format
+    parser's own paraphrase, and two parses of the same format word it
+    differently, so on its own it is recorded but never escalates a grade."""
+    patterns = _scope_patterns(patterns_file)["body_required"]
+    stated = [criterion.text]
+    level = match_level(criterion, verdict) if verdict else None
+    if level is not None:
+        stated.append(
+            next(
+                item["descriptor"]
+                for item in criterion.levels
+                if int(item["level"]) == level.ordinal
+            )
+        )
+    if any(pattern.search(text) for text in stated for pattern in patterns):
+        return "decides"
+    request = getattr(criterion, "evidence", None) or ""
+    if any(pattern.search(request) for pattern in patterns):
+        return "advisory"
+    return None
+
+
 def _scope_failure(batch, criterion, detail):
     path = getattr(batch, "scope_patterns_file", None)
     if path is None:
@@ -203,13 +230,7 @@ def _scope_failure(batch, criterion, detail):
             "The quoted evidence only identifies a source; it does not show this criterion. "
             "Check the manuscript yourself before relying on this grade.",
         )
-    requirements = criterion.text + "\n" + (getattr(criterion, "evidence", None) or "")
-    level = match_level(criterion, detail["verdict"])
-    if level is not None:
-        requirements += "\n" + next(
-            item["descriptor"] for item in criterion.levels if int(item["level"]) == level.ordinal
-        )
-    if not any(pattern.search(requirements) for pattern in patterns["body_required"]):
+    if body_evidence_obligation(criterion, detail["verdict"], path) != "decides":
         return None
     body, references = (
         getattr(batch, "body_context", None),
@@ -368,6 +389,14 @@ async def check_support(
             }
         elif item.status == "supported" and capability_failure:
             results[criterion.id] = capability_failure
+        patterns_file = getattr(batch, "scope_patterns_file", None)
+        if (
+            patterns_file is not None
+            and body_evidence_obligation(criterion, detail["verdict"], patterns_file) == "advisory"
+        ):
+            # Kept for the audit trail: only the parser's evidence request
+            # asked for in-text evidence, so it did not guard this grade.
+            results[criterion.id]["advisory_body_evidence"] = True
     return results
 
 
