@@ -102,7 +102,7 @@ def test_a_retraction_notice_is_described_as_a_notice(title, record_type):
     assert lead.detail["kind"] == RETRACTION_NOTICE
     assert lead.detail["reason"].startswith("This entry matches a retraction notice")
     assert "possibly retracted" not in lead.detail["reason"]
-    assert exclusion_reason("citation_integrity", lead.detail) == "retraction_lead_not_counted"
+    assert exclusion_reason("citation_integrity", lead.detail) == "retraction_notice_not_counted"
 
 
 def test_a_record_openalex_types_as_a_notice_needs_no_retracted_flag():

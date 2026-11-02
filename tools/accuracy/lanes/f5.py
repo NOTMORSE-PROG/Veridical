@@ -88,6 +88,13 @@ DEFAULTS = {
     # by title alone, so a lookup can reach OpenAlex's title search.
     "openalex_retraction_rows": 25,
     "openalex_retraction_seed": 640,
+    # BUG-683: Crossref retraction records cited by DOI. Notices are labelled
+    # by the retracted work's own record (it lists the notice as its
+    # retraction); decoys are retracted works whose titles read like notices.
+    "retraction_notice_rows": 100,
+    "retraction_notice_wanted": 12,
+    "retraction_decoy_wanted": 8,
+    "retraction_decoy_title_pattern": r"^\s*(?:retracted|notice\s+of\s+retraction|withdrawn)\b",
     "notice_title_pattern": r"notice of|retraction|withdrawn|expression of concern",
     "accusation_words": r"fake|fabricat|fraud|forg|plagiar|dishonest|false",
 }
@@ -1199,6 +1206,156 @@ def _openalex_retraction_rows(outcomes, notes, total):
     ]
 
 
+def _cited_entry(msg, doi):
+    """An APA-shaped entry with its DOI. Notices often list no author, so the
+    journal stands in as the author, as a reference list would give it."""
+    entry = _apa_entry(msg, doi)
+    if entry:
+        return entry
+    venue = _clean((msg.get("container-title") or [""])[0])
+    parts = (msg.get("issued") or {}).get("date-parts") or [[None]]
+    year, title = parts[0][0], _clean((msg.get("title") or [""])[0]).rstrip(".")
+    if not (venue and year and title):
+        return None
+    return f"{venue}. ({year}). {title}. {venue}. https://doi.org/{doi}"
+
+
+def _retracts(target, notice_doi):
+    """Whether the retracted work's own record names this DOI as its retraction."""
+    for relation in target.get("updated-by") or []:
+        if (relation.get("type") or "").lower() == "retraction" and (
+            relation.get("DOI") or ""
+        ).casefold() == notice_doi.casefold():
+            return True
+    return False
+
+
+async def _retraction_notice_part(ctx, config, patterns, settings, client):
+    """Retraction notices and notice-titled retracted works, cited by DOI."""
+    frozen = ctx.golden / LANE / "retraction_notice_cases.json"
+    notes = []
+    if not frozen.exists():
+        data = await _json(
+            client,
+            "https://api.crossref.org/works",
+            {
+                "filter": "update-type:retraction",
+                "sample": str(config["retraction_notice_rows"]),
+            },
+        )
+        decoy_title = re.compile(config["retraction_decoy_title_pattern"], re.IGNORECASE)
+        cases = []
+        notices = decoys = 0
+        for msg in (data or {}).get("message", {}).get("items") or []:
+            doi = msg.get("DOI")
+            entry = _cited_entry(msg, doi) if doi else None
+            if not entry:
+                continue
+            own = doi.casefold()
+            targets = [
+                (u.get("DOI") or "")
+                for u in msg.get("update-to") or []
+                if (u.get("type") or "").lower() == "retraction"
+                and (u.get("DOI") or "").casefold() != own
+            ]
+            title = _clean((msg.get("title") or [""])[0])
+            if targets and notices < config["retraction_notice_wanted"]:
+                target = await _json(client, f"https://api.crossref.org/works/{targets[0]}")
+                if target and _retracts(target.get("message") or {}, doi):
+                    cases.append({"doi": doi, "entry": entry, "label": "notice"})
+                    notices += 1
+            elif (
+                not targets
+                and decoy_title.search(title)
+                and decoys < config["retraction_decoy_wanted"]
+            ):
+                cases.append({"doi": doi, "entry": entry, "label": "retracted_work"})
+                decoys += 1
+        built = {"built_on": datetime.now(UTC).date().isoformat(), "cases": cases}
+        frozen.write_text(json.dumps(built, indent=1), encoding="utf-8")
+    cases = json.loads(frozen.read_text(encoding="utf-8"))["cases"]
+    outcomes = []
+    for start in range(0, len(cases), config["plants_per_copy"]):
+        chunk = cases[start : start + config["plants_per_copy"]]
+        host = load_extraction(ctx.extractions / f"{config['host_for_entries']}.json")
+        drafts = _plant_entries(host, patterns, [c["entry"] for c in chunk])
+        try:
+            verdicts = await _verify_entries(client, settings, drafts)
+        except RateLimited as stop:
+            notes.append(f"stopped early: {stop}")
+            break
+        for case, draft, (verdict, flag) in zip(chunk, drafts, verdicts, strict=False):
+            reason = (flag.detail.get("reason") if flag else "") or ""
+            outcomes.append(
+                {
+                    **case,
+                    "parsed_with_doi_intact": draft.doi is not None
+                    and draft.doi.casefold() == case["doi"].casefold(),
+                    "verdict": verdict.kind.value,
+                    "flag_kind": flag.detail.get("kind") if flag else None,
+                    "flag_severity": str(flag.severity) if flag else None,
+                    "counted": bool(flag) and flag.detail.get("affects_readiness") is not False,
+                    "flag_reason": reason or None,
+                    "accusation_wording": bool(
+                        re.search(config["accusation_words"], reason, re.IGNORECASE)
+                    ),
+                }
+            )
+    return outcomes, notes, len(cases)
+
+
+def _retraction_notice_rows(outcomes, notes, total):
+    intact = [o for o in outcomes if o["parsed_with_doi_intact"]]
+    notices = [o for o in intact if o["label"] == "notice"]
+    works = [o for o in intact if o["label"] == "retracted_work"]
+    def run_note(label):
+        left_out = sum(
+            o["label"] == label and not o["parsed_with_doi_intact"] for o in outcomes
+        )
+        return (
+            f"{len(outcomes)} of {total} frozen cases were run"
+            + (f" ({'; '.join(notes)})" if notes else "")
+            + (f"; {left_out} left out: their DOI did not parse from the entry" if left_out else "")
+        )
+    return [
+        rate_row(
+            LANE,
+            "a cited retraction notice named a notice, never a counted retraction",
+            "entry",
+            sum(
+                o["flag_kind"] == "retraction_notice_cited"
+                and o["flag_severity"] == "low"
+                and not o["counted"]
+                for o in notices
+            ),
+            len(notices),
+            note="Notices from Crossref's retraction records (a retraction link to another DOI), "
+            "each cross-checked against the retracted work's record. Crossref writes both links "
+            "from one deposit, so the cross-check shows Crossref agrees with itself; it is not an "
+            f"independent label (BUG-683). {run_note('notice')}.",
+        ),
+        rate_row(
+            LANE,
+            "a retracted work titled like a notice keeps its counted High",
+            "entry",
+            sum(o["flag_kind"] == "retracted_source" and o["counted"] for o in works),
+            len(works),
+            note="Decoys: retracted works whose titles open 'RETRACTED', 'Notice of "
+            "Retraction' or 'WITHDRAWN', retracted in place (no retraction link to another DOI). "
+            "They show such titles keep the High; they cannot include a work whose only "
+            f"retraction link points at another DOI. {run_note('retracted_work')}.",
+        ),
+        rate_row(
+            LANE,
+            "wording check cited retraction notices",
+            "lead",
+            sum(not o["accusation_wording"] for o in notices if o["flag_kind"]),
+            sum(bool(o["flag_kind"]) for o in notices),
+            note="Leads with no accusation word in their text.",
+        ),
+    ]
+
+
 def _part_b_rows(outcomes):
     rows = []
     expected = {
@@ -1470,11 +1627,13 @@ def run(ctx: Context) -> tuple[list[MetricRow], dict]:
             unread_cases = await _unread_page_cases(ctx, config, patterns, settings)
             part_b = await _part_b(ctx, config, patterns, settings, client, transport)
             oa_part = await _openalex_retraction_part(ctx, config, patterns, settings, client)
-        return part_a, unread_cases, part_b, oa_part, transport
+            rn_part = await _retraction_notice_part(ctx, config, patterns, settings, client)
+        return part_a, unread_cases, part_b, oa_part, rn_part, transport
 
-    part_a, unread_cases, part_b, oa_part, transport = asyncio.run(go())
+    part_a, unread_cases, part_b, oa_part, rn_part, transport = asyncio.run(go())
     outcomes, notes, counts = part_b
     oa_outcomes, oa_notes, oa_total = oa_part
+    rn_outcomes, rn_notes, rn_total = rn_part
     rows, details = [], {"unread_page_cases": unread_cases}
     if isinstance(part_a, tuple):
         tally, new_counts, unmatched, records, coverage = part_a
@@ -1491,6 +1650,7 @@ def run(ctx: Context) -> tuple[list[MetricRow], dict]:
     rows += _unread_page_rows(unread_cases)
     rows += _part_b_rows(outcomes)
     rows += _openalex_retraction_rows(oa_outcomes, oa_notes, oa_total)
+    rows += _retraction_notice_rows(rn_outcomes, rn_notes, rn_total)
     rows += real_precision_rows(ctx.golden, LANE)
     details.update(
         {
@@ -1502,6 +1662,8 @@ def run(ctx: Context) -> tuple[list[MetricRow], dict]:
                 Counter(str(o["answered_by"]) for o in oa_outcomes)
             ),
             "openalex_retraction_notes": oa_notes,
+            "retraction_notice_plants": rn_outcomes,
+            "retraction_notice_notes": rn_notes,
             "registry_requests_sent": transport.sent,
             "registry_cache_hits": transport.hits,
             "registry_answers_fetched_on": sorted(transport.fetched_on),

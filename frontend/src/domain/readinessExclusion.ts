@@ -9,6 +9,7 @@ export const READINESS_EXCLUSION_COPY: Record<string, string> = {
   unassessed_evidence: "the evidence for this finding could not be checked.",
   recency_note_not_counted: "this format records source age as a note, not as a readiness concern.",
   retraction_lead_not_counted: "this lead comes from one database only. Check it yourself.",
+  retraction_notice_not_counted: "a retraction notice is not itself a retracted paper. Check which one the entry means to cite.",
 };
 
 const NOT_COUNTED = "Not counted for readiness";
