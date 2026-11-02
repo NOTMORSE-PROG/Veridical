@@ -35,7 +35,7 @@
       "support_caution": "The quote shows the method, not the results"
     },
     "lines": [
-      "Graded automatically: two grading passes disagreed and no third pass settled it with quotes found in the manuscript, so the lower of the two grades was used."
+      "Graded automatically: two grading passes chose different grades and no third pass settled the difference, so the lower of the two grades was used."
     ],
     "caution": "The quote check did not support this grade: The quote shows the method, not the results."
   },

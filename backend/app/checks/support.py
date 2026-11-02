@@ -89,13 +89,18 @@ def _scope_wording_data() -> dict:
     return json.loads(_SCOPE_WORDING.read_text(encoding="utf-8"))
 
 
-def later_scope_note(missing: list[str]) -> str:
+def later_scope_note(missing: list[str], variant: str | None = None) -> str:
     """The note a report adds, at display time, to a grade whose saved
     evidence check said "supported" before this rule existed. It says where it
-    came from, and it changes nothing stored."""
+    came from, and it changes nothing stored.
+
+    `variant` says what today's rule would do with the grade: None when it
+    would keep it with a caution, "adverse" or "escalate" when it would leave
+    it to the instructor."""
     data = _scope_wording_data()
     about, check = _about_and_check(missing, data)
-    return data["later_note"].format(about=about, check=check)
+    key = f"later_note_{variant}" if variant else "later_note"
+    return data[key].format(about=about, check=check)
 
 
 def _about_and_check(missing: list[str], data: dict) -> tuple[str, str]:

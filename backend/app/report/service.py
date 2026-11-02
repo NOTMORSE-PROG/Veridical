@@ -40,6 +40,7 @@ from app.checks.reuse.service import NO_TEXT_NOTE
 from app.checks.reuse.source import passage_match_supported
 from app.checks.support import (
     SOURCE_SCOPE_POLICY_VERSION,
+    adverse_rating,
     later_scope_note,
     scope_obligations,
     scope_wording,
@@ -434,7 +435,17 @@ def later_note(result: CheckResult, criterion: Criterion, detail: dict) -> str |
     if support.get("status") != "supported" or support.get("scope_guard"):
         return None
     scope = _current_scope(criterion, detail.get("verdict"))
-    return later_scope_note(scope) if scope else None
+    if not scope:
+        return None
+    # The same test apply_support uses today: a grade it would not keep with
+    # a caution is one the instructor would now decide, so the note says so.
+    if get_settings().grading_decision_policy != "decide":
+        variant = "escalate"
+    elif adverse_rating(criterion, result.outcome, detail):
+        variant = "adverse"
+    else:
+        variant = None
+    return later_scope_note(scope, variant)
 
 
 def _automatic_grade(
