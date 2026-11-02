@@ -1660,23 +1660,6 @@
     color: var(--color-signal-ink-secondary);
   }
 
-  .signal-first-use__mark {
-    position: absolute;
-    inset-block-start: var(--signal-space-6);
-    inset-inline-end: var(--signal-space-6);
-    width: var(--signal-empty-illustration-size);
-    height: var(--signal-first-use-rail-height);
-    border-inline-start: var(--signal-border-emphasis) solid var(--color-signal-foundation);
-  }
-
-  .signal-first-use__mark span {
-    position: absolute;
-    inset-block-start: 50%;
-    inset-inline-start: calc(var(--signal-border-emphasis) * -1);
-    width: var(--signal-empty-illustration-size);
-    border-block-start: var(--signal-border-emphasis) solid var(--color-signal-brand-active);
-  }
-
   .signal-first-use ol {
     display: grid;
     gap: var(--signal-space-3);
@@ -7871,10 +7854,6 @@
 
     .signal-first-use {
       padding: var(--signal-space-6) var(--signal-space-5);
-    }
-
-    .signal-first-use__mark {
-      display: none;
     }
 
     .signal-active-format {
