@@ -49,6 +49,14 @@ def _headers(settings: Settings) -> dict[str, str]:
     return {"User-Agent": f"VERIDICAL/1.0 (mailto:{settings.external_contact_email})"}
 
 
+def _doi_key(value) -> str:
+    """A DOI compared as a DOI, whether written bare or as a resolver link."""
+    text = (value or "").strip().casefold()
+    for prefix in ("https://doi.org/", "http://doi.org/", "https://dx.doi.org/", "doi:"):
+        text = text.removeprefix(prefix)
+    return text
+
+
 def retraction_notice_targets(msg: dict[str, Any] | None) -> tuple[str, ...]:
     """The DOIs a retraction notice retracts, or () when the record is not one.
 
@@ -57,14 +65,16 @@ def retraction_notice_targets(msg: dict[str, Any] | None) -> tuple[str, ...]:
     retraction in `updated-by`, or, retracted in place, an `update-to`
     pointing at itself. Titles say nothing reliable either way: notices are
     titled "RETRACTED: ...", and works "Notice of Retraction: ..." (BUG-683,
-    measured on Crossref's own retraction records)."""
+    measured on Crossref's own retraction records). The parser still reads a
+    notice's relation as a retraction; only a lookup by the cited DOI uses
+    this to name the record a notice."""
     if not isinstance(msg, dict):
         return ()
-    own = (msg.get("DOI") or "").casefold()
+    own = _doi_key(msg.get("DOI"))
 
     def retractions(field):
         return [
-            (rel.get("DOI") or "").casefold()
+            _doi_key(rel.get("DOI"))
             for rel in msg.get(field) or []
             if isinstance(rel, dict) and (rel.get("type") or "").lower() == "retraction"
         ]
@@ -111,11 +121,7 @@ def _parse_work(msg: dict[str, Any]) -> VerificationResult:
                 retraction_detail = f"{label} (source: {source})"
         elif rel_type in ("correction", "erratum"):
             is_correction = True
-    if retraction_notice_targets(msg):
-        # The record is the notice, not the retracted work: citing it is not
-        # citing a retracted source (BUG-683). The verdict names it a notice.
-        retracted, retraction_detail = False, None
-    elif not retracted and title and title.upper().startswith("RETRACTED"):
+    if not retracted and title and title.upper().startswith("RETRACTED"):
         # Pre-2023 retractions predating Crossref's Retraction Watch
         # integration often carry no structured `update-to` at all — the
         # title prefix is the only signal (verified live, module docstring).

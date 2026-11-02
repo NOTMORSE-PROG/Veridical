@@ -1,6 +1,6 @@
 {
   "_source": "BUG-640 (2026-11-01, owner decision via the PM). OpenAlex's is_retracted is used only when OpenAlex is already asked for the entry (the title-search fallback), only as a Low lead to verify, and never counts for readiness. Measured: of 30 DOI-bearing works OpenAlex marks retracted, Crossref records a retraction for 17; of the other 12, about 10 are retraction notices. A notice is never treated as a retracted work, and a retracted work is never called a notice.",
-  "_notice_note": "A lead needs OpenAlex's own signal: is_retracted, or a record OpenAlex types as a retraction. A record is a notice when OpenAlex types it so, or when its title opens with a phrase only notices use. 'Retracted:', 'RETRACTED:', 'Notice of Retraction' and 'Withdrawn' are NOT notice phrases: publishers retitle the retracted work itself that way (backend review, BUG-640), and on this DOI-less path most such records are the works. Matched case-insensitively at the start of the title.",
+  "_notice_note": "A lead needs OpenAlex's own signal: is_retracted, or a record OpenAlex types as a retraction. A record is a notice when OpenAlex types it so, or when its title opens with a phrase only notices use. 'Retracted:', 'RETRACTED:', 'Notice of Retraction' and 'Withdrawn' are NOT notice phrases: publishers retitle the retracted work itself that way (backend review, BUG-640), and on this DOI-less path most such records are the works. Matched case-insensitively at the start of the title. This title rule is for OpenAlex records reached by title search only; an entry cited by DOI is named a notice from Crossref's relations, never its title (Hindawi titles its notices 'Retracted: ...').",
   "notice_types": [
     "retraction"
   ],
@@ -14,7 +14,7 @@
   "retracted_work_reason": "OpenAlex lists this work ('{title}') as possibly retracted. Crossref's title search did not find it, so this could not be confirmed there. Please check {link}.",
   "retracted_work_reason_crossref_not_asked": "OpenAlex lists this work ('{title}') as possibly retracted. Crossref was not searched for it, so this is not confirmed. Please check {link}.",
   "notice_reason": "This entry matches a retraction notice ('{title}'), not the research paper it retracts. Please check which one the entry means to cite ({link}).",
-  "_doi_notice_note": "BUG-683: an entry whose DOI's own Crossref record is a retraction notice (its retraction relation points at another DOI). Same kind and label as a notice OpenAlex lists; {retracted} names the retracted paper's link(s).",
+  "_doi_notice_note": "BUG-683: an entry whose DOI's own Crossref record is a retraction notice (its retraction relation points at another DOI). Same kind and label as a notice OpenAlex lists; {retracted} names the retracted paper's link(s). Only for a lookup by the cited DOI. This file's path setting (citation_openalex_retraction_lead_file) governs both leads.",
   "doi_notice_reason": "This entry's DOI leads to a retraction notice ('{title}'), not to the research paper it retracts ({retracted}). Please check which one the entry means to cite.",
   "retracted_link": "https://doi.org/{doi}",
   "retracted_link_separator": " and ",
