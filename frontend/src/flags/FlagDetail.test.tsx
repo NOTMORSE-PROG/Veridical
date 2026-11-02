@@ -56,10 +56,10 @@ describe("FlagDetailPage", () => {
         placement: { reference_id: reference }, image_data_url: null,
         caption: "The original image is unavailable in this control." },
     });
-    const source = await screen.findByRole("button", { name: "Open original page: page 1" });
+    const source = await screen.findByRole("button", { name: "Open original page: PDF p. 1" });
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     source.focus(); fireEvent.click(source);
-    const dialog = await screen.findByRole("dialog", { name: "Original source: page 1" });
+    const dialog = await screen.findByRole("dialog", { name: "Original source: PDF page 1" });
     expect(within(dialog).getByText("t(28) = 2.45, p = .001")).toBeVisible();
     expect(await within(dialog).findByText("The original image is unavailable in this control.")).toBeVisible();
     expect(within(dialog).getByText("No original-page image is available for this saved evidence.")).toBeVisible();
@@ -144,7 +144,7 @@ describe("FlagDetailPage", () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/flags/5": FLAG }));
     renderWithProviders(<FlagDetailPage />, { route: "/flags/5", path: "/flags/:flagId" });
     expect(await screen.findByText(/Wang, S\. \(2019\)/)).toBeInTheDocument();
-    expect(screen.getByText("page 34")).toBeInTheDocument();
+    expect(screen.getByText("PDF p. 34")).toBeInTheDocument();
     expect(screen.getByText("Recorded check result")).toBeInTheDocument();
     expect(screen.getByText("Not supported")).toBeInTheDocument();
     expect(screen.getByText("High severity")).toBeInTheDocument();

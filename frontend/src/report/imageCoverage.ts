@@ -1,5 +1,6 @@
 import type { IntegrityCheckStatusOut } from "../api/types";
 import type { CoverageStatementItem } from "../ui/CoverageStatement";
+import { pdfPage } from "../domain/sourceAnchor";
 
 export const IMAGE_COVERAGE_LABELS: Record<string, string> = {
   reading_not_recorded: "Table and equation reading was not recorded",
@@ -48,7 +49,7 @@ export function imageCoverageItem(status: IntegrityCheckStatusOut, checkRunId: n
     const page = Number.isSafeInteger(item.page) && item.page! > 0 ? item.page : null;
     const paragraph = Number.isSafeInteger(item.paragraph) && item.paragraph! >= 0 ? item.paragraph : null;
     const anchor = page !== null ? `page ${page}` : paragraph !== null ? `paragraph ${paragraph}` : null;
-    const location = page !== null ? `Page ${page}` : paragraph !== null ? `Extracted paragraph ${paragraph + 1}` : "Source location unavailable";
+    const location = page !== null ? pdfPage(page, "long") : paragraph !== null ? `Extracted paragraph ${paragraph + 1}` : "Source location unavailable";
     const label = `${location}: ${IMAGE_COVERAGE_LABELS[item.reason] ?? "Image content unassessed"}`;
     // Only merged images count pieces; a plain image is not "a piece".
     const pieces = Number.isSafeInteger(item.piece_count) && item.piece_count! > 1 ? item.piece_count! : 0;

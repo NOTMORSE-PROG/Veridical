@@ -70,7 +70,7 @@ function SharedPageSession({ token, snapshot, reference, context, references, in
       ? <p role="status">{SHARED_PAGE_GONE}</p>
       : <div role="alert"><p>{query.error instanceof ApiError ? query.error.message : "The original page could not be loaded."}</p><Button disabled={query.isFetching} variant="secondary" onClick={() => { void query.refetch(); }}>Retry original page</Button></div>)}
     {page && <figure className={large ? "signal-evidence-dialog__page" : "signal-criterion-packet__preview"}>
-      {page.image_data_url ? <img src={page.image_data_url} alt={`Original source, ${instructorAnchor(reference.anchor ?? "")}`} /> : <p>No original-page image is available for this evidence.</p>}
+      {page.image_data_url ? <img src={page.image_data_url} alt={`Original source, ${instructorAnchor(reference.anchor ?? "", "long")}`} /> : <p>No original-page image is available for this evidence.</p>}
       <figcaption>{page.caption}</figcaption>
     </figure>}
   </>;
@@ -80,7 +80,7 @@ function SharedPageSession({ token, snapshot, reference, context, references, in
     <Button variant="secondary" aria-label={reference.anchor?.trim() ? `Open original page: ${instructorAnchor(reference.anchor)}` : undefined} onClick={() => setDialog(true)}>{reference.anchor?.trim() ? "Open original page" : "Open saved source"}</Button>
     <Button variant="secondary" aria-expanded={preview} onClick={() => setPreview(value => !value)}>{preview ? "Hide" : "Show"} page preview</Button>
     {preview && image(false)}
-    {dialog && <Dialog title={context ? `Evidence and explanation: ${context.title}` : `Original source: ${instructorAnchor(reference.anchor ?? "") || "Saved source"}`} wide className={context ? "signal-dialog--source-context" : undefined} onClose={() => setDialog(false)}>
+    {dialog && <Dialog title={context ? `Evidence and explanation: ${context.title}` : `Original source: ${instructorAnchor(reference.anchor ?? "", "long") || "Saved source"}`} wide className={context ? "signal-dialog--source-context" : undefined} onClose={() => setDialog(false)}>
       {context ? <EvidenceSourceLayout source={image(true)} context={<section aria-label="Shared assessment"><h3>{context.title}</h3><h4>Assessment and explanation</h4><p>{context.explanation || "No assessment explanation was shared for this item."}</p>{context.recordedNote && <p><strong>Recorded system note:</strong> {context.recordedNote}</p>}
         <div className="signal-criterion-packet__quotations">{references.map(entry => <figure key={entry.reference_id}><figcaption><strong>{ROLE_LABEL[entry.role]}</strong><span>{instructorAnchor(entry.anchor ?? "")}</span></figcaption><blockquote>{entry.quote}</blockquote></figure>)}</div></section>} />
         : <><blockquote>{reference.quote}</blockquote>{image(true)}</>}
