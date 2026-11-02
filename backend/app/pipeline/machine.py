@@ -761,7 +761,11 @@ def _may_lack_unread_note(result: CheckResult | None) -> bool:
 
 
 async def _record_unread_pages(
-    session: AsyncSession, check_run_id: int, result: CheckResult, pages: list[int]
+    session: AsyncSession,
+    check_run_id: int,
+    result: CheckResult,
+    pages: list[int],
+    max_unread_ratio: float | None = None,
 ) -> None:
     """Records the pages an integrity check left unread. A check that did not
     read every page never reports the manuscript as passed; its flags stand."""
@@ -775,7 +779,13 @@ async def _record_unread_pages(
         session,
         event_type=f"{result.kind.value}_source_scope_recorded",
         check_run_id=check_run_id,
-        payload={"unread_pages": pages, "outcome": result.outcome.value},
+        # The bar in effect, so a past result stays explainable after either
+        # unread-page setting changes (BUG-621).
+        payload={
+            "unread_pages": pages,
+            "outcome": result.outcome.value,
+            "unread_pages_max_ratio": max_unread_ratio,
+        },
     )
     await session.commit()
 
@@ -818,24 +828,55 @@ async def _run_integrity_stage(
     # check already saved the extraction is not reread at all (BUG-152).
     unannotated = [result for result in existing if _may_lack_unread_note(result)]
     extraction = None
+    reuse_extraction = None
     unread_pages: list[int] = []
+    reuse_unread_pages: list[int] = []
     if None in existing:
-        extraction = await load_raw_store_async(settings, manuscript.id)
-        extraction = bind_analytical_source(extraction, manuscript.content_hash)
+        source = await load_raw_store_async(settings, manuscript.id)
+        source = bind_analytical_source(source, manuscript.content_hash)
         # Check the pages whose reading order is established instead of none
         # at all; each check records the pages it left out.
         extraction, unread_pages = readable_pages_copy(
-            extraction, settings.analysis_unread_pages_max_ratio
+            source, settings.analysis_unread_pages_max_ratio
         )
-        if unread_pages:
-            for result in unannotated:
-                await _record_unread_pages(session, check_run.id, result, unread_pages)
+        # BUG-621: the originality check compares passage by passage, so
+        # leaving more unread pages out only removes its evidence. It gets
+        # its own copy, from the same pruning at its own bar; the other
+        # checks keep theirs. When both bars leave the same pages out it is
+        # the very same copy.
+        shared_ratio = settings.analysis_unread_pages_max_ratio
+        reuse_ratio = settings.reuse_unread_pages_max_ratio
+        if unread_pages and reuse_ratio >= shared_ratio:
+            # Pages already confined under the shared bar are the same pages
+            # under a higher one; no second copy is built.
+            reuse_extraction, reuse_unread_pages = extraction, unread_pages
+        else:
+            reuse_extraction, reuse_unread_pages = readable_pages_copy(source, reuse_ratio)
+            if reuse_unread_pages == unread_pages:
+                reuse_extraction = extraction
+        for result in unannotated:
+            is_reuse = result is reuse_existing
+            pages = reuse_unread_pages if is_reuse else unread_pages
+            if pages:
+                await _record_unread_pages(
+                    session,
+                    check_run.id,
+                    result,
+                    pages,
+                    reuse_ratio if is_reuse else shared_ratio,
+                )
 
     if agreement_existing is None:
         agreement_result = await run_internal_agreement_check(
             session, llm, check_run.id, extraction, settings
         )
-        await _record_unread_pages(session, check_run.id, agreement_result, unread_pages)
+        await _record_unread_pages(
+            session,
+            check_run.id,
+            agreement_result,
+            unread_pages,
+            settings.analysis_unread_pages_max_ratio,
+        )
         agreement_flags = (
             agreement_result.detail.get("n_flags", 0) if agreement_result.detail else 0
         )
@@ -860,7 +901,13 @@ async def _run_integrity_stage(
             citation_result = await run_citation_integrity_check(
                 session, client, check_run.id, citations, extraction, patterns, settings, llm
             )
-        await _record_unread_pages(session, check_run.id, citation_result, unread_pages)
+        await _record_unread_pages(
+            session,
+            check_run.id,
+            citation_result,
+            unread_pages,
+            settings.analysis_unread_pages_max_ratio,
+        )
         citation_flags = citation_result.detail.get("n_flags", 0) if citation_result.detail else 0
     else:
         citation_flags = (
@@ -870,7 +917,13 @@ async def _run_integrity_stage(
 
     if forensics_existing is None:
         forensics_result = await run_statistical_forensics_check(session, check_run.id, extraction)
-        await _record_unread_pages(session, check_run.id, forensics_result, unread_pages)
+        await _record_unread_pages(
+            session,
+            check_run.id,
+            forensics_result,
+            unread_pages,
+            settings.analysis_unread_pages_max_ratio,
+        )
         forensics_flags = (
             forensics_result.detail.get("n_flags", 0) if forensics_result.detail else 0
         )
@@ -885,12 +938,18 @@ async def _run_integrity_stage(
             session,
             manuscript.id,
             check_run.id,
-            extraction,
+            reuse_extraction,
             settings,
             instructor_id=manuscript.instructor_id,
             content_hash=manuscript.content_hash,
         )
-        await _record_unread_pages(session, check_run.id, reuse_result, unread_pages)
+        await _record_unread_pages(
+            session,
+            check_run.id,
+            reuse_result,
+            reuse_unread_pages,
+            settings.reuse_unread_pages_max_ratio,
+        )
         reuse_detail = reuse_result.detail or {}
     else:
         reuse_detail = reuse_existing.detail or {}
