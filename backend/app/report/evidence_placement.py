@@ -355,6 +355,8 @@ def render_pdf_evidence(
             round((y1 - y0) / height, 4),
         )
         for x0, y0, x1, y1 in drawn
-        if x1 > x0 and y1 > y0
+        # A mark is only a scroll hint: one that is not a real, positive box is
+        # dropped rather than allowed to fail the whole page.
+        if all(isfinite(v) for v in (x0, y0, x1, y1)) and x1 > x0 and y1 > y0
     )
     return ReferencePageImage(placement, image, max(rendered_pixels, width * height), marks)
