@@ -8,6 +8,12 @@ const scope = (patch: Partial<AgreementScopeOut> = {}): AgreementScopeOut => ({
   set_aside_by_role: [{ role: "literature", count: 3 }], set_aside: [], absence_leads_withheld: true, ...patch,
 });
 
+const OBJECTIVE_FOLD_LINES = [
+  "1 possible objective from the literature review was set aside, because that part of a paper usually describes other studies.",
+  "1 possible objective from the methodology was set aside, because that part of a paper usually describes how the study was done.",
+  "3 more were set aside from other parts of the paper.",
+];
+
 describe("agreement scope copy", () => {
   it("matches the PDF export's copy word for word", () => {
     expect(AGREEMENT_SCOPE_COPY.heading).toBe(copy.heading);
@@ -36,6 +42,7 @@ describe("agreement scope copy", () => {
     expect(AGREEMENT_SCOPE_COPY.objectiveSetAsideListIntro).toBe(copy.objective_set_aside_list_intro);
     expect(AGREEMENT_SCOPE_COPY.objectivesKeptDespiteRole).toBe(copy.objectives_kept_despite_role);
     expect(AGREEMENT_SCOPE_COPY.objectivesNotIdentified).toBe(copy.objectives_not_identified);
+    expect(AGREEMENT_SCOPE_COPY.objectivesSetAsideUnlisted).toBe(copy.objectives_set_aside_unlisted);
     for (const [role, place] of Object.entries(copy.objective_places)) expect(objectivePlace(role)).toBe(place);
     for (const [role, reason] of Object.entries(copy.objective_roles)) {
       expect(objectiveSetAsideLines(scope({ n_objectives_set_aside: 2, objectives_set_aside_by_role: [{ role, count: 2 }] }))[0]).toContain(`usually ${reason}.`);
@@ -50,6 +57,14 @@ describe("agreement scope copy", () => {
       "3 possible objectives from the literature review were set aside, because that part of a paper usually describes other studies.",
       "1 possible objective from the appendices was set aside, because that part of a paper usually holds supporting material.",
     ]);
+  });
+
+  it("folds many parts and words an unknown part the same way as the PDF", () => {
+    // Same sentences as test_report_agreement_scope.py's objective folding test.
+    const roles = ["literature", "methodology", "appendix", "zzz", "front_matter"].map((role) => ({ role, count: 1 }));
+    expect(objectiveSetAsideLines(scope({ n_objectives_set_aside: 5, objectives_set_aside_by_role: roles }))).toEqual(OBJECTIVE_FOLD_LINES);
+    expect(objectiveSetAsideLines(scope({ n_objectives_set_aside: 1, objectives_set_aside_by_role: [{ role: "zzz", count: 1 }] })))
+      .toEqual(["1 possible objective from another part of the paper was set aside, because that part does not state this study's own objectives."]);
   });
 
   it("says why no objective was set aside, and nothing for an older run", () => {

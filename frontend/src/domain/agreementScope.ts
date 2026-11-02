@@ -66,6 +66,7 @@ export const AGREEMENT_SCOPE_COPY = {
   objectiveSetAsideListHeading: "Objectives set aside",
   objectiveSetAsideListIntro: "These statements read like objectives but are in parts of the paper that usually do not state this study's own objectives. Open one to check it yourself.",
   objectivesKeptDespiteRole: "Every possible objective was in a part of the paper that usually does not state this study's objectives, so all {n} were kept and compared anyway. Some may be other studies' aims or steps of the method.",
+  objectivesSetAsideUnlisted: "Where these were set aside from was not recorded, so they cannot be listed here.",
   objectivesNotIdentified: "The chapter that states the objectives could not be found, so possible objectives were taken from every part of the paper. Some may be other studies' aims.",
   limit: `Partly assessed: ${READINESS_EXCLUSION_COPY.statement_roles_unverified.replace(/\.$/, "")}, so this check does not change readiness.`,
   absence: "An objective with no matching result is not reported here.",
@@ -111,6 +112,7 @@ export function objectiveSetAsideLines(scope: AgreementScopeOut): string[] {
   if (scope.n_objectives_kept_despite_role) return [AGREEMENT_SCOPE_COPY.objectivesKeptDespiteRole.replace("{n}", String(scope.n_objectives ?? 0))];
   if (scope.objectives_section_identified === false) return [AGREEMENT_SCOPE_COPY.objectivesNotIdentified];
   const roles = scope.objectives_set_aside_by_role ?? [];
+  if (!roles.length) return scope.n_objectives_set_aside ? [AGREEMENT_SCOPE_COPY.objectivesSetAsideUnlisted] : [];
   const fold = roles.length >= ROLE_FOLDING.foldAt;
   const lines = roles.slice(0, fold ? ROLE_FOLDING.shown : roles.length).map(({ role, count }) => {
     const place = ROLE_PHRASES[role]?.[0] ?? OBJECTIVE_PLACES[role];

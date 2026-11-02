@@ -204,17 +204,21 @@ def _objective_sections(detail: dict) -> dict:
     identified = sections.get("objectives_section_identified")
     entries = _set_aside_entries(sections.get("set_aside"), lambda item: item.get("chapter_role"))
     despite = sections.get("kept_despite_role")
-    roles = Counter(entry["role"] for entry in entries or [])
+    # The saved count is what the found line adds up to. The statements are
+    # listed only when they account for that count exactly; otherwise where
+    # they came from is unknown, and the panel says so rather than listing
+    # some of them under a total they do not reach.
+    count = _count(sections.get("n_objectives_set_aside"))
+    listed = entries if entries is not None and count is not None and len(entries) == count else []
+    roles = Counter(entry["role"] for entry in listed)
     return {
         "n_objectives_extracted": _count(detail.get("n_intents_extracted")),
         "objectives_section_identified": identified if isinstance(identified, bool) else None,
-        "n_objectives_set_aside": _count(sections.get("n_objectives_set_aside"))
-        if entries is not None
-        else None,
+        "n_objectives_set_aside": count,
         "objectives_set_aside_by_role": [
             {"role": role, "count": count} for role, count in roles.most_common()
         ],
-        "objectives_set_aside": entries or [],
+        "objectives_set_aside": listed,
         "n_objectives_kept_despite_role": len(despite)
         if isinstance(despite, list) and despite
         else None,
