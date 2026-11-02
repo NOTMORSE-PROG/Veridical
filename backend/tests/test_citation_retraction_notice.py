@@ -8,6 +8,7 @@ from app.checks.citations.retraction_lead import RETRACTION_NOTICE
 from app.checks.citations.verify import (
     CitationVerdict,
     VerdictKind,
+    _describable_notice,
     _verdict_flag_draft,
     _verdict_from_result,
 )
@@ -67,26 +68,34 @@ def test_a_notice_is_told_apart_by_its_relations_not_its_title(msg, targets):
 
 
 @pytest.mark.parametrize("msg", [NOTICE, NOTICE_TITLED_RETRACTED])
-def test_the_parser_never_marks_a_notice_retracted(msg):
+def test_only_a_lookup_by_the_cited_doi_names_a_notice(msg):
     parsed = _parse_work(msg)
-    assert parsed.retracted is False and parsed.retraction_detail is None
+    assert _verdict_from_result(parsed, key_kind="doi").kind == VerdictKind.retraction_notice
+    # A title match could equally be the retracted work: unchanged there.
+    assert _verdict_from_result(parsed, key_kind="title").kind == VerdictKind.retracted
+    assert parsed.retracted is True  # the loose-title-match guard still sees it
 
 
 @pytest.mark.parametrize("msg", [WORK_IN_PLACE, WORK_NOTICE_OF_RETRACTION, WORK_TITLE_ONLY])
 def test_a_retracted_work_is_still_retracted(msg):
     assert _parse_work(msg).retracted is True
-    assert _verdict_from_result(_parse_work(msg)).kind == VerdictKind.retracted
+    assert _verdict_from_result(_parse_work(msg), key_kind="doi").kind == VerdictKind.retracted
 
 
 def test_a_notice_cached_as_retracted_before_the_rule_is_named_a_notice():
     cached = VerificationResult(
         found=True, provider="crossref", title=NOTICE["title"][0], retracted=True, raw=NOTICE
     )
-    assert _verdict_from_result(cached).kind == VerdictKind.retraction_notice
+    assert _verdict_from_result(cached, key_kind="doi").kind == VerdictKind.retraction_notice
+
+
+def test_a_self_link_written_as_a_resolver_address_is_still_the_work():
+    msg = record("10.1000/work.6", "RETRACTED: Kiosk", update_to=["https://doi.org/10.1000/WORK.6"])
+    assert retraction_notice_targets(msg) == ()
 
 
 def draft(msg, settings=None):
-    verdict = _verdict_from_result(_parse_work(msg))
+    verdict = _verdict_from_result(_parse_work(msg), key_kind="doi")
     return _verdict_flag_draft(CITATION, verdict, settings or Settings(_env_file=None))
 
 
@@ -100,7 +109,7 @@ def test_a_cited_notice_is_a_low_uncounted_notice_lead():
         "not to the research paper it retracts (https://doi.org/10.1000/work.1). "
         "Please check which one the entry means to cite."
     )
-    assert exclusion_reason("citation_integrity", lead.detail) == "retraction_lead_not_counted"
+    assert exclusion_reason("citation_integrity", lead.detail) == "retraction_notice_not_counted"
 
 
 def test_a_cited_retracted_work_keeps_its_counted_high_finding():
@@ -110,9 +119,14 @@ def test_a_cited_retracted_work_keeps_its_counted_high_finding():
     assert exclusion_reason("citation_integrity", finding.detail) is None
 
 
-def test_without_its_wording_a_notice_raises_nothing_rather_than_a_retraction(tmp_path):
+def test_a_notice_whose_wording_is_unreadable_is_disclosed_as_unassessed(tmp_path):
     settings = Settings(
         _env_file=None, citation_openalex_retraction_lead_file=tmp_path / "missing.json"
     )
-    verdict = CitationVerdict(VerdictKind.retraction_notice, _parse_work(NOTICE))
-    assert _verdict_flag_draft(CITATION, verdict, settings) is None
+    notice = CitationVerdict(VerdictKind.retraction_notice, _parse_work(NOTICE))
+    disclosed = _describable_notice(notice, settings)
+    assert disclosed.kind == VerdictKind.unassessed
+    assert disclosed.unassessed_reason == "retraction_notice_policy_unavailable"
+    assert _describable_notice(notice, Settings(_env_file=None)).kind == (
+        VerdictKind.retraction_notice
+    )

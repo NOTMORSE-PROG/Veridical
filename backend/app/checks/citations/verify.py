@@ -253,11 +253,9 @@ async def verify_citation(
         if verdict.result and verdict.result.found:
             if not same_doi(returned_doi(verdict.result), citation.doi):
                 return CitationVerdict(VerdictKind.unassessed, verdict.result)
-            if verdict.kind in (
-                VerdictKind.retracted,
-                VerdictKind.corrected,
-                VerdictKind.retraction_notice,
-            ):
+            if verdict.kind == VerdictKind.retraction_notice:
+                return _describable_notice(verdict, settings)
+            if verdict.kind in (VerdictKind.retracted, VerdictKind.corrected):
                 return verdict
             comparison = compare_metadata(
                 citation, verdict.result, policy=title_policy, settings=settings
@@ -602,14 +600,33 @@ async def _verify_keyed(
     return verdict
 
 
+def _describable_notice(verdict: CitationVerdict, settings: Settings) -> CitationVerdict:
+    """A notice verdict, or unassessed when its wording cannot be read: the
+    notice is then disclosed in coverage, never dropped and never counted."""
+    try:
+        load_retraction_lead_policy(settings.citation_openalex_retraction_lead_file)
+    except (OSError, ValueError, UnicodeError):
+        return CitationVerdict(
+            VerdictKind.unassessed,
+            verdict.result,
+            unassessed_reason="retraction_notice_policy_unavailable",
+        )
+    return verdict
+
+
 def _verdict_from_result(
     result: VerificationResult, *, key_kind: str | None = None, key_value: str | None = None
 ) -> CitationVerdict:
     if not result.found:
         return CitationVerdict(VerdictKind.not_found, result, key_kind, key_value)
-    if result.provider == "crossref" and crossref_client.retraction_notice_targets(result.raw):
-        # Read from the stored record, so a notice cached before this rule
-        # existed (and stored as retracted) is told apart too.
+    if (
+        key_kind == "doi"
+        and result.provider == "crossref"
+        and crossref_client.retraction_notice_targets(result.raw)
+    ):
+        # Only the cited DOI itself says the entry points at the notice: a
+        # title match could equally be the retracted work. Read from the
+        # stored record, so a notice cached as retracted is told apart too.
         return CitationVerdict(VerdictKind.retraction_notice, result)
     if result.retracted:
         return CitationVerdict(VerdictKind.retracted, result)
