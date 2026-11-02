@@ -1,5 +1,6 @@
 """F4–F7: saved execution state, independent of finding counts or severity."""
 
+import re
 from collections import Counter
 
 from pydantic import ValidationError
@@ -10,7 +11,9 @@ from app.models.run import CheckResult
 from app.report.schemas import (
     COVERAGE_REASONS,
     AgreementScopeOut,
+    IntegrityCheckStatusOut,
     IntegrityModuleOut,
+    PublicCoverageOut,
     UndeterminedPairsOut,
 )
 from app.report.statistical_scope import statistical_check_scope
@@ -203,7 +206,7 @@ def module_states(modules: list[IntegrityModuleOut]) -> list[IntegrityModuleOut]
         IntegrityModuleOut(
             check_kind=module.check_kind,
             state=module.state,
-            coverage_reason=module.coverage_reason,
+            coverage_reason=_known_reason(module.coverage_reason),
         )
         for module in modules
     ]
@@ -219,4 +222,58 @@ def public_modules(modules: list[IntegrityModuleOut]) -> list[IntegrityModuleOut
         if module.agreement_scope is not None
         else module
         for module in modules
+    ]
+
+
+def _known_reason(reason: str | None) -> str | None:
+    return reason if reason in COVERAGE_REASONS else None
+
+
+# The only shapes the originality check writes for where its left-out text
+# starts; anything else saved there is not shared.
+_LOCATION = re.compile(r"(?:p\. |¶)[1-9][0-9]{0,5}")
+
+
+def _location(value: str | None) -> str | None:
+    return value if isinstance(value, str) and _LOCATION.fullmatch(value) else None
+
+
+def _pages(values) -> list[int]:
+    return sorted({page for page in values or () if type(page) is int and page > 0})
+
+
+_PUBLIC_KINDS = {
+    "internal_agreement",
+    "citation_integrity",
+    "statistical_forensics",
+    "originality_reuse",
+}
+
+
+def public_coverage(statuses: list[IntegrityCheckStatusOut]) -> list[PublicCoverageOut]:
+    """What each integrity check left out, as the adviser may see it: the
+    recorded code, page numbers and counts, copied field by field from the
+    report's coverage record. Nothing else in that record crosses. A count saved
+    in any other shape than a whole number of zero or more shows as 0, so one
+    bad record never stops the link from opening."""
+    return [
+        PublicCoverageOut(
+            check_kind=status.check_kind,
+            coverage_reason=_known_reason(status.coverage_reason),
+            n_pages_not_read=_count(status.n_source_pages_unassessed) or 0,
+            pages_not_read=_pages(status.source_pages_unassessed),
+            pages_not_compared=_pages(status.pages_not_compared),
+            not_compared_from=_location(status.not_compared_from),
+            n_skipped_service=_count(status.n_skipped_api_down) or 0,
+            n_skipped_capacity=_count(status.n_skipped_quota) or 0,
+            n_skipped_unreadable=_count(status.n_skipped_parse_failure) or 0,
+            n_references_unverified=_count(status.n_metadata_skipped_insufficient) or 0,
+            n_citation_links_unchecked=_count(status.n_linkage_unassessed) or 0,
+            n_claims_unchecked=_count(status.n_claim_support_unassessed) or 0,
+            n_images_unchecked=_count(status.n_images_unassessed) or 0,
+            n_tables_unchecked=_count(status.n_recovery_tables_unassessed) or 0,
+            n_equations_unchecked=_count(status.n_equations_unassessed) or 0,
+        )
+        for status in statuses
+        if status.check_kind in _PUBLIC_KINDS
     ]

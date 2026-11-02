@@ -32,6 +32,10 @@ export interface SharedModuleStatusInput {
   /** The check says what it left out elsewhere on the page (agreement scope,
    * originality scope), so no generic "not covered" line is needed. */
   coverageShownElsewhere?: boolean;
+  /** What the check left out is listed under the points, reason included. */
+  coverageListed?: boolean;
+  /** An originality check that compared no text at all. */
+  nothingCompared?: boolean;
   detailSnapshot?: "current" | "stale" | "not_recorded";
 }
 
@@ -40,9 +44,9 @@ export function sharedModuleTone(state: State): "done" | "partial" | "unknown" {
   return state === "partial" || state === "incomplete" ? "partial" : state === "not_recorded" ? "unknown" : "done";
 }
 
-export function sharedModuleStatus({ kind, state, findings, leads, coverageReason, coverageShownElsewhere, detailSnapshot }: SharedModuleStatusInput): { title: string; points: string[] } {
+export function sharedModuleStatus({ kind, state, findings, leads, coverageReason, coverageShownElsewhere, coverageListed, nothingCompared, detailSnapshot }: SharedModuleStatusInput): { title: string; points: string[] } {
   const found = plural(findings, "possible inconsistency", "possible inconsistencies");
-  const notCovered = coverageReason && coverageCopy(coverageReason)
+  const notCovered = coverageListed ? [] : coverageReason && coverageCopy(coverageReason)
     ? [`Not covered: ${coverageCopy(coverageReason)}`]
     : coverageShownElsewhere ? [] : ["This link does not record what this check did not cover."];
   const leadLine = leads > 0 ? [`${plural(leads, "comparison lead", "comparison leads")}: a lead is a passage to compare yourself. It is not a finding and is not scored.`] : [];
@@ -50,6 +54,9 @@ export function sharedModuleStatus({ kind, state, findings, leads, coverageReaso
     return findings > 0
       ? { title: "Completed", points: [`${found} recorded.`, ...leadLine] }
       : { title: "Completed", points: ["No possible inconsistencies were recorded.", `This covers only what this check looks at: ${SCOPE[kind]}.`, ...leadLine] };
+  }
+  if (kind === "originality_reuse" && nothingCompared && findings === 0 && (state === "partial" || state === "incomplete")) {
+    return { title: "Not fully run", points: ["No text was compared, so this says nothing about originality.", ...notCovered, ...leadLine] };
   }
   if (state === "partial") {
     return findings > 0

@@ -17,6 +17,7 @@ import { unconfirmedAutomaticRuleRows } from "../domain/ruleScope";
 import { SharedAssessmentContext } from "./SharedAssessmentContext";
 import { SharedEvidencePacket, useSharedEvidenceManifest } from "./SharedEvidencePacket";
 import { INTEGRITY_MODULES, IntegrityModuleNavigation, IntegrityModuleSummary, selectedIntegrityModule } from "./IntegrityModules";
+import { SharedLeftOut } from "./SharedLeftOut";
 import { sharedCountLabel, sharedFindingsIntro, sharedModuleStatus, sharedModuleTone } from "./sharedModuleStatus";
 import { AgreementScopeSummary } from "./AgreementCheckScope";
 import { countInconsistencies, isInterrupted } from "../domain/agreementScope";
@@ -130,8 +131,12 @@ export function AdviserViewPage() {
   const findingGroups = clusterFlagFindings(moduleFlags);
   const selectedModuleRecord = report.integrity_modules?.find(saved => saved.check_kind === selectedModule);
   const leadCount = findingGroups.filter(group => isOptionalComparisonLead(group.flags[0])).length;
+  const selectedCoverage = report.integrity_coverage?.find(item => item.check_kind === selectedModule);
+  const leftOut = selectedModuleRecord?.state === "partial" || selectedModuleRecord?.state === "incomplete";
   const sharedStatus = sharedModuleStatus({ kind: selectedModule, state: selectedModuleRecord?.state ?? "not_recorded", findings: findingGroups.length - leadCount, leads: leadCount,
     coverageReason: selectedModuleRecord?.coverage_reason,
+    coverageListed: Boolean(selectedCoverage) && leftOut,
+    nothingCompared: Boolean(report.originality_scope?.not_compared_reason),
     coverageShownElsewhere: Boolean(selectedModuleRecord?.agreement_scope) || (selectedModule === "originality_reuse" && Boolean(report.originality_scope)) || (selectedModule === "statistical_forensics" && Boolean(report.statistical_check_scope)),
     detailSnapshot: data.detail_snapshot });
   const requestedFinding = selectedCriterionId(params.get("finding"));
@@ -233,6 +238,8 @@ export function AdviserViewPage() {
             <p className="signal-shared-module-status__kicker">What this check found</p>
             <p className="signal-shared-module-status__headline">{sharedStatus.title}</p>
             <ul>{sharedStatus.points.map(point => <li key={point}>{point}</li>)}</ul>
+            {leftOut && selectedCoverage && <SharedLeftOut key={selectedModule} coverage={selectedCoverage} all={report.integrity_coverage ?? []}
+              originalityNotCompared={selectedModule === "originality_reuse" && Boolean(report.originality_scope?.not_compared_reason)} />}
           </div>
           {selectedModule === "internal_agreement" && agreementModule?.agreement_scope && <AgreementScopeSummary scope={agreementModule.agreement_scope}
             findings={countInconsistencies(moduleFlags)} undecided={undecidedCount}

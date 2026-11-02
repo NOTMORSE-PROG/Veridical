@@ -768,7 +768,27 @@ export interface UndeterminedPairsOut {
 /** BUG-044 fix: the public, unauthenticated adviser view's report
  * payload. Deliberately does NOT extend `ReportOut` -- see
  * `ReportCommon`'s own comment for which fields were cut and why. */
+/** BUG-676: what one integrity check left out, as the shared link carries it. */
+export interface PublicCoverageOut {
+  check_kind: "internal_agreement" | "citation_integrity" | "statistical_forensics" | "originality_reuse";
+  coverage_reason: string | null;
+  n_pages_not_read: number;
+  pages_not_read: number[];
+  pages_not_compared: number[];
+  not_compared_from: string | null;
+  n_skipped_service: number;
+  n_skipped_capacity: number;
+  n_skipped_unreadable: number;
+  n_references_unverified: number;
+  n_citation_links_unchecked: number;
+  n_claims_unchecked: number;
+  n_images_unchecked: number;
+  n_tables_unchecked: number;
+  n_equations_unchecked: number;
+}
+
 export interface PublicReportOut extends ReportCommon {
+  integrity_coverage?: PublicCoverageOut[];
   assessment_revision?: number | null;
   subject?: ReportOut["subject"];
   integrity_modules?: IntegrityModuleOut[];
