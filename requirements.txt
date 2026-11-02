@@ -1,3 +1,10 @@
-# Dependency entry point for the separate native-compute project.
-# The API retains backend/pyproject.toml and its tested lockfile.
--r compute-helper/requirements.txt
+# The native-compute helper's pins, for a deployment built from the repository
+# root. Vercel's builder no longer reads a "-r" include here (BUG-531), so the
+# pins are listed directly; they must match compute-helper/requirements.txt,
+# which a backend test checks. The API keeps backend/pyproject.toml and its lockfile.
+pymupdf==1.28.0
+pydantic==2.13.4
+pydantic-settings==2.14.2
+boto3==1.43.86
+python-docx==1.2.0
+lxml==6.1.1

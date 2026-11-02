@@ -52,9 +52,10 @@ for module, distributions in importlib.metadata.packages_distributions().items()
     if any(project(d) in installed for d in distributions):
         allowed.add(module)
 
-# Python ships a few modules the name list leaves out, such as the platform's
-# generated _sysconfigdata module, so anything found in its own folders counts
-# as standard library. Installed packages never live there.
+# Python ships a few modules the name list leaves out, so anything found in
+# its own folders counts as standard library. Installed packages never live
+# there. (On Linux the generated _sysconfigdata module is one of them, but the
+# get_paths() call below has already imported it before the finder is added.)
 paths = sysconfig.get_paths()
 python_home = {paths["stdlib"], paths["platstdlib"]}
 python_home |= {str(Path(p) / "lib-dynload") for p in list(python_home)}
@@ -90,3 +91,59 @@ def test_the_helper_entrypoint_loads_with_only_the_helper_requirements():
     )
     assert result.returncode == 0, result.stderr[-3000:]
     assert "helper loaded: handler" in result.stdout
+
+
+def _pins(path):
+    lines = (REPO / path).read_text(encoding="utf-8").splitlines()
+    return sorted(line.strip() for line in lines if line.strip() and not line.startswith("#"))
+
+
+def test_the_root_requirements_list_the_helper_pins_directly():
+    # A deployment built from the repository root reads requirements.txt, and
+    # Vercel's builder no longer follows a "-r" include there.
+    assert _pins("requirements.txt") == _pins("compute-helper/requirements.txt")
+    assert not any(pin.startswith("-") for pin in _pins("requirements.txt"))
+
+
+def test_the_helper_reports_the_commit_it_was_deployed_from(monkeypatch):
+    import importlib.util
+    import io
+    import json
+
+    spec = importlib.util.spec_from_file_location(
+        "native_extract_commit", REPO / "api" / "native_extract.py"
+    )
+    entry = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(entry)
+
+    def get():
+        handler = entry.handler.__new__(entry.handler)
+        handler.wfile = io.BytesIO()
+        handler.request_version = "HTTP/1.1"
+        handler.requestline = "GET / HTTP/1.1"
+        handler.command = "GET"
+        handler.close_connection = True
+        handler.do_GET()
+        return json.loads(handler.wfile.getvalue().split(b"\r\n\r\n", 1)[1])
+
+    for name in ("DEPLOYED_COMMIT", "RENDER_GIT_COMMIT", "VERCEL_GIT_COMMIT_SHA"):
+        monkeypatch.delenv(name, raising=False)
+    assert get() == {"service": "native-compute", "version": "native-v1", "commit": None}
+    monkeypatch.setenv("DEPLOYED_COMMIT", "abc123")
+    assert get()["commit"] == "abc123"
+
+
+def test_the_helper_pins_are_the_versions_the_backend_is_tested_with():
+    # The helper runs backend/app against its own pins, so they must be the
+    # versions backend CI resolves from the lockfile.
+    import re
+    import tomllib
+
+    lock = tomllib.loads((REPO / "backend" / "uv.lock").read_text(encoding="utf-8"))
+    locked = {
+        re.sub(r"[-_.]+", "-", package["name"]).lower(): package["version"]
+        for package in lock["package"]
+    }
+    for pin in _pins("compute-helper/requirements.txt"):
+        name, _, version = pin.partition("==")
+        assert locked.get(re.sub(r"[-_.]+", "-", name).lower()) == version, pin
