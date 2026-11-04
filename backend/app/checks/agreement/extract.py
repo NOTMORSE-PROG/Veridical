@@ -379,6 +379,7 @@ def _extract_objective_prose(
     """Recognize explicit aims without extending a heading across omitted source."""
     if not cues.objective_prose_enabled:
         return []
+    from app.checks.agreement.evidence_policy import assertion_policy
     from app.ingest.quotations import located_quote_status
 
     candidates = []
@@ -399,7 +400,8 @@ def _extract_objective_prose(
             continue
         if parse_reference(text, order_index=0).parse_status == CitationParseStatus.parsed:
             continue
-        for start, end in _sentence_spans(text):
+        spans = _sentence_spans(text)
+        for span_index, (start, end) in enumerate(spans):
             sentence = _normalize(text[start:end])
             if not any(
                 re.fullmatch(pattern, sentence, re.IGNORECASE)
@@ -422,6 +424,35 @@ def _extract_objective_prose(
             )
             if quotation is None or quotation[1]:
                 continue
+            # A completed-work claim immediately beside an aim belongs to the
+            # same source passage, just as it does in a numbered objective.
+            # Keep it only with its own unquoted, complete assertion evidence.
+            if span_index + 1 < len(spans):
+                _, following_end = spans[span_index + 1]
+                following = _normalize(text[end:following_end])
+                policy = assertion_policy()
+                if (
+                    any(
+                        re.search(pattern, following, re.IGNORECASE)
+                        for pattern in policy["factual_assertion_patterns"]
+                    )
+                    and not any(
+                        re.search(pattern, following, re.IGNORECASE)
+                        for pattern in policy["factual_scope_veto_patterns"]
+                    )
+                    and len(text[start:following_end]) <= settings.agreement_context_max_chars
+                ):
+                    passage = _normalize(text[start:following_end])
+                    passage_quote = located_quote_status(
+                        source, passage, settings, _scope_cache=quotation_cache
+                    )
+                    passage_location = sections.locate(passage, _anchor_for(block), block.page)
+                    if (
+                        passage_quote is not None
+                        and not passage_quote[1]
+                        and passage_location == where
+                    ):
+                        sentence = passage
             candidates.append(
                 Statement(
                     kind="intent",

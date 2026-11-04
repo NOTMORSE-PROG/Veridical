@@ -214,7 +214,7 @@ async def test_seeded_contradiction_produces_a_real_flag_row(session_factory):
         assert result.detail["n_intents"] == 1
         assert result.detail["n_outcomes"] == 1
         assert result.detail["n_flags"] == 1
-        assert result.detail["prompt_version"] == "v4"
+        assert result.detail["prompt_version"] == "v5"
         assert result.detail["verdict_counts"] == {"contradictory": 1}
         assert result.detail["undetermined"] == {
             "count": 0,

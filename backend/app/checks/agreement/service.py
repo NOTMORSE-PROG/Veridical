@@ -84,6 +84,16 @@ async def run_internal_agreement_check(
                 "n_intents": 0,
                 "n_outcomes": 0,
                 "n_flags": 0,
+                "assessment_ledger": {
+                    "version": "v1",
+                    "recognition_complete": False,
+                    "recognition_reason": "statement_extraction_unassessed",
+                    "selected_pair_count": 0,
+                    "disposition_counts": {},
+                    "pairs": [],
+                    "unmatched_objectives": [],
+                    "unselected_outcomes": [],
+                },
                 "note": (
                     "No objective/finding-style statements were detected in the available source. "
                     "Native Word source coverage is incomplete; this does not establish absence."
@@ -177,6 +187,7 @@ async def run_internal_agreement_check(
             "n_skipped_ai_not_configured": pairing.n_skipped_ai_not_configured,
             "n_skipped_ai_key_rejected": pairing.n_skipped_ai_key_rejected,
             "prompt_version": PROMPT_VERSION,
+            "assessment_ledger": pairing.assessment_ledger,
             # Pairs the judge could not decide are coverage, shown once on the
             # report beside the findings, not one finding row each.
             "undetermined": {
