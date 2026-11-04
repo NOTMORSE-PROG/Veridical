@@ -28,7 +28,6 @@ a bug -- check the actual rendered page before treating one as real.
 
 import contextlib
 import json
-import re
 from datetime import UTC, datetime
 from functools import lru_cache
 from io import BytesIO
@@ -78,6 +77,7 @@ from app.report.schemas import (
 )
 from app.report.source_coverage import project_source_coverage
 from app.report.source_inventory import NativeSourceNote, group_native_source_notes
+from app.report.source_location import display_anchor as _display_anchor
 from app.report.source_print import source_evidence_flowables, source_image_size, source_image_store
 from app.report.statistical_scope import statistical_scope_copy
 from app.report.text import Paragraph, clusters, draw_right_text, register_fonts, text_width
@@ -855,11 +855,6 @@ def _result_display(row: CriterionResultOut) -> tuple[str, str]:
         "not_applicable": ("Not applicable", "neutral"),
         "unverifiable": ("Unverifiable", "neutral"),
     }.get(row.outcome, (row.outcome, "neutral"))
-
-
-def _display_anchor(anchor: str) -> str:
-    match = re.fullmatch(r"(?:¶|Â¶|paragraph\s+)(\d+)", anchor.strip(), flags=re.I)
-    return f"Extracted paragraph {int(match[1]) + 1}" if match else anchor
 
 
 def _source_caption(row: CriterionResultOut) -> str:
