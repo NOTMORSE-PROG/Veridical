@@ -171,16 +171,17 @@ def extract_document(path: str, settings: Settings) -> ExtractionResult:
             # the inventory. It cannot become a false continuous sentence.
             continue
         bold_ratio, max_size = _run_typography(item)
+        style_name = (item.style.name or "").casefold() if item.style else ""
         blocks.append(
             TextBlock(
                 paragraph=index,
                 text=text,
                 max_font_size=max_size,
                 bold_ratio=bold_ratio,
+                paragraph_style=style_name,
             )
         )
 
-        style_name = (item.style.name or "").casefold() if item.style else ""
         if style_name.startswith(patterns.toc_style_prefixes):
             continue  # a TOC listing is content, never structure
         candidate = _classify_paragraph(text, index, style_name, bold_ratio, patterns, settings)

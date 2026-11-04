@@ -897,6 +897,9 @@ class Settings(BaseSettings):
     forensics_sprite_policy_file: Path | None = None
     # When a table's percentages are held to "sum to 100%"; empty = packaged default.
     forensics_percentage_policy_file: Path | None = None
+    forensics_table_context_file: Path | None = None
+    forensics_grimmer_max_observations: int = Field(default=1000000, ge=2)
+    forensics_grimmer_max_candidate_means: int = Field(default=10000, ge=1)
     forensics_sprite_max_rows: int = Field(default=3, ge=1)
     forensics_sprite_max_input_rows: int = Field(default=50, ge=1)
     forensics_sprite_max_receipt_rows: int = Field(default=50, ge=1)
@@ -1200,6 +1203,24 @@ class Settings(BaseSettings):
     # match of the pattern in the recorded text ("2024-2025") is its start.
     reuse_school_year_start_month: int = Field(default=8, ge=1, le=12)
     reuse_school_year_pattern: str = r"(?:19|20)\d{2}"
+    reuse_literal_enabled: bool = True
+    reuse_literal_min_words: int = Field(default=40, ge=2)
+    reuse_literal_probe_words: int = Field(default=8, ge=1)
+    reuse_literal_probe_stride: int = Field(default=16, ge=1)
+    reuse_literal_max_probes: int = Field(default=64, ge=1)
+    reuse_literal_passage_max_chars: int = Field(default=32768, ge=1)
+    reuse_literal_candidate_max_chars: int = Field(default=65536, ge=1)
+    reuse_literal_candidate_limit: int = Field(default=64, ge=1)
+    reuse_literal_span_limit: int = Field(default=16, ge=1)
+    reuse_literal_dedup_work_limit: int = Field(default=2000000, ge=1)
+    reuse_literal_token_work_limit: int = Field(default=2000000, ge=1)
+    reuse_literal_query_timeout_ms: int = Field(default=2000, ge=1)
+    reuse_literal_max_queries: int = Field(default=128, ge=1)
+    reuse_literal_time_budget_seconds: float = Field(default=8.0, gt=0, allow_inf_nan=False)
+    reuse_quotation_policy_file: str | None = None
+    reuse_source_read_max_bytes: int = Field(default=2097152, ge=1)
+    reuse_source_cache_max_bytes: int = Field(default=16777216, ge=1)
+    reuse_source_cache_max_entries: int = Field(default=16, ge=1)
 
     # --- Library (V-066, F7.1/F7.2 surfaces) -----------------------------------
     # How many chapters' worth of passage excerpt the library shows for a
@@ -1456,6 +1477,8 @@ class Settings(BaseSettings):
         "forensics_sprite_policy_file",
         "forensics_percentage_policy_file",
         "reuse_same_work_names_file",
+        "forensics_table_context_file",
+        "reuse_quotation_policy_file",
         mode="before",
     )
     @classmethod
@@ -1467,6 +1490,12 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _weight_importance_ratios_are_ordered(self) -> "Settings":
+        if (
+            self.reuse_literal_probe_words > self.reuse_literal_min_words
+            or self.reuse_literal_probe_stride
+            > self.reuse_literal_min_words - self.reuse_literal_probe_words + 1
+        ):
+            raise ValueError("literal probes must cover the configured minimum contiguous span")
         if (
             2 * (self.pipeline_claim_renew_seconds + self.pipeline_coordination_timeout_seconds)
             >= self.pipeline_claim_stale_seconds

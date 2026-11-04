@@ -586,11 +586,7 @@ def _passage_drafts(
 
     if unstructured:
         body_blocks = _unstructured_body_blocks(extraction, patterns)
-        body_quote_ids = (
-            block_quote_ids_in_scope(body_blocks, settings)
-            if extraction.anchor_kind == "page"
-            else set()
-        )
+        body_quote_ids = block_quote_ids_in_scope(body_blocks, settings)
         for draft in _scoped_passages(
             source,
             body_blocks,

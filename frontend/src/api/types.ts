@@ -679,6 +679,7 @@ export interface IntegrityCheckStatusOut {
  * Library became separate; "pre_library" for older checks that counted the
  * former automatic archive. */
 export interface OriginalityScope {
+  literal_unassessed_passages?: number | null;
   library_passage_indexing?: {
     version: "v1";
     partial: boolean;
@@ -751,7 +752,7 @@ export interface AgreementScopeOut {
 export interface IntegrityModuleOut {
   check_kind: "internal_agreement" | "citation_integrity" | "statistical_forensics" | "originality_reuse";
   state: "completed" | "partial" | "incomplete" | "not_applicable" | "not_recorded";
-  /** Agreement pairs the check compared but could not decide: coverage, not findings. */
+  /** Selected agreement pairs left unresolved: coverage, not findings. */
   undetermined?: UndeterminedPairsOut | null;
   /** internal_agreement only: what the check covered (BUG-617). Absent for older runs. */
   agreement_scope?: AgreementScopeOut | null;
@@ -762,7 +763,8 @@ export interface IntegrityModuleOut {
 export interface UndeterminedPairsOut {
   count: number;
   compared_count: number;
-  pairs: { intent_text: string; intent_anchor: string; outcome_text: string; outcome_anchor: string; reason?: string | null }[];
+  locally_unassessed_count?: number | null;
+  pairs: { intent_text: string; intent_anchor: string; outcome_text: string; outcome_anchor: string; reason?: string | null; comparison_method?: "generation" | "phase_guard" | "unknown" }[];
 }
 
 /** BUG-044 fix: the public, unauthenticated adviser view's report
@@ -938,6 +940,7 @@ export interface ResolveEscalationOut {
 // bounded, stored text (never a live read of the matched manuscript's
 // file -- bounded-excerpt rule, carried from V-058/BUG-050 Branch B).
 export interface PassagePairOut {
+  literal_overlap?: { normalization: string; word_count: number; own_start: number; own_end: number; matched_start: number; matched_end: number } | null;
   own_excerpt: string;
   own_context_before: string | null;
   own_context_after: string | null;
@@ -947,7 +950,7 @@ export interface PassagePairOut {
   matched_context_after: string | null;
   context_words_each_side: number;
   similarity: number;
-  level: "exact_duplicate" | "high_similarity" | null;
+  level: "exact_duplicate" | "high_similarity" | "literal_overlap" | null;
 }
 
 // BUG-078: what confirm-source would mark, if the instructor confirms this
@@ -1209,6 +1212,7 @@ export interface FigureReadingOut {
 // `Flag` -- `id` is a request-scoped string, `own_region.flag_id` is a
 // synthetic negative int, neither can be confused with a real Flag.id.
 export interface ExcludedReuseMatchOut {
+  literal_overlap?: PassagePairOut["literal_overlap"];
   id: string;
   own_excerpt: string;
   own_context_before: string | null;
@@ -1220,11 +1224,12 @@ export interface ExcludedReuseMatchOut {
   matched_context_after: string | null;
   context_words_each_side: number;
   similarity: number;
-  level: "exact_duplicate" | "high_similarity";
+  level: "exact_duplicate" | "high_similarity" | "literal_overlap";
   excluded_reason: ("reference_list" | "block_quote")[];
 }
 
 export interface ReuseMatchesOut {
+  literal_retrieval?: { method: string; unassessed: { passage_index: number; reason: string }[] } | null;
   passage_archive_size_n: number;
   matches: ExcludedReuseMatchOut[];
   n_source_candidates_withheld?: number;

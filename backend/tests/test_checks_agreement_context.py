@@ -102,4 +102,5 @@ def test_the_prompt_shows_the_context_for_each_pair():
     assert "TEXT AROUND THE FINDING" in prompt
     assert "SCOPE/LIMITATION STATEMENT (p. 4)" in prompt
     assert 'under "Results and Discussion"' in prompt
-    assert "objective_reported_not_done" in prompt
+    assert "incompatible_descriptive_claims" in prompt
+    assert "objective_reported_not_done" not in prompt

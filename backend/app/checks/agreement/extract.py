@@ -14,12 +14,11 @@ manuscript" fixture (5/5 intents, 4/4 outcomes, with two planted
 distractors — a future-work and a scope-negation sentence — correctly
 excluded). Both measured at 100%, well above the 80% floor, so (V-006's own
 precedent: 17/17 regex -> skip the LLM fallback) augmentation was never
-built. If a future real manuscript drops rule recall below the 80% floor,
-add the Gemini pass here; don't build it speculatively against a floor
-nothing has failed yet.
+built. Those measurements cover their original formulations. Bare-infinitive
+objectives exposed a separate recognizer gap, handled below with a bounded
+objective-section rule rather than a generation pass.
 
-Two independent rule types, matching the ticket's own wording exactly
-("rule-based cues (objectives lists, modal verbs)"):
+Three complementary rule types, within intent/outcome extraction:
 1. **Objective/outcome LIST detection**: a numbered/bulleted list under a
    heading matching `cues.objective_heading_synonyms` /
    `outcome_heading_synonyms` (data file, ENGINEERING §8) — the strong
@@ -32,6 +31,10 @@ Two independent rule types, matching the ticket's own wording exactly
    "results showed..."): sentence-level, position-independent, the part
    of this ticket general contradiction-detection scope explicitly does
    NOT require chapter placement.
+3. **Objective-section prose**: complete bare-infinitive sentences under a
+   configured objective heading, including native Word list paragraphs whose
+   numbering is not part of the extracted text. This weaker cue requires
+   known unquoted source text and is withheld in excluded chapter roles.
 
 Guards (ticket edge cases): a sentence containing a future-work phrase
 ("future researchers", "could later...") or a scope-negation phrase ("is
@@ -40,7 +43,7 @@ as an intent — even if it also matches a modal cue.
 """
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from difflib import SequenceMatcher
 from typing import Literal
 
@@ -370,6 +373,68 @@ def _extract_outcome_prose(
 # --- dedup --------------------------------------------------------------------
 
 
+def _extract_objective_prose(
+    blocks, cues, *, source, sections, heading_keys, heading_max_words, settings
+) -> list[Statement]:
+    """Recognize explicit aims without extending a heading across omitted source."""
+    if not cues.objective_prose_enabled:
+        return []
+    from app.ingest.quotations import located_quote_status
+
+    candidates = []
+    in_objectives = False
+    quotation_cache = {}
+    for block in blocks:
+        if block.is_furniture or not block.text.strip():
+            continue
+        text = block.text.strip()
+        key = (block.page, block.paragraph, _normalize(text))
+        if key in heading_keys or _is_heading_like(text, max_words=heading_max_words):
+            in_objectives = _heading_section(text, cues) == "objectives" and not any(
+                re.search(pattern, text, re.IGNORECASE)
+                for pattern in cues.objective_heading_exclusion_patterns
+            )
+            continue
+        if not in_objectives or _LIST_MARKER.match(text):
+            continue
+        if parse_reference(text, order_index=0).parse_status == CitationParseStatus.parsed:
+            continue
+        for start, end in _sentence_spans(text):
+            sentence = _normalize(text[start:end])
+            if not any(
+                re.fullmatch(pattern, sentence, re.IGNORECASE)
+                for pattern in cues.objective_prose_patterns
+            ):
+                continue
+            if any(
+                phrase in sentence.lower()
+                for phrase in (*cues.future_work_guard_phrases, *cues.scope_negation_phrases)
+            ):
+                continue
+            where = sections.locate(sentence, _anchor_for(block), block.page)
+            kept_chapter = where.chapter_number in sections.roles.objectives_kept_chapters
+            if (
+                where.chapter_role in sections.roles.objectives_excluded and not kept_chapter
+            ) or where.heading_role in sections.roles.objectives_excluded:
+                continue
+            quotation = located_quote_status(
+                source, sentence, settings, _scope_cache=quotation_cache
+            )
+            if quotation is None or quotation[1]:
+                continue
+            candidates.append(
+                Statement(
+                    kind="intent",
+                    text=sentence,
+                    anchor=_anchor_for(block),
+                    page=block.page,
+                    paragraph=block.paragraph,
+                    cue="intent_section_prose",
+                )
+            )
+    return candidates
+
+
 def _dedupe(statements: list[Statement], *, threshold: float) -> list[Statement]:
     """Merge near-duplicate restatements (ticket edge case: Ch1 vs Ch3
     wording drift on the same objective) by normalized-text similarity —
@@ -430,10 +495,29 @@ def extract_statements(
 ) -> ExtractionOutcome:
     settings = settings or get_settings()
     cues = cues or load_cues(settings.agreement_cues_file)
+    from app.checks.section_roles import SectionMap, load_section_roles
     from app.ingest.analytical_source import analytical_source
+    from app.ingest.blockquotes import block_quote_ids_in_scope
 
     statements = []
-    for scope in analytical_source(extraction).scopes:
+    source = analytical_source(extraction)
+    sections = (
+        SectionMap(
+            extraction,
+            load_section_roles(settings.section_roles_file),
+            heading_max_words=settings.agreement_heading_max_words,
+            locate_chars=settings.agreement_context_locate_chars,
+        )
+        if cues.objective_prose_enabled
+        else None
+    )
+    heading_keys = set()
+    pending = list(extraction.section_tree.nodes)
+    while pending:
+        node = pending.pop()
+        heading_keys.add((node.page, node.paragraph, _normalize(node.title)))
+        pending.extend(node.children)
+    for scope in source.scopes:
         scoped = extraction.model_copy(update={"blocks": list(scope)})
         statements.extend(
             _extract_list_statements(
@@ -456,6 +540,36 @@ def extract_statements(
                 list(scope), cues, heading_max_words=settings.agreement_heading_max_words
             )
         )
+        if sections is not None:
+            # PDF quotation inference needs actual page geometry; legacy text
+            # without that provenance cannot support this weaker cue.
+            quote_ids = None
+            if source.state != "not_applicable" or all(
+                block.page is not None and block.bbox is not None
+                for block in scope
+                if not block.is_furniture and block.text.strip()
+            ):
+                quote_ids = frozenset(block_quote_ids_in_scope(list(scope), settings))
+            scoped_source = replace(source, scopes=(scope,), quotation_block_ids=quote_ids)
+            candidates = _extract_objective_prose(
+                list(scope),
+                cues,
+                source=scoped_source,
+                sections=sections,
+                heading_keys=heading_keys,
+                heading_max_words=settings.agreement_heading_max_words,
+                settings=settings,
+            )
+            statements.extend(
+                candidate
+                for candidate in candidates
+                if not any(
+                    existing.kind == candidate.kind
+                    and existing.anchor == candidate.anchor
+                    and existing.text == candidate.text
+                    for existing in statements
+                )
+            )
     threshold = settings.agreement_dedup_similarity_threshold
     # Deduped per-kind (not across the combined list) — an intent and an
     # outcome should never merge into each other even if their wording

@@ -93,6 +93,8 @@ class TextBlock(BaseModel):
     is_furniture: bool = False
     source_line_ids: list[str] | None = None
     source_lines: list[SourceLineSpan] | None = None
+    # None means historical extraction did not retain Word style provenance.
+    paragraph_style: str | None = None
 
 
 class UriLink(BaseModel):

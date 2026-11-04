@@ -89,6 +89,8 @@ export function ReuseExplorePanel({
   const anyToggleOn = includeReferenceList || includeBlockQuote;
   const excludedMatches = data?.matches ?? [];
   const comparisonLoaded = !isFetching && !isError && isSuccess && data !== undefined;
+  const literalLimits = comparisonLoaded && data.literal_retrieval?.method === "casefold_whitespace_tokens_v1"
+    ? new Set(data.literal_retrieval.unassessed.map((entry) => entry.passage_index)).size : 0;
   const coverage = isFetching
     ? anyToggleOn ? "Loading comparison coverage and additional matches." : "Loading comparison coverage."
     : isError
@@ -138,6 +140,7 @@ export function ReuseExplorePanel({
           {!isFetching && isError && <> <button type="button" onClick={(event) => retry(event, refetch)} className="font-medium underline">Try again</button></>}
         </p>
         <p>An empty result is not evidence of originality.</p>
+        {!!literalLimits && <p>Short-passage comparison was incomplete for {literalLimits} manuscript passages in this request. Some shared wording may not be listed.</p>}
         {!!data?.n_source_candidates_withheld && <p>{data.n_source_candidates_withheld} selected comparison candidates were withheld because their source passages could not be verified. Those comparisons remain unassessed.</p>}
       </div>
 
@@ -154,8 +157,8 @@ export function ReuseExplorePanel({
         <ToggleRow
           checked={includeBlockQuote}
           onChange={onToggleBlockQuote}
-          label="Include block-quote matches"
-          helper="VERIDICAL excludes matches inside a detected block quote by default, since a properly cited long quotation is expected to match its source. Turning this on shows those matches anyway, for your own check."
+          label="Include quotation matches"
+          helper="Detected quotations are excluded by default. Turn this on to inspect matching quoted text. These additional matches do not change readiness."
         />
       </fieldset>
 
@@ -223,7 +226,7 @@ export function ReuseExplorePanel({
                             key={r}
                             className="rounded-full bg-status-neutral-bg px-2 py-0.5 text-xs text-ink-tertiary"
                           >
-                            {r === "reference_list" ? "Reference list" : "Block quote"}
+                            {r === "reference_list" ? "Reference list" : "Detected quotation"}
                           </span>
                         ))}
                       </span>

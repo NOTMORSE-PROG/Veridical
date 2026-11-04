@@ -108,7 +108,17 @@ def reuse_reason(detail: dict[str, Any]) -> str:
     target = f"Library record #{ref}" if isinstance(ref, int) else "a Library record"
     chapter = detail.get("own_chapter_title")
     location = f' in your section "{chapter}"' if isinstance(chapter, str) and chapter else ""
-    return (
+    literal = detail.get("literal_overlap")
+    prefix = (
+        f"A contiguous span of {literal['word_count']} words matches "
+        "after case and whitespace normalization. "
+        if isinstance(literal, dict)
+        and type(literal.get("word_count")) is int
+        and literal["word_count"] > 0
+        and literal.get("normalization") == "casefold_whitespace_tokens_v1"
+        else ""
+    )
+    return prefix + (
         f"Comparison lead{location} against {target}. Compare the source passages in context; "
         "similarity alone does not establish copying, authorship, or which document came first. "
         "This lead does not change readiness."

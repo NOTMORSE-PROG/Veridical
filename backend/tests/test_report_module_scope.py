@@ -96,6 +96,24 @@ def test_undecided_agreement_pairs_reach_the_report_as_coverage():
     assert module.undetermined.count == 1
     assert module.undetermined.compared_count == 9
     assert module.undetermined.pairs[0].outcome_anchor == "p. 40"
+    assert module.undetermined.locally_unassessed_count is None
+    assert module.undetermined.pairs[0].comparison_method == "unknown"
+
+
+def test_locally_declined_pair_retains_actual_zero_comparisons_and_source_method():
+    module = agreement(
+        {
+            "undetermined": {
+                "count": 1,
+                "compared_count": 0,
+                "locally_unassessed_count": 1,
+                "pairs": [dict(PAIR, comparison_method="phase_guard")],
+            }
+        }
+    )
+    assert module.undetermined.compared_count == 0
+    assert module.undetermined.locally_unassessed_count == 1
+    assert module.undetermined.pairs[0].comparison_method == "phase_guard"
 
 
 @pytest.mark.parametrize(

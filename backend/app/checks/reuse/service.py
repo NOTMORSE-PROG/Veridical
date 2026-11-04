@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.audit.service import write_audit_event
 from app.checks.reuse.embed import compute_document_embeddings, compute_passage_embeddings
 from app.checks.reuse.lexical import wording_evidence
+from app.checks.reuse.literal import literal_policy_record, maximal_literal_matches
 from app.checks.reuse.query import (
     PassageMatch,
     SimilarityMatch,
@@ -30,7 +31,7 @@ from app.checks.reuse.query import (
     query_similar_passages,
 )
 from app.checks.reuse.same_work import SameWork, find_same_work, name_rules_fingerprint
-from app.checks.reuse.source import coarse_candidate_supported, passage_match_supported
+from app.checks.reuse.source import SourceCache, coarse_candidate_supported, passage_match_supported
 from app.checks.source_quality import persist_source_limitation
 from app.config import Settings
 from app.findings.policy import reuse_reason
@@ -268,9 +269,12 @@ def _passage_match_to_flag_draft(
     different shape from `_match_to_flag_draft` above (see the wording
     templates' own comment for why: real passage text as the excerpt,
     the explanatory sentence in `detail["reason"]` instead)."""
-    if match.level not in ("exact_duplicate", "high_similarity"):
+    if match.level not in ("exact_duplicate", "high_similarity", "literal_overlap"):
         raise ValueError("Unclassified supporting evidence cannot create a passage flag")
-    if match.level == "exact_duplicate":
+    if match.level == "literal_overlap":
+        severity = FlagSeverity.med
+        template = HIGH_SIMILARITY_PASSAGE_WORDING
+    elif match.level == "exact_duplicate":
         severity = FlagSeverity.high
         template = EXACT_DUPLICATE_PASSAGE_WORDING
     else:
@@ -298,6 +302,7 @@ def _passage_match_to_flag_draft(
         "matched_context_text": match.matched_context_text,
         "is_reference_list_match": match.own_is_reference_list or match.matched_is_reference_list,
         "is_block_quote_match": match.own_is_block_quote or match.matched_is_block_quote,
+        **({"literal_overlap": match.literal_overlap} if match.literal_overlap else {}),
     }
     detail["reason"] = reuse_reason(detail)
     return severity, match.own_text, page_anchor, detail
@@ -335,7 +340,7 @@ def _withheld_lead(granularity: str, match, level, own: str, other: str, setting
 async def _same_work_audit(session: AsyncSession, same_work: SameWork, settings) -> dict:
     """What BUG-662 left out of the comparison and why, so a past result can
     be rebuilt after the Library or the name rules change. Opaque ids only."""
-    cache = {}
+    cache = SourceCache()
     unreadable = [
         s.manuscript_id
         for s in same_work.sources
@@ -355,6 +360,31 @@ async def _same_work_audit(session: AsyncSession, same_work: SameWork, settings)
         "same_work_similarity_threshold": settings.reuse_same_work_similarity_threshold,
         "same_work_name_rules": name_rules_fingerprint(settings),
     }
+
+
+def _deduplicate_passage_matches(matches):
+    retained, seen = [], set()
+    for match in matches:
+        identity = (
+            match.matched_manuscript_id,
+            match.own_chapter_index,
+            match.own_char_start,
+            match.own_char_end,
+            match.matched_chapter_index,
+            match.matched_char_start,
+            match.matched_char_end,
+            match.own_text,
+            match.matched_text,
+            match.own_is_block_quote,
+            match.matched_is_block_quote,
+            match.own_is_reference_list,
+            match.matched_is_reference_list,
+            tuple(sorted((match.literal_overlap or {}).items())),
+        )
+        if identity not in seen:
+            seen.add(identity)
+            retained.append(match)
+    return retained
 
 
 def _has_text(extraction: ExtractionResult) -> bool:
@@ -573,7 +603,7 @@ async def run_originality_reuse_check(
         # A canonical identical-byte copy may retain an older extraction.
         # Revalidate the selected representative instead of transferring
         # source-projection authority merely because the file hash matches.
-        source_cache = {}
+        source_cache = SourceCache()
         supported_coarse = []
         for match in query_result.matches:
             if await coarse_candidate_supported(
@@ -589,11 +619,27 @@ async def run_originality_reuse_check(
         )
         supported_passages = []
         for match in passage_query_result.matches:
-            if await passage_match_supported(session, manuscript_id, match, settings, source_cache):
+            if await passage_match_supported(
+                session, manuscript_id, match, settings, source_cache, require_unquoted=True
+            ):
                 supported_passages.append(match)
+        deduplicated = _deduplicate_passage_matches(supported_passages)
+        maximal, dedup_unassessed = maximal_literal_matches(
+            deduplicated, settings.reuse_literal_dedup_work_limit
+        )
+        if passage_query_result.literal_scope is not None:
+            passage_query_result.literal_scope["contained_proofs_omitted"] = (
+                passage_query_result.literal_scope.get("contained_proofs_omitted", 0)
+                + len(deduplicated)
+                - len(maximal)
+            )
+            passage_query_result.literal_scope["unassessed"].extend(
+                {"passage_index": index, "reason": "dedup_work_budget"}
+                for index in sorted(dedup_unassessed)
+            )
         passage_query_result = dataclasses.replace(
             passage_query_result,
-            matches=supported_passages,
+            matches=maximal,
             n_source_candidates_withheld=passage_query_result.n_source_candidates_withheld
             + len(passage_query_result.matches)
             - len(supported_passages),
@@ -695,22 +741,29 @@ async def run_originality_reuse_check(
         query_result.n_source_candidates_withheld
         + passage_query_result.n_source_candidates_withheld
     )
-    native_limited = source.limited or bool(withheld)
+    native_limited = source.limited
+    source_limited = bool(withheld)
+    literal_limited = bool((passage_query_result.literal_scope or {}).get("unassessed"))
 
     result = CheckResult(
         check_run_id=check_run_id,
         criterion_id=None,
         kind=CheckKind.originality_reuse,
         outcome=ResultOutcome.escalated
-        if native_limited or membership_partial or not_compared
+        if native_limited or source_limited or literal_limited or membership_partial or not_compared
         else (ResultOutcome.not_applicable if no_comparisons else ResultOutcome.passed),
         detail={
             **source.detail(),
             "reference_membership_issues": list(selection.membership_issues),
             "passage_inventory_status": "not_captured" if membership_partial else "available",
             "n_source_candidates_withheld": withheld,
+            "literal_retrieval": passage_query_result.literal_scope,
             "coverage_reason": "native_math_comparison_incomplete"
             if native_limited
+            else "source_comparison_incomplete"
+            if source_limited
+            else "literal_comparison_incomplete"
+            if literal_limited
             else "reference_membership_partial"
             if membership_partial
             else "reference_end_unclear"
@@ -812,6 +865,7 @@ async def run_originality_reuse_check(
         payload={
             **result.detail,
             "thresholds": {
+                "literal": literal_policy_record(settings),
                 "exact_duplicate": settings.reuse_exact_duplicate_threshold,
                 "high_similarity": settings.reuse_high_similarity_threshold,
                 "passage_exact_duplicate": settings.reuse_passage_exact_duplicate_threshold,

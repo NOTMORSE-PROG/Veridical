@@ -1193,7 +1193,9 @@ async def dismiss_failed_manuscript(
     return manuscript
 
 
-def load_raw_store(settings: Settings, manuscript_id: int) -> ExtractionResult:
+def load_raw_store(
+    settings: Settings, manuscript_id: int, *, max_bytes: int | None = None
+) -> ExtractionResult:
     """Reads back what `_write_raw_store` wrote — the structural check
     engine (V-016) is the first consumer of the full extraction (blocks,
     tables, geometry) beyond the ingestion pass itself.
@@ -1205,11 +1207,22 @@ def load_raw_store(settings: Settings, manuscript_id: int) -> ExtractionResult:
     unchanged for the genuinely-gone case (pre-migration rows, a purged
     manuscript)."""
     storage = get_storage(settings)
-    path = ensure_local_file(settings, storage, str(raw_store_path(settings, manuscript_id)))
+    path = ensure_local_file(
+        settings, storage, str(raw_store_path(settings, manuscript_id)), max_bytes=max_bytes
+    )
+    if max_bytes is not None:
+        with path.open("rb") as retained:
+            data = retained.read(max_bytes + 1)
+        if len(data) > max_bytes:
+            raise OverflowError("Retained source exceeds the comparison read limit")
+        result = ExtractionResult.model_validate_json(data)
+        return result
     return ExtractionResult.model_validate_json(path.read_text(encoding="utf-8"))
 
 
-async def load_raw_store_async(settings: Settings, manuscript_id: int) -> ExtractionResult:
+async def load_raw_store_async(
+    settings: Settings, manuscript_id: int, *, max_bytes: int | None = None
+) -> ExtractionResult:
     """`load_raw_store`, off the event loop (backend review finding,
     BUG-138 review): every caller of `load_raw_store` runs from async
     context, and since BUG-138 a cache miss now means a real network fetch
@@ -1217,9 +1230,7 @@ async def load_raw_store_async(settings: Settings, manuscript_id: int) -> Extrac
     every one of those sites originally did, would block the whole server
     on exactly the request pattern most likely right after a redeploy/
     idle-wake (many resumed check runs hitting a cold cache at once)."""
-    return await asyncio.get_running_loop().run_in_executor(
-        None, load_raw_store, settings, manuscript_id
-    )
+    return await asyncio.to_thread(load_raw_store, settings, manuscript_id, max_bytes=max_bytes)
 
 
 # Held while a figure store is derived from a full extraction, so two report

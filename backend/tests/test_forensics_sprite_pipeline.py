@@ -398,7 +398,15 @@ def test_child_scientific_thread_limit_does_not_change_parent_environment(monkey
 
 
 def _plain_table(page, rows):
-    return TableBlock(page=page, rows=[["Respondents", "N", "Mean"], *rows], source="native")
+    return TableBlock(
+        page=page,
+        rows=[
+            ["Respondents", "N", "Mean", "Item response unit", "Number of items"],
+            *[[*row, "integer", "1"] for row in rows],
+        ],
+        source="native",
+        caption="Each participant supplies exactly one integer rating.",
+    )
 
 
 def test_grim_still_runs_on_tables_after_the_sprite_input_budget_is_used_up():

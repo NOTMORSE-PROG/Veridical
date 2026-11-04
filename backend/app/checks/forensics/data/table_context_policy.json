@@ -1,0 +1,27 @@
+{
+  "version": "table_context_v4",
+  "max_body_item_gap": 1,
+  "max_context_chars": 1800,
+  "continuous_patterns": [
+    "\\bmeasurements? (?:are|were) continuous\\b",
+    "\\bcontinuous (?:measurements?|lengths?|weights?|durations?)\\b",
+    "\\bnot integer (?:ratings?|responses?|measurements?)\\b"
+  ],
+  "weighted_patterns": ["\\bweighted (?:mean|average)\\b", "\\bunequal (?:survey )?weights\\b"],
+  "composite_patterns": ["\\bcomposite (?:mean|average|score)\\b", "\\baverages? \\d+ (?:questionnaire )?items\\b"],
+  "single_integer_patterns": [
+    "\\b(?:each|every) (?:participant|respondent) (?:gives?|gave|supplies|supplied|provides?|provided|contributes?|contributed) (?:exactly )?one integer (?:rating|response)\\b",
+    "\\b(?:table|row) reports (?:exactly )?(?:one|a single) integer (?:rating|response) per (?:participant|respondent)\\b"
+  ],
+  "single_integer_veto_patterns": ["\\bnot (?:exactly )?one integer\\b", "\\bnot (?:a )?single integer\\b", "\\bnot.{0,60}(?:single|one) integer\\b", "\\bnon[- ]integer\\b"],
+  "complete_patterns": ["\\ball categories are shown\\b", "\\b(?:complete|exhaustive) (?:category )?distribution\\b"],
+  "exclusive_patterns": ["\\bexactly one of the categories\\b", "\\bmutually exclusive\\b"],
+  "distribution_veto_patterns": [
+    "\\b(?:can|may) select multiple\\b", "\\bcategories overlap\\b",
+    "\\bselect all that apply\\b", "\\bmultiple responses\\b", "\\bmultiple answers\\b",
+    "\\bindependent .{0,30}rates\\b", "\\bother categories are omitted\\b",
+    "\\bonly (?:two |three |selected |some )?categories\\b",
+    "\\bnot (?:an? )?(?:complete|exhaustive|mutually exclusive)\\b",
+    "\\bnot all categories\\b", "\\bneed not (?:sum|total)\\b"
+  ]
+}

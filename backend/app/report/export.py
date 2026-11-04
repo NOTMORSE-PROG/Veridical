@@ -183,11 +183,11 @@ def _agreement_scope_flowables(report, module, listed_flags, undecided_legacy, s
     scope = module.agreement_scope
     if scope is None:
         return []
-    # Only these two are possible inconsistencies; an injection warning sits
-    # on a pair that read as consistent and is a finding of another kind.
+    # Attainment and factual leads share this aggregate; unresolved pairs and
+    # injection warnings remain separate records.
     findings = sum(
         flag.check_kind == "internal_agreement"
-        and flag.problem_kind in {"agreement_contradictory", "agreement_partial"}
+        and flag.problem_kind in set(agreement_scope_copy()["review_lead_kinds"])
         for flag in listed_flags
     )
     undecided = (module.undetermined.count if module.undetermined else 0) + len(undecided_legacy)
@@ -225,42 +225,58 @@ def _agreement_scope_flowables(report, module, listed_flags, undecided_legacy, s
 def _undecided_pairs_flowables(
     report, legacy: list[FlagSummaryOut], styles: dict[str, ParagraphStyle]
 ) -> list:
-    """Objective/result pairs the agreement check compared but could not
-    decide, as one list after the module's findings rather than a page each."""
+    """Unresolved selected pairs, without implying that every pair was compared."""
     module = next(
         (m for m in report.integrity_modules if m.check_kind == "internal_agreement"), None
     )
     saved = module.undetermined if module and module.undetermined else None
     pairs = [
-        (pair.intent_text, pair.intent_anchor, pair.outcome_text, pair.outcome_anchor)
+        (
+            pair.intent_text,
+            pair.intent_anchor,
+            pair.outcome_text,
+            pair.outcome_anchor,
+            pair.reason,
+            pair.comparison_method,
+        )
         for pair in (saved.pairs if saved else [])
-    ] + [(flag.evidence_excerpt, flag.page_anchor, None, None) for flag in legacy]
+    ] + [(flag.evidence_excerpt, flag.page_anchor, None, None, None, "unknown") for flag in legacy]
     if not pairs:
         return []
-    # Older runs saved no compared count; the pairs listed are then all that is known.
-    lead = (
-        f"VERIDICAL could not decide on {len(pairs)} of "
-        f"{max(saved.compared_count, len(pairs))} objective and result pairs it compared."
-        if saved
-        else f"VERIDICAL could not decide on {len(pairs)} objective and result "
-        f"{'pair' if len(pairs) == 1 else 'pairs'}."
-    )
+
     items = [
         Paragraph("Pairs to read yourself", styles["h3"]),
         Paragraph(
             escape(
-                f"{lead} This is not a problem found in the manuscript. If "
-                "objective coverage matters for this defense, read the pairs and decide "
-                "yourself."
+                f"{len(pairs)} selected {'pair' if len(pairs) == 1 else 'pairs'} left unresolved. "
+                "Review both statements and their surrounding text. These pairs are not "
+                "manuscript findings and do not change readiness."
             ),
             styles["body"],
         ),
     ]
-    for number, (intent, intent_at, outcome, outcome_at) in enumerate(pairs, start=1):
+    if saved is not None and saved.compared_count is not None:
+        items.append(Paragraph(f"Pairs compared with AI: {saved.compared_count}.", styles["body"]))
+    else:
+        items.append(Paragraph(agreement_scope_copy()["comparison_unknown"], styles["body"]))
+    if saved is not None and saved.locally_unassessed_count:
+        items.append(
+            Paragraph(
+                f"Pairs left unassessed before AI comparison: {saved.locally_unassessed_count}.",
+                styles["body"],
+            )
+        )
+    for number, (intent, intent_at, outcome, outcome_at, reason, method) in enumerate(
+        pairs, start=1
+    ):
         text = f"{number}. Objective ({_display_anchor(intent_at)}): “{intent}”"
         if outcome is not None:
             text += f" Result ({_display_anchor(outcome_at)}): “{outcome}”"
         items.append(Paragraph(escape(text), styles["body"]))
+        labels = agreement_scope_copy()["pair_assessment_labels"]
+        label = labels.get(method, labels["unknown"])
+        note = f"{label}: {reason}" if reason else f"{label}."
+        items.append(Paragraph(escape(note), styles["body"]))
     return items
 
 
@@ -769,6 +785,15 @@ def _originality_scope_flowables(data: ReportExportData, styles: dict[str, Parag
         Spacer(1, 10),
     ]
     if scope and scope.compared_count and not scope.not_compared_reason:
+        if scope.literal_unassessed_passages:
+            items.append(
+                Paragraph(
+                    "Short-passage comparison was incomplete for "
+                    f"{scope.literal_unassessed_passages} manuscript passages when this check ran. "
+                    "Some shared wording may not be listed.",
+                    styles["caption"],
+                )
+            )
         sentences = indexing_scope_sentences(scope.library_passage_indexing)
         if sentences and scope.library_passage_indexing is not None:
             items.append(Paragraph("Passage comparison limits", styles["h3"]))

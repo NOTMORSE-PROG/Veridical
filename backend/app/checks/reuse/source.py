@@ -1,6 +1,8 @@
 """Bounded native-source compatibility for selected F7 candidates (BUG-457)."""
 
+import asyncio
 from bisect import bisect_right
+from dataclasses import replace
 
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,6 +14,14 @@ from app.models.manuscript import Manuscript
 from app.storage.access import read_source
 
 
+class SourceCache(dict):
+    """A request-local cache with a conservative serialized-source budget."""
+
+    def __init__(self):
+        super().__init__()
+        self.retained_bytes = 0
+
+
 async def selected_native_source(
     session: AsyncSession,
     manuscript_id: int,
@@ -20,6 +30,13 @@ async def selected_native_source(
 ) -> AnalyticalSource | bool:
     if manuscript_id in cache:
         return cache[manuscript_id]
+    if isinstance(cache, SourceCache):
+        available = settings.reuse_source_cache_max_bytes - cache.retained_bytes
+        if len(cache) >= settings.reuse_source_cache_max_entries or available <= 0:
+            return False
+        read_limit = min(settings.reuse_source_read_max_bytes, available)
+    else:
+        read_limit = settings.reuse_source_read_max_bytes
     manuscript = await session.get(Manuscript, manuscript_id)
     if manuscript is None or manuscript.purged_at is not None:
         source = False
@@ -28,12 +45,71 @@ async def selected_native_source(
 
         try:
             extraction = await read_source(
-                session, manuscript, lambda: load_raw_store_async(settings, manuscript.id)
+                session,
+                manuscript,
+                lambda: load_raw_store_async(settings, manuscript.id, max_bytes=read_limit),
             )
+            if isinstance(cache, SourceCache):
+                # Reserve the full admitted read, including JSON overhead that
+                # the source projection may no longer retain after validation.
+                cache.retained_bytes += read_limit
             source = analytical_source(
                 extraction, expected_source_sha256=manuscript.content_hash or ""
             )
-        except (FileNotFoundError, GoneError, ValidationError):
+            from app.checks.reuse.embed import _unstructured_body_blocks, _uses_unstructured_body
+            from app.ingest.blockquotes import block_quote_block_ids, block_quote_ids_in_scope
+            from app.ingest.normalize import normalize
+            from app.ingest.patterns import load_patterns
+            from app.ingest.references import select_references
+
+            patterns = load_patterns(settings.ingest_patterns_file)
+            chapters = [node for node in extraction.section_tree.nodes if node.level == 1]
+            quote_ids = (
+                block_quote_ids_in_scope(_unstructured_body_blocks(extraction, patterns), settings)
+                if _uses_unstructured_body(chapters, patterns)
+                else block_quote_block_ids(extraction, settings)
+            )
+            references = select_references(extraction, patterns)
+            fragments = None
+            if not references.issues and not references.membership_issues:
+                from app.ingest.source_slices import SourceFragment
+
+                fragments = []
+                for block in [references.heading, *references.span, *references.protected_span]:
+                    if block is None or not block.text.strip():
+                        continue
+                    if isinstance(block, SourceFragment):
+                        owner = extraction.blocks[block.source_block_index]
+                        fragments.append((id(owner), block.source_start, block.source_end))
+                    elif any(block is item for item in extraction.blocks):
+                        fragments.append((id(block), 0, len(block.text)))
+                    else:
+                        fragments = None
+                        break
+                if fragments is not None:
+                    fragments = tuple(fragments)
+            headings, pending = [], list(extraction.section_tree.nodes)
+            while pending:
+                node = pending.pop()
+                headings.append(node)
+                pending.extend(node.children)
+            heading_paragraphs = {node.paragraph for node in headings if node.paragraph is not None}
+            page_headings = {(node.page, normalize(node.title)) for node in headings}
+            source = replace(
+                source,
+                quotation_block_ids=frozenset(quote_ids),
+                reference_block_spans=fragments,
+                heading_block_ids=frozenset(
+                    id(block)
+                    for block in extraction.blocks
+                    if (block.paragraph is not None and block.paragraph in heading_paragraphs)
+                    or (
+                        block.paragraph is None
+                        and (block.page, normalize(block.text)) in page_headings
+                    )
+                ),
+            )
+        except (FileNotFoundError, GoneError, ValidationError, OverflowError):
             source = False
     cache[manuscript_id] = source
     return source
@@ -44,6 +120,14 @@ def selected_passage_supported(
 ) -> bool:
     if isinstance(source, bool):
         return source
+    needle = " ".join(text.split())
+    if any(
+        id(block) in source.heading_block_ids and " ".join(block.text.split()) == needle
+        for scope in source.scopes
+        for block in scope
+    ):
+        # A shared structural label alone cannot support a reuse warning.
+        return False
     if source.state == "not_applicable":
         # The retained extraction identifies PDF capability even when the
         # caller's filename has a Word suffix. Existing PDF guards still apply.
@@ -86,6 +170,16 @@ async def coarse_candidate_supported(session, manuscript_id, settings, cache) ->
     source = await selected_native_source(session, manuscript_id, settings, cache)
     if isinstance(source, bool):
         return source
+    from app.ingest.quotations import located_word_quotation
+
+    for scope in source.scopes:
+        words = await asyncio.to_thread(
+            located_word_quotation, source, " ".join(block.text for block in scope), settings
+        )
+        if words is None or any(word[1] for word in words):
+            # Existing aggregate vectors do not record quotation exclusion.
+            # Independently located unquoted passage leads remain available.
+            return False
     # Existing aggregate vectors have no projection-generation column.
     # A positive/unknown native inventory cannot certify their old input.
     # Independently bound passage leads remain available separately.
@@ -94,10 +188,12 @@ async def coarse_candidate_supported(session, manuscript_id, settings, cache) ->
     )
 
 
-async def passage_match_supported(session, manuscript_id, match, settings, cache) -> bool:
+async def passage_match_supported(
+    session, manuscript_id, match, settings, cache, *, require_unquoted=False
+) -> bool:
     own = await selected_native_source(session, manuscript_id, settings, cache)
     matched = await selected_native_source(session, match.matched_manuscript_id, settings, cache)
-    return selected_passage_supported(
+    supported = selected_passage_supported(
         own, text=match.own_text, context=match.own_context_text, paragraph=match.own_paragraph
     ) and selected_passage_supported(
         matched,
@@ -105,3 +201,36 @@ async def passage_match_supported(session, manuscript_id, match, settings, cache
         context=match.matched_context_text,
         paragraph=match.matched_paragraph,
     )
+    if supported and (match.literal_overlap is not None or require_unquoted):
+        from app.ingest.quotations import located_quote_status, located_word_reference
+
+        own_quote = await asyncio.to_thread(located_quote_status, own, match.own_text, settings)
+        matched_quote = await asyncio.to_thread(
+            located_quote_status, matched, match.matched_text, settings
+        )
+        if own_quote is None or matched_quote is None:
+            return False
+        if require_unquoted and (
+            own_quote[1]
+            or matched_quote[1]
+            or match.own_is_block_quote
+            or match.matched_is_block_quote
+        ):
+            return False
+        if match.literal_overlap is None:
+            return True
+        own_refs = await asyncio.to_thread(located_word_reference, own, match.own_text, settings)
+        matched_refs = await asyncio.to_thread(
+            located_word_reference, matched, match.matched_text, settings
+        )
+        return bool(
+            own_quote is not None
+            and matched_quote is not None
+            and own_refs is not None
+            and matched_refs is not None
+            and own_quote[1] == match.own_is_block_quote
+            and matched_quote[1] == match.matched_is_block_quote
+            and any(word[1] for word in own_refs) == match.own_is_reference_list
+            and any(word[1] for word in matched_refs) == match.matched_is_reference_list
+        )
+    return supported

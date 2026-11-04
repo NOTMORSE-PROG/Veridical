@@ -1939,11 +1939,13 @@ async def test_a_section_with_no_passage_evidence_keeps_its_existing_path(sessio
     assert any(not kind.endswith("_passage") for kind in kinds)
 
 
-async def test_a_nearer_topic_match_does_not_hide_the_real_source(session_factory):
+@pytest.mark.parametrize("literal_enabled", [False, True])
+async def test_a_nearer_topic_match_does_not_hide_the_real_source(session_factory, literal_enabled):
     """BUG-620: the nearest Library passage holds every word in another order
     (the same vector, no shared runs); the real source ranks below it. The
     real source is found when the next candidates are tried, and lost when
-    only the nearest is."""
+    only the nearest is tried by the vector route. Independent literal
+    retrieval still finds the copied text with either vector bound."""
     copied = (
         "The clinic queue prototype sent each patient a text message when their turn was "
         "near, and the nurses reported that the waiting room was calmer during the trial "
@@ -1952,7 +1954,12 @@ async def test_a_nearer_topic_match_does_not_hide_the_real_source(session_factor
     tokens = copied.split()
     shuffled = " ".join(tokens[1::2] + tokens[0::2])
     source_text = copied + " Patients also asked for reminders in Filipino as well as English."
-    settings = get_settings().model_copy(update={"reuse_passage_high_similarity_threshold": 0.5})
+    settings = get_settings().model_copy(
+        update={
+            "reuse_passage_high_similarity_threshold": 0.5,
+            "reuse_literal_enabled": literal_enabled,
+        }
+    )
 
     decoy_id, _ = await _seed_manuscript_and_run(session_factory, group_label="Shuffled")
     await _add_to_library(session_factory, decoy_id, _extraction(shuffled, CH2))
@@ -1984,7 +1991,10 @@ async def test_a_nearer_topic_match_does_not_hide_the_real_source(session_factor
                 ).all()
             )
     assert source_id in found[5] and decoy_id not in found[5]
-    assert source_id not in found[1]
+    if literal_enabled:
+        assert source_id in found[1] and decoy_id not in found[1]
+    else:
+        assert source_id not in found[1]
 
 
 # --- BUG-662: another upload of the same work ---------------------------------

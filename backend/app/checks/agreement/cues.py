@@ -4,7 +4,7 @@ data, never a hardcoded branch) — same convention as
 `app.checks.rules.keywords.load_keywords`."""
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 _DEFAULT_FILE = Path(__file__).parent / "data" / "cues.json"
@@ -27,6 +27,14 @@ class AgreementCues:
     objective_status_patterns: tuple[str, ...] = ()
     named_system_pattern: str | None = None
     named_system_ignore: frozenset[str] = frozenset()
+    phase_qualifier_patterns: tuple[str, ...] = ()
+    phase_qualifier_ignored: frozenset[str] = frozenset()
+    phase_label_aliases: dict[str, str] = field(default_factory=dict)
+    phase_action_prefix_pattern: str | None = None
+    source_explanation_policy: dict = field(default_factory=dict)
+    objective_prose_enabled: bool = False
+    objective_prose_patterns: tuple[str, ...] = ()
+    objective_heading_exclusion_patterns: tuple[str, ...] = ()
 
 
 def load_cues(path: Path | None = None) -> AgreementCues:
@@ -47,4 +55,14 @@ def load_cues(path: Path | None = None) -> AgreementCues:
         objective_status_patterns=tuple(raw.get("objective_status_patterns", ())),
         named_system_pattern=raw.get("named_system_pattern"),
         named_system_ignore=frozenset(raw.get("named_system_ignore", ())),
+        phase_qualifier_patterns=tuple(raw.get("phase_qualifier_patterns", ())),
+        phase_qualifier_ignored=frozenset(raw.get("phase_qualifier_ignored", ())),
+        phase_label_aliases=raw.get("phase_label_aliases", {}),
+        phase_action_prefix_pattern=raw.get("phase_action_prefix_pattern"),
+        source_explanation_policy=raw.get("source_explanation_policy", {}),
+        objective_prose_enabled=raw.get("objective_prose_enabled", False) is True,
+        objective_prose_patterns=tuple(raw.get("objective_prose_patterns", ())),
+        objective_heading_exclusion_patterns=tuple(
+            raw.get("objective_heading_exclusion_patterns", ())
+        ),
     )

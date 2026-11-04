@@ -105,7 +105,7 @@ def test_observed_unsupported_notation_is_not_not_applicable():
     assert coverage["coverage_reason"] == "statistical_notation_unassessed"
     assert coverage["analysis_coverage"] == "unsupported"
     assert coverage["statistical_notation_unassessed"] is True
-    assert coverage["statistical_notation_coverage"]["version"] == "v1"
+    assert coverage["statistical_notation_coverage"]["version"] == "v2"
     items = coverage["statistical_notation_coverage"]["items"]
     assert items and all(
         NARRATIVE[item["source_start"] : item["source_end"]] == item["raw_text"] for item in items
