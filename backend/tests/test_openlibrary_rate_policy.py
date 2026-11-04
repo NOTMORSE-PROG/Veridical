@@ -118,6 +118,13 @@ async def test_actual_book_adapter_paces_redirect_and_retry(monkeypatch, fault):
         return httpx.Response(200, json={"title": "Synthetic edition", "key": "/books/fixture"})
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        if fault == 429:
+            with pytest.raises(ApiDownError, match="429"):
+                await openlibrary.lookup_isbn(client, "9780140328721", settings=profile)
+            with pytest.raises(ApiDownError, match="429"):
+                await openlibrary.lookup_isbn(client, "another-isbn", settings=profile)
+            assert times == [0, 1]
+            return
         result = await openlibrary.lookup_isbn(client, "9780140328721", settings=profile)
     assert result.found and not result.content_checkable
     assert times == [0, 1, 2, 3]

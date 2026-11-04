@@ -29,6 +29,7 @@ from app.models.enums import (
     ResultOutcome,
 )
 from app.models.run import CheckResult, Flag
+from app.rate_governor import RateGovernor
 from app.report.scoring import ScorableFlag, ScorableResult, score_check_run
 from app.report.service import _load_scorable_flags
 
@@ -180,7 +181,7 @@ def citation(raw, index=0):
 
 
 @pytest.mark.parametrize("failure", ["html", "null", "list", 400, 422, 401, 403, 410, 429, 503])
-async def test_failed_book_lookup_preserves_healthy_neighbor_and_no_absence_cache(
+async def test_failed_book_lookup_preserves_provider_limits_and_no_absence_cache(
     monkeypatch, failure
 ):
     refs = [
@@ -190,13 +191,14 @@ async def test_failed_book_lookup_preserves_healthy_neighbor_and_no_absence_cach
     assert refs[0].isbn == "9780132350884" and refs[1].isbn == "9780201616224"
     requests = []
 
-    class Governor:
-        acquisitions = 0
+    class Clock:
+        now = 0.0
 
-        async def acquire(self):
-            self.acquisitions += 1
+        async def sleep(self, seconds):
+            self.now += seconds
 
-    governor = Governor()
+    clock = Clock()
+    governor = RateGovernor(rpm=60, clock=lambda: clock.now, sleep=clock.sleep)
 
     def response(request):
         requests.append(request.url.path)
@@ -228,23 +230,30 @@ async def test_failed_book_lookup_preserves_healthy_neighbor_and_no_absence_cach
         row["reference_order_index"]: row["status"]
         for row in result.detail["reference_metadata_coverage"]
     }
-    assert statuses == {0: "api_down", 1: "existence_confirmed"}
-    assert result.detail["n_metadata_api_down"] == 1
+    expected_second = "api_down" if failure == 429 else "existence_confirmed"
+    assert statuses == {0: "api_down", 1: expected_second}
+    assert result.detail["n_metadata_api_down"] == (2 if failure == 429 else 1)
     assert result.detail["n_metadata_not_found"] == 0
-    stored.assert_awaited_once()
-    assert stored.await_args.kwargs["key_value"] == refs[1].isbn
-    assert stored.await_args.kwargs["result"].found is True
+    if failure == 429:
+        stored.assert_not_awaited()
+    else:
+        stored.assert_awaited_once()
+        assert stored.await_args.kwargs["key_value"] == refs[1].isbn
+        assert stored.await_args.kwargs["result"].found is True
     unavailable = [
         row
         for row in session.rows
         if isinstance(row, Flag) and row.detail.get("kind") == "unverifiable_api_down"
     ]
-    assert len(unavailable) == 1
-    assert unavailable[0].detail["affects_readiness"] is False
-    assert exclusion_reason("citation_integrity", unavailable[0].detail) == "unassessed_evidence"
-    expected_bad_attempts = 2 if failure in ("html", "null", "list", 429, 503) else 1
-    assert len(requests) == governor.acquisitions == expected_bad_attempts + 1
-    assert requests[-1].endswith(f"/{refs[1].isbn}.json")
+    assert len(unavailable) == (2 if failure == 429 else 1)
+    for flag in unavailable:
+        assert flag.detail["affects_readiness"] is False
+        assert exclusion_reason("citation_integrity", flag.detail) == "unassessed_evidence"
+    expected_bad_attempts = 2 if failure in ("html", "null", "list", 503) else 1
+    expected_requests = expected_bad_attempts + (failure != 429)
+    assert len(requests) == len(governor._timestamps) == expected_requests
+    if failure != 429:
+        assert requests[-1].endswith(f"/{refs[1].isbn}.json")
 
 
 async def test_current_flag_projection_excludes_exact_legacy_outage_without_hiding_real_neighbor():

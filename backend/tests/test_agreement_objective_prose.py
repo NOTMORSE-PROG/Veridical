@@ -104,6 +104,47 @@ def test_a_quotation_style_does_not_supply_the_thesis_own_objective(tmp_path):
     assert extract_statements(extraction, settings=Settings(_env_file=None)).intents == []
 
 
+def test_adjacent_completed_work_assertion_stays_in_its_native_objective_passage(tmp_path):
+    text = AIM + " The cargo inspection prototype was implemented with signed route manifests."
+    extraction = _extract(tmp_path, text=text)
+    [intent] = extract_statements(extraction, settings=Settings(_env_file=None)).intents
+    assert intent.text == text and intent.anchor == "¶1"
+
+
+@pytest.mark.parametrize(
+    "following",
+    [
+        " If the cargo inspection prototype was implemented, operators would use it.",
+        " Whether the cargo inspection prototype was implemented remains unclear.",
+        " According to prior work, the cargo inspection prototype was implemented.",
+        ' "The cargo inspection prototype was implemented with signed route manifests."',
+    ],
+)
+def test_adjacent_question_conditional_prior_work_or_quotation_is_not_added(tmp_path, following):
+    extraction = _extract(tmp_path, text=AIM + following)
+    [intent] = extract_statements(extraction, settings=Settings(_env_file=None)).intents
+    assert intent.text == AIM
+
+
+def test_extended_objective_keeps_chapter_identity_for_named_system_exclusion(tmp_path):
+    from app.checks.agreement.pair import prepare_pairs
+
+    settings = Settings(_env_file=None)
+    extraction = _extract(
+        tmp_path,
+        chapter="CHAPTER 1 Introduction AirSpecs",
+        text="To implement offline export. The export module was implemented.",
+        result_heading="CHAPTER 4 Results CollarID",
+        result_text="The export module did not implement offline export in the evaluated build.",
+    )
+    found = extract_statements(extraction, settings=settings)
+    assert len(found.intents) == len(found.outcomes) == 1
+    prepared = prepare_pairs(
+        found.intents, found.outcomes, extraction=extraction, cues=load_cues(), settings=settings
+    )
+    assert prepared.candidates == []
+
+
 def test_missing_legacy_style_provenance_cannot_establish_an_unquoted_aim(tmp_path):
     extraction = _extract(tmp_path)
     blocks = [block.model_copy(update={"paragraph_style": None}) for block in extraction.blocks]

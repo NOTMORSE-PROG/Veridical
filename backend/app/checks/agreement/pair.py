@@ -25,7 +25,6 @@ could not decide are coverage, not findings: they go in the result detail.
 
 import asyncio
 import functools
-import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -35,6 +34,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from app.checks.agreement.context import DocumentContext, PairContext
 from app.checks.agreement.cues import AgreementCues, load_cues
+from app.checks.agreement.evidence_policy import assertion_policy
 from app.checks.agreement.extract import Statement, _sentence_spans
 from app.checks.agreement.sections import gate_objectives, gate_results
 from app.checks.agreement.source_explanations import reported_resource_explanation
@@ -49,9 +49,8 @@ from app.ml.embeddings import cosine_similarity, embed_texts
 from app.models.enums import FlagSeverity
 
 PROMPT_TYPE = "agreement_pairing"
-PROMPT_VERSION = "v4"
+PROMPT_VERSION = "v5"
 _PROMPT_FILE = Path(__file__).parent / "prompts" / f"{PROMPT_TYPE}_{PROMPT_VERSION}.txt"
-_REASONS_FILE = Path(__file__).parent / "data" / "contradiction_reasons_v3.json"
 
 UNMATCHED_INTENT_WORDING = (
     'Objective "{intent}" does not appear to be addressed in the results, '
@@ -178,6 +177,7 @@ class PairingResult:
     # (another paper's aim in the literature review, a process step).
     objective_sections: dict | None = None
     n_locally_unassessed: int = 0
+    assessment_ledger: dict = field(default_factory=dict)
 
     @property
     def n_skipped_total(self) -> int:
@@ -283,6 +283,7 @@ class PreparedPairs:
     n_results: int
     results_sections: dict | None = None
     objective_sections: dict | None = None
+    unselected_outcomes: list[dict] = field(default_factory=list)
 
 
 def prepare_pairs(
@@ -354,6 +355,16 @@ def prepare_pairs(
             "n_results_too_short": too_short,
         },
         objective_sections=objective_gate.detail() if objective_gate is not None else None,
+        unselected_outcomes=[
+            {"text": item.text, "anchor": item.anchor, "reason": "below_result_word_minimum"}
+            for item in outcomes
+            if len(item.text.split()) < settings.agreement_min_result_words
+        ]
+        + [
+            {"text": item.text, "anchor": item.anchor, "reason": "no_selected_objective"}
+            for index, item in enumerate(results)
+            if index not in matched
+        ],
     )
 
 
@@ -379,7 +390,7 @@ def with_context(candidates: list[Candidate], document: DocumentContext | None) 
 
 @functools.lru_cache(maxsize=1)
 def contradiction_reasons() -> dict[str, str]:
-    return json.loads(_REASONS_FILE.read_text(encoding="utf-8"))["reasons"]
+    return assertion_policy()["reasons"]
 
 
 def _quoted(text: str) -> str:
@@ -607,7 +618,7 @@ def check_contradiction(
     finding_text = " ".join({candidate.outcome.text, finding_side[finding[0]]})
     if different_named_systems(candidate.intent.text, finding_text, cues):
         return "different_named_system", None
-    policy = json.loads(_REASONS_FILE.read_text(encoding="utf-8"))
+    policy = assertion_policy()
     # A cropped quote can hide 'whether' or 'if' in the surrounding goal.
     # Inspect its complete source sentence, retaining abbreviation continuations.
     objective_assertion = _assertion_parent(candidate.intent.text, objective[1], policy)
@@ -635,6 +646,9 @@ class Judged:
     quotes: VerifiedQuotes | None = None
     # What each re-ask answered, kept so a withheld contradiction can be traced.
     confirmations: list[str] = field(default_factory=list)
+    confirmation_readings: list[dict] = field(default_factory=list)
+    unassessed_reason: str | None = None
+    confirmation_deferred_reason: str | None = None
     locally_unassessed: bool = False
     source_explanation: dict | None = None
 
@@ -660,22 +674,31 @@ async def _judge_all(
             )
         except AIUnavailableError as exc:
             counters[exc.cause] += len(judged) - start
+            for item in judged[start:]:
+                item.unassessed_reason = exc.cause
             return
         except QuotaExhaustedError:
             # BUG-080: terminal for the whole run — every remaining pair would
             # fail the same way, so count them all and stop.
             counters["quota"] += len(judged) - start
+            for item in judged[start:]:
+                item.unassessed_reason = "quota"
             return
         except ApiDownError:
             counters["api_down"] += len(chunk)
+            for item in chunk:
+                item.unassessed_reason = "api_down"
             continue
         except PairingError:
             counters["parse_failure"] += len(chunk)
+            for item in chunk:
+                item.unassessed_reason = "parse_failure"
             continue
         for i, item in enumerate(chunk):
             verdict = verdicts.get(i)
             if verdict is None:
                 counters["parse_failure"] += 1
+                item.unassessed_reason = "parse_failure"
                 continue
             item.verdict = verdict
 
@@ -751,6 +774,20 @@ async def judge_pairs(
     )
     standing = [j for j in judged if j.final == "contradictory"]
     for reading in range(1, readings + 1):
+        terminal_cause = next(
+            (
+                cause
+                for cause in ("quota", "ai_not_configured", "ai_key_rejected")
+                if counters[cause]
+            ),
+            None,
+        )
+        if terminal_cause is not None:
+            for original in standing:
+                if not majority or original.confirmations.count("contradictory") == 0:
+                    original.confirmation_deferred_reason = terminal_cause
+                    _withhold(original)
+            break
         if majority:
             # A majority of three: a pair whose first re-ask already agreed has
             # two answers of three and needs no third.
@@ -770,7 +807,35 @@ async def judge_pairs(
             reading=reading,
         )
         for original, repeat in zip(standing, reversed(again), strict=True):
-            original.confirmations.append(repeat.verdict.verdict if repeat.verdict else "none")
+            problem = None
+            if repeat.verdict and repeat.verdict.verdict == "contradictory":
+                problem, _ = check_contradiction(
+                    repeat.candidate,
+                    repeat.verdict,
+                    cues,
+                    min_quote_chars=settings.agreement_quote_min_chars,
+                )
+            original.confirmation_readings.append(
+                {
+                    "reading": reading,
+                    "response": repeat.verdict.model_dump() if repeat.verdict else None,
+                    "reported_attainment": repeat.verdict.reported_attainment
+                    if repeat.verdict
+                    else None,
+                    "source_evidence_verified": repeat.verdict is not None
+                    and repeat.verdict.verdict == "contradictory"
+                    and problem is None,
+                    "validation_reason": problem,
+                    "unassessed_reason": repeat.unassessed_reason,
+                }
+            )
+            original.confirmations.append(
+                "cannot_determine"
+                if problem
+                else repeat.verdict.verdict
+                if repeat.verdict
+                else "none"
+            )
         if not majority:
             # Unanimity: the first answer's reason and quotes were already
             # checked against the sent text, and every re-ask has to reach the
@@ -790,10 +855,76 @@ async def judge_pairs(
 def _withhold(item: Judged) -> None:
     item.final = "cannot_determine"
     item.downgrade = (
-        "confirmation_not_answered"
+        "confirmation_evidence_unverified"
+        if any(reading["validation_reason"] for reading in item.confirmation_readings)
+        else "confirmation_not_answered"
         if all(answer == "none" for answer in item.confirmations)
         else "verdict_not_stable"
     )
+
+
+def _assessment_ledger(judged: list[Judged], prepared: "PreparedPairs") -> dict:
+    """Keep initial coverage separate from re-asks and unmatched statements.
+
+    A completed comparison only describes its selected pair. It cannot establish
+    that lexical recognition found every eligible statement in the manuscript.
+    """
+    pairs = []
+    for item in judged:
+        if item.locally_unassessed:
+            disposition = "locally_unassessed"
+        elif item.verdict is None:
+            disposition = "provider_unassessed"
+        elif item.final == "cannot_determine":
+            disposition = "compared_unresolved"
+        else:
+            disposition = "compared_resolved"
+        attainments = (
+            [item.verdict.reported_attainment]
+            if item.verdict is not None and not item.locally_unassessed
+            else []
+        )
+        attainments.extend(
+            reading["reported_attainment"]
+            for reading in item.confirmation_readings
+            if reading["response"] is not None
+        )
+        pairs.append(
+            {
+                **_pair_record(item),
+                "disposition": disposition,
+                "unassessed_reason": item.unassessed_reason or item.downgrade,
+                "initial_response": item.verdict.model_dump()
+                if item.verdict is not None and not item.locally_unassessed
+                else None,
+                "confirmation_readings": item.confirmation_readings,
+                "confirmation_deferred_reason": item.confirmation_deferred_reason,
+                "attainment_disagreement": len(set(attainments)) > 1,
+            }
+        )
+    return {
+        "version": "v1",
+        "recognition_complete": False,
+        "recognition_reason": "statement_roles_unverified",
+        "selected_pair_count": len(pairs),
+        "disposition_counts": {
+            disposition: sum(pair["disposition"] == disposition for pair in pairs)
+            for disposition in (
+                "compared_resolved",
+                "compared_unresolved",
+                "locally_unassessed",
+                "provider_unassessed",
+            )
+        },
+        "pairs": pairs,
+        "unmatched_objectives": [
+            {"text": item.text, "anchor": item.anchor, "reason": "no_selected_result"}
+            for item in prepared.unmatched_intents
+        ],
+        "unselected_outcomes": prepared.unselected_outcomes,
+        "objective_sections": prepared.objective_sections,
+        "results_sections": prepared.results_sections,
+    }
 
 
 def _common_detail(candidate: Candidate, verdict: PairVerdict) -> dict:
@@ -1009,4 +1140,5 @@ async def run_agreement_pairing(
         verdict_counts=verdict_counts,
         downgrades=downgrades,
         explained_in_context=explained,
+        assessment_ledger=_assessment_ledger(judged, prepared),
     )

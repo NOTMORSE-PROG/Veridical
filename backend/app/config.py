@@ -732,6 +732,7 @@ class Settings(BaseSettings):
     external_http_timeout_seconds: float = 15.0
     external_max_retries: int = 2
     external_retry_base_seconds: float = 1.0
+    external_rate_limit_cooldown_seconds: float = Field(default=300.0, gt=0, allow_inf_nan=False)
     # CrossRef polite-pool rates changed 2025-12-01 (RESEARCH.md §2) — two
     # different endpoints, two different limits: single-DOI lookup vs.
     # metadata search.
@@ -750,7 +751,7 @@ class Settings(BaseSettings):
     # needed to build against); set the env var once a key is issued
     # (V-028's own pending action item) for a higher ceiling, no code change.
     semantic_scholar_api_key: str | None = None
-    semantic_scholar_rps: float = 1.0
+    semantic_scholar_rps: float = Field(default=1.0, gt=0, allow_inf_nan=False)
     # OpenAlex (BUG-610, checked live 2026-10-31): keyless use shares a $0.10
     # daily budget per network address, about 100 title searches; a free key
     # from openalex.org/settings/api gives $1 a day. Documented ceiling is 10

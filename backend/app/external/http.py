@@ -5,23 +5,45 @@ same shape as `app/llm/queue.py`'s transport retry, generalized past Gemini.
 
 A 404 alone is a missing-record answer. Other non-retryable refusals
 mean the lookup could not be completed, not that a publication is absent.
-Malformed or non-object JSON uses the existing bounded retry budget.
+Malformed or non-object JSON uses the existing bounded retry budget. A rate
+rejection stops retries and defers further provider admissions.
 """
 
 import asyncio
+import math
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 
 import httpx
 
-from app.config import Settings
+from app.config import Settings, get_settings
 from app.errors import ApiDownError
-from app.rate_governor import RateGovernor
+from app.rate_governor import RateGovernor, RateLimitDeferredError
 
 SleepFn = Callable[[float], Awaitable[None]]
 
 
 async def _default_sleep(seconds: float) -> None:
     await asyncio.sleep(seconds)
+
+
+def _rate_limit_delay(response: httpx.Response) -> float:
+    fallback = get_settings().external_rate_limit_cooldown_seconds
+    value = response.headers.get("Retry-After")
+    if value is None:
+        return fallback
+    try:
+        seconds = float(value)
+    except ValueError:
+        try:
+            until = parsedate_to_datetime(value)
+            if until.tzinfo is None:
+                return fallback
+            seconds = (until - datetime.now(UTC)).total_seconds()
+        except (ValueError, TypeError, OverflowError):
+            return fallback
+    return max(fallback, seconds) if math.isfinite(seconds) else fallback
 
 
 def build_http_client(settings: Settings) -> httpx.AsyncClient:
@@ -87,12 +109,19 @@ async def get_json(
             else:
                 await governor.acquire()
                 response = await client.get(url, params=params, headers=headers)
+        except RateLimitDeferredError as exc:
+            raise ApiDownError(f"{provider} lookup could not be completed (HTTP 429).") from exc
         except httpx.RequestError as exc:
             last_exc = exc
         else:
             if response.status_code == 404:
                 return None
-            if response.status_code == 429 or response.status_code >= 500:
+            if response.status_code == 429:
+                defer = getattr(governor, "defer_for", None)
+                if defer is not None:
+                    defer(_rate_limit_delay(response))
+                raise ApiDownError(f"{provider} lookup could not be completed (HTTP 429).")
+            if response.status_code >= 500:
                 last_exc = httpx.HTTPStatusError(
                     f"{provider} returned {response.status_code}",
                     request=response.request,

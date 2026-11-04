@@ -20,6 +20,10 @@ SleepFn = Callable[[float], Awaitable[None]]
 ClockFn = Callable[[], float]
 
 
+class RateLimitDeferredError(Exception):
+    """A provider rejected requests and its admission window has not reopened."""
+
+
 async def _default_sleep(seconds: float) -> None:
     await asyncio.sleep(seconds)
 
@@ -46,6 +50,7 @@ class RateGovernor:
         self._timestamps: deque[float] = deque()
         self._min_interval_seconds = 0.0
         self._last_admitted_at: float | None = None
+        self._deferred_until = 0.0
         self.tighten_min_interval(min_interval_seconds)
 
     def tighten_min_interval(self, seconds: float) -> None:
@@ -59,10 +64,18 @@ class RateGovernor:
             raise ValueError("Minimum request interval must be finite and nonnegative.")
         self._min_interval_seconds = max(self._min_interval_seconds, seconds)
 
+    def defer_for(self, seconds: float) -> None:
+        """Keep a provider's rejection across clients without blocking a worker."""
+        if not math.isfinite(seconds) or seconds <= 0:
+            raise ValueError("Provider cooldown must be finite and positive.")
+        self._deferred_until = max(self._deferred_until, self._clock() + seconds)
+
     async def acquire(self) -> None:
         async with self._lock:
             while True:
                 now = self._clock()
+                if now < self._deferred_until:
+                    raise RateLimitDeferredError
                 window_start = now - 60.0
                 while self._timestamps and self._timestamps[0] < window_start:
                     self._timestamps.popleft()

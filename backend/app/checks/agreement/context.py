@@ -134,6 +134,20 @@ def _locate(statement: Statement, sentences: list[Sentence], prefix: int) -> int
         or (len(sentence.text) >= prefix and sentence.text.lower()[:prefix] in key)
     ]
     at_anchor = [i for i in matches if sentences[i].anchor == statement.anchor]
+    if not at_anchor:
+        spans = _sentence_spans(statement.text)
+        if len(spans) > 1:
+            start, end = spans[0]
+            first = _normalize(statement.text[start:end]).lower()
+            local_first = [
+                index
+                for index, sentence in enumerate(sentences)
+                if sentence.anchor == statement.anchor and sentence.text.lower() == first
+            ]
+            # An extended passage spans several source sentences. Bind its
+            # first complete sentence only at its own anchor; a repeated aim
+            # elsewhere cannot supply the chapter identity for this passage.
+            return local_first[0] if len(local_first) == 1 else None
     return (at_anchor or matches or [None])[0]
 
 
