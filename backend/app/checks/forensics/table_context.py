@@ -8,6 +8,7 @@ from app.checks.forensics.keywords import load_keywords
 from app.checks.forensics.sprite_inputs import declared_item_count, load_sprite_policy
 from app.config import get_settings
 from app.ingest.analytical_source import analytical_source
+from app.ingest.quotations import located_quote_status
 from app.ingest.schemas import ExtractionResult
 
 
@@ -31,6 +32,8 @@ def table_contexts(extraction: ExtractionResult, policy: dict | None = None) -> 
     requires future geometric binding; it is never borrowed from the whole page.
     """
     policy = policy or load_table_context_policy()
+    settings = get_settings()
+    quote_cache = {}
     source = analytical_source(extraction)
     safe_tables = {id(table) for table in source.tables}
     blocks = [block for scope in source.scopes for block in scope if not block.is_furniture]
@@ -55,6 +58,7 @@ def table_contexts(extraction: ExtractionResult, policy: dict | None = None) -> 
         if id(table) not in safe_tables or table.low_confidence:
             continue
         receipts = []
+        receipt_owners = []
         caption_owner = None
         if (
             table.source == "native"
@@ -86,6 +90,7 @@ def table_contexts(extraction: ExtractionResult, policy: dict | None = None) -> 
         # paragraph, or establish a declaration from an image reading alone.
         if caption_owner is not None:
             receipts.append({"kind": "caption", "text": table.caption})
+            receipt_owners.append(caption_owner)
         if table.source == "native" and table.paragraph is not None:
             end = table.paragraph
             adjacent = by_paragraph.get(end - 1, [])
@@ -123,10 +128,38 @@ def table_contexts(extraction: ExtractionResult, policy: dict | None = None) -> 
                             "text": block.text,
                         }
                     )
+                    receipt_owners.append(block)
+        declarations = []
+        for receipt, owner in zip(receipts, receipt_owners, strict=True):
+            seen = set()
+            for pattern in policy["single_integer_patterns"]:
+                for match in re.finditer(pattern, receipt["text"], re.IGNORECASE):
+                    if match.span() in seen:
+                        continue
+                    seen.add(match.span())
+                    # Validate the assertion itself, so an unrelated quotation
+                    # elsewhere in the paragraph cannot establish or veto it.
+                    status = located_quote_status(
+                        source, match.group(), settings, _scope_cache=quote_cache
+                    )
+                    anchored = (
+                        status is not None
+                        and status[0] == owner.paragraph
+                        and status[2] == owner.page
+                    )
+                    declarations.append(
+                        {
+                            "kind": receipt["kind"],
+                            "paragraph": owner.paragraph,
+                            "text": match.group(),
+                            "quotation_status": status[1] if anchored else None,
+                        }
+                    )
         contexts[index] = {
             "policy_version": policy["version"],
             "sources": receipts,
             "text": "\n".join(receipt["text"] for receipt in receipts),
+            "integer_declarations": declarations,
         }
     return contexts
 
@@ -151,7 +184,10 @@ def mean_applicability(extraction: ExtractionResult, contexts: dict[int, dict]) 
         headers = " | ".join(table.rows[0]) if table.rows else ""
         if has_pattern(headers, policy["weighted_patterns"]):
             reason = "weighted"
-        single_integer = has_pattern(text, policy["single_integer_patterns"])
+        single_integer = any(
+            declaration["quotation_status"] is False
+            for declaration in context.get("integer_declarations", [])
+        )
         columns = {
             name: [
                 position

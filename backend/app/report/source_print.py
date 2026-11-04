@@ -17,6 +17,7 @@ from app.report.evidence_captions import (
     TEXT_LAYER_CAPTION,
 )
 from app.report.page_image_disclosure import PageImageUnavailable
+from app.report.source_location import display_anchor
 from app.report.text import Paragraph
 
 
@@ -52,7 +53,7 @@ def source_identity(criterion_id, flag_id, role, index):
 
 
 def source_caption(identity, anchor, qualification, *, page=None):
-    location = anchor.strip() if anchor and anchor.strip() else "Not recorded"
+    location = display_anchor(anchor.strip()) if anchor and anchor.strip() else "Not recorded"
     origin = f"Rendered from the submitted PDF, page {page}. " if page is not None else ""
     return f"{identity}. {origin}Saved location: {location}. {qualification}"
 
