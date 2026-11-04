@@ -104,8 +104,16 @@ def normalize_notation(text: str) -> NormalizedNotation:
     if len(normalized) != len(text):
         raise ValueError("Notation replacements must retain character ownership")
     value = NormalizedNotation(normalized, text, array("Q", [0]), array("Q", [0]))
+    # Keep the first character's ownership, then delete the rest of the alias.
+    # The citable range still covers the original printed chi2 expression.
+    alias = policy.get("chi_ascii_alias")
+    if alias:
+        matches = list(re.finditer(alias, value.text))
+        normalized = re.sub(alias, lambda match: "X" + match[0][1:], value.text)
+        value = NormalizedNotation(normalized, text, value.starts, value.original_starts)
+        value = _delete(value, ((match.start() + 1, match.end()) for match in matches))
     spans = (
-        (match.start(), match.end()) for match in re.finditer(policy["thousands_comma"], normalized)
+        (match.start(), match.end()) for match in re.finditer(policy["thousands_comma"], value.text)
     )
     value = _delete(value, spans)
     spans = (

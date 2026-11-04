@@ -1,4 +1,4 @@
-"""Execute unchanged default tests; report retained invalid oracle separately.
+"""Execute unchanged default tests; report retained invalid oracles separately.
 
 The default pytest result remains a failure. Acceptance checks the source-correct
 controls and refuses every other failure, absent gate or changed frozen artifact.
@@ -14,11 +14,93 @@ import sys
 import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
-MANIFEST = ROOT / "tools/data/backend_acceptance_v2.json"
+MANIFEST = ROOT / "tools/data/backend_acceptance_v3.json"
+
+
+def diagnostic_rules(manifest: dict) -> list[dict]:
+    if manifest.get("schema_version") == "backend-acceptance-v3":
+        return manifest["retained_diagnostics"]
+    return [
+        {
+            "selector": manifest["retained_diagnostic"],
+            "trace_contains": [
+                "assert flags == []",
+                manifest["diagnostic_assertion_location"],
+            ],
+            "message_contains": ["Left contains one more item"],
+        }
+    ]
+
+
+def declaration_transition_problems(manifest: dict, root: Path) -> list[str]:
+    try:
+        transition = manifest["transition"]
+        parent_path = root / transition["parent_manifest"]
+        parent_bytes = parent_path.read_bytes()
+        parent = json.loads(parent_bytes)
+        parent_hash = hashlib.sha256(parent_bytes).hexdigest()
+        frozen = manifest["frozen_artifact_sha256"]
+        replacements = transition["replacements"]
+        added = transition["additional_controls"]
+        prior_names = [record["prior_selector"] for record in replacements]
+        next_names = [record["replacement_selector"] for record in replacements]
+        rules = diagnostic_rules(parent) + [
+            record["diagnostic"] for record in replacements
+        ]
+        replacement_map = dict(zip(prior_names, next_names, strict=True))
+        expected_gates = [
+            replacement_map.get(name, name) for name in parent["gating_selectors"]
+        ] + added
+        if (
+            parent.get("schema_version") != "backend-acceptance-v2"
+            or registry_problems(parent, root)
+            or parent_hash != transition["parent_manifest_sha256"]
+            or frozen.get(transition["parent_manifest"]) != parent_hash
+            or any(
+                frozen.get(path) != value
+                for path, value in parent["frozen_artifact_sha256"].items()
+            )
+            or not replacements
+            or len(set(prior_names)) != len(prior_names)
+            or any(name not in parent["gating_selectors"] for name in prior_names)
+            or any(
+                record["diagnostic"]["selector"] != record["prior_selector"]
+                for record in replacements
+            )
+            or any(not record["reason"].strip() for record in replacements)
+            or not added
+            or len(set(expected_gates)) != len(expected_gates)
+            or set(expected_gates) & {record["selector"] for record in rules}
+            or manifest["gating_selectors"] != expected_gates
+            or manifest["retained_diagnostics"] != rules
+            or manifest["max_skips_default"] != parent["max_skips_default"]
+            or not transition["reason"].strip()
+        ):
+            return ["Invalid declaration transition or changed prior authority."]
+        for rule in rules:
+            for key in ("trace_contains", "message_contains"):
+                if (
+                    not isinstance(rule[key], list)
+                    or not rule[key]
+                    or any(
+                        not isinstance(value, str) or not value.strip()
+                        for value in rule[key]
+                    )
+                ):
+                    return ["Missing exact diagnostic failure identity."]
+        for name in [*next_names, *added]:
+            module = "backend/" + name.split("::", 1)[0]
+            if module not in frozen:
+                return ["Replacement and applicability controls must be source-frozen."]
+    except (KeyError, TypeError, ValueError, OSError, AttributeError):
+        return ["Missing or malformed declaration transition."]
+    return []
 
 
 def registry_problems(manifest: dict, root: Path) -> list[str]:
     """A new contract preserves its prior authority and every unchanged gate."""
+    if manifest.get("schema_version") == "backend-acceptance-v3":
+        return declaration_transition_problems(manifest, root)
     if manifest.get("schema_version") == "backend-acceptance-v1":
         return (
             ["Unexpected transition in v1 registry."]
@@ -136,6 +218,13 @@ def classify(
                     expected = -1
                 if element.get(key) != str(expected):
                     problems.append(f"JUnit root {key} count inconsistent.")
+    try:
+        rules = {record["selector"]: record for record in diagnostic_rules(manifest)}
+        if problems and manifest.get("schema_version") == "backend-acceptance-v3":
+            rules = {}
+    except (KeyError, TypeError):
+        rules = {}
+        problems.append("Missing diagnostic rules.")
     cases = {}
     skipped = []
     failed = []
@@ -155,13 +244,15 @@ def classify(
         failure, error = case.find("failure"), case.find("error")
         if failure is not None or error is not None:
             failed.append(node)
-            if node != manifest["retained_diagnostic"] or error is not None:
+            rule = rules.get(node)
+            if rule is None or error is not None:
                 problems.append(f"Unexpected failure/error: {node}")
-            elif (
-                "assert flags == []" not in (failure.text or "")
-                or manifest["diagnostic_assertion_location"]
-                not in (failure.text or "").replace("\\", "/")
-                or "Left contains one more item" not in failure.get("message", "")
+            elif any(
+                value not in (failure.text or "").replace("\\", "/")
+                for value in rule["trace_contains"]
+            ) or any(
+                value not in failure.get("message", "")
+                for value in rule["message_contains"]
             ):
                 problems.append("Retained diagnostic failed for a different reason.")
     for node in manifest["gating_selectors"]:
@@ -173,13 +264,16 @@ def classify(
             problems.append(
                 f"Required control absent, duplicated or nonpassing: {node}"
             )
-    diagnostic = cases.get(manifest["retained_diagnostic"], [])
-    if len(diagnostic) != 1 or diagnostic[0].find("failure") is None:
+    for node in rules:
+        diagnostic = cases.get(node, [])
+        if len(diagnostic) != 1 or diagnostic[0].find("failure") is None:
+            problems.append(
+                f"Retained failing diagnostic absent, duplicated or no longer failed: {node}"
+            )
+    if len(failed) != len(rules):
         problems.append(
-            "Original default failing diagnostic absent, duplicated or no longer failed."
+            f"Expected {len(rules)} retained failures; observed {len(failed)}."
         )
-    if len(failed) != 1:
-        problems.append(f"Expected one retained failure; observed {len(failed)}.")
     skip_limit = manifest["max_skips_default"] if max_skips is None else max_skips
     actual_skips = sum(item["type"] != "pytest.xfail" for item in skipped)
     if actual_skips > skip_limit:
@@ -203,7 +297,7 @@ def classify(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path, required=True)
-    parser.add_argument("--registry", choices=("v1", "v2"), default="v2")
+    parser.add_argument("--registry", choices=("v1", "v2", "v3"), default="v3")
     args = parser.parse_args()
     args.output_dir.mkdir(parents=True, exist_ok=True)
     xml = args.output_dir.resolve() / "default-pytest.xml"
@@ -240,7 +334,7 @@ def main() -> int:
         "Default pytest: "
         + report["default_result"]
         + "; backend acceptance: "
-        + ("PASS WITH RETAINED FAILED DIAGNOSTIC" if report["accepted"] else "FAIL")
+        + ("PASS WITH RETAINED FAILED DIAGNOSTICS" if report["accepted"] else "FAIL")
     )
     return 0 if report["accepted"] else 1
 

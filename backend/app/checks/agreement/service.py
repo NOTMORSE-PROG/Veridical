@@ -167,6 +167,7 @@ async def run_internal_agreement_check(
                 "The retained comparisons are review leads, not readiness deductions."
             ),
             "n_outcomes": len(outcomes),
+            "n_locally_unassessed": pairing.n_locally_unassessed,
             "n_flags": len(pairing.flags),
             "n_unmatched_outcomes": pairing.n_unmatched_outcomes,
             "n_unmatched_intents": pairing.n_unmatched_intents,
@@ -181,6 +182,7 @@ async def run_internal_agreement_check(
             "undetermined": {
                 "count": len(pairing.undetermined),
                 "compared_count": pairing.n_compared,
+                "locally_unassessed_count": pairing.n_locally_unassessed,
                 "pairs": pairing.undetermined,
             },
             "verdict_counts": pairing.verdict_counts,

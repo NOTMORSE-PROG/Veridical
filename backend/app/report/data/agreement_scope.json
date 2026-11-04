@@ -51,5 +51,24 @@
   "matching_heading": "About these pairs",
   "matching_caveat": "VERIDICAL matches each objective with the results most like it. Some matched pairs may not belong together, and this matching is being improved. A matched pair is not proof that both statements are about the same thing.",
   "interrupted_tail": "Pairs it did not compare are not treated as passed.",
-  "interrupted": "The check was interrupted before it compared every pair."
+  "interrupted": "The check was interrupted before it compared every pair.",
+  "review_lead_kinds": [
+    "agreement_contradictory",
+    "agreement_factual_conflict",
+    "agreement_unmet",
+    "agreement_partial"
+  ],
+  "review_lead": "internal agreement review lead",
+  "review_leads": "internal agreement review leads",
+  "no_review_leads": "No internal agreement review lead was recorded.",
+  "comparison_unknown": "The number of pairs compared with AI was not recorded.",
+  "compared_count": "Pairs compared with AI: {n}.",
+  "unresolved_count": "Selected pairs left unresolved: {n}.",
+  "no_ai_comparison": "No pair was compared with AI.",
+  "no_agreement_inference": "This does not mean the objectives and results agree.",
+  "pair_assessment_labels": {
+    "phase_guard": "Left unassessed before AI comparison",
+    "generation": "AI comparison was inconclusive",
+    "unknown": "Comparison status not recorded"
+  }
 }

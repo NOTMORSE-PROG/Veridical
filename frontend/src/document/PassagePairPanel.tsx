@@ -77,16 +77,19 @@ export function PassagePairPanel({
 }) {
   const shared = sharedPassageRanges(pair.own_excerpt, pair.matched_excerpt);
   const hasExactSharedWording = shared.left.length > 0;
+  const literalWords = pair.literal_overlap?.normalization === "casefold_whitespace_tokens_v1"
+    && Number.isInteger(pair.literal_overlap.word_count) && pair.literal_overlap.word_count > 0
+    ? pair.literal_overlap.word_count : null;
 
   const excludedLead = (() => {
     if (variant !== "excluded" || excludedReason.length === 0) return null;
     const label =
       excludedReason.length === 2
-        ? "the reference list and a detected block quote"
+        ? "the reference list and detected quotation text"
         : excludedReason[0] === "reference_list"
           ? "the reference list"
-          : "a detected block quote";
-    return `This passage was not included in readiness because it falls inside ${label}. Shown here for your own check, not as a finding.`;
+          : "detected quotation text";
+    return `This match was excluded from the default comparison because it includes ${label}. Shown here for your own check, not as a finding.`;
   })();
 
   return (
@@ -97,6 +100,7 @@ export function PassagePairPanel({
       {excludedLead && <p className="signal-reading-note__lead">{excludedLead}</p>}
       <div className="signal-reading-note">
         <p className="signal-reading-note__lead">Compare the stored passages in context. Similar wording does not establish identical passages or files, copying, authorship or which document came first.</p>
+        {literalWords !== null && <p>Shared wording: {literalWords} consecutive words. Matching ignores capitalization and spacing. Punctuation and numbers are retained.</p>}
         <ul>
           <li>{hasExactSharedWording ? "Shaded wording appears in both stored passages." : "No stable exact phrase was found to highlight. Compare both passages manually."}</li>
           <li>These are stored excerpts, not complete source documents.</li>

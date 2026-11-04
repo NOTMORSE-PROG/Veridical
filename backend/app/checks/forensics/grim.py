@@ -97,6 +97,7 @@ class GrimmerResult:
     # case) — the caller must not treat an empty `values` here the same
     # way it would treat empty-because-genuinely-inconsistent.
     unenumerated: bool = False
+    unassessed_reason: str | None = None
 
 
 def grimmer_check(
@@ -112,6 +113,25 @@ def grimmer_check(
     against that package's own known-answer test suite, not invented)."""
     if n_obs < 2:
         return GrimmerResult(passed=False)  # SD undefined for a single observation
+
+    from app.config import get_settings
+
+    settings = get_settings()
+    if n_obs * n_items > settings.forensics_grimmer_max_observations:
+        return GrimmerResult(passed=False, unassessed_reason="observation_work_limit")
+    # Bound both memory and iteration work before constructing candidate means.
+    effective_n = n_obs * n_items
+    granule = 0.5 * 10 ** (-m_prec)
+    lower = (mean - granule - _DUST) * effective_n
+    upper = (mean + granule + _DUST) * effective_n
+    if not all(
+        math.isfinite(value)
+        for value in (lower, upper, (mean * mean + sd * sd) * n_obs * n_items**2)
+    ):
+        return GrimmerResult(passed=False, unassessed_reason="numeric_range_unassessed")
+    candidates = math.floor(upper) - math.ceil(lower) + 1
+    if candidates > settings.forensics_grimmer_max_candidate_means:
+        return GrimmerResult(passed=False, unassessed_reason="candidate_mean_work_limit")
 
     possible_means = _grim_possible_means(mean, n_obs, m_prec, n_items)
     if not possible_means:

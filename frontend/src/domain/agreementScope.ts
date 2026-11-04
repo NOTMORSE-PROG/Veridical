@@ -27,6 +27,14 @@ const ROLE_FOLDING = { foldAt: 4, shown: 2 } as const;
 
 export const AGREEMENT_SCOPE_COPY = {
   heading: "What this check compared",
+  reviewLead: "internal agreement review lead",
+  reviewLeads: "internal agreement review leads",
+  noReviewLeads: "No internal agreement review lead was recorded.",
+  comparisonUnknown: "The number of pairs compared with AI was not recorded.",
+  comparedCount: "Pairs compared with AI: {n}.",
+  unresolvedCount: "Selected pairs left unresolved: {n}.",
+  noAiComparison: "No pair was compared with AI.",
+  noAgreementInference: "This does not mean the objectives and results agree.",
   setAsideListHeading: "Results set aside",
   setAsideListIntro: "These statements read like results but are in parts of the paper that usually do not report this study's own results. Open one to check it yourself.",
   limit: `Partly assessed: ${READINESS_EXCLUSION_COPY.statement_roles_unverified.replace(/\.$/, "")}, so this check does not change readiness.`,
@@ -40,12 +48,12 @@ export const AGREEMENT_SCOPE_COPY = {
   matchingCaveat: "VERIDICAL matches each objective with the results most like it. Some matched pairs may not belong together, and this matching is being improved. A matched pair is not proof that both statements are about the same thing.",
 } as const;
 
-// Only these are possible inconsistencies. An injection warning sits on a
-// pair that read as consistent and is a finding of another kind.
-const INCONSISTENCY_KINDS = new Set(["agreement_contradictory", "agreement_partial"]);
+// Factual and attainment leads share this aggregate. Unresolved pairs and
+// injection warnings retain their separate meanings.
+const REVIEW_LEAD_KINDS = new Set(["agreement_contradictory", "agreement_factual_conflict", "agreement_unmet", "agreement_partial"]);
 
 export function countInconsistencies(flags: readonly { check_kind: string; problem_kind?: string | null }[]): number {
-  return flags.filter((flag) => flag.check_kind === "internal_agreement" && INCONSISTENCY_KINDS.has(flag.problem_kind ?? "")).length;
+  return flags.filter((flag) => flag.check_kind === "internal_agreement" && REVIEW_LEAD_KINDS.has(flag.problem_kind ?? "")).length;
 }
 
 export function rolePhrase(role: string): string {
@@ -93,22 +101,10 @@ export function setAsideLines(scope: AgreementScopeOut): string[] {
   return lines;
 }
 
-/** Why no pair was compared, said only as far as the record shows it. */
-function nothingCompared(scope: AgreementScopeOut): string {
-  if (scope.n_pairs_skipped) return "The check was interrupted before it compared any pair, so it makes no finding.";
-  if (scope.n_objectives === 0) return "No objectives were found, so nothing was compared and the check makes no finding.";
-  if (scope.n_results === 0) return "No results were left to compare, so the check makes no finding.";
-  if (scope.n_results_set_aside == null || scope.n_results_too_short == null) return "No pair was compared, so the check makes no finding.";
-  if (scope.n_results != null && scope.n_results <= scope.n_results_set_aside + scope.n_results_too_short) {
-    return "No results were left to compare, so the check makes no finding.";
-  }
-  return "No result was close enough to an objective to compare, so the check makes no finding.";
-}
-
 export interface OutcomeInput {
-  /** Possible inconsistencies raised as findings. */
+  /** Recorded factual or attainment review leads. */
   findings: number;
-  /** Pairs compared but not decided. */
+  /** Selected unresolved pairs, including local abstentions. */
   undecided: number;
   /** Pairs compared; null when the run did not record it. */
   compared: number | null;
@@ -140,48 +136,25 @@ function undecidedSentence(undecided: number, afterFindings: boolean, surface: O
 
 /** The comparison's outcome. The compared count is coverage, never a count
  * of agreeing pairs. */
-export function outcomeLines(scope: AgreementScopeOut, { findings, undecided, compared, interrupted = false, surface }: OutcomeInput): string[] {
-  const inconsistencies = (n: number) => `${n} possible ${plural(n, "inconsistency", "inconsistencies")}`;
-  const pairCount = (n: number) => `${n} ${plural(n, "pair", "pairs")}`;
-  if (compared == null) {
-    // With no objectives or no results, nothing could have been compared.
-    if (scope.n_objectives === 0 || scope.n_results === 0) return [nothingCompared(scope), "This does not mean the objectives and results agree."];
-    const lines = ["This report did not record how many pairs were compared."];
-    if (findings > 0) lines.push(`It found ${inconsistencies(findings)}. ${findingsSentence(findings, surface)}`);
-    if (undecided > 0) lines.push(`${pairCount(undecided)} could not be decided. ${undecidedSentence(undecided, findings > 0, surface)}`);
-    return lines;
-  }
-  if (compared === 0) return [nothingCompared(scope), "This does not mean the objectives and results agree."];
-  const base = interrupted
-    ? `The check was interrupted. Among the ${pairCount(compared)} it compared before then`
-    : `Among the ${pairCount(compared)} VERIDICAL matched`;
-  let lines: string[];
+export function outcomeLines(_scope: AgreementScopeOut, { findings, undecided, compared, interrupted = false, surface }: OutcomeInput): string[] {
+  const copy = AGREEMENT_SCOPE_COPY;
+  const lines = [compared == null
+    ? copy.comparisonUnknown
+    : copy.comparedCount.replace("{n}", String(compared))];
+  if (compared === 0) lines.push(copy.noAiComparison, copy.noAgreementInference);
   if (findings > 0) {
-    lines = [`${base}, the comparison found ${inconsistencies(findings)}. ${findingsSentence(findings, surface)}`];
-    if (undecided > 0) lines.push(`${undecided} other ${plural(undecided, "pair", "pairs")} could not be decided. ${undecidedSentence(undecided, true, surface)}`);
-  } else if (undecided === 0) {
-    lines = [`${base}, the comparison found no possible inconsistency.`];
-  } else if (undecided >= compared) {
-    // Interrupted, the outcome still names the interruption here.
-    const lead = interrupted ? "The check was interrupted. " : "";
-    const which = interrupted ? "it compared before then" : "VERIDICAL matched";
-    lines = [compared === 1
-      ? `${lead}The comparison could not decide on the one pair ${which}, so it makes no finding. ${undecidedSentence(1, false, surface)}`
-      : `${lead}The comparison could not decide on any of the ${pairCount(compared)} ${which}, so it makes no finding. ${undecidedSentence(compared, false, surface)}`];
-  } else {
-    lines = [
-      `${base}, the comparison found no possible inconsistency in the pairs it could decide.`,
-      `${pairCount(undecided)} could not be decided. ${undecidedSentence(undecided, false, surface)}`,
-    ];
+    lines.push(`${findings} ${plural(findings, copy.reviewLead, copy.reviewLeads)}. ${findingsSentence(findings, surface)}`);
+  } else if (compared != null && compared > 0) {
+    lines.push(copy.noReviewLeads);
   }
-  if (interrupted) lines.push(AGREEMENT_SCOPE_COPY.interruptedTail);
+  if (undecided > 0) lines.push(`${copy.unresolvedCount.replace("{n}", String(undecided))} ${undecidedSentence(undecided, findings > 0, surface)}`);
+  if (interrupted) lines.push(copy.interrupted, copy.interruptedTail);
   return lines;
 }
 
 /** The interruption still needs saying when the outcome does not name it:
  * unknown or no pairs compared, without every pair having been skipped. */
-export function interruptedLine(scope: AgreementScopeOut, { compared, interrupted, outcomeShown }: { compared: number | null; interrupted: boolean; outcomeShown: boolean }): string | null {
+export function interruptedLine(_scope: AgreementScopeOut, { interrupted, outcomeShown }: { compared: number | null; interrupted: boolean; outcomeShown: boolean }): string | null {
   if (!interrupted) return null;
-  const named = compared ? true : compared === 0 && Boolean(scope.n_pairs_skipped);
-  return outcomeShown && named ? null : `${AGREEMENT_SCOPE_COPY.interrupted} ${AGREEMENT_SCOPE_COPY.interruptedTail}`;
+  return outcomeShown ? null : `${AGREEMENT_SCOPE_COPY.interrupted} ${AGREEMENT_SCOPE_COPY.interruptedTail}`;
 }

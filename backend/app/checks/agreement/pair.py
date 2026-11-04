@@ -31,12 +31,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.checks.agreement.context import DocumentContext, PairContext
 from app.checks.agreement.cues import AgreementCues, load_cues
-from app.checks.agreement.extract import Statement
+from app.checks.agreement.extract import Statement, _sentence_spans
 from app.checks.agreement.sections import gate_objectives, gate_results
+from app.checks.agreement.source_explanations import reported_resource_explanation
 from app.checks.injection import InjectionSignal, detect_injection_signal
 from app.checks.section_roles import SectionMap, load_section_roles
 from app.config import Settings
@@ -48,22 +49,25 @@ from app.ml.embeddings import cosine_similarity, embed_texts
 from app.models.enums import FlagSeverity
 
 PROMPT_TYPE = "agreement_pairing"
-PROMPT_VERSION = "v2"
+PROMPT_VERSION = "v4"
 _PROMPT_FILE = Path(__file__).parent / "prompts" / f"{PROMPT_TYPE}_{PROMPT_VERSION}.txt"
-_REASONS_FILE = Path(__file__).parent / "data" / "contradiction_reasons.json"
+_REASONS_FILE = Path(__file__).parent / "data" / "contradiction_reasons_v3.json"
 
 UNMATCHED_INTENT_WORDING = (
     'Objective "{intent}" does not appear to be addressed in the results, '
     "a possible gap or unstated change of scope. Please check manually."
 )
 CONTRADICTORY_WORDING = (
-    "This result appears to contradict this objective ({reason}), a possible "
-    'inconsistency, please check manually. Objective: "{intent}" | Result: "{outcome}"'
+    "These reported claims may describe incompatible facts about the same subject and release "
+    "or time. Compare both quoted claims and check whether their surrounding text reconciles them."
 )
 PARTIAL_WORDING = (
-    "This objective appears to be only partially addressed in the results, "
-    'a possible incomplete implementation, please check manually. Objective: "{intent}" '
-    '| Result: "{outcome}"'
+    "The selected result describes some progress toward this objective. "
+    "Review which parts were completed and which remained unfinished."
+)
+UNMET_WORDING = (
+    "The selected result reports that this objective was not achieved. "
+    "Review the stated outcome and any explanation for the unmet objective."
 )
 # BUG-160: a "consistent" verdict is silence, and silence is exactly what must
 # not happen when the text behind that verdict is suspect — a manipulated
@@ -71,16 +75,15 @@ PARTIAL_WORDING = (
 # student's own manuscript, so this is a fact about the document, never an
 # accusation.
 AGREEMENT_INJECTION_SUSPECTED_WORDING = (
-    "This objective and this result appear consistent, but this part of the "
-    "document also contains text that appears to address an automated "
-    "grader rather than the reader, so that verdict should not be trusted "
-    'without a direct look. Objective: "{intent}" | Result: "{outcome}"'
+    "This comparison includes text that appears to address an automated grader. "
+    "Read both statements and their surrounding text before relying on the recorded judgment."
 )
 
 Verdict = Literal[
     "consistent",
     "consistent_in_context",
     "partial",
+    "unmet",
     "contradictory",
     "unrelated",
     "cannot_determine",
@@ -105,6 +108,23 @@ class PairVerdict(BaseModel):
     reason_category: str | None = None
     objective_quote: str | None = None
     finding_quote: str | None = None
+    reported_attainment: Literal["achieved", "partial", "unmet", "unknown"] = "unknown"
+    context_basis: Literal["scope", "limitation", "revision", "none", "unknown"] = "unknown"
+
+    @model_validator(mode="after")
+    def coherent_attainment(self) -> "PairVerdict":
+        if self.verdict in ("unmet", "partial") and self.reported_attainment != self.verdict:
+            raise ValueError("Attainment must agree with the recorded gap verdict")
+        if self.verdict == "consistent" and self.reported_attainment in ("unmet", "partial"):
+            raise ValueError("An achieved verdict cannot erase reported nonachievement")
+        if self.verdict == "consistent_in_context" and (
+            self.reported_attainment not in ("achieved", "unmet", "partial")
+            or self.context_basis not in ("scope", "limitation", "revision")
+        ):
+            raise ValueError(
+                "An explained difference needs known attainment and an explanation basis"
+            )
+        return self
 
 
 class PairVerdictBatchResponse(BaseModel):
@@ -157,6 +177,7 @@ class PairingResult:
     # The same for objectives: aims stated outside the thesis's own objectives
     # (another paper's aim in the literature review, a process step).
     objective_sections: dict | None = None
+    n_locally_unassessed: int = 0
 
     @property
     def n_skipped_total(self) -> int:
@@ -404,6 +425,19 @@ def _build_prompt(pairs: list[Candidate], *, reading: int = 0) -> str:
     )
 
 
+def parse_verdict_batch(response: object, n_pairs: int) -> dict[int, PairVerdict]:
+    """Accept either JSON envelope while validating the complete answer set."""
+    try:
+        payload = {"verdicts": response} if isinstance(response, list) else response
+        parsed = PairVerdictBatchResponse.model_validate(payload)
+    except Exception as exc:  # noqa: BLE001 — bad shape degrades honestly, never crashes the run
+        raise PairingError(f"agreement_pairing response failed validation: {exc}") from exc
+    indexes = [v.index for v in parsed.verdicts]
+    if len(indexes) != len(set(indexes)) or set(indexes) != set(range(n_pairs)):
+        raise PairingError("agreement_pairing returned duplicate, missing, or invalid pair indexes")
+    return {v.index: v for v in parsed.verdicts}
+
+
 async def _judge_batch(
     llm: LLMClient,
     pairs: list[Candidate],
@@ -415,14 +449,7 @@ async def _judge_batch(
     response = await llm.complete(
         PROMPT_TYPE, prompt, prompt_version=PROMPT_VERSION, check_run_id=check_run_id
     )
-    try:
-        parsed = PairVerdictBatchResponse.model_validate(response)
-    except Exception as exc:  # noqa: BLE001 — bad shape degrades honestly, never crashes the run
-        raise PairingError(f"agreement_pairing response failed validation: {exc}") from exc
-    indexes = [v.index for v in parsed.verdicts]
-    if len(indexes) != len(set(indexes)) or set(indexes) != set(range(len(pairs))):
-        raise PairingError("agreement_pairing returned duplicate, missing, or invalid pair indexes")
-    return {v.index: v for v in parsed.verdicts}
+    return parse_verdict_batch(response, len(pairs))
 
 
 def _normalized_with_positions(text: str) -> tuple[str, list[int]]:
@@ -497,6 +524,30 @@ def different_named_systems(objective: str, finding: str, cues: AgreementCues) -
     )
 
 
+def different_reported_phases(objective: str, finding: str, cues: AgreementCues) -> bool:
+    """Decline attainment inference across explicitly different release labels."""
+
+    def qualifiers(text: str) -> dict[str, set[str]]:
+        found: dict[str, set[str]] = {}
+        for pattern in cues.phase_qualifier_patterns:
+            for match in re.finditer(pattern, text, re.IGNORECASE):
+                if cues.phase_action_prefix_pattern and re.search(
+                    cues.phase_action_prefix_pattern, text[: match.start("kind")], re.IGNORECASE
+                ):
+                    continue
+                label = match.group("label").casefold()
+                if label in cues.phase_qualifier_ignored:
+                    continue
+                label = cues.phase_label_aliases.get(label, label)
+                if all(part.isdecimal() for part in label.split(".")):
+                    label = ".".join(part.lstrip("0") or "0" for part in label.split("."))
+                found.setdefault(match.group("kind").casefold(), set()).add(label)
+        return found
+
+    left, right = qualifiers(objective), qualifiers(finding)
+    return any(left[kind].isdisjoint(right[kind]) for kind in left.keys() & right.keys())
+
+
 FINDING_QUOTE_SOURCES = ("finding", "text_before", "text_after")
 
 
@@ -508,6 +559,25 @@ class VerifiedQuotes:
     objective: str
     finding: str
     finding_source: str
+
+
+def _assertion_parent(source: str, quote: str, policy: dict) -> str | None:
+    """A source clause must assert the quoted words, rather than ask or posit them."""
+    spans = []
+    for start, end in _sentence_spans(source):
+        if spans and re.search(
+            policy["nonterminal_period_pattern"], source[spans[-1][0] : spans[-1][1]], re.IGNORECASE
+        ):
+            spans[-1] = (spans[-1][0], end)
+        else:
+            spans.append((start, end))
+    parents = [source[start:end] for start, end in spans if quote in source[start:end]]
+    if len(parents) != 1 or any(
+        re.search(pattern, parents[0], re.IGNORECASE)
+        for pattern in policy["factual_scope_veto_patterns"]
+    ):
+        return None
+    return parents[0]
 
 
 def check_contradiction(
@@ -529,12 +599,30 @@ def check_contradiction(
     finding = _quoted_span(verdict.finding_quote, finding_side, min_chars=min_quote_chars)
     if finding is None:
         return "finding_quote_not_found", None
+    if finding[0] != 0:
+        return "finding_quote_outside_selected_statement", None
     # Two different named systems (a "CollarID" objective against an
     # "AirSpecs" result) are two different things, whatever the wording. The
     # finding side is read from the sentence the quote came from as well.
     finding_text = " ".join({candidate.outcome.text, finding_side[finding[0]]})
     if different_named_systems(candidate.intent.text, finding_text, cues):
         return "different_named_system", None
+    policy = json.loads(_REASONS_FILE.read_text(encoding="utf-8"))
+    # A cropped quote can hide 'whether' or 'if' in the surrounding goal.
+    # Inspect its complete source sentence, retaining abbreviation continuations.
+    objective_assertion = _assertion_parent(candidate.intent.text, objective[1], policy)
+    if objective_assertion is None:
+        return "objective_assertion_scope_unassessed", None
+    finding_assertion = _assertion_parent(candidate.outcome.text, finding[1], policy)
+    if finding_assertion is None:
+        return "finding_assertion_scope_unassessed", None
+    if different_reported_phases(objective_assertion, finding_assertion, cues):
+        return "different_quoted_phases", None
+    if not any(
+        re.search(pattern, objective[1], re.IGNORECASE)
+        for pattern in policy["factual_assertion_patterns"]
+    ):
+        return "objective_is_not_descriptive_assertion", None
     return None, VerifiedQuotes(objective[1], finding[1], FINDING_QUOTE_SOURCES[finding[0]])
 
 
@@ -547,6 +635,8 @@ class Judged:
     quotes: VerifiedQuotes | None = None
     # What each re-ask answered, kept so a withheld contradiction can be traced.
     confirmations: list[str] = field(default_factory=list)
+    locally_unassessed: bool = False
+    source_explanation: dict | None = None
 
 
 async def _judge_all(
@@ -609,13 +699,42 @@ async def judge_pairs(
     }
     chunk_size = max(1, settings.agreement_pairing_max_pairs_per_call)
     judged = [Judged(candidate) for candidate in candidates]
+    for item in judged:
+        if different_reported_phases(item.candidate.intent.text, item.candidate.outcome.text, cues):
+            item.verdict = PairVerdict(
+                index=0,
+                verdict="cannot_determine",
+                reasoning=(
+                    "The selected statements name different releases, versions or phases. "
+                    "The selected result does not establish attainment for the intended phase."
+                ),
+                reported_attainment="unknown",
+                context_basis="unknown",
+            )
+            item.final = "cannot_determine"
+            item.downgrade = "different_reported_phases"
+            item.locally_unassessed = True
     await _judge_all(
-        llm, judged, check_run_id=check_run_id, chunk_size=chunk_size, counters=counters
+        llm,
+        [item for item in judged if not item.locally_unassessed],
+        check_run_id=check_run_id,
+        chunk_size=chunk_size,
+        counters=counters,
     )
     for item in judged:
         if item.verdict is None:
             continue
         item.final = item.verdict.verdict
+        item.source_explanation = reported_resource_explanation(
+            item.candidate.outcome,
+            item.candidate.context,
+            cues,
+            verdict=item.verdict.verdict,
+            attainment=item.verdict.reported_attainment,
+            intent_text=item.candidate.intent.text,
+        )
+        if item.source_explanation is not None:
+            item.final = "consistent_in_context"
         if item.final == "contradictory":
             problem, item.quotes = check_contradiction(
                 item.candidate,
@@ -688,6 +807,8 @@ def _common_detail(candidate: Candidate, verdict: PairVerdict) -> dict:
         "outcome_anchor": candidate.outcome.anchor,
         "gemini_reasoning": verdict.reasoning,
         "prompt_version": PROMPT_VERSION,
+        "reported_attainment": verdict.reported_attainment,
+        "context_basis": verdict.context_basis,
     }
 
 
@@ -717,9 +838,7 @@ def _candidate_to_flag(
             page_anchor=anchor,
             detail={
                 "kind": "agreement_injection_suspected",
-                "reason": AGREEMENT_INJECTION_SUSPECTED_WORDING.format(
-                    intent=candidate.intent.text, outcome=candidate.outcome.text
-                ),
+                "reason": AGREEMENT_INJECTION_SUSPECTED_WORDING,
                 "judged_as": final,
                 **common_detail,
             },
@@ -732,27 +851,24 @@ def _candidate_to_flag(
             evidence_excerpt=candidate.intent.text,
             page_anchor=anchor,
             detail={
-                "kind": "agreement_contradictory",
-                "reason": CONTRADICTORY_WORDING.format(
-                    reason=reason_label, intent=quotes.objective, outcome=quotes.finding
-                ),
+                "kind": "agreement_factual_conflict",
+                "reason": CONTRADICTORY_WORDING,
                 "reason_category": verdict.reason_category,
+                "reason_category_label": reason_label,
                 "objective_quote": quotes.objective,
                 "finding_quote": quotes.finding,
                 "finding_quote_source": quotes.finding_source,
                 **common_detail,
             },
         )
-    if final == "partial":
+    if final in ("partial", "unmet"):
         return AgreementFlagDraft(
             severity=FlagSeverity.low,
             evidence_excerpt=candidate.intent.text,
             page_anchor=anchor,
             detail={
-                "kind": "agreement_partial",
-                "reason": PARTIAL_WORDING.format(
-                    intent=candidate.intent.text, outcome=candidate.outcome.text
-                ),
+                "kind": "agreement_partial" if final == "partial" else "agreement_unmet",
+                "reason": PARTIAL_WORDING if final == "partial" else UNMET_WORDING,
                 **common_detail,
             },
         )
@@ -781,7 +897,34 @@ def _pair_record(item: Judged) -> dict:
         "intent_anchor": candidate.intent.anchor,
         "outcome_text": candidate.outcome.text,
         "outcome_anchor": candidate.outcome.anchor,
-        "reason": item.verdict.reasoning if item.verdict else None,
+        "reason": item.source_explanation["label"]
+        if item.source_explanation
+        else item.verdict.reasoning
+        if item.verdict
+        else None,
+        "model_reasoning": item.verdict.reasoning
+        if item.verdict and not item.locally_unassessed
+        else None,
+        "reported_attainment": item.verdict.reported_attainment if item.verdict else "unknown",
+        "context_basis": item.source_explanation["basis"]
+        if item.source_explanation
+        else item.verdict.context_basis
+        if item.verdict
+        else "unknown",
+        "model_verdict": item.verdict.verdict
+        if item.verdict and not item.locally_unassessed
+        else None,
+        "model_context_basis": item.verdict.context_basis
+        if item.verdict and not item.locally_unassessed
+        else None,
+        "explanation_method": item.source_explanation["method"]
+        if item.source_explanation
+        else "generation"
+        if item.verdict and not item.locally_unassessed
+        else "not_assessed",
+        "source_explanation": item.source_explanation,
+        "verdict": item.final,
+        "comparison_method": "phase_guard" if item.locally_unassessed else "generation",
         **({"downgrade": item.downgrade} if item.downgrade else {}),
     }
 
@@ -859,7 +1002,10 @@ async def run_agreement_pairing(
         n_skipped_ai_not_configured=counters["ai_not_configured"],
         n_skipped_ai_key_rejected=counters["ai_key_rejected"],
         undetermined=undetermined,
-        n_compared=sum(1 for item in judged if item.verdict is not None),
+        n_compared=sum(
+            1 for item in judged if item.verdict is not None and not item.locally_unassessed
+        ),
+        n_locally_unassessed=sum(1 for item in judged if item.locally_unassessed),
         verdict_counts=verdict_counts,
         downgrades=downgrades,
         explained_in_context=explained,

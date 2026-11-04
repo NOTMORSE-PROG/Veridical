@@ -85,3 +85,22 @@ def test_bibliography_fragments_and_prior_results_are_not_current_outcome_prose(
         ]
     )
     assert extract_statements(d, settings=Settings(_env_file=None)).outcomes == []
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        "The drainage controller works during the scheduled irrigation period.",
+        "The index rebuild took eleven seconds during the evaluation.",
+        "The occupancy alarms were triggered whenever a room exceeded capacity.",
+        "The cache deletes temporary entries after the retention interval.",
+        "The intake service accepted photographs but did not classify their contents.",
+    ],
+)
+def test_plain_operation_results_keep_source_and_section_boundaries(result):
+    settings = Settings(_env_file=None)
+    out = extract_statements(source(["Results", result]), settings=settings)
+    assert [s.text for s in out.outcomes] == [result]
+    for heading in ("Proposed Design", "Prior Results", "References"):
+        out = extract_statements(source([heading, result]), settings=settings)
+        assert out.outcomes == []
