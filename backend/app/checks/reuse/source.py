@@ -71,7 +71,9 @@ async def selected_native_source(
             )
             references = select_references(extraction, patterns)
             fragments = None
-            if not references.issues and not references.membership_issues:
+            # A protected tail has uncertain membership, but its source bounds
+            # are known. Exclude those intervals while retaining the clear body.
+            if not references.issues:
                 from app.ingest.source_slices import SourceFragment
 
                 fragments = []
@@ -95,6 +97,11 @@ async def selected_native_source(
                 pending.extend(node.children)
             heading_paragraphs = {node.paragraph for node in headings if node.paragraph is not None}
             page_headings = {(node.page, normalize(node.title)) for node in headings}
+            chapter_anchors = {
+                (node.page, node.paragraph, match.group("num").casefold())
+                for node in headings
+                if node.level == 1 and (match := patterns.chapter.match(normalize(node.title)))
+            }
             source = replace(
                 source,
                 quotation_block_ids=frozenset(quote_ids),
@@ -107,6 +114,15 @@ async def selected_native_source(
                         block.paragraph is None
                         and (block.page, normalize(block.text)) in page_headings
                     )
+                ),
+                # Formal chapter headings establish independent quotation
+                # regions. Numbered heuristic subheadings alone do not.
+                quotation_scope_starts=frozenset(
+                    id(block)
+                    for block in extraction.blocks
+                    if (match := patterns.chapter.match(normalize(block.text)))
+                    and (block.page, block.paragraph, match.group("num").casefold())
+                    in chapter_anchors
                 ),
             )
         except (FileNotFoundError, GoneError, ValidationError, OverflowError):

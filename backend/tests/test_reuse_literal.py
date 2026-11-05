@@ -192,6 +192,11 @@ def test_probe_grid_reaches_each_side_of_a_library_boundary():
         (None, "historical text", None),
         ("normal", 'Opening "unclosed words', None),
         ("normal", "A student's own prose", [False] * 4),
+        ("normal", "Their neighbours’ influences shape the network", [False] * 6),
+        ("normal", "The students’ records remain private", [False] * 5),
+        ("normal", "Opening ‘quoted words’ closing prose", [False, True, True, False, False]),
+        ("normal", "Opening ‘unclosed words", None),
+        ("normal", "An orphan closing word’", None),
         (
             "normal",
             "instructors' manuals describe ordinary prose beside students' records",
