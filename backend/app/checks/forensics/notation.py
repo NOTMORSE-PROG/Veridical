@@ -226,13 +226,20 @@ def bind_library_row(
     return None
 
 
-def text_notation_coverage(extraction: "ExtractionResult", stats: list["ReportedStat"]) -> dict:
+def text_notation_coverage(
+    extraction: "ExtractionResult",
+    stats: list["ReportedStat"],
+    *,
+    covered_ranges: Iterable[tuple[int, int, int]] = (),
+) -> dict:
     policy = notation_policy()
     source = analytical_source(extraction)
     blocks = [block for scope in source.scopes for block in scope if not block.is_furniture]
     patterns = [re.compile(_pattern(pattern, policy)) for pattern in policy["result_candidates"]]
     items = []
     bound_by_block = defaultdict(list)
+    for block_index, start, end in covered_ranges:
+        bound_by_block[block_index].append((start, end))
     for stat in stats:
         if (
             stat.kind == "inferential"

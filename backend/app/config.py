@@ -899,6 +899,7 @@ class Settings(BaseSettings):
     # When a table's percentages are held to "sum to 100%"; empty = packaged default.
     forensics_percentage_policy_file: Path | None = None
     forensics_table_context_file: Path | None = None
+    forensics_prose_mean_policy_file: Path | None = None
     forensics_grimmer_max_observations: int = Field(default=1000000, ge=2)
     forensics_grimmer_max_candidate_means: int = Field(default=10000, ge=1)
     forensics_sprite_max_rows: int = Field(default=3, ge=1)
@@ -1479,6 +1480,7 @@ class Settings(BaseSettings):
         "forensics_percentage_policy_file",
         "reuse_same_work_names_file",
         "forensics_table_context_file",
+        "forensics_prose_mean_policy_file",
         "reuse_quotation_policy_file",
         mode="before",
     )
