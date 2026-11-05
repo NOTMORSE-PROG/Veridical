@@ -1,5 +1,7 @@
 {
   "version": "source_quote_spans_v1",
   "paragraph_styles": ["quote", "intense quote", "block quote", "quotation"],
-  "delimiter_pairs": [["\"", "\""], ["“", "”"], ["‘", "’"], ["'", "'"]]
+  "delimiter_pairs": [["\"", "\""], ["“", "”"], ["‘", "’"], ["'", "'"]],
+  "possessive_apostrophes": ["’"],
+  "possessive_word_endings": ["s"]
 }
