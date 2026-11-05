@@ -11,6 +11,7 @@ import type { EvidencePage, EvidenceReference } from "./evidenceTypes";
 import { useEvidenceManifest } from "./useEvidenceSource";
 import type { FlagOut } from "../api/types";
 import { CriterionEvidenceDialog, type CriterionEvidenceContext } from "./CriterionEvidenceDialog";
+import { scrollToMark } from "./scrollToMark";
 
 /** 404, 409 and 410 do not change on a retry; a busy or failed server may. */
 export function isPermanentSourceError(error: unknown): boolean {
@@ -97,7 +98,7 @@ function RecordedPageSession({ checkRunId, snapshot, reference, cachedPage, cont
         <Button variant="secondary" disabled={query.isFetching} onClick={() => { void query.refetch(); }}>Retry original page</Button></div>)}
     {current && wholeDocument && <p className="signal-field-hint">This comparison covers the whole document, so no single page image applies. Read the passage in the manuscript beside this review.</p>}
     {current && !wholeDocument && <figure className={enlarged ? "signal-evidence-dialog__page" : "signal-criterion-packet__preview"}>
-      {current.image_data_url ? <img src={current.image_data_url} alt={`Original source, ${instructorAnchor(reference.anchor ?? "")}`} /> : <p>No original-page image is available for this saved evidence.</p>}
+      {current.image_data_url ? <img src={current.image_data_url} alt={`Original source, ${instructorAnchor(reference.anchor ?? "")}`} onLoad={event => scrollToMark(event.currentTarget, current.marks)} /> : <p>No original-page image is available for this saved evidence.</p>}
       <figcaption>{current.caption}</figcaption>
     </figure>}
   </>;

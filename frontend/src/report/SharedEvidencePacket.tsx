@@ -10,6 +10,7 @@ import type { EvidenceManifest, EvidencePage, EvidenceReference } from "./eviden
 import { isPermanentSourceError, verifyEvidencePage } from "./RecordedEvidencePage";
 import { EvidenceSourceLayout } from "./EvidenceSourceLayout";
 import { EvidenceItem } from "./EvidenceItem";
+import { scrollToMark } from "./scrollToMark";
 
 // An adviser cannot upload anything, so the shared view says what remains.
 const SHARED_PAGE_GONE = "The original page is not available in this shared report. The saved quotation above is what VERIDICAL recorded.";
@@ -70,7 +71,7 @@ function SharedPageSession({ token, snapshot, reference, context, references, in
       ? <p role="status">{SHARED_PAGE_GONE}</p>
       : <div role="alert"><p>{query.error instanceof ApiError ? query.error.message : "The original page could not be loaded."}</p><Button disabled={query.isFetching} variant="secondary" onClick={() => { void query.refetch(); }}>Retry original page</Button></div>)}
     {page && <figure className={large ? "signal-evidence-dialog__page" : "signal-criterion-packet__preview"}>
-      {page.image_data_url ? <img src={page.image_data_url} alt={`Original source, ${instructorAnchor(reference.anchor ?? "")}`} /> : <p>No original-page image is available for this evidence.</p>}
+      {page.image_data_url ? <img src={page.image_data_url} alt={`Original source, ${instructorAnchor(reference.anchor ?? "")}`} onLoad={event => scrollToMark(event.currentTarget, page.marks)} /> : <p>No original-page image is available for this evidence.</p>}
       <figcaption>{page.caption}</figcaption>
     </figure>}
   </>;
