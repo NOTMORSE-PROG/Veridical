@@ -327,6 +327,10 @@ async def test_withheld_findings_keep_honest_wording(monkeypatch):
         [LINKED, UNUSED, UNPARSED_LOUKIL],
     )
     for flag in flags:
+        if flag.detail.get("kind") == "outside_recency_window":
+            assert flag.detail.get("affects_readiness") is False
+            assert "foundational work" in flag.detail["reason"]
+            continue
         reason = (flag.detail.get("reason") or "").casefold()
         assert "possible" in reason
         assert not any(word in reason for word in ("fake", "fabricat", "on purpose", "dishonest"))

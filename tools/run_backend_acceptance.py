@@ -14,11 +14,14 @@ import sys
 import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
-MANIFEST = ROOT / "tools/data/backend_acceptance_v3.json"
+MANIFEST = ROOT / "tools/data/backend_acceptance_v4.json"
 
 
 def diagnostic_rules(manifest: dict) -> list[dict]:
-    if manifest.get("schema_version") == "backend-acceptance-v3":
+    if manifest.get("schema_version") in {
+        "backend-acceptance-v3",
+        "backend-acceptance-v4",
+    }:
         return manifest["retained_diagnostics"]
     return [
         {
@@ -97,8 +100,74 @@ def declaration_transition_problems(manifest: dict, root: Path) -> list[str]:
     return []
 
 
+class _PriorSourceView:
+    """Validate the prior contract against its preserved original test bytes."""
+
+    def __init__(self, root: Path, archives: dict[str, str]):
+        self.root = root
+        self.archives = archives
+
+    def __truediv__(self, path: str) -> Path:
+        return self.root / self.archives.get(path, path)
+
+
+def recency_transition_problems(manifest: dict, root: Path) -> list[str]:
+    try:
+        transition = manifest["transition"]
+        parent_path = transition["parent_manifest"]
+        parent_bytes = (root / parent_path).read_bytes()
+        parent = json.loads(parent_bytes)
+        digest = hashlib.sha256(parent_bytes).hexdigest()
+        changes = transition["updated_tests"]
+        archives = {
+            record["test_path"]: record["prior_test_archive"] for record in changes
+        }
+        frozen = manifest["frozen_artifact_sha256"]
+        added = transition["additional_controls"]
+        if (
+            parent.get("schema_version") != "backend-acceptance-v3"
+            or digest != transition["parent_manifest_sha256"]
+            or frozen.get(parent_path) != digest
+            or not changes
+            or len(archives) != len(changes)
+            or registry_problems(parent, _PriorSourceView(root, archives))
+            or manifest["retained_diagnostics"] != parent["retained_diagnostics"]
+            or manifest["max_skips_default"] != parent["max_skips_default"]
+            or not added
+            or manifest["gating_selectors"] != parent["gating_selectors"] + added
+            or len(set(manifest["gating_selectors"]))
+            != len(manifest["gating_selectors"])
+            or not transition["reason"].strip()
+            or any(
+                frozen.get(path) != value
+                for path, value in parent["frozen_artifact_sha256"].items()
+                if path not in archives
+            )
+        ):
+            return ["Invalid recency policy transition or changed prior authority."]
+        for record in changes:
+            path, archive = record["test_path"], record["prior_test_archive"]
+            old = parent["frozen_artifact_sha256"][path]
+            if (
+                frozen.get(archive) != old
+                or hashlib.sha256((root / archive).read_bytes()).hexdigest() != old
+                or frozen.get(path) == old
+                or hashlib.sha256((root / path).read_bytes()).hexdigest()
+                != frozen.get(path)
+                or not record["reason"].strip()
+            ):
+                return ["Changed or missing prior recency-policy evidence."]
+        if any("backend/" + name.split("::", 1)[0] not in frozen for name in added):
+            return ["Mandatory recency controls must be source-frozen."]
+    except (KeyError, TypeError, ValueError, OSError, AttributeError):
+        return ["Missing or malformed recency policy transition."]
+    return []
+
+
 def registry_problems(manifest: dict, root: Path) -> list[str]:
     """A new contract preserves its prior authority and every unchanged gate."""
+    if manifest.get("schema_version") == "backend-acceptance-v4":
+        return recency_transition_problems(manifest, root)
     if manifest.get("schema_version") == "backend-acceptance-v3":
         return declaration_transition_problems(manifest, root)
     if manifest.get("schema_version") == "backend-acceptance-v1":
@@ -220,7 +289,10 @@ def classify(
                     problems.append(f"JUnit root {key} count inconsistent.")
     try:
         rules = {record["selector"]: record for record in diagnostic_rules(manifest)}
-        if problems and manifest.get("schema_version") == "backend-acceptance-v3":
+        if problems and manifest.get("schema_version") in {
+            "backend-acceptance-v3",
+            "backend-acceptance-v4",
+        }:
             rules = {}
     except (KeyError, TypeError):
         rules = {}
@@ -297,7 +369,7 @@ def classify(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path, required=True)
-    parser.add_argument("--registry", choices=("v1", "v2", "v3"), default="v3")
+    parser.add_argument("--registry", choices=("v1", "v2", "v3", "v4"), default="v4")
     args = parser.parse_args()
     args.output_dir.mkdir(parents=True, exist_ok=True)
     xml = args.output_dir.resolve() / "default-pytest.xml"

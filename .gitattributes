@@ -19,3 +19,6 @@
 /tools/data/backend_acceptance_v2.json -text whitespace=trailing-space,space-before-tab,cr-at-eol
 /tools/data/backend_acceptance_v3.json -text whitespace=trailing-space,space-before-tab,cr-at-eol
 /backend/app/report/fonts/LICENSE_DEJAVU -text whitespace=-blank-at-eol
+
+/tools/data/backend_acceptance_v4.json -text
+/backend/tests/fixtures/recency_policy_v1/*.before.txt -text

@@ -256,7 +256,12 @@ async def test_metadata_snapshot_or_unassessed_reason_survives_full_assembly(
             )
             assert result.detail["n_metadata_skipped_insufficient"] == 1
             assert ledger["lookup_attempted"] == (mode != "invalid_policy")
-            assert result.detail["n_flags"] == 0
+            flags = (
+                await session.scalars(select(Flag).where(Flag.check_result_id == result.id))
+            ).all()
+            assert len(flags) == result.detail["n_flags"] == 1
+            assert flags[0].detail["kind"] == "outside_recency_window"
+            assert flags[0].detail["affects_readiness"] is False
             assert len(calls) == (0 if mode == "invalid_policy" else 1)
 
 

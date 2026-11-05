@@ -255,6 +255,82 @@ class AcceptanceControls(unittest.TestCase):
         self.assertTrue(self.verdict())
         self.assertEqual(len(list(self.suite.iter("failure"))), 2)
 
+    def recency_transition(self):
+        self.declaration_transition()
+        parent = json.loads(json.dumps(self.manifest))
+        parent_path = self.root / "v3.json"
+        parent_path.write_text(json.dumps(parent))
+        parent_hash = hashlib.sha256(parent_path.read_bytes()).hexdigest()
+        path = "backend/tests/declared.py"
+        source = self.root / path
+        archive = self.root / "declared-before.py.txt"
+        archive.write_bytes(source.read_bytes())
+        source.write_bytes(b"mandatory notes excluded only from older warning oracles")
+        added_module = self.root / "backend/tests/recency.py"
+        added_module.write_bytes(b"required policy controls")
+        self.manifest = {
+            **parent,
+            "schema_version": "backend-acceptance-v4",
+            "frozen_artifact_sha256": {
+                **parent["frozen_artifact_sha256"],
+                parent_path.name: parent_hash,
+                path: hashlib.sha256(source.read_bytes()).hexdigest(),
+                archive.name: hashlib.sha256(archive.read_bytes()).hexdigest(),
+                "backend/tests/recency.py": hashlib.sha256(
+                    added_module.read_bytes()
+                ).hexdigest(),
+            },
+            "gating_selectors": parent["gating_selectors"]
+            + ["tests/recency.py::required"],
+            "transition": {
+                "parent_manifest": parent_path.name,
+                "parent_manifest_sha256": parent_hash,
+                "updated_tests": [
+                    {
+                        "test_path": path,
+                        "prior_test_archive": archive.name,
+                        "reason": "Source age checking is now required.",
+                    }
+                ],
+                "additional_controls": ["tests/recency.py::required"],
+                "reason": "Preserve the old oracles and require the new policy controls.",
+            },
+        }
+        self.required = ET.SubElement(
+            self.suite, "testcase", classname="tests.recency", name="required"
+        )
+        return parent_path, archive, source
+
+    def test_recency_transition_preserves_exact_prior_diagnostics_and_sources(self):
+        self.recency_transition()
+        self.assertTrue(self.verdict())
+        self.assertEqual(len(list(self.suite.iter("failure"))), 2)
+
+    def test_recency_transition_rejects_changed_archives_parent_and_current_source(
+        self,
+    ):
+        paths = self.recency_transition()
+        for path in paths:
+            saved = path.read_bytes()
+            path.write_bytes(b"unauthorized change")
+            self.assertFalse(self.verdict())
+            path.write_bytes(saved)
+        self.assertTrue(self.verdict())
+
+    def test_recency_transition_cannot_drop_gates_diagnostics_or_increase_skips(self):
+        self.recency_transition()
+        for key, value in (
+            ("gating_selectors", self.manifest["gating_selectors"][:-1]),
+            ("retained_diagnostics", self.manifest["retained_diagnostics"][:-1]),
+            ("max_skips_default", 99),
+        ):
+            saved = self.manifest[key]
+            self.manifest[key] = value
+            self.assertFalse(self.verdict())
+            self.manifest[key] = saved
+        ET.SubElement(self.required, "failure", message="new policy failed")
+        self.assertFalse(self.verdict())
+
     def test_default_cli_runs_unchanged_collection_with_the_approved_registry(self):
         import io
         import os
@@ -263,9 +339,9 @@ class AcceptanceControls(unittest.TestCase):
         from unittest.mock import patch
         from run_backend_acceptance import main
 
-        self.declaration_transition()
+        self.recency_transition()
         self.assertTrue(self.verdict())
-        manifest = self.root / "tools/data/backend_acceptance_v3.json"
+        manifest = self.root / "tools/data/backend_acceptance_v4.json"
         manifest.parent.mkdir(parents=True)
         manifest.write_text(json.dumps(self.manifest))
         output = self.root / "fresh-run"
@@ -289,7 +365,7 @@ class AcceptanceControls(unittest.TestCase):
         ):
             self.assertEqual(main(), 0)
         report = json.loads((output / "acceptance.json").read_text())
-        self.assertEqual(report["registry_version"], "backend-acceptance-v3")
+        self.assertEqual(report["registry_version"], "backend-acceptance-v4")
         self.assertEqual(report["default_result"], "FAIL")
         self.assertEqual(len(report["failed_selectors"]), 2)
         self.assertTrue(report["accepted"])
