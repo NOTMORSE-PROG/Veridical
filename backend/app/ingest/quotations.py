@@ -115,6 +115,9 @@ def _reference_spans_in_scope(ranges, source):
 
 
 def _scope_quote_spans(joined, ranges, source, policy):
+    spans = inline_quote_spans(joined, policy)
+    if spans is not None:
+        return merged_spans(spans), []
     starts = sorted(
         {0, len(joined)}
         | {start for start, _end, block in ranges if id(block) in source.quotation_scope_starts}
@@ -210,9 +213,14 @@ def _located_word_protection(source, excerpt, settings, *, references, _scope_ca
                 if references
                 else _scope_quote_spans(joined, ranges, source, policy)
             )
-            body_projection = (
-                None if references else _body_quote_spans(joined, ref_spans, policy, ranges, source)
-            )
+            if references:
+                body_projection = None
+            elif ref_spans == []:
+                # With no bibliography in this scope, both projections use
+                # identical text and can share the completed parse.
+                body_projection = (inline_spans, unknown_spans)
+            else:
+                body_projection = _body_quote_spans(joined, ref_spans, policy, ranges, source)
             body_spans, body_unknown = (
                 body_projection if body_projection is not None else (None, [])
             )
