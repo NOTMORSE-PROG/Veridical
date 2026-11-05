@@ -95,3 +95,86 @@ async def test_report_and_export_say_later_material_was_left_out(monkeypatch):
     text = " ".join(recency_sentences(summary))
     assert "Dates were read only from the 2 entries kept as part of the reference list" in text
     assert "left out" in text
+
+
+@pytest.mark.parametrize("failure", ["none", "grammar", "conflicting", "undated", "empty_list"])
+async def test_required_recency_gaps_are_incomplete_in_the_whole_module(
+    monkeypatch, tmp_path, failure
+):
+    from dataclasses import asdict
+
+    from app.checks.citations.support import ClaimSupportPairResult, ClaimSupportResult
+    from app.external.schemas import VerificationResult
+    from app.ingest.references import parse_reference
+    from app.models.citation import Citation
+    from app.models.enums import CheckKind, ResultOutcome
+    from app.report.module_scope import integrity_modules
+
+    raw = "Reyes, J. (2024). First complete source. Journal of Examples, 1(1), 1-2."
+    body = "Prior work (Reyes, 2024)."
+    if failure == "conflicting":
+        raw = "Reyes, J. (2024). First complete source. Journal of Examples, 2025, 1(1), 1-2."
+    elif failure == "undated":
+        raw = "Reyes, J. (n.d.). First complete source. Journal of Examples, 1(1), 1-2."
+        body = "Prior work (Reyes, n.d.)."
+    extraction = complete_source(body, [] if failure == "empty_list" else [raw])
+    citations = (
+        []
+        if failure == "empty_list"
+        else [Citation(manuscript_id=1, **asdict(parse_reference(raw, 0)))]
+    )
+    session = MemorySession()
+    monkeypatch.setattr(
+        verify,
+        "verify_citation",
+        AsyncMock(
+            return_value=verify.CitationVerdict(
+                verify.VerdictKind.existence_confirmed,
+                VerificationResult(
+                    found=True, provider="crossref", abstract="Prior work was consulted."
+                ),
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        verify,
+        "run_claim_support_check",
+        AsyncMock(
+            return_value=ClaimSupportResult(
+                [],
+                0,
+                0,
+                0,
+                pair_results=[
+                    ClaimSupportPairResult(
+                        i, "assessed", model_verdict="supported", effective_verdict="supported"
+                    )
+                    for i in range(len(citations))
+                ],
+            )
+        ),
+    )
+    monkeypatch.setattr(verify, "write_audit_event", AsyncMock())
+    settings = Settings(
+        _env_file=None,
+        citation_recency_grammar_file=tmp_path / "missing.json" if failure == "grammar" else None,
+    )
+    result = await verify.run_citation_integrity_check(
+        session, None, 1, citations, extraction, load_patterns(), settings, object()
+    )
+    summary = result.detail["citation_recency"]
+    if failure == "none":
+        assert result.outcome == ResultOutcome.passed
+        assert summary["assessment_coverage"] == "complete"
+    else:
+        assert result.outcome != ResultOutcome.passed
+        assert result.detail["coverage_reason"]
+        assert result.detail["analysis_coverage"] in {"partial", "unsupported"}
+        assert summary["enabled"] is True
+        module = next(
+            m
+            for m in integrity_modules([result], set())
+            if m.check_kind == CheckKind.citation_integrity.value
+        )
+        assert module.state != "completed"
+        assert summary.get("n_outside_window", 0) == 0

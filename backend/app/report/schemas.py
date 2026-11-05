@@ -145,6 +145,7 @@ COVERAGE_REASONS = frozenset(
         "reference_source_projection_unbound",
         "metadata_comparison_policy_unavailable",
         "citation_metadata_comparison_unassessed",
+        "citation_recency_incomplete",
         "author_year_citation_parse_unassessed",
         "numeric_citation_style_unassessed",
         "numeric_citation_scan_limit",
@@ -251,6 +252,10 @@ class CitationRecencySummaryOut(BaseModel):
     has no readable year, and the last group is never judged."""
 
     status: Literal["assessed", "unassessed", "off"]
+    policy_version: str | None = None
+    enabled: bool | None = None
+    check_year: int | None = None
+    assessment_coverage: Literal["complete", "partial", "unsupported"] | None = None
     # Why the list was not read for dates ("reference_list_not_bound",
     # "reference_membership_partial", "reference_list_unavailable",
     # "source_unavailable", "no_references", "format_setting_invalid",
