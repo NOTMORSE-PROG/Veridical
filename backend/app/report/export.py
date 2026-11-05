@@ -2239,6 +2239,8 @@ def _build_report_pdf(data: ReportExportData, image_path) -> bytes:
                 )
                 if f.overridden:
                     caption_text += " · Overridden"
+                elif f.finding_confirmed:
+                    caption_text += " · Confirmed"
                 if f.affects_readiness is False and not optional:
                     caption_text += " · Not scored"
                 header = Paragraph(caption_text, caption_style)
@@ -2334,6 +2336,24 @@ def _build_report_pdf(data: ReportExportData, image_path) -> bytes:
                         Paragraph(
                             "<b>Recorded instructor judgment:</b> "
                             + escape(detail.override_reason),
+                            styles["body"],
+                        )
+                    )
+                elif f.finding_confirmed and not f.overridden:
+                    judgment = "Confirmed"
+                    if detail.finding_confirmed_at is not None:
+                        recorded_at = detail.finding_confirmed_at
+                        timestamp = (
+                            _format_date(recorded_at.astimezone(UTC), with_time=True)
+                            if recorded_at.utcoffset() is not None
+                            else recorded_at.isoformat()
+                        )
+                        judgment += f" ({timestamp})"
+                    if detail.finding_confirm_note:
+                        judgment += ". " + detail.finding_confirm_note
+                    explanation.append(
+                        Paragraph(
+                            "<b>Recorded instructor judgment:</b> " + escape(judgment),
                             styles["body"],
                         )
                     )

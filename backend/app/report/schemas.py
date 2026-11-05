@@ -971,6 +971,8 @@ class FlagExportDetailOut(BaseModel):
     source_identifier: str | None = None
     comparisons: list[ExportComparisonOut] = Field(default_factory=list)
     override_reason: str | None = None
+    finding_confirm_note: str | None = None
+    finding_confirmed_at: datetime | None = None
     evidence_unavailable: bool = False
     evidence_is_summary: bool = False
     current_guidance: str | None = None
