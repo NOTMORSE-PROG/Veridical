@@ -1,0 +1,6 @@
+{
+  "_source": "BUG-696 (2026-11-09): an author-year citation that spells its source's surname differently from the reference entry was left without an entry. Measured on the stored dev theses: DESTAMP cites 'Xiongbin (2017)' for the entry 'Xiong-Bin, W. et al. (2017)'; two blind raters judged them the same work. Only a citation the main matching left without an entry is considered, only in a document where the main matching linked something, and only when exactly one same-year entry has its surname. An organisation's short and long forms ('Statista Research Department' for 'Statista') are not linked: no name rule tells them apart from two offices of one body ('Department of Health Region IV' and 'Department of Health'), so they stay unassessed.",
+  "enabled": true,
+  "_fold_note": "Characters dropped before two names are compared: 'Xiong-Bin' and 'Xiongbin' are one name.",
+  "fold_pattern": "[\\s\\-\\u2010-\\u2015'\\u2019.]+"
+}

@@ -1565,6 +1565,16 @@ async def _run_citation_integrity_check(
             ),
             "n_in_text_citations": len(in_text),
             "n_linked": len(cross.linked),
+            # A link made only because a surname was spelled differently, so
+            # the instructor can see it was not an exact match (BUG-696).
+            "linked_by_spelling": [
+                {
+                    "citation": cite.raw_text,
+                    "page": cite.page,
+                    "reference_order_index": ref.order_index,
+                }
+                for cite, ref in cross.linked_by_spelling
+            ],
             "n_orphans": len(cross.orphans),
             "n_orphans_reported": len(orphans),
             "n_uncited": len(absence_candidates),

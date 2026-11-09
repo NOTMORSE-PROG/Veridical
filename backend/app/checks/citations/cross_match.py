@@ -7,7 +7,11 @@ IEEE, ACM, CHED, DOST, etc.) and numbered bracket citations ([1], [1]-[3]).
 
 from __future__ import annotations
 
+import json
+import logging
 import re
+from functools import lru_cache
+from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 from app.checks.citations.numbered import explicit_reference_label
@@ -25,6 +29,9 @@ class ReferenceLike(Protocol):
     year: int | str | None
 
 
+logger = logging.getLogger(__name__)
+
+_NAME_VARIANTS_FILE = Path(__file__).parent / "data" / "name_variants.json"
 _INITIALS_TOKEN = re.compile(r"(?:[^\W\d_]\.)+(?:-[^\W\d_]\.)*")
 
 # Bidirectional known alias dictionary for prominent global & Philippine technical/academic bodies
@@ -200,6 +207,62 @@ def _build_reference_number_index(references: list[ReferenceLike]) -> dict[int, 
     return by_number
 
 
+@lru_cache(maxsize=4)
+def load_name_variant_policy(path: Path | None = None) -> dict:
+    return json.loads((path or _NAME_VARIANTS_FILE).read_text(encoding="utf-8"))
+
+
+def _link_name_variants(orphans, references, linked, cited):
+    """Link a citation left without an entry to the one same-year entry whose
+    first surname is the citation's spelled differently: hyphens, spaces,
+    apostrophes or periods dropped ("Xiongbin" for "Xiong-Bin, W."). BUG-696.
+    Anything else stays an orphan, including two entries that fit. Returns
+    the remaining orphans and the links made, so each one can be reported as
+    a link by spelling."""
+    made = []
+    if not linked:
+        # When the main matching linked nothing, the citations were not read,
+        # not respelt; the whole list is withheld for that elsewhere.
+        return orphans, made
+    try:
+        policy = load_name_variant_policy(get_settings().citation_name_variant_policy_file)
+        enabled = policy["enabled"]
+        if not isinstance(enabled, bool):
+            raise TypeError(f"'enabled' must be true or false, not {enabled!r}")
+        fold = re.compile(policy["fold_pattern"])
+    except (OSError, ValueError, KeyError, TypeError, re.error) as exc:
+        logger.warning("Citation name-variant policy unusable, variant linking skipped: %s", exc)
+        return orphans, made
+    if not enabled:
+        return orphans, made
+
+    def folded(name):
+        return fold.sub("", (name or "").casefold())
+
+    remaining = []
+    for cite in orphans:
+        name = cite.surnames[0] if cite.surnames else ""
+        fitting = []
+        if folded(name) and cite.year:
+            for ref in references:
+                if reference_date_key(ref) != citation_date_key(cite.year):
+                    continue
+                author = next((a for a in ref.authors or [] if a and a.strip()), "")
+                entry_name = author.split(",", 1)[0].strip()
+                if folded(entry_name) == folded(name):
+                    fitting.append((ref, entry_name))
+        # The same name, spelled the same, is one the main matching declined
+        # for a reason of its own; it is not a respelling.
+        if len(fitting) == 1 and fitting[0][1].casefold() != name.casefold():
+            ref = fitting[0][0]
+            linked.append((cite, [ref]))
+            cited.add(ref.order_index)
+            made.append((cite, ref))
+        else:
+            remaining.append(cite)
+    return remaining, made
+
+
 def cross_match(in_text: list[InTextCitation], references: list[ReferenceLike]) -> CrossMatchResult:
     from app.checks.citations.extract import (
         CrossMatchResult,
@@ -349,6 +412,7 @@ def cross_match(in_text: list[InTextCitation], references: list[ReferenceLike]) 
         else:
             orphans.append(cite)
 
+    orphans, by_spelling = _link_name_variants(orphans, references, linked, cited_order_indexes)
     uncited = [r for r in references if r.order_index not in cited_order_indexes]
     return CrossMatchResult(
         in_text=in_text,
@@ -358,4 +422,5 @@ def cross_match(in_text: list[InTextCitation], references: list[ReferenceLike]) 
         ambiguous=ambiguous,
         possibly_cited=[r for r in references if r.order_index in possibly_cited],
         confidently_uncited=[r for r in uncited if r.order_index not in possibly_cited],
+        linked_by_spelling=by_spelling,
     )
