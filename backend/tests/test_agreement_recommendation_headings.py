@@ -54,6 +54,11 @@ def results(rows, agreement_cues=None):
         "1) Recommendation for Conclusion 1",
         "4.5.3. Recommendation for Conclusion 2",
         "Chapter 5: Recommendation for Conclusion 1",
+        # Other forms of the word, and a suggestion.
+        "Recommended Actions for Conclusion 1",
+        "Suggestions Based on the Findings",
+        # Listed with something that is not a results section.
+        "Recommendations and Future Work Based on the Findings",
     ],
 )
 def test_a_recommendation_heading_is_not_a_results_heading(heading):
@@ -69,6 +74,7 @@ def test_a_recommendation_heading_is_not_a_results_heading(heading):
         "Recommendations and Conclusions",
         "Recommendations, Summary and Conclusions",
         "RECOMMENDATIONS AND SUMMARY OF FINDINGS",
+        "A. Recommendations and Findings",
         "5.2 Conclusion",
         "Summary of Findings",
     ],
@@ -92,7 +98,7 @@ def test_the_rule_is_data():
     without = replace(
         packaged,
         outcome_heading_exclusion_patterns=tuple(
-            p for p in packaged.outcome_heading_exclusion_patterns if "recommendation" not in p
+            p for p in packaged.outcome_heading_exclusion_patterns if "recommend" not in p
         ),
     )
     assert len(without.outcome_heading_exclusion_patterns) == (

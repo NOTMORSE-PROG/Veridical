@@ -129,9 +129,9 @@
   ],
   "outcome_heading_exclusion_patterns": [
     "\\b(?:prior|previous|earlier|related|cited)\\b",
-    "^\\s*(?:chapter\\s+(?:\\d+|[ivxlc]+)\\s*[:.\\u2013\\u2014-]?\\s*|\\(?(?:\\d+(?:\\.\\d+)*|[ivxlc]+|[a-z])[.)]\\s*)?recommendations?\\b(?!\\s*(?:,|&|and\\b))"
+    "^\\s*(?:chapter\\s+(?:\\d+|[ivxlc]+)\\s*[:.\\u2013\\u2014-]?\\s*|\\(?(?:\\d+(?:\\.\\d+)*|[ivxlc]+|[a-z])[.)]\\s*)?(?:recommend(?:ations?|ed)|suggest(?:ions?|ed))\\b(?!\\s*(?:,|&|and\\b)\\s*(?:the\\s+)?(?:summary|conclusions?|findings|results)\\b)"
   ],
-  "_outcome_heading_exclusion_note": "BUG-695 (2026-11-09): a heading whose subject is a recommendation ('1. Recommendation for Conclusion 1', '(a) Recommendation for ...', 'Chapter 5: Recommendations') is not a results heading, even when it names a conclusion; recommendations are not results. Anchored at the start of the heading, after any numbering or chapter prefix, so 'Summary, Conclusions, and Recommendations' stays a results heading; a chapter title that lists recommendations with other sections ('Recommendations and Conclusions', 'Recommendations, Summary and Conclusions') stays one too.",
+  "_outcome_heading_exclusion_note": "BUG-695 (2026-11-09): a heading whose subject is a recommendation or suggestion ('1. Recommendation for Conclusion 1', '(a) Recommended Actions for ...', 'Suggestions Based on the Findings', 'Chapter 5: Recommendations') is not a results heading, even when it names a conclusion or findings; recommendations are not results. Anchored at the start of the heading, after any numbering or chapter prefix, so 'Summary, Conclusions, and Recommendations' stays a results heading; a chapter title that lists recommendations with a summary, conclusions, findings or results ('Recommendations and Conclusions', 'Recommendations, Summary and Conclusions') stays one too, while 'Recommendations and Future Work ...' does not.",
   "_source_v094": "2026-10-31 (V-094): scope/limitation/revision cues so the judge sees a manuscript's own delimitations; explicit 'objective not met' patterns that always reach the judge; the named-system guard for a contradiction between two different named systems (BUG-593). Precision-biased and data, like the rest of this file.",
   "scope_heading_synonyms": [
     "scope and delimitation",
