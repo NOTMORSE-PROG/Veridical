@@ -49,6 +49,11 @@ def results(rows, agreement_cues=None):
         "3. Recommendation for Conclusion 3",
         "Recommendations Based on the Conclusions",
         "5.3 Recommendations",
+        # Whatever numbering or chapter prefix comes first.
+        "(a) Recommendation for Conclusion 1",
+        "1) Recommendation for Conclusion 1",
+        "4.5.3. Recommendation for Conclusion 2",
+        "Chapter 5: Recommendation for Conclusion 1",
     ],
 )
 def test_a_recommendation_heading_is_not_a_results_heading(heading):
@@ -60,6 +65,10 @@ def test_a_recommendation_heading_is_not_a_results_heading(heading):
     [
         "Summary, Conclusions, and Recommendations",
         "Conclusions and Recommendations",
+        # Recommendations listed first, with the other sections of the chapter.
+        "Recommendations and Conclusions",
+        "Recommendations, Summary and Conclusions",
+        "RECOMMENDATIONS AND SUMMARY OF FINDINGS",
         "5.2 Conclusion",
         "Summary of Findings",
     ],
