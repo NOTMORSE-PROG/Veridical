@@ -361,3 +361,108 @@ async def test_a_link_without_saved_detail_still_says_whether_each_check_ran(mon
         ("citation_integrity", "partial", "source_reading_order_unresolved"),
     ]
     assert all(m.undetermined is None and m.agreement_scope is None for m in states)
+
+
+def test_states_alone_never_carry_an_unknown_coverage_code():
+    from app.report.module_scope import module_states
+    from app.report.schemas import IntegrityModuleOut
+
+    module = IntegrityModuleOut(
+        check_kind="citation_integrity", state="partial", coverage_reason="PRIVATE_FREE_TEXT"
+    )
+    assert module_states([module])[0].coverage_reason is None
+
+
+def _status(**changes):
+    from app.report.schemas import IntegrityCheckStatusOut
+
+    values = dict(
+        check_kind="originality_reuse",
+        outcome="passed",
+        n_skipped_quota=1,
+        n_skipped_api_down=2,
+        n_skipped_parse_failure=3,
+        coverage_reason="source_reading_order_partial",
+        n_metadata_skipped_insufficient=4,
+        n_linkage_unassessed=5,
+        n_source_pages_unassessed=3,
+        source_pages_unassessed=[14, 12, 12, 13],
+        pages_not_compared=[160, 158, 159],
+        not_compared_from="p. 158",
+        n_claim_support_unassessed=6,
+        n_images_unassessed=7,
+        n_recovery_tables_unassessed=8,
+        n_equations_unassessed=9,
+    )
+    values.update(changes)
+    return IntegrityCheckStatusOut(**values)
+
+
+def test_a_shared_copy_names_what_each_check_left_out_and_nothing_else():
+    from app.report.module_scope import public_coverage
+
+    [out] = public_coverage([_status()])
+    assert out.model_dump() == {
+        "check_kind": "originality_reuse",
+        "coverage_reason": "source_reading_order_partial",
+        "n_pages_not_read": 3,
+        "pages_not_read": [12, 13, 14],
+        "pages_not_compared": [158, 159, 160],
+        "not_compared_from": "p. 158",
+        "n_skipped_service": 2,
+        "n_skipped_capacity": 1,
+        "n_skipped_unreadable": 3,
+        "n_references_unverified": 4,
+        "n_citation_links_unchecked": 5,
+        "n_claims_unchecked": 6,
+        "n_images_unchecked": 7,
+        "n_tables_unchecked": 8,
+        "n_equations_unchecked": 9,
+    }
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"coverage_reason": "PRIVATE_FREE_TEXT"},
+        {"not_compared_from": "PRIVATE the list ends near the appendix"},
+        {"not_compared_from": "page 3"},
+        {"source_pages_unassessed": [0, -2, 5], "pages_not_compared": [0]},
+    ],
+)
+def test_a_shared_copy_drops_values_outside_their_known_shapes(changes):
+    from app.report.module_scope import public_coverage
+
+    [out] = public_coverage([_status(**changes)])
+    encoded = out.model_dump_json()
+    assert "PRIVATE" not in encoded and "page 3" not in encoded
+    assert all(page > 0 for page in out.pages_not_read + out.pages_not_compared)
+
+
+def test_a_shared_copy_skips_checks_it_does_not_know():
+    from app.report.module_scope import public_coverage
+
+    assert public_coverage([_status(check_kind="structural")]) == []
+
+
+def test_the_shared_coverage_schema_rejects_extra_fields():
+    from pydantic import ValidationError
+
+    from app.report.module_scope import public_coverage
+    from app.report.schemas import PublicCoverageOut
+
+    values = public_coverage([_status()])[0].model_dump()
+    for extra in ("reason", "image_coverage_items", "outcome", "source_pages_unassessed"):
+        with pytest.raises(ValidationError):
+            PublicCoverageOut.model_validate({**values, extra: "anything"})
+
+
+@pytest.mark.parametrize("bad", [-1, True, 2.0, "3"])
+def test_a_badly_saved_count_shows_as_zero_and_never_breaks_the_link(bad):
+    from app.report.module_scope import public_coverage
+
+    status = _status()
+    status = status.model_copy(update={"n_linkage_unassessed": bad, "n_images_unassessed": bad})
+    [out] = public_coverage([status])
+    assert out.n_citation_links_unchecked == 0 and out.n_images_unchecked == 0
+    assert out.n_tables_unchecked == 8 and out.pages_not_read == [12, 13, 14]

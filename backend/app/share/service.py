@@ -18,7 +18,7 @@ from app.models.run import CheckResult, CheckRun, Flag
 from app.models.share import ShareLink
 from app.pipeline.service import get_check_run
 from app.report.assessment import lock_assessment
-from app.report.module_scope import module_states, public_modules
+from app.report.module_scope import module_states, public_coverage, public_modules
 from app.report.schemas import (
     CriterionResultOut,
     PublicCriterionResultOut,
@@ -322,6 +322,7 @@ def _to_public_report(report: ReportOut) -> PublicReportOut:
         originality_scope=report.originality_scope,
         statistical_check_scope=report.statistical_check_scope,
         assessment_incomplete=bool(report.integrity_check_status),
+        integrity_coverage=public_coverage(report.integrity_check_status or []),
         historical_citation_title_unverified=report.historical_citation_title_unverified,
         historical_native_math_unverified=report.historical_native_math_unverified,
         semantic_support_unverified=report.historical_semantic_support_unverified,

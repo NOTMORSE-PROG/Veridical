@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.config import get_settings
 from app.db import DbInt, DbText
@@ -549,6 +549,39 @@ class PublicCriterionResultOut(BaseModel):
     resolved: bool = False
 
 
+class PublicCoverageOut(BaseModel):
+    """What one integrity check left out, for the adviser view (BUG-676):
+    its recorded coverage code, the pages it could not read or did not
+    compare, and counts of the items it did not check. Copied from the
+    report's own coverage record, never recomputed; no reasons, links,
+    excerpts or service details cross."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    check_kind: Literal[
+        "internal_agreement", "citation_integrity", "statistical_forensics", "originality_reuse"
+    ]
+    # COVERAGE_REASONS only (never free text); None when none was recorded.
+    coverage_reason: str | None = None
+    # Pages the check could not read in a reliable order, so left out. The
+    # count can be known when the pages were not recorded.
+    n_pages_not_read: int = Field(default=0, ge=0)
+    pages_not_read: list[int] = Field(default_factory=list)
+    # F7: pages left out of the comparison, and where that text starts.
+    pages_not_compared: list[int] = Field(default_factory=list)
+    not_compared_from: str | None = None
+    # Items not checked, by kind, as the check counted them.
+    n_skipped_service: int = Field(default=0, ge=0)
+    n_skipped_capacity: int = Field(default=0, ge=0)
+    n_skipped_unreadable: int = Field(default=0, ge=0)
+    n_references_unverified: int = Field(default=0, ge=0)
+    n_citation_links_unchecked: int = Field(default=0, ge=0)
+    n_claims_unchecked: int = Field(default=0, ge=0)
+    n_images_unchecked: int = Field(default=0, ge=0)
+    n_tables_unchecked: int = Field(default=0, ge=0)
+    n_equations_unchecked: int = Field(default=0, ge=0)
+
+
 class PublicReportOut(BaseModel):
     """BUG-044 fix: the public, unauthenticated adviser view's report
     payload — deliberately NOT `ReportOut`. Excludes `previous_status`/
@@ -596,6 +629,8 @@ class PublicReportOut(BaseModel):
     )
     # Coverage fact only: no private rationale, raw detail, or source identity.
     assessment_incomplete: bool = False
+    # BUG-676: what each integrity check left out, from the live report.
+    integrity_coverage: list[PublicCoverageOut] = Field(default_factory=list)
     historical_citation_title_unverified: bool = False
     historical_native_math_unverified: bool = False
     semantic_support_unverified: bool = False

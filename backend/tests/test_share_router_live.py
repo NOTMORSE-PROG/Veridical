@@ -585,8 +585,28 @@ def test_shared_report_public_schema_is_an_exact_allow_list(
         # Public uncertainty only; no source inventory or equation content.
         "historical_native_math_unverified",
         "statistical_check_scope",
+        # BUG-676: what each check left out, as codes, page numbers and counts.
+        "integrity_coverage",
     }
     assert type(shared["report"]["assessment_incomplete"]) is bool
+    for coverage in shared["report"]["integrity_coverage"]:
+        assert set(coverage) == {
+            "check_kind",
+            "coverage_reason",
+            "n_pages_not_read",
+            "pages_not_read",
+            "pages_not_compared",
+            "not_compared_from",
+            "n_skipped_service",
+            "n_skipped_capacity",
+            "n_skipped_unreadable",
+            "n_references_unverified",
+            "n_citation_links_unchecked",
+            "n_claims_unchecked",
+            "n_images_unchecked",
+            "n_tables_unchecked",
+            "n_equations_unchecked",
+        }
     assert shared["detail_snapshot"] == "current"
     assert set(shared["report"]["subject"]) == {"basis", "title", "member_names"}
     assert shared["report"]["subject"]["basis"] == "not_recorded"
