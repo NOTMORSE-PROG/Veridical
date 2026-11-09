@@ -22,9 +22,10 @@ the section text) to gate correctly — logged as a known limitation, not
 silently worked around.
 """
 
+import math
 import re
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from app.checks.forensics.extract import ReportedStat
@@ -97,6 +98,10 @@ class GrimGrimmerResult:
     # discipline applied to the one case its own docstring named but
     # didn't implement.
     skipped_composite_rows: int
+    invalid_sample_rows: int = 0
+    grimmer_unassessed: list[dict] = field(default_factory=list)
+    assessed_mean_rows: int = 0
+    assessed_sd_rows: int = 0
 
 
 _TableKey = tuple[str, int | None]
@@ -134,7 +139,12 @@ def _likely_composite_tables(
     n_counts_by_table: dict[_TableKey, Counter[int]] = {}
     for (anchor, table_index, _group_label), row in grouped.items():
         n_stat = row.get("n")
-        if n_stat is None:
+        if (
+            n_stat is None
+            or not math.isfinite(n_stat.value)
+            or n_stat.value <= 0
+            or n_stat.value != int(n_stat.value)
+        ):
             continue
         n_counts_by_table.setdefault((anchor, table_index), Counter())[int(n_stat.value)] += 1
     return {
@@ -151,12 +161,22 @@ def evaluate_grim_grimmer(
     grouped = _group_descriptive_stats(stats)
     composite_tables = _likely_composite_tables(grouped)
     skipped_composite_rows = 0
+    invalid_sample_rows = 0
+    grimmer_unassessed = []
+    assessed_mean_rows = assessed_sd_rows = 0
 
     for (anchor, table_index, group_label), row in grouped.items():
         n_stat = row.get("n")
         mean_stat = row.get("mean")
         if n_stat is None or mean_stat is None:
             continue  # GRIM needs both — no guessing a missing n or mean
+        if (
+            not math.isfinite(n_stat.value)
+            or n_stat.value <= 0
+            or n_stat.value != int(n_stat.value)
+        ):
+            invalid_sample_rows += 1
+            continue
 
         if (anchor, table_index) in composite_tables or table_index in (
             excluded_table_indices or ()
@@ -168,6 +188,7 @@ def evaluate_grim_grimmer(
         mean = mean_stat.value
         m_prec = _decimal_places(mean_stat.raw_text)
         label = f" ({group_label})" if group_label else ""
+        assessed_mean_rows += 1
 
         if not grim_check(n, mean, prec=m_prec):
             flags.append(
@@ -193,6 +214,17 @@ def evaluate_grim_grimmer(
         sd = sd_stat.value
         sd_prec = _decimal_places(sd_stat.raw_text)
         grimmer_result = grimmer_check(mean, sd, n, m_prec=m_prec, sd_prec=sd_prec)
+        if grimmer_result.unassessed_reason:
+            grimmer_unassessed.append(
+                {
+                    "table_index": table_index,
+                    "anchor": anchor,
+                    "group_label": group_label,
+                    "reason": grimmer_result.unassessed_reason,
+                }
+            )
+            continue
+        assessed_sd_rows += 1
         if not grimmer_result.passed:
             flags.append(
                 ForensicsFlagDraft(
@@ -214,4 +246,11 @@ def evaluate_grim_grimmer(
                     },
                 )
             )
-    return GrimGrimmerResult(flags=flags, skipped_composite_rows=skipped_composite_rows)
+    return GrimGrimmerResult(
+        flags=flags,
+        skipped_composite_rows=skipped_composite_rows,
+        invalid_sample_rows=invalid_sample_rows,
+        grimmer_unassessed=grimmer_unassessed,
+        assessed_mean_rows=assessed_mean_rows,
+        assessed_sd_rows=assessed_sd_rows,
+    )

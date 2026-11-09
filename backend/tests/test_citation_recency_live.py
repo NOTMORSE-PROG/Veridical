@@ -182,15 +182,16 @@ async def test_a_wider_format_window_removes_the_note(session_factory):
     assert result.detail["citation_recency"]["setting_sources"]["window_years"] == "format"
 
 
-async def test_turning_the_note_off_in_the_format_reads_nothing(session_factory):
+async def test_legacy_disabled_format_is_checked_without_rewriting_it(session_factory):
     extraction, citations = _manuscript()
     check_run_id, _ = await _seed(session_factory, {"enabled": False})
     result, recency = await _run(session_factory, check_run_id, extraction, citations)
-    assert recency == []
-    assert result.detail["citation_recency"]["status"] == "off"
+    assert len(recency) == 1
+    assert result.detail["citation_recency"]["status"] == "assessed"
+    assert result.detail["citation_recency"]["enabled"] is True
 
 
-async def test_a_format_that_never_chose_stays_off_by_default(session_factory, monkeypatch):
+async def test_a_format_that_never_chose_is_checked_by_default(session_factory, monkeypatch):
     monkeypatch.delenv("CITATION_RECENCY_ENABLED", raising=False)
     get_settings.cache_clear()
     try:
@@ -199,8 +200,9 @@ async def test_a_format_that_never_chose_stays_off_by_default(session_factory, m
         result, recency = await _run(session_factory, check_run_id, extraction, citations)
     finally:
         get_settings.cache_clear()
-    assert recency == []
-    assert result.detail["citation_recency"]["status"] == "off"
+    assert len(recency) == 1
+    assert result.detail["citation_recency"]["status"] == "assessed"
+    assert result.detail["citation_recency"]["enabled"] is True
     assert result.detail["citation_recency"]["setting_sources"]["enabled"] == "default"
 
 
@@ -209,11 +211,12 @@ async def test_invalid_saved_setting_is_reported_unassessed(session_factory):
     check_run_id, _ = await _seed(session_factory, {"window_years": -3})
     result, recency = await _run(session_factory, check_run_id, extraction, citations)
     assert recency == []
-    assert result.detail["citation_recency"] == {
-        "schema_version": "citation-recency-v1",
-        "status": "unassessed",
-        "unassessed_reason": "format_setting_invalid",
-    }
+    summary = result.detail["citation_recency"]
+    assert summary["status"] == "unassessed"
+    assert summary["enabled"] is True
+    assert summary["policy_version"] == "mandatory-recency-v1"
+    assert summary["unassessed_reason"] == "format_setting_invalid"
+    assert summary["check_year"] >= 2026
 
 
 async def test_check_date_is_used_when_the_title_page_has_no_year(session_factory):
@@ -266,6 +269,149 @@ async def test_family_setting_is_saved_shown_and_carried(session_factory):
 def test_request_body_refuses_unknown_and_out_of_range_values():
     from pydantic import ValidationError
 
-    for body in ({"window_years": 0}, {"window_years": 101}, {"basis": "x"}, {"enabled": "yes"}):
+    for body in (
+        {"window_years": 0},
+        {"window_years": 101},
+        {"basis": "x"},
+        {"enabled": "yes"},
+        {"enabled": False},
+    ):
         with pytest.raises(ValidationError):
             CitationRecencyFormatSettings.model_validate(body)
+
+
+async def test_api_refuses_disable_and_preserves_legacy_setting(session_factory):
+    from app.auth.service import create_session
+    from app.db import get_session
+    from app.main import app
+
+    _, rubric = await _seed(session_factory, {"enabled": False, "window_years": 7})
+    async with session_factory() as session:
+        instructor = await session.get(Instructor, rubric.instructor_id)
+        token = (await create_session(session, instructor, get_settings())).token
+
+    async def local_session():
+        async with session_factory() as session:
+            yield session
+
+    app.dependency_overrides[get_session] = local_session
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://test",
+            cookies={get_settings().session_cookie_name: token},
+        ) as client:
+            before = await client.get(f"/rubrics/{rubric.id}")
+            assert before.status_code == 200
+            assert before.json()["citation_recency"]["enabled"] is True
+            assert before.json()["citation_recency"]["window_years"] == 7
+            refused = await client.put(
+                f"/rubric-families/{rubric.rubric_family_id}/citation-recency",
+                json={"enabled": False, "window_years": 1},
+            )
+            assert refused.status_code == 422
+            assert refused.json()["detail"][0]["loc"] == ["body", "enabled"]
+            assert "cannot be disabled" in refused.json()["detail"][0]["msg"]
+            after = await client.get(f"/rubrics/{rubric.id}")
+            assert after.json()["citation_recency"] == before.json()["citation_recency"]
+        async with session_factory() as session:
+            saved = await session.get(Rubric, rubric.id)
+            assert saved.citation_recency == {"enabled": False, "window_years": 7}
+    finally:
+        app.dependency_overrides.pop(get_session, None)
+
+
+async def test_new_check_and_recheck_do_not_reuse_historical_off_result(session_factory):
+    from copy import deepcopy
+
+    import pymupdf
+
+    from app.errors import ConflictError
+    from app.models.audit import AuditLog
+    from app.models.enums import CheckKind, CheckRunStatus, IngestStatus, ResultOutcome
+    from app.models.run import CheckResult
+    from app.pipeline.service import create_check_run
+    from app.report.export import build_report_pdf
+    from app.report.service import aggregate_and_score, get_report, get_report_export_data
+
+    extraction, citations = _manuscript()
+    old_id, rubric = await _seed(session_factory, {"enabled": False})
+    historical = {
+        "schema_version": "citation-recency-v1",
+        "status": "off",
+        "enabled": False,
+        "setting_sources": {"enabled": "format"},
+    }
+    async with session_factory() as session:
+        old = await session.get(CheckRun, old_id)
+        old.status = CheckRunStatus.done
+        manuscript = await session.get(Manuscript, old.manuscript_id)
+        manuscript.ingest_status = IngestStatus.done
+        saved = CheckResult(
+            check_run_id=old_id,
+            kind=CheckKind.citation_integrity,
+            outcome=ResultOutcome.passed,
+            detail={"citation_recency": historical},
+        )
+        audit = AuditLog(
+            check_run_id=old_id,
+            event_type="citation_integrity_check_computed",
+            payload={"citation_recency": deepcopy(historical)},
+        )
+        session.add_all([saved, audit])
+        await session.commit()
+        saved_id, audit_id = saved.id, audit.id
+        await aggregate_and_score(session, old_id, commit=True)
+        old_report = (await get_report(session, old_id, rubric.instructor_id)).citation_recency
+        old_pdf = build_report_pdf(
+            await get_report_export_data(session, old_id, rubric.instructor_id)
+        )
+        with pymupdf.open(stream=old_pdf, filetype="pdf") as doc:
+            assert "turns the recency note off" in " ".join(p.get_text() for p in doc)
+        with pytest.raises(ConflictError, match="confirmed, active rubric"):
+            await create_check_run(session, rubric.instructor_id, old.manuscript_id, rubric.id)
+        loaded_rubric = await session.get(Rubric, rubric.id)
+        loaded_rubric.is_active = True
+        await session.commit()
+        first = await create_check_run(session, rubric.instructor_id, old.manuscript_id, rubric.id)
+        first_id = first.id
+    first_result, first_notes = await _run(session_factory, first_id, extraction, citations)
+    assert len(first_notes) == 1
+    async with session_factory() as session:
+        first = await session.get(CheckRun, first_id)
+        first.status = CheckRunStatus.done
+        await session.commit()
+        await aggregate_and_score(session, first_id, commit=True)
+        second = await create_check_run(
+            session, rubric.instructor_id, first.manuscript_id, rubric.id
+        )
+        second_id = second.id
+    second_result, second_notes = await _run(session_factory, second_id, extraction, citations)
+    assert len(second_notes) == 1
+    assert len({old_id, first_id, second_id}) == 3
+    for result in (first_result, second_result):
+        summary = result.detail["citation_recency"]
+        assert summary["enabled"] is True
+        assert summary["policy_version"] == "mandatory-recency-v1"
+        assert summary["reference_year"] == 2024
+        assert summary["reference_year_basis"] == "manuscript_year"
+        assert summary["assessment_coverage"] == "partial"
+    async with session_factory() as session:
+        assert (await session.get(CheckResult, saved_id)).detail == {"citation_recency": historical}
+        assert (await session.get(AuditLog, audit_id)).payload == {"citation_recency": historical}
+        assert (
+            await get_report(session, old_id, rubric.instructor_id)
+        ).citation_recency == old_report
+        report = await get_report(session, first_id, rubric.instructor_id)
+        assert report.citation_recency.enabled is True
+        assert report.citation_recency.policy_version == "mandatory-recency-v1"
+        assert report.citation_recency.n_outside_window == 1
+        pdf = build_report_pdf(
+            await get_report_export_data(session, first_id, rubric.instructor_id)
+        )
+        with pymupdf.open(stream=pdf, filetype="pdf") as doc:
+            exported = " ".join(p.get_text() for p in doc)
+        assert "Source recency:" in exported
+        assert "no readable year" in exported
+        assert "do not count toward readiness" in exported
+        assert (await session.get(Rubric, rubric.id)).citation_recency == {"enabled": False}

@@ -104,8 +104,16 @@ def normalize_notation(text: str) -> NormalizedNotation:
     if len(normalized) != len(text):
         raise ValueError("Notation replacements must retain character ownership")
     value = NormalizedNotation(normalized, text, array("Q", [0]), array("Q", [0]))
+    # Keep the first character's ownership, then delete the rest of the alias.
+    # The citable range still covers the original printed chi2 expression.
+    alias = policy.get("chi_ascii_alias")
+    if alias:
+        matches = list(re.finditer(alias, value.text))
+        normalized = re.sub(alias, lambda match: "X" + match[0][1:], value.text)
+        value = NormalizedNotation(normalized, text, value.starts, value.original_starts)
+        value = _delete(value, ((match.start() + 1, match.end()) for match in matches))
     spans = (
-        (match.start(), match.end()) for match in re.finditer(policy["thousands_comma"], normalized)
+        (match.start(), match.end()) for match in re.finditer(policy["thousands_comma"], value.text)
     )
     value = _delete(value, spans)
     spans = (
@@ -218,13 +226,20 @@ def bind_library_row(
     return None
 
 
-def text_notation_coverage(extraction: "ExtractionResult", stats: list["ReportedStat"]) -> dict:
+def text_notation_coverage(
+    extraction: "ExtractionResult",
+    stats: list["ReportedStat"],
+    *,
+    covered_ranges: Iterable[tuple[int, int, int]] = (),
+) -> dict:
     policy = notation_policy()
     source = analytical_source(extraction)
     blocks = [block for scope in source.scopes for block in scope if not block.is_furniture]
     patterns = [re.compile(_pattern(pattern, policy)) for pattern in policy["result_candidates"]]
     items = []
     bound_by_block = defaultdict(list)
+    for block_index, start, end in covered_ranges:
+        bound_by_block[block_index].append((start, end))
     for stat in stats:
         if (
             stat.kind == "inferential"

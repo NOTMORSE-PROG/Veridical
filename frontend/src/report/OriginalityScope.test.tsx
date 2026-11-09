@@ -7,6 +7,11 @@ import { OriginalityScope } from "./OriginalityScope";
 import { originalityUnassessed } from "./originalityScopeState";
 
 describe("OriginalityScope", () => {
+  it("retains saved incomplete short-passage coverage beside the Library count", () => {
+    renderWithProviders(<OriginalityScope scope={{ compared_count: 4, corpus: "library", literal_unassessed_passages: 2 }} />);
+    expect(screen.getByText(/incomplete for 2 manuscript passages when this check ran/)).toBeVisible();
+    expect(screen.getByText(/Some shared wording may not be listed/)).toBeVisible();
+  });
   it("states an empty Library as nothing to compare against, never as originality", () => {
     renderWithProviders(<OriginalityScope scope={{ compared_count: 0, corpus: "library" }} showAddAction />);
     expect(screen.getByText("Originality had nothing to compare against")).toBeInTheDocument();

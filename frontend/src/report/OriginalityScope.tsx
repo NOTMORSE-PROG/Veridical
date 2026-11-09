@@ -45,7 +45,7 @@ export function OriginalityScope({
       <Alert tone="info" title="Originality had nothing to compare against">
         <p>
           {scope.corpus === "library"
-            ? "No Library records were available to compare against when this check ran, so no reuse could be found. This is not evidence of originality. Add finished manuscripts to the Library so future checks have something to compare against."
+            ? `No Library records were available to compare against when this check ran, so no reuse could be found. This is not evidence of originality.${showAddAction ? " Add finished manuscripts to the Library so future checks have something to compare against." : ""}`
             : "No stored manuscripts were available to compare against when this check ran, so no reuse could be found. This is not evidence of originality."}
         </p>
         {showAddAction && scope.corpus === "library" && (
@@ -63,6 +63,7 @@ export function OriginalityScope({
         : `Originality and reuse: compared against ${count} stored ${noun} when this check ran, before the Library became a separate collection.`}
     </p>
     <LibraryPassageScope summary={scope.library_passage_indexing} />
+    {!!scope.literal_unassessed_passages && <p className="signal-originality-scope">Short-passage comparison was incomplete for {scope.literal_unassessed_passages} manuscript passages when this check ran. Some shared wording may not be listed.</p>}
     </>
   );
 }

@@ -51,8 +51,7 @@ async def test_redirects_and_concurrent_lookups_each_wait_before_dispatch():
     assert results == [{"title": "Synthetic metadata"}] * 2
 
 
-@pytest.mark.parametrize("status", [429, 503])
-async def test_retry_and_each_redirect_are_paced(status):
+async def test_server_retry_and_each_redirect_are_paced():
     clock = Clock()
     times = []
     governor = RateGovernor(
@@ -63,7 +62,7 @@ async def test_retry_and_each_redirect_are_paced(status):
         times.append(clock.now)
         if request.url.path.startswith("/isbn/"):
             return httpx.Response(302, headers={"location": "/books/edition.json"})
-        return httpx.Response(status if len(times) == 2 else 200, json={"ok": True})
+        return httpx.Response(503 if len(times) == 2 else 200, json={"ok": True})
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         result = await get_json(
@@ -78,6 +77,34 @@ async def test_retry_and_each_redirect_are_paced(status):
         )
     assert result == {"ok": True}
     assert times == [0, 1, 2, 3]
+
+
+async def test_rate_rejection_after_a_paced_redirect_stops_all_further_sends():
+    clock, times = Clock(), []
+    governor = RateGovernor(
+        rpm=60, min_interval_seconds=1, clock=lambda: clock.now, sleep=clock.sleep
+    )
+
+    def handler(request):
+        times.append(clock.now)
+        if request.url.path.startswith("/isbn/"):
+            return httpx.Response(302, headers={"location": "/books/edition.json"})
+        return httpx.Response(429)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        for _ in range(2):
+            with pytest.raises(ApiDownError):
+                await get_json(
+                    client,
+                    "https://openlibrary.org/isbn/fixture.json",
+                    provider="openlibrary",
+                    governor=governor,
+                    max_retries=1,
+                    retry_base_seconds=0,
+                    sleep=clock.sleep,
+                    pace_redirects=True,
+                )
+    assert times == [0, 1]
 
 
 async def test_redirect_loop_is_bounded_and_becomes_unavailable():

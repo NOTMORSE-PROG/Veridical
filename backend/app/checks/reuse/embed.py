@@ -505,11 +505,10 @@ def _passage_drafts(
     patterns = load_patterns(settings.ingest_patterns_file)
     source = analytical_source(extraction)
     content_blocks = [b for b in extraction.blocks if not b.is_furniture]
-    selection = select_references(extraction, patterns)
-    if selection.membership_issues:
-        # Whole/chapter vectors use proven body fragments. A complete passage
-        # inventory cannot classify this protected secondary bibliography.
-        return None
+    # Bibliography-like text after the primary list whose membership is unclear
+    # (the protected span) is cut out by `non_reference_blocks` below, so every
+    # block touching it is tagged as reference list and never matched. The body
+    # outside it is compared rather than the whole inventory being refused.
     non_ref_ids = {
         id(b) for b in non_reference_blocks(extraction, patterns, ambiguous_entries_ok=True)
     }
@@ -586,11 +585,7 @@ def _passage_drafts(
 
     if unstructured:
         body_blocks = _unstructured_body_blocks(extraction, patterns)
-        body_quote_ids = (
-            block_quote_ids_in_scope(body_blocks, settings)
-            if extraction.anchor_kind == "page"
-            else set()
-        )
+        body_quote_ids = block_quote_ids_in_scope(body_blocks, settings)
         for draft in _scoped_passages(
             source,
             body_blocks,

@@ -79,3 +79,13 @@ describe("source availability actions", () => {
     expect(screen.queryByText(/page 1\b/i)).not.toBeInTheDocument();
   });
 });
+
+it("starts every page preview closed when asked, leaving the page one click away", () => {
+  const own = { ...reference, quote: "This report follows the structure below.", anchor: "page 23" };
+  const fetch = vi.fn(() => new Promise<Response>(() => {}));
+  vi.stubGlobal("fetch", fetch);
+  renderWithProviders(<SharedEvidencePacket embedded previewClosed token="test-link" manifest={manifest} references={[own]} />);
+  expect(screen.getByRole("button", { name: "Show page preview" })).toHaveAttribute("aria-expanded", "false");
+  expect(screen.getByRole("button", { name: /^Open original page/ })).toBeInTheDocument();
+  expect(fetch).not.toHaveBeenCalled();
+});

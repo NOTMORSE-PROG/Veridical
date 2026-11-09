@@ -24,11 +24,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.audit.service import write_audit_event
 from app.checks.forensics.checks import ForensicsFlagDraft, evaluate_grim_grimmer
 from app.checks.forensics.coverage import image_coverage
-from app.checks.forensics.extract import extract_all_stats
+from app.checks.forensics.extract import descriptive_table_coverage, extract_all_stats
 from app.checks.forensics.notation import text_notation_coverage
 from app.checks.forensics.pcheck import evaluate_p_recalc
+from app.checks.forensics.prose_mean import assess_prose_means
 from app.checks.forensics.sanity import evaluate_group_counts, evaluate_percentage_sums
 from app.checks.forensics.sprite import evaluate_sprite
+from app.checks.forensics.table_context import mean_applicability, table_contexts
 from app.checks.source_quality import persist_source_limitation
 from app.ingest.analytical_source import analytical_source
 from app.ingest.schemas import ExtractionResult
@@ -63,6 +65,8 @@ def _compute_forensics_findings(extraction: ExtractionResult) -> _ForensicsCompu
 
     outcome = ResultOutcome.passed if (inferential or descriptive) else ResultOutcome.not_applicable
     coverage = image_coverage(extraction, stats)
+    table_coverage = descriptive_table_coverage(extraction)
+    coverage["descriptive_table_coverage"] = table_coverage
     tail_context_limited = bool(coverage.get("coverage_reason"))
 
     source = analytical_source(extraction)
@@ -80,31 +84,70 @@ def _compute_forensics_findings(extraction: ExtractionResult) -> _ForensicsCompu
     )
     unassessed_ids = {id(stat) for stat in unassessed_stats}
     assessed_stats = [stat for stat in stats if id(stat) not in unassessed_ids]
-    coverage.update(text_notation_coverage(extraction, assessed_stats))
+    prose = assess_prose_means(extraction)
+    coverage["prose_mean_assessment"] = prose.ledger
+    coverage.update(
+        text_notation_coverage(extraction, assessed_stats, covered_ranges=prose.covered_ranges)
+    )
+    if prose.ledger["assessed"]:
+        outcome = ResultOutcome.passed
+    if prose.ledger["unassessed"] or prose.ledger["omitted_blocks"]:
+        coverage["statistical_notation_unassessed"] = True
+        coverage.setdefault("coverage_reason", "statistical_notation_unassessed")
+        outcome = ResultOutcome.escalated
     if coverage["statistical_notation_unassessed"]:
         coverage.setdefault("coverage_reason", "statistical_notation_unassessed")
         coverage["assessment_scope"] = "available_text_and_tables"
-        coverage["analysis_coverage"] = "partial" if assessed_stats else "unsupported"
+        coverage["analysis_coverage"] = (
+            "partial" if assessed_stats or prose.ledger["assessed"] else "unsupported"
+        )
     if coverage.get("coverage_reason"):
+        outcome = ResultOutcome.escalated
+    if any(record["state"] == "unassessed" for record in table_coverage):
         outcome = ResultOutcome.escalated
 
     reconstruction = evaluate_sprite(extraction)
-    grim_grimmer = evaluate_grim_grimmer(
-        stats, excluded_table_indices=set(reconstruction["single_item_excluded_tables"])
-    )
+    contexts = table_contexts(extraction)
+    applicability = mean_applicability(extraction, contexts)
+    excluded = set(reconstruction["single_item_excluded_tables"])
+    excluded.update(index for index, receipt in applicability.items() if receipt["reason"])
+    coverage["table_mean_applicability"] = applicability
+    if any(receipt["state"] == "unassessed" for receipt in applicability.values()):
+        outcome = ResultOutcome.escalated
+    grim_grimmer = evaluate_grim_grimmer(stats, excluded_table_indices=excluded)
+    coverage["n_grim_invalid_sample_rows"] = grim_grimmer.invalid_sample_rows
+    coverage["grimmer_unassessed"] = grim_grimmer.grimmer_unassessed
+    coverage["numerical_assessment_counts"] = {
+        "inferential_checked": len(inferential) - len(unassessed_stats),
+        "integer_mean_checked": grim_grimmer.assessed_mean_rows + prose.ledger["assessed"],
+        "integer_sd_checked": grim_grimmer.assessed_sd_rows,
+    }
+    if grim_grimmer.grimmer_unassessed or grim_grimmer.invalid_sample_rows:
+        outcome = ResultOutcome.escalated
     if grim_grimmer.skipped_composite_rows:
         outcome = ResultOutcome.escalated
     if reconstruction["unassessed_rows"]:
         outcome = ResultOutcome.escalated
+    percentage_records = []
+    percentage_flags = evaluate_percentage_sums(
+        stats, tables=extraction.tables, contexts=contexts, assessment_records=percentage_records
+    )
+    coverage["percentage_assessments"] = percentage_records
+    coverage["numerical_assessment_counts"]["percentage_distribution_checked"] = sum(
+        record["state"] == "assessed" for record in percentage_records
+    )
+    if any(record["state"] != "assessed" for record in percentage_records):
+        outcome = ResultOutcome.escalated
     flag_drafts: list[ForensicsFlagDraft] = [
         *grim_grimmer.flags,
+        *prose.flags,
         *p_flags,
-        *evaluate_percentage_sums(stats, tables=extraction.tables),
+        *percentage_flags,
         *evaluate_group_counts(stats),
     ]
     return _ForensicsComputation(
         n_inferential=len(inferential),
-        n_descriptive=len(descriptive),
+        n_descriptive=len(descriptive) + 2 * prose.ledger["assessed"],
         outcome=outcome,
         flag_drafts=flag_drafts,
         skipped_composite_rows=grim_grimmer.skipped_composite_rows,

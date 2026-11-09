@@ -121,6 +121,7 @@ class CitationRecencySettingsOut(BaseModel):
     format set it, "default" when the configured default applies)."""
 
     enabled: bool
+    policy_version: str | None = None
     window_years: int
     reference_year_basis: Literal["manuscript_year", "check_date"]
     counts_toward_readiness: bool

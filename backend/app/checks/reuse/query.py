@@ -35,17 +35,32 @@ family link, wiring that exemption is passing that set in, not
 redesigning this function.
 """
 
+import asyncio
+import time
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Literal
 
 from sqlalchemy import Numeric, and_, case, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.checks.reuse.embed import DocumentEmbeddings, PassageEmbedding
-from app.checks.reuse.source import coarse_candidate_supported, passage_match_supported
+from app.checks.reuse.literal import (
+    NORMALIZATION,
+    literal_candidates,
+    literal_policy_record,
+    literal_spans,
+    literal_window,
+    maximal_literal_matches,
+)
+from app.checks.reuse.source import SourceCache, coarse_candidate_supported, passage_match_supported
 from app.config import Settings
 from app.groups.service import DEFAULT_GROUP_LABEL, normalize_group_name
+from app.ingest.quotations import (
+    located_quote_status,
+    located_word_quotation,
+    located_word_reference,
+)
 from app.models.enums import LibraryEntryStatus, ManuscriptOrigin
 from app.models.group import Group
 from app.models.library import LibraryEntry
@@ -58,7 +73,7 @@ from app.models.manuscript import (
 
 _UNGROUPED_NORMALIZED = normalize_group_name(DEFAULT_GROUP_LABEL)
 
-MatchLevel = Literal["exact_duplicate", "high_similarity"]
+MatchLevel = Literal["exact_duplicate", "high_similarity", "literal_overlap"]
 
 
 @dataclass(frozen=True)
@@ -475,10 +490,11 @@ async def query_similar_manuscripts(
         )
     )
 
-    source_cache = {}
+    source_cache = SourceCache()
     supported = []
+    own_supported = await coarse_candidate_supported(session, manuscript_id, settings, source_cache)
     for match in matches:
-        if await coarse_candidate_supported(
+        if own_supported and await coarse_candidate_supported(
             session, match.matched_manuscript_id, settings, source_cache
         ):
             supported.append(match)
@@ -533,6 +549,7 @@ class PassageMatch:
     matched_context_text: str
     matched_is_reference_list: bool
     matched_is_block_quote: bool
+    literal_overlap: dict | None = None
 
 
 async def passage_archive_size(
@@ -727,7 +744,7 @@ async def best_supporting_passage(
     than one strong pairing, and that is exactly the case this ticket says
     must not stay high severity."""
     best: PassageMatch | None = None
-    source_cache = {}
+    source_cache = SourceCache()
     best_similarity = -1.0
     for passage in passages:
         if passage.is_reference_list or passage.is_block_quote:
@@ -790,7 +807,8 @@ async def best_supporting_passage(
             matched_is_reference_list=archive_row.is_reference_list,
             matched_is_block_quote=archive_row.is_block_quote,
         )
-        # The caller's own source is validated by the main query path;
+        # The caller's own source and quotation scope are validated by the
+        # main coarse query path before this fallback is used;
         # this fallback must independently fence the selected Library side.
         from app.checks.reuse.source import selected_native_source, selected_passage_supported
 
@@ -803,6 +821,11 @@ async def best_supporting_passage(
             context=candidate.matched_context_text,
             paragraph=candidate.matched_paragraph,
         ):
+            quotation = await asyncio.to_thread(
+                located_quote_status, source, candidate.matched_text, settings
+            )
+            if quotation is None or quotation[1]:
+                continue
             best_similarity = similarity
             best = candidate
     return best
@@ -818,6 +841,226 @@ class PassageQueryResult:
     # BUG-620: own passages whose nearest supported candidates all failed the
     # caller's `confirm` test (the nearest of them, for the audit).
     unconfirmed: list[PassageMatch] = field(default_factory=list)
+    literal_scope: dict | None = None
+
+
+async def _literal_matches_for(
+    session,
+    manuscript_id,
+    passage,
+    *,
+    exclude,
+    include_reference_list,
+    include_block_quote,
+    settings,
+    cache,
+    scope,
+    deadline,
+):
+    def limitation(reason):
+        scope["unassessed"].append({"passage_index": passage.passage_index, "reason": reason})
+
+    window, start, issue = literal_window(passage.text, passage.context_text, passage.char_start)
+    if issue:
+        limitation(issue)
+    passage = replace(passage, text=window, char_start=start, char_end=start + len(window))
+    if settings.reuse_passage_context_words < settings.reuse_literal_min_words:
+        limitation("boundary_context_configuration_not_assessed")
+    if settings.reuse_passage_chunk_words < settings.reuse_literal_min_words:
+        limitation("boundary_chunk_configuration_not_assessed")
+    length = settings.reuse_literal_min_words - settings.reuse_literal_probe_words + 1
+    bad = settings.reuse_literal_probe_words - 1
+    stride = settings.reuse_literal_probe_stride
+    if length // stride <= (bad + stride - 1) // stride:
+        limitation("boundary_probe_configuration_not_assessed")
+    if scope["queries"] >= settings.reuse_literal_max_queries or time.monotonic() >= deadline:
+        limitation("query_or_time_budget")
+        return []
+    scope["queries"] += 1
+    rows, issues = await literal_candidates(
+        session,
+        passage,
+        exclude=exclude,
+        include_reference_list=include_reference_list,
+        include_block_quote=include_block_quote,
+        settings=settings,
+        scope=scope,
+    )
+    for issue in issues:
+        limitation(issue)
+    from app.checks.reuse.source import selected_native_source
+
+    matches = []
+    for row in rows:
+        if time.monotonic() >= deadline:
+            limitation("time_budget")
+            break
+        archive = row[0]
+        matched_window, matched_start, issue = literal_window(
+            archive.text, archive.context_text, archive.char_start
+        )
+        if issue:
+            limitation(issue)
+        if (
+            len(passage.text.split()) * len(matched_window.split())
+            > settings.reuse_literal_token_work_limit - scope["token_work"]
+        ):
+            limitation("token_work_budget")
+            break
+        own_source = await selected_native_source(session, manuscript_id, settings, cache)
+        matched_source = await selected_native_source(
+            session, archive.manuscript_id, settings, cache
+        )
+        own_words = await asyncio.to_thread(
+            located_word_quotation, own_source, passage.text, settings
+        )
+        matched_words = await asyncio.to_thread(
+            located_word_quotation, matched_source, matched_window, settings
+        )
+        own_refs = await asyncio.to_thread(
+            located_word_reference, own_source, passage.text, settings
+        )
+        matched_refs = await asyncio.to_thread(
+            located_word_reference, matched_source, matched_window, settings
+        )
+        if own_words is None or matched_words is None or own_refs is None or matched_refs is None:
+            limitation("source_or_quotation_not_assessed")
+            continue
+        try:
+            spans, work, overflow = await asyncio.to_thread(
+                literal_spans,
+                passage.text,
+                matched_window,
+                settings.reuse_literal_token_work_limit - scope["token_work"],
+                minimum=settings.reuse_literal_min_words,
+                span_limit=settings.reuse_literal_span_limit,
+                own_quotes=[
+                    (quote[1] and not include_block_quote)
+                    or (ref[1] and not include_reference_list)
+                    for quote, ref in zip(own_words, own_refs, strict=True)
+                ],
+                matched_quotes=[
+                    (quote[1] and not include_block_quote)
+                    or (ref[1] and not include_reference_list)
+                    for quote, ref in zip(matched_words, matched_refs, strict=True)
+                ],
+            )
+        except OverflowError:
+            limitation("token_work_budget")
+            break
+        scope["token_work"] += work
+        scope["candidates_verified"] += 1
+        if any(word[1] for word in own_refs) or any(word[1] for word in matched_refs):
+            scope["reference_exclusions"].append(
+                {
+                    "passage_index": passage.passage_index,
+                    "matched_manuscript_id": archive.manuscript_id,
+                    "own_words_excluded": sum(word[1] for word in own_refs)
+                    if not include_reference_list
+                    else 0,
+                    "matched_words_excluded": sum(word[1] for word in matched_refs)
+                    if not include_reference_list
+                    else 0,
+                }
+            )
+        if any(word[1] for word in own_words) or any(word[1] for word in matched_words):
+            scope["quotation_exclusions"].append(
+                {
+                    "passage_index": passage.passage_index,
+                    "matched_manuscript_id": archive.manuscript_id,
+                    "own_words_excluded": sum(word[1] for word in own_words)
+                    if not include_block_quote
+                    else 0,
+                    "matched_words_excluded": sum(word[1] for word in matched_words)
+                    if not include_block_quote
+                    else 0,
+                }
+            )
+        if overflow:
+            limitation("span_limit")
+        for span in spans:
+            own_text = passage.text[span.own_start : span.own_end]
+            matched_text = matched_window[span.matched_start : span.matched_end]
+            own_quote = await asyncio.to_thread(
+                located_quote_status, own_source, own_text, settings
+            )
+            matched_quote = await asyncio.to_thread(
+                located_quote_status, matched_source, matched_text, settings
+            )
+            if own_quote is None or matched_quote is None:
+                limitation("source_span_ambiguous")
+                continue
+            own_span_refs = await asyncio.to_thread(
+                located_word_reference, own_source, own_text, settings
+            )
+            matched_span_refs = await asyncio.to_thread(
+                located_word_reference, matched_source, matched_text, settings
+            )
+            if own_span_refs is None or matched_span_refs is None:
+                limitation("reference_span_not_assessed")
+                continue
+            match = _literal_match(
+                passage,
+                row,
+                span,
+                own_quote,
+                matched_quote,
+                matched_window=matched_window,
+                matched_start=matched_start,
+            )
+            match = replace(
+                match,
+                own_is_reference_list=any(word[1] for word in own_span_refs),
+                matched_is_reference_list=any(word[1] for word in matched_span_refs),
+            )
+            if await passage_match_supported(session, manuscript_id, match, settings, cache):
+                matches.append(match)
+            else:
+                limitation("source_span_not_supported")
+    return matches
+
+
+def _literal_match(
+    passage, row, span, own_quote, matched_quote, *, matched_window=None, matched_start=None
+):
+    archive = row[0]
+    matched_window = archive.text if matched_window is None else matched_window
+    matched_start = archive.char_start if matched_start is None else matched_start
+    return PassageMatch(
+        own_passage_index=passage.passage_index,
+        own_chapter_index=passage.chapter_index,
+        own_page=own_quote[2],
+        own_paragraph=own_quote[0],
+        own_char_start=passage.char_start + span.own_start,
+        own_char_end=passage.char_start + span.own_end,
+        own_text=passage.text[span.own_start : span.own_end],
+        own_context_text=passage.context_text,
+        own_is_reference_list=passage.is_reference_list,
+        own_is_block_quote=own_quote[1],
+        level="literal_overlap",
+        similarity=float(row.similarity),
+        matched_manuscript_id=archive.manuscript_id,
+        matched_group_label=row.group_label,
+        matched_instructor_id=row.instructor_id,
+        matched_chapter_index=archive.chapter_index,
+        matched_page=matched_quote[2],
+        matched_paragraph=matched_quote[0],
+        matched_char_start=matched_start + span.matched_start,
+        matched_char_end=matched_start + span.matched_end,
+        matched_text=matched_window[span.matched_start : span.matched_end],
+        matched_context_text=archive.context_text,
+        matched_is_reference_list=archive.is_reference_list,
+        matched_is_block_quote=matched_quote[1],
+        literal_overlap={
+            "normalization": NORMALIZATION,
+            "word_count": span.word_count,
+            "own_start": passage.char_start + span.own_start,
+            "own_end": passage.char_start + span.own_end,
+            "matched_start": matched_start + span.matched_start,
+            "matched_end": matched_start + span.matched_end,
+            "cosine_scope": "original_passage_vectors",
+        },
+    )
 
 
 async def query_similar_passages(
@@ -853,39 +1096,188 @@ async def query_similar_passages(
 
     matches: list[PassageMatch] = []
     unconfirmed: list[PassageMatch] = []
-    source_cache = {}
+    literal_intervals: set[tuple] = set()
+    source_cache = SourceCache()
+
     withheld = 0
+    literal_scope = (
+        {
+            "method": NORMALIZATION,
+            "policy": literal_policy_record(settings),
+            "queries": 0,
+            "candidates_verified": 0,
+            "token_work": 0,
+            "quoted_spans_excluded": 0,
+            "quotation_exclusions": [],
+            "reference_exclusions": [],
+            "unassessed": [],
+        }
+        if settings.reuse_literal_enabled
+        else None
+    )
+    deadline = time.monotonic() + settings.reuse_literal_time_budget_seconds
     for passage in passages:
         if not include_reference_list and passage.is_reference_list:
             continue
-        if not include_block_quote and passage.is_block_quote:
-            continue
-        found = await _passage_candidates_for(
-            session,
-            passage,
-            exclude_manuscript_ids=exclude,
-            include_reference_list=include_reference_list,
-            include_block_quote=include_block_quote,
-            settings=settings,
-            limit=max(1, candidates) if confirm is not None else 1,
-        )
+        found = []
+        if include_block_quote or not passage.is_block_quote:
+            found = await _passage_candidates_for(
+                session,
+                passage,
+                exclude_manuscript_ids=exclude,
+                include_reference_list=include_reference_list,
+                include_block_quote=include_block_quote,
+                settings=settings,
+                limit=max(1, candidates) if confirm is not None else 1,
+            )
         supported = []
+        native_supported = False
+        quotation_unassessed = False
         for candidate in found:
-            if await passage_match_supported(
+            if not await passage_match_supported(
                 session, manuscript_id, candidate, settings, source_cache
             ):
-                supported.append(candidate)
-                if confirm is None or confirm(candidate):
-                    matches.append(candidate)
-                    break
+                continue
+            native_supported = True
+            from app.checks.reuse.source import selected_native_source
+
+            own_source = await selected_native_source(
+                session, manuscript_id, settings, source_cache
+            )
+            matched_source = await selected_native_source(
+                session, candidate.matched_manuscript_id, settings, source_cache
+            )
+            own_quote = await asyncio.to_thread(
+                located_quote_status, own_source, candidate.own_text, settings
+            )
+            matched_quote = await asyncio.to_thread(
+                located_quote_status, matched_source, candidate.matched_text, settings
+            )
+            candidate = replace(
+                candidate,
+                own_is_block_quote=candidate.own_is_block_quote or bool(own_quote and own_quote[1]),
+                matched_is_block_quote=candidate.matched_is_block_quote
+                or bool(matched_quote and matched_quote[1]),
+            )
+            if not include_block_quote and any(
+                value and value[1] for value in (own_quote, matched_quote)
+            ):
+                if literal_scope is not None:
+                    literal_scope["quoted_spans_excluded"] += 1
+                continue
+            if not include_block_quote and any(
+                value is None for value in (own_quote, matched_quote)
+            ):
+                # Valid native prose can still have an unclosed quotation or
+                # missing quotation provenance. Neither establishes unquoted text.
+                quotation_unassessed = True
+                if literal_scope is not None:
+                    literal_scope["unassessed"].append(
+                        {
+                            "passage_index": passage.passage_index,
+                            "reason": "source_or_quotation_not_assessed",
+                            "matched_manuscript_id": candidate.matched_manuscript_id,
+                        }
+                    )
+                continue
+            supported.append(candidate)
+            if confirm is None or confirm(candidate):
+                matches.append(candidate)
+                break
         else:
-            if found and not supported:
+            if found and (not native_supported or quotation_unassessed):
                 withheld += 1
-            elif supported:
+            if supported:
                 unconfirmed.append(supported[0])
+        if literal_scope is not None:
+            literal_matches = await _literal_matches_for(
+                session,
+                manuscript_id,
+                passage,
+                exclude=exclude,
+                include_reference_list=include_reference_list,
+                include_block_quote=include_block_quote,
+                settings=settings,
+                cache=source_cache,
+                scope=literal_scope,
+                deadline=deadline,
+            )
+            for literal in literal_matches:
+                if confirm is not None and not confirm(literal):
+                    unconfirmed.append(literal)
+                    literal_scope["unassessed"].append(
+                        {
+                            "passage_index": passage.passage_index,
+                            "reason": "confirmation_withheld_literal_proof",
+                            "matched_manuscript_id": literal.matched_manuscript_id,
+                            "literal_overlap": literal.literal_overlap,
+                        }
+                    )
+                    continue
+                interval = (
+                    literal.own_chapter_index,
+                    literal.own_char_start,
+                    literal.own_char_end,
+                    literal.matched_manuscript_id,
+                    literal.matched_chapter_index,
+                    literal.matched_char_start,
+                    literal.matched_char_end,
+                    literal.own_is_block_quote,
+                    literal.matched_is_block_quote,
+                    literal.own_is_reference_list,
+                    literal.matched_is_reference_list,
+                )
+                # Adjacent stored windows can expose the same source interval.
+                if interval in literal_intervals:
+                    continue
+                literal_intervals.add(interval)
+                existing = next(
+                    (
+                        index
+                        for index, item in enumerate(matches)
+                        if item.own_passage_index == passage.passage_index
+                        and item.matched_manuscript_id == literal.matched_manuscript_id
+                        and item.matched_chapter_index == literal.matched_chapter_index
+                        and item.own_char_start
+                        <= literal.own_char_start
+                        < literal.own_char_end
+                        <= item.own_char_end
+                        and item.matched_char_start
+                        <= literal.matched_char_start
+                        < literal.matched_char_end
+                        <= item.matched_char_end
+                        and literal.own_text in item.own_text
+                        and literal.matched_text in item.matched_text
+                        and item.own_is_block_quote == literal.own_is_block_quote
+                        and item.matched_is_block_quote == literal.matched_is_block_quote
+                        and item.own_is_reference_list == literal.own_is_reference_list
+                        and item.matched_is_reference_list == literal.matched_is_reference_list
+                        and item.literal_overlap is None
+                        and item.level != "literal_overlap"
+                    ),
+                    None,
+                )
+                if existing is None:
+                    matches.append(literal)
+                else:
+                    matches[existing] = replace(
+                        matches[existing], literal_overlap=literal.literal_overlap
+                    )
+    original_match_count = len(matches)
+    matches, dedup_unassessed = maximal_literal_matches(
+        matches, settings.reuse_literal_dedup_work_limit
+    )
+    if literal_scope is not None:
+        literal_scope["contained_proofs_omitted"] = original_match_count - len(matches)
+        literal_scope["unassessed"].extend(
+            {"passage_index": index, "reason": "dedup_work_budget"}
+            for index in sorted(dedup_unassessed)
+        )
+
     return PassageQueryResult(
         matches=matches,
         passage_archive_size_n=archive_size_n,
         n_source_candidates_withheld=withheld,
         unconfirmed=unconfirmed,
+        literal_scope=literal_scope,
     )

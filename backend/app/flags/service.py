@@ -63,7 +63,12 @@ def _passage_pair_from_detail(evidence_excerpt: str, detail: dict) -> PassagePai
             matched_context=detail.get("matched_context_text", ""),
             matched_ref=detail.get("matched_manuscript_id"),
             similarity=detail.get("similarity", 0.0),
-            level="exact_duplicate" if "exact_duplicate" in kind else "high_similarity",
+            level="literal_overlap"
+            if kind == "reuse_literal_overlap_passage"
+            else "exact_duplicate"
+            if "exact_duplicate" in kind
+            else "high_similarity",
+            literal_overlap=detail.get("literal_overlap"),
         )
     # BUG-153: a whole-document/chapter-level match (`kind` has no
     # "_passage" suffix) carries its own SUPPORTING passage under a
@@ -87,7 +92,15 @@ def _passage_pair_from_detail(evidence_excerpt: str, detail: dict) -> PassagePai
 
 
 def _stored_passage_pair(
-    *, own_excerpt, own_context, matched_excerpt, matched_context, matched_ref, similarity, level
+    *,
+    own_excerpt,
+    own_context,
+    matched_excerpt,
+    matched_context,
+    matched_ref,
+    similarity,
+    level,
+    literal_overlap=None,
 ) -> PassagePairOut | None:
     """A malformed historical pair is unavailable, never an export-wide failure."""
     if type(matched_ref) is not int or matched_ref <= 0:
@@ -114,6 +127,7 @@ def _stored_passage_pair(
             context_words_each_side=get_settings().reuse_passage_context_words,
             similarity=similarity,
             level=level,
+            literal_overlap=literal_overlap,
         )
     except ValidationError:
         return None
@@ -188,6 +202,8 @@ def _p_value_comparison(check_kind: str, detail: dict) -> PValueComparisonOut | 
 def _agreement_pair(check_kind: str, detail: dict) -> AgreementPairOut | None:
     if check_kind != "internal_agreement" or detail.get("kind") not in (
         "agreement_contradictory",
+        "agreement_factual_conflict",
+        "agreement_unmet",
         "agreement_partial",
         "agreement_cannot_determine",
         "agreement_injection_suspected",

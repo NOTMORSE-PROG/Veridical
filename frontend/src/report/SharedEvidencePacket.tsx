@@ -91,7 +91,9 @@ function SharedPageSession({ token, snapshot, reference, context, references, in
 // The default role of a section needs no label; others say what the passage is.
 const DEFAULT_ROLES = new Set<EvidenceReference["role"]>(["criterion_evidence", "finding_excerpt"]);
 
-export function SharedEvidencePacket({ token, manifest, references, fallback = [], context, embedded = false }: {
+export function SharedEvidencePacket({ token, manifest, references, fallback = [], context, embedded = false, previewClosed = false }: {
+  /** Start with every page preview closed (the page is one click away). */
+  previewClosed?: boolean;
   token: string; manifest?: EvidenceManifest; references: EvidenceReference[];
   fallback?: { quote: string; anchor: string }[];
   context?: SharedEvidenceContext;
@@ -111,7 +113,7 @@ export function SharedEvidencePacket({ token, manifest, references, fallback = [
       </>}
       actions={manifest && reference.source_scope === "own_manuscript" && (reference.anchor?.trim() || reference.quote.trim())
         ? <SharedSourcePage key={`${token}:${manifest.snapshot_id}:${reference.reference_id}`} token={token} snapshot={manifest.snapshot_id} reference={reference} context={context} references={references}
-          initialPreview={index === references.findIndex(item => item.source_scope === "own_manuscript" && Boolean(item.anchor?.trim() || item.quote.trim()))} />
+          initialPreview={!previewClosed && index === references.findIndex(item => item.source_scope === "own_manuscript" && Boolean(item.anchor?.trim() || item.quote.trim()))} />
         : undefined}
       result={manifest && reference.source_scope === "own_manuscript" && reference.quote.trim() && !reference.anchor?.trim()
         ? <p>No source location was saved for this item.</p> : undefined} />)

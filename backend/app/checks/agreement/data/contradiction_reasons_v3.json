@@ -1,0 +1,19 @@
+{
+  "version": "agreement_judgment_v3",
+  "reasons": {
+    "incompatible_descriptive_claims": "two descriptive assertions concern the same subject and relevant release or time but report incompatible facts",
+    "incompatible_reported_measurements": "two reported measurements concern the same population, measure and relevant time but cannot both hold"
+  },
+  "factual_scope_veto_patterns": [
+    "^\\s*to\\b", "\\b(?:whether|if|unless|will|would|could|might|hypothesized|hypothesize|hypothesis)\\b",
+    "\\?", "\\b(?:no|insufficient|little) evidence\\b", "\\b(?:unclear|unknown|unconfirmed|not all)\\b",
+    "\\b(?:aims?|seeks?|intends?|plans?|proposes?) to\\b",
+    "\\b(?:aim|goal|objective|purpose) (?:is|was|remains) to\\b",
+    "\\b(?:prior|previous|earlier|cited|another) (?:study|work|paper|research)\\b", "\\baccording to\\b"
+  ],
+  "nonterminal_period_pattern": "(?:\\b(?:Dr|Mr|Mrs|Ms|Prof|Sr|Jr|vs|etc)|e\\.g|i\\.e)\\.$",
+  "factual_assertion_patterns": [
+    "\\b(?:was|were|has been|have been) (?:successfully )?(?:completed|implemented|deployed|achieved|included|measured|recorded)\\b",
+    "\\b(?:is|are) (?:fully )?(?:implemented|deployed|complete|operational)\\b"
+  ]
+}

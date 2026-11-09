@@ -7,6 +7,7 @@ export const SEMANTIC_SUPPORT_REVIEW = {
 export const RECORDED_GRADE_BASIS = {
   qualification: "A recorded location does not establish support for a grade.",
   review: "Review the criterion, any recorded explanation and the manuscript before choosing a grade.",
+  reviewShared: "No grade has been recorded for this criterion yet. The instructor grades it.",
   missingExplanation: "No AI explanation is available for this review item.",
   missingExcerpt: "No located excerpt is available for this review item.",
   missingLocation: "No manuscript location is available for this excerpt.",

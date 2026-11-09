@@ -2,10 +2,9 @@
 // manuscript" (the product's own one-line description). The format half
 // has had a real screen since V-012 (UploadRubricModal.tsx, screen 4c);
 // this is the same shape pointed at the ingestion endpoint instead --
-// same Modal base, same file-input/error pattern. No mandatory review
-// screen follows this one (a manuscript has nothing to confirm the way a
-// parsed rubric does), so unlike the rubric modal this one shows a real
-// success state in place rather than auto-navigating away.
+// same Modal base, same file-input/error pattern. The signed-in shell owns
+// the upload so closing this dialog and navigating do not stop it. Embedded
+// contexts without that provider retain the in-dialog result flow.
 //
 // V-063 (owner's call, 2026-08-19): this modal used to also carry its own
 // free-text "Group name or label" field, resolved into a real `Group`
@@ -29,7 +28,6 @@ import { Button } from "../ui/Button";
 import { GroupAssignmentFields } from "./GroupAssignmentFields";
 import { useIngestManuscript } from "./useCheckRun";
 import { useBackgroundUploads } from "../upload/BackgroundUploads";
-import { BACKGROUND_UPLOAD_MIN_BYTES } from "../config/ui";
 import { useRubricFamilies } from "../rubric/useRubric";
 import { formatChoiceLabel } from "../domain/formatIdentity";
 import { UploadRefusedError } from "../api/directManuscriptUpload";
@@ -104,7 +102,7 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
   const [startRubricId, setStartRubricId] = useState<number | "">("");
   const startCheckId = useId();
   const startFormatId = useId();
-  const inBackground = Boolean(background && file && file.size >= BACKGROUND_UPLOAD_MIN_BYTES);
+  const inBackground = Boolean(background && file);
   const offersStartCheck = inBackground && Boolean(background?.canStartCheck);
   const { data: families, isPending: familiesPending } = useRubricFamilies({ enabled: offersStartCheck });
   const activeFamilies = useMemo(
@@ -190,7 +188,7 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
     }
     if (sending.current || scopeStatus !== "ready" || !isScopeCurrent()) return;
     if (unknownFiles.length > 0 && !confirmed) { setConfirming(true); return; }
-    if (background && file.size >= BACKGROUND_UPLOAD_MIN_BYTES) {
+    if (background) {
       if (offersStartCheck && startWhenReady && chosenRubricId === "") {
         setFieldError("Choose the required format for the check, or untick Start a check when it's ready.");
         return;
@@ -468,7 +466,11 @@ export function UploadManuscriptModal({ onClose, onUploadSuccess }: UploadManusc
             {inBackground && (
               <section className="signal-upload-background" aria-labelledby={`${startCheckId}-title`}>
                 <h3 id={`${startCheckId}-title`}>This file uploads in the background</h3>
-                <p>It is large, so this dialog closes and an Uploads panel in the lower right shows its progress. Keep this tab open until the file is sent; after that you can close it, and the server keeps preparing the file.</p>
+                <p>This dialog closes when you start the upload. The Uploads panel in the lower right shows its progress, so you can keep using VERIDICAL.</p>
+                <p>{background?.canStartCheck
+                  ? "Keep this tab open until the file is sent. Once Preparing appears, the server can finish even if you close this tab."
+                  : "Keep this tab open until the upload finishes."}</p>
+                <p>Once the manuscript is ready, you can review its group details on the Review Desk.</p>
                 {offersStartCheck && (familiesPending ? (
                   <p>Loading your required formats.</p>
                 ) : activeFamilies.length === 0 ? (

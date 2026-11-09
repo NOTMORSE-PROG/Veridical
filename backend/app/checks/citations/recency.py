@@ -35,7 +35,7 @@ from pathlib import Path
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from app.checks.citations.extract import CitationFlagDraft
 from app.config import Settings
@@ -44,6 +44,7 @@ from app.ingest.titlepage import front_matter_blocks
 from app.models.enums import CitationParseStatus, FlagSeverity
 
 SUMMARY_SCHEMA_VERSION = "citation-recency-v1"
+POLICY_VERSION = "mandatory-recency-v1"
 FINDING_KIND = "outside_recency_window"
 ReferenceYearBasis = Literal["manuscript_year", "check_date"]
 
@@ -51,12 +52,12 @@ _DEFAULT_GRAMMAR_FILE = Path(__file__).parent / "data" / "citation_recency.json"
 
 
 # ---------------------------------------------------------------------------
-# Settings: per format, with configuration defaults
+# Settings: mandatory checking, configurable window and readiness treatment
 
 
 class CitationRecencyFormatSettings(BaseModel):
-    """What a format may set. Every field is optional; a missing field uses
-    the configured default, so an instructor only states what differs."""
+    """Optional format choices. Checking itself is required; enabled remains
+    in the request contract so an attempted opt-out receives a clear refusal."""
 
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -64,6 +65,17 @@ class CitationRecencyFormatSettings(BaseModel):
     window_years: int | None = Field(default=None, ge=1, le=100)
     reference_year_basis: ReferenceYearBasis | None = None
     counts_toward_readiness: bool | None = None
+
+    @field_validator("enabled")
+    @classmethod
+    def require_recency(cls, value: bool | None) -> bool | None:
+        if value is False:
+            raise ValueError(
+                "Citation recency is required for every new assessment and re-check "
+                "and cannot be disabled. Older sources are notes for instructor review; "
+                "they do not affect readiness unless you choose to count them."
+            )
+        return value
 
 
 @dataclass(frozen=True)
@@ -77,6 +89,7 @@ class RecencyPolicy:
 
     def record(self) -> dict[str, Any]:
         return {
+            "policy_version": POLICY_VERSION,
             "enabled": self.enabled,
             "window_years": self.window_years,
             "reference_year_basis": self.reference_year_basis,
@@ -103,7 +116,12 @@ def resolve_policy(stored: Any, settings: Settings) -> RecencyPolicy:
         chosen = CitationRecencyFormatSettings()
     else:
         try:
-            chosen = CitationRecencyFormatSettings.model_validate(stored)
+            # Old formats may retain an opt-out. Keep their saved bytes and
+            # other choices, while applying the built-in check to new runs.
+            legacy = stored
+            if isinstance(stored, dict) and stored.get("enabled") is False:
+                legacy = {**stored, "enabled": True}
+            chosen = CitationRecencyFormatSettings.model_validate(legacy)
         except ValidationError as exc:
             raise ValueError("citation recency format setting is not valid") from exc
     values, sources = {}, {}
@@ -115,6 +133,8 @@ def resolve_policy(stored: Any, settings: Settings) -> RecencyPolicy:
         else:
             values[name] = value
             sources[name] = "format"
+    values["enabled"] = True
+    sources["enabled"] = "default"
     return RecencyPolicy(**values, sources=sources)
 
 
@@ -506,19 +526,12 @@ class RecencyAssessment:
 def unassessed_summary(reason: str, policy: RecencyPolicy | None = None) -> dict[str, Any]:
     return {
         "schema_version": SUMMARY_SCHEMA_VERSION,
+        "policy_version": POLICY_VERSION,
+        "enabled": True,
+        "assessment_coverage": "unsupported",
         "status": "unassessed",
         "unassessed_reason": reason,
         **(policy.record() if policy else {}),
-    }
-
-
-def off_summary(policy: RecencyPolicy) -> dict[str, Any]:
-    """The format turned the note off; nothing was read or flagged."""
-    return {
-        "schema_version": SUMMARY_SCHEMA_VERSION,
-        "status": "off",
-        "unassessed_reason": None,
-        **policy.record(),
     }
 
 
@@ -529,8 +542,6 @@ def assess_recency(
     grammar: RecencyGrammar,
     check_year: int,
 ) -> RecencyAssessment:
-    if not policy.enabled:
-        return RecencyAssessment(off_summary(policy))
     readings = [
         (
             citation,
@@ -602,6 +613,7 @@ def assess_recency(
     summary = {
         "schema_version": SUMMARY_SCHEMA_VERSION,
         "status": "assessed",
+        "assessment_coverage": "partial" if reasons else "complete",
         "unassessed_reason": None,
         **policy.record(),
         "grammar_version": grammar.version,

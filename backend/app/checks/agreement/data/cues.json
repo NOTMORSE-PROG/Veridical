@@ -110,11 +110,22 @@
     "does not include"
   ],
   "intent_construction_patterns": [
-    "\\b(?:objective|aim|goal|purpose)s?\\s+(?:is|are|was|were)\\s+to\\b"
+    "\\b(?:objective|aim|goal|purpose)s?(?: of (?:this|the) (?:study|project|research))?\\s+(?:is|are|was|were)\\s+to\\b"
   ],
   "outcome_prose_enabled": true,
+  "objective_prose_enabled": true,
+  "objective_prose_patterns": [
+    "^to\\s+(?:analy[sz]e|assess|authenticate|authorize|automate|build|calculate|calibrate|classify|compare|compute|construct|create|deliver|demonstrate|deploy|describe|design|detect|determine|develop|document|enable|establish|estimate|evaluate|examine|explore|generate|identify|implement|improve|include|increase|integrate|investigate|manage|map|measure|monitor|optimi[sz]e|predict|protect|provide|prototype|recommend|record|reduce|retrieve|secure|simulate|store|support|synchronize|test|track|understand|validate|verify)\\b[^,;:]*[.!?]?$"
+  ],
+  "objective_heading_exclusion_patterns": [
+    "\\b(?:prior|previous|earlier|related|cited|future|excluded)\\b",
+    "\\b(?:out of scope|not included)\\b",
+    "\\bother\\s+(?:stud(?:y|ies)|research|projects?)\\b"
+  ],
   "outcome_prose_patterns": [
-    "\\b(?:achieved|attained|reduced|increased|decreased|improved|measured|recorded|observed|demonstrated|performed|yielded|implemented|supported|rejected)\\b"
+    "\\b(?:did|does|do)\\s+not\\s+(?:develop|evaluate|retain)\\b",
+    "\\b(?:developed|evaluated|retained)\\b",
+    "\\b(?:achieved|attained|reduced|increased|decreased|improved|measured|recorded|observed|demonstrated|performed|yielded|implemented|supported|rejected|deployed|delivered|allowed|supports?|operates?|permits?|lacks?|accept(?:s|ed)?|stores?|deletes?|works?|took|triggered)\\b"
   ],
   "outcome_heading_exclusion_patterns": [
     "\\b(?:prior|previous|earlier|related|cited)\\b"
@@ -154,6 +165,40 @@
     "\\b(?:fell|falls|fall) short of the (?:objective|goal|target)\\b"
   ],
   "named_system_pattern": "\\b[A-Z][a-z]+[A-Z][A-Za-z0-9]*\\b",
+  "phase_qualifier_patterns": [
+    "\\b(?:for|in|of|from|during|on|the|evaluated|current|final)\\s+(?P<kind>release|version|phase|iteration|build)\\s+(?P<label>[0-9]+(?:\\.[0-9]+)*|one|two|three|four|five|six|seven|eight|nine|ten|first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|i|ii|iii|iv|v|vi|vii|viii|ix|x|alpha|beta|gamma)\\b",
+    "\\b(?P<kind>(?-i:Release|Version|Phase|Iteration))\\s+(?P<label>[0-9]+(?:\\.[0-9]+)*|one|two|three|four|five|six|seven|eight|nine|ten|first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|i|ii|iii|iv|v|vi|vii|viii|ix|x|alpha|beta|gamma)\\b"
+  ],
+  "phase_action_prefix_pattern": "\\b(?:to|can|could|will|would|should|must|may|might|not|never)\\s+$",
+  "source_explanation_policy": {
+    "version": "source_causal_limitation_v2",
+    "label": "Source-reported explanation; adequacy not assessed.",
+    "causal_patterns": ["\\b(?:because|due to|owing to|as a result of)\\b"],
+    "clause_boundary_pattern": "[,;:]|\\b(?:but|although|whereas|while|however|yet|and)\\b",
+    "constraint_denial_pattern": "\\b(?:no|neither|none|not|never|hardly|scarcely|seldom)\\b",
+    "target_term_pattern": "[a-z0-9]+(?:[-'][a-z0-9]+)*",
+    "target_term_aliases": {"automate": "automatic", "automated": "automatic"},
+    "min_target_shared_terms": 2,
+    "target_stop_terms": ["to", "the", "a", "an", "this", "that", "its", "our", "their", "implement", "implemented", "provide", "provided", "system", "module", "project", "study", "feature"],
+    "nonachievement_patterns": ["\\b(?:not|never)\\s+(?:implement(?:ed)?|deliver(?:ed)?|achiev(?:e|ed)|provid(?:e|ed)|complet(?:e|ed)|perform(?:ed)?|deploy(?:ed)?)\\b", "\\bremained (?:unmet|unachieved|unfinished|incomplete)\\b"],
+    "constraint_patterns": ["\\s*(?:(?:the|a|an|its|our)\\s+)?(?:[a-z][a-z0-9_-]*\\s+){1,8}(?:was|were|is|are|remained)\\s+(?:unavailable|insufficient|unfunded|(?P<constraint_negation>not)\\s+(?:actually\\s+)?available)(?:\\s+(?:during|throughout|for)\\s+(?:(?:the|this)\\s+)?(?:study|evaluation|testing|trial|implementation))?\\s*[.!]?\\s*"],
+    "veto_patterns": [
+      "\\bnot\\s+(?:because|due to|owing to)\\b",
+      "\\bnot\\s+(?:unavailable|insufficient|unfunded)\\b",
+      "\\bnever\\s+(?:unavailable|insufficient|unfunded)\\b",
+      "\\b(?:false|untrue|inaccurate|incorrect|disputed|questioned|unsupported|unconfirmed|unclear)\\b",
+      "\\bnot (?:the |a )?reason\\b",
+      "\\b(?:participants?|respondents?|interviewees?)\\b", "[?\"“”]",
+      "\\b(?:other|another|different|unrelated|separate)\\b",
+      "\\b(?:if|unless|would|could|will|might|hypothesized|hypothesize|hypothesis)\\b",
+      "\\b(?:prior|previous|earlier|cited|another) (?:study|work|paper|research)\\b",
+      "\\baccording to\\b", "\\bparticipants? (?:said|reported|claimed)\\b",
+      "\\b(?:for example|hypothetical|suppose|imagine)\\b",
+      "\\b(?:release|version|phase|iteration|prototype|revision)\\b"
+    ]
+  },
+  "phase_qualifier_ignored": ["is", "was", "were", "are", "of", "the", "for", "with", "that", "which", "has", "had"],
+  "phase_label_aliases": {"one": "1", "first": "1", "i": "1", "two": "2", "second": "2", "ii": "2", "three": "3", "third": "3", "iii": "3", "four": "4", "fourth": "4", "iv": "4", "five": "5", "fifth": "5", "v": "5", "six": "6", "sixth": "6", "vi": "6", "seven": "7", "seventh": "7", "vii": "7", "eight": "8", "eighth": "8", "viii": "8", "nine": "9", "ninth": "9", "ix": "9", "ten": "10", "tenth": "10", "x": "10"},
   "named_system_ignore": [
     "JavaScript",
     "TypeScript",

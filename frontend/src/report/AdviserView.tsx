@@ -4,7 +4,7 @@ import { type MouseEvent, type ReactNode, useEffect, useLayoutEffect, useRef } f
 import { Link, useLocation, useParams, useSearchParams } from "react-router";
 import { ApiError } from "../api/client";
 import { DECISION_LABEL } from "../domain/decisionTone";
-import { manuscriptIdentity } from "../domain/manuscriptLabel";
+import { UNGROUPED_LABEL, manuscriptIdentity } from "../domain/manuscriptLabel";
 import { isUnresolvedSharedCriterion } from "../domain/sharedCriterionReview";
 import { Alert } from "../ui/Alert";
 import { Button } from "../ui/Button";
@@ -16,12 +16,14 @@ import { RuleScopeSummary } from "./RuleScopeNotice";
 import { unconfirmedAutomaticRuleRows } from "../domain/ruleScope";
 import { SharedAssessmentContext } from "./SharedAssessmentContext";
 import { SharedEvidencePacket, useSharedEvidenceManifest } from "./SharedEvidencePacket";
-import { IntegrityModuleNavigation, IntegrityModuleSummary, selectedIntegrityModule } from "./IntegrityModules";
+import { INTEGRITY_MODULES, IntegrityModuleNavigation, IntegrityModuleSummary, selectedIntegrityModule } from "./IntegrityModules";
+import { sharedCountLabel, sharedFindingsIntro, sharedModuleStatus, sharedModuleTone } from "./sharedModuleStatus";
 import { AgreementScopeSummary } from "./AgreementCheckScope";
 import { countInconsistencies, isInterrupted } from "../domain/agreementScope";
 import { CitationSourceLinks } from "../flags/CitationSourceLinks";
 import { CitationComparison } from "../flags/CitationComparison";
 import { isLegacyUndecided } from "../domain/undecidedPairs";
+import { UndeterminedPairs } from "./UndeterminedPairs";
 import { selectedCriterionId } from "./criterionReviewNavigation";
 import { criterionRecordId } from "./savedJudgment";
 import { clusterFlagFindings } from "./flagClusters";
@@ -126,6 +128,12 @@ export function AdviserViewPage() {
     && Number.isInteger(report.assessment_revision) ? evidence.data : undefined;
   const moduleFlags = flags.filter(flag => flag.check_kind === selectedModule);
   const findingGroups = clusterFlagFindings(moduleFlags);
+  const selectedModuleRecord = report.integrity_modules?.find(saved => saved.check_kind === selectedModule);
+  const leadCount = findingGroups.filter(group => isOptionalComparisonLead(group.flags[0])).length;
+  const sharedStatus = sharedModuleStatus({ kind: selectedModule, state: selectedModuleRecord?.state ?? "not_recorded", findings: findingGroups.length - leadCount, leads: leadCount,
+    coverageReason: selectedModuleRecord?.coverage_reason,
+    coverageShownElsewhere: Boolean(selectedModuleRecord?.agreement_scope) || (selectedModule === "originality_reuse" && Boolean(report.originality_scope)) || (selectedModule === "statistical_forensics" && Boolean(report.statistical_check_scope)),
+    detailSnapshot: data.detail_snapshot });
   const requestedFinding = selectedCriterionId(params.get("finding"));
   const requestedGroupIndex = findingGroups.findIndex(group => group.flags.some(flag => flag.id === requestedFinding));
   const selectedGroupIndex = Math.max(0, requestedGroupIndex);
@@ -164,8 +172,13 @@ export function AdviserViewPage() {
         <header className="signal-route-header signal-shared-report-header"><div>
           <p className="signal-eyebrow">Shared readiness report</p>
           <h1 ref={headingRef} tabIndex={-1}>{report.subject?.basis === "confirmed_assignment_at_check" && report.subject.title ? report.subject.title : "Readiness report"}</h1>
-          {report.subject?.basis === "confirmed_assignment_at_check" ? <><p>Group members: {report.subject.member_names.join(", ") || "Not recorded"}.</p><p className="signal-field-hint">Recorded when this check began.</p></> : <p>{identity.primary}</p>}
-          <p className="signal-route-header__intro">Required format: {report.rubric_title}</p>
+          {/* Who and what the report is about, as labelled facts under the title. */}
+          <dl className="signal-shared-report-facts">
+            {report.subject?.basis === "confirmed_assignment_at_check"
+              ? <div><dt>Group members</dt><dd>{report.subject.member_names.join(", ") || "Not recorded"} <span className="signal-field-hint">(recorded when this check began)</span></dd></div>
+              : <div><dt>{report.manuscript_group_label === UNGROUPED_LABEL && report.manuscript_original_filename ? "Manuscript" : "Group"}</dt><dd>{identity.primary}</dd></div>}
+            <div><dt>Required format</dt><dd>{report.rubric_title}</dd></div>
+          </dl>
         </div></header>
         {data.detail_snapshot === "stale" && <Alert title="Additional shared detail needs a new link" tone="info">The assessment changed after these details were shared. Ask the instructor to regenerate the link for the current explanations and identity.</Alert>}
 
@@ -196,27 +209,41 @@ export function AdviserViewPage() {
               <SignalCriteriaResults results={[selectedCriterion]} checkRunId={report.check_run_id} publicView publicSelection={{ position: selectedIndex + 1, total: report.results.length, nav: <nav aria-label="Shared criterion navigation" className="signal-item-head__nav">
                 <Button variant="secondary" disabled={selectedIndex === 0} onClick={event => selectCriterion(event.currentTarget, selectedIndex - 1)}>Previous criterion</Button>
                 <Button variant="secondary" disabled={selectedIndex >= report.results.length - 1} onClick={event => selectCriterion(event.currentTarget, selectedIndex + 1)}>Next criterion</Button>
-              </nav> }} renderEvidence={row => <SharedEvidencePacket embedded key={`${token}:${manifest?.snapshot_id}:${row.criterion_id}`} token={token ?? ""} manifest={manifest} references={manifest?.references.filter(ref => ref.criterion_id === row.criterion_id) ?? []} fallback={row.evidence} context={{title: row.text, explanation: row.reasoning, recordedNote: row.reason}} />} />
+              </nav> }} renderEvidence={row => <SharedEvidencePacket embedded previewClosed key={`${token}:${manifest?.snapshot_id}:${row.criterion_id}`} token={token ?? ""} manifest={manifest} references={manifest?.references.filter(ref => ref.criterion_id === row.criterion_id) ?? []} fallback={row.evidence} context={{title: row.text, explanation: row.reasoning, recordedNote: row.reason}} />} />
             </div>
           </> : <p>No criterion records were shared.</p>}
         </section> : <section className="signal-review-section signal-shared-findings-panel" aria-labelledby="shared-findings-heading">
-        <header className="signal-review-section__heading"><div><p className="signal-section-kicker">Integrity record</p><h2 id="shared-findings-heading" tabIndex={-1}>Findings</h2></div><span>{flags.length} saved records</span></header>
-        <p className="signal-review-section__intro">Choose one check module, then read each finding with its explanation and saved evidence. These are possible inconsistencies to review, not separate grades.</p>
-        <IntegrityModuleNavigation selected={selectedModule} controls="shared-selected-module" modules={report.integrity_modules}
+        <header className="signal-review-section__heading"><div><p className="signal-section-kicker">Integrity record</p><h2 id="shared-findings-heading" tabIndex={-1}>Findings</h2></div><span>{sharedCountLabel(clusterFlagFindings(flags).filter(group => !isOptionalComparisonLead(group.flags[0])).length, clusterFlagFindings(flags).filter(group => isOptionalComparisonLead(group.flags[0])).length)}</span></header>
+        <p className="signal-review-section__intro">Choose a check to see what it covered and any possible inconsistencies it recorded. These are not grades. {sharedFindingsIntro(data.detail_snapshot)}</p>
+        <IntegrityModuleNavigation selected={selectedModule} controls="shared-selected-module" modules={report.integrity_modules} hint={null}
+          countLabels={Object.fromEntries(["internal_agreement", "citation_integrity", "statistical_forensics", "originality_reuse"].map(kind => {
+            const groups = clusterFlagFindings(flags.filter(flag => flag.check_kind === kind));
+            const leads = groups.filter(group => isOptionalComparisonLead(group.flags[0])).length;
+            return [kind, sharedCountLabel(groups.length - leads, leads)];
+          }))}
           counts={new Map(["internal_agreement", "citation_integrity", "statistical_forensics", "originality_reuse"].map(kind => [kind, flags.filter(flag => flag.check_kind === kind).length]))}
           onSelect={kind => {
             if (document.activeElement instanceof HTMLElement) follow(document.activeElement, "shared-findings-heading");
             const next = new URLSearchParams(params); next.set("module", kind); next.delete("finding"); setParams(next);
           }} />
         <div id="shared-selected-module">
-          <IntegrityModuleSummary kind={selectedModule} />
+          {/* What to verify is said only when there is something to verify. */}
+          {findingGroups.length > 0 ? <IntegrityModuleSummary kind={selectedModule} /> : <h3 className="signal-shared-check-title">{INTEGRITY_MODULES.find(item => item.kind === selectedModule)?.label}</h3>}
+          <div className={`signal-shared-module-status signal-shared-module-status--${sharedModuleTone(selectedModuleRecord?.state ?? "not_recorded")}`} role="note">
+            <p className="signal-shared-module-status__kicker">What this check found</p>
+            <p className="signal-shared-module-status__headline">{sharedStatus.title}</p>
+            <ul>{sharedStatus.points.map(point => <li key={point}>{point}</li>)}</ul>
+          </div>
           {selectedModule === "internal_agreement" && agreementModule?.agreement_scope && <AgreementScopeSummary scope={agreementModule.agreement_scope}
             findings={countInconsistencies(moduleFlags)} undecided={undecidedCount}
             compared={agreementModule.undetermined?.compared_count ?? null}
             interrupted={isInterrupted(agreementModule.agreement_scope, agreementModule.state)} />}
           {params.has("finding") && requestedGroupIndex < 0 && <p role="status">Requested finding is unavailable in this module. Showing its first shared finding.</p>}
-          <SignalPublicFlags framingOnly flags={moduleFlags} selectedRecordId={selectedFlag?.id} selectedModule={selectedModule} originalityScope={selectedModule === "originality_reuse" ? report.originality_scope : null} checkRunId={report.check_run_id} statisticalScope={selectedModule === "statistical_forensics" ? report.statistical_check_scope : null} />
-          {selectedModule === "internal_agreement" && undecidedCount > 0 && !agreementModule?.agreement_scope && <p className="signal-field-hint">VERIDICAL could not decide on {undecidedCount} objective and result pair{undecidedCount === 1 ? "" : "s"}. These are not findings; the instructor's report lists them.</p>}
+          <SignalPublicFlags framingOnly detailSnapshot={data.detail_snapshot} flags={moduleFlags} selectedRecordId={selectedFlag?.id} selectedModule={selectedModule} originalityScope={selectedModule === "originality_reuse" ? report.originality_scope : null} checkRunId={report.check_run_id} statisticalScope={selectedModule === "statistical_forensics" ? report.statistical_check_scope : null} />
+          {/* The pairs behind the "not decided" count, as evidence to read. */}
+          {selectedModule === "internal_agreement" && undecidedCount > 0 && <UndeterminedPairs shared checkRunId={report.check_run_id}
+            undetermined={agreementModule?.undetermined} legacy={savedFlags.filter(isLegacyUndecided)}
+            legacyPairs={new Map(details.flatMap(detail => detail.agreement_pair ? [[detail.id, detail.agreement_pair] as const] : []))} />}
           {findingGroups.length > 0 && selectedGroup && selectedFlag && (() => {
             const lead = isOptionalComparisonLead(selectedFlag);
             const noun = findingGroups.some(group => isOptionalComparisonLead(group.flags[0])) ? "Item" : "Finding";
@@ -282,7 +309,6 @@ export function AdviserViewPage() {
               </article>
             </>;
           })()}
-          {findingGroups.length === 0 && <p>No shared integrity signals are shown in this module.</p>}
         </div>
         </section>}
 

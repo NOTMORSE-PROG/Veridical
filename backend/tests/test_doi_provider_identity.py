@@ -1,5 +1,7 @@
 """F5 exact DOI provider coverage; no network or database required."""
 
+from functools import lru_cache
+
 import httpx
 import pytest
 
@@ -11,7 +13,7 @@ from app.checks.citations.verify import (
     verify_citation,
 )
 from app.config import Settings
-from app.external import cache
+from app.external import cache, datacite
 from app.external.schemas import VerificationResult
 from app.models.citation import Citation
 from app.models.enums import CitationParseStatus
@@ -21,6 +23,9 @@ DOI = "10.5281/zenodo.1450596"
 
 @pytest.fixture(autouse=True)
 def no_database(monkeypatch):
+    # Mocked rejections must not close admission for unrelated or live lookups.
+    monkeypatch.setattr(datacite, "_governor", lru_cache()(datacite._governor.__wrapped__))
+
     async def empty(*args, **kwargs):
         return None
 

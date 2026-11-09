@@ -17,7 +17,7 @@ export function comparisonLeadFilter(value: string | null): ComparisonLeadFilter
 export const COMPARISON_LEAD_COPY = {
   title: "Comparison leads",
   intro: "Optional evidence. These leads are not scored and do not block your decision.",
-  qualification: "Not scored. Does not affect readiness or block your decision.",
+  qualification: "Not scored. It does not affect readiness or the final decision.",
   about: "These are optional saved comparison records. Records may overlap or cover different scopes. Inspect the source evidence before drawing a conclusion.",
   badge: "Comparison lead: not scored",
   markerLegend: "L marks a comparison lead. Comparison leads are not scored.",

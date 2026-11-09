@@ -1,12 +1,12 @@
 {
-  "version": "sprite_inputs_v1",
+  "version": "sprite_inputs_v2",
   "headers": {
     "n": ["n", "sample size", "number of observations"],
     "mean": ["mean", "m", "average", "ave", "x̄"],
     "sd": ["sd", "s.d.", "sample sd", "standard deviation"],
     "min_val": ["minimum possible item score", "minimum possible score", "scale lower bound"],
     "max_val": ["maximum possible item score", "maximum possible score", "scale upper bound"],
-    "n_items": ["averaged item count", "number of averaged items", "n_items"],
+    "n_items": ["averaged item count", "number of averaged items", "number of items", "n_items"],
     "unit": ["item response unit", "response unit"],
     "sd_convention": ["sd convention", "standard deviation convention"]
   },

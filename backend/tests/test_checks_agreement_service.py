@@ -181,7 +181,10 @@ async def test_seeded_contradiction_produces_a_real_flag_row(session_factory):
     extraction = _extraction(
         [
             _block("Objectives"),
-            _block("1. To build a biometric login module for the mobile app."),
+            _block(
+                "1. To build a biometric login module for the mobile app. "
+                "The biometric login module was implemented."
+            ),
             _block("Summary of Findings"),
             _block(
                 "1. The biometric login module was not implemented due to hardware constraints."
@@ -194,8 +197,8 @@ async def test_seeded_contradiction_produces_a_real_flag_row(session_factory):
                 "index": 0,
                 "verdict": "contradictory",
                 "reasoning": "The finding says it was not implemented.",
-                "reason_category": "objective_reported_not_done",
-                "objective_quote": "build a biometric login module",
+                "reason_category": "incompatible_descriptive_claims",
+                "objective_quote": "The biometric login module was implemented",
                 "finding_quote": "The biometric login module was not implemented",
             }
         ]
@@ -211,9 +214,14 @@ async def test_seeded_contradiction_produces_a_real_flag_row(session_factory):
         assert result.detail["n_intents"] == 1
         assert result.detail["n_outcomes"] == 1
         assert result.detail["n_flags"] == 1
-        assert result.detail["prompt_version"] == "v2"
+        assert result.detail["prompt_version"] == "v5"
         assert result.detail["verdict_counts"] == {"contradictory": 1}
-        assert result.detail["undetermined"] == {"count": 0, "compared_count": 1, "pairs": []}
+        assert result.detail["undetermined"] == {
+            "count": 0,
+            "compared_count": 1,
+            "locally_unassessed_count": 0,
+            "pairs": [],
+        }
 
         flag_query = text(
             "SELECT severity, page_anchor, detail FROM flag WHERE check_result_id = :id"
@@ -221,11 +229,58 @@ async def test_seeded_contradiction_produces_a_real_flag_row(session_factory):
         rows = (await session.execute(flag_query, {"id": result.id})).all()
     assert len(rows) == 1
     assert rows[0].severity == "high"
-    assert rows[0].detail["intent_text"] == "To build a biometric login module for the mobile app."
+    assert rows[0].detail["intent_text"] == (
+        "To build a biometric login module for the mobile app. "
+        "The biometric login module was implemented."
+    )
     assert "was not implemented" in rows[0].detail["outcome_text"]
     from app.findings.policy import exclusion_reason
 
     assert exclusion_reason("internal_agreement", rows[0].detail) == "statement_roles_unverified"
+
+
+async def test_honestly_unmet_seed_cannot_be_saved_as_a_factual_conflict(session_factory):
+    check_run_id = await _seed_check_run(session_factory)
+    extraction = _extraction(
+        [
+            _block("Objectives"),
+            _block("1. To build a biometric login module for the mobile app."),
+            _block("Summary of Findings"),
+            _block(
+                "1. The biometric login module was not implemented due to hardware constraints."
+            ),
+        ]
+    )
+    llm = ScriptedLLM(
+        [
+            {
+                "verdicts": [
+                    {
+                        "index": 0,
+                        "verdict": "contradictory",
+                        "reasoning": "The finding says it was not implemented.",
+                        "reason_category": "objective_reported_not_done",
+                        "objective_quote": "build a biometric login module",
+                        "finding_quote": "The biometric login module was not implemented",
+                    }
+                ]
+            }
+        ]
+    )
+    async with session_factory() as session:
+        result = await run_internal_agreement_check(
+            session, llm, check_run_id, extraction, get_settings()
+        )
+        rows = (
+            await session.execute(
+                text("SELECT detail FROM flag WHERE check_result_id = :id"),
+                {"id": result.id},
+            )
+        ).all()
+    assert rows == [] and result.detail["n_flags"] == 0
+    assert result.detail["undetermined"]["count"] == 1
+    assert result.detail["contradictions_withheld"] == {"reason_not_named": 1}
+    assert len(llm.calls) == 1
 
 
 async def test_unmatched_detector_candidate_does_not_prove_missing_result(session_factory):
