@@ -174,8 +174,12 @@ async def test_seeded_grim_impossible_mean_produces_a_real_flag_row(session_fact
     check_run_id = await _seed_check_run(session_factory)
     table = TableBlock(
         page=5,
-        rows=[["Group", "n", "M"], ["Control", "10", "3.33"]],
+        rows=[
+            ["Group", "n", "M", "Item response unit", "Number of items"],
+            ["Control", "10", "3.33", "integer", "1"],
+        ],
         source="native",
+        caption="Each participant supplies exactly one integer rating.",
     )
     extraction = _extraction(tables=[table])
     async with session_factory() as session:
@@ -224,7 +228,15 @@ async def test_wrong_p_value_and_grim_impossible_mean_both_flagged_together(sess
     extraction = _extraction(
         blocks=[_block("The effect was significant, t(28) = 2.45, p = .900.")],
         tables=[
-            TableBlock(page=5, rows=[["Group", "n", "M"], ["A", "10", "3.33"]], source="native")
+            TableBlock(
+                page=5,
+                rows=[
+                    ["Group", "n", "M", "Item response unit", "Number of items"],
+                    ["A", "10", "3.33", "integer", "1"],
+                ],
+                source="native",
+                caption="Each participant supplies exactly one integer rating.",
+            )
         ],
     )
     async with session_factory() as session:

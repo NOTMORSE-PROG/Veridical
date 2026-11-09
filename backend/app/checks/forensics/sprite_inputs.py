@@ -96,6 +96,14 @@ def _number(raw: str, max_chars: int) -> tuple[Decimal, int] | None:
     return number, max(0, -number.as_tuple().exponent)
 
 
+def declared_item_count(raw: str, policy: dict) -> int | None:
+    """Share the same typed count semantics across granularity gates."""
+    value = _number(raw, policy["max_numeric_token_chars"])
+    if value is None or value[0] < 1 or value[0] != value[0].to_integral_value():
+        return None
+    return int(value[0])
+
+
 def extract_sprite_rows(
     extraction: ExtractionResult,
     policy: dict | None = None,

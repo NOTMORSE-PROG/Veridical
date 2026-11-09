@@ -19,6 +19,10 @@ class AnalyticalSource:
     tables: tuple[TableBlock, ...]
     excluded_paragraphs: tuple[int, ...]
     unlocated_occurrences: int = 0
+    quotation_block_ids: frozenset[int] | None = None
+    reference_block_spans: tuple[tuple[int, int, int], ...] | None = ()
+    heading_block_ids: frozenset[int] = frozenset()
+    quotation_scope_starts: frozenset[int] = frozenset()
 
     @property
     def occurrence_count(self) -> int | None:

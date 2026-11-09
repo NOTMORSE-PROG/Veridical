@@ -1,5 +1,6 @@
 {
-  "version": "v1",
+  "version": "v3",
+  "chi_ascii_alias": "(?<![A-Za-z0-9_])(?i:chi)(?=2\\s*\\()",
   "number": "[-+]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[eE][-+]?\\d+)?",
   "observed_number": "$NUMBER(?:\\s*[\\u00d7\\u00b7*]\\s*10\\s*(?:\\^\\s*[-+\\u2212]?\\d+|[\\u207b\\u207a]?[\\u2070\\u00b9\\u00b2\\u00b3\\u2074-\\u2079]+)|\\s*\\^\\s*[-+\\u2212]?\\d+|[\\u207b\\u207a]?[\\u2070\\u00b9\\u00b2\\u00b3\\u2074-\\u2079]+|[%\\u2030])?",
   "character_replacements": {
@@ -22,9 +23,11 @@
   },
   "test_value_suffix": "\\s*(?P<comparison>[<>=])\\s*(?P<number>$NUMBER)\\s*,\\s*",
   "result_candidates": [
-    "(?<![A-Za-z0-9_])(?:t|F|r|[Zz]|Q(?:w|b|within|between)?|[\u03c7\u03a7](?:\u00b2|2)?|X2?)\\s*\\([^()]*\\)\\s*[=<>\u2264\u2265]{1,2}\\s*$OBSERVED(?:\\s*,\\s*p\\s*[=<>\u2264\u2265]{1,2}\\s*$OBSERVED)?",
-    "(?<![A-Za-z0-9_])(?:t|F|r|[Zz]|Q|[\u03c7\u03a7](?:\u00b2|2)?|X2?)\\s*[=<>\u2264\u2265]{1,2}\\s*$OBSERVED[^\\d.;!?\\r\\n]*\\bdf\\s*=\\s*$NUMBER[^\\d.;!?\\r\\n]*\\bp\\s*[=<>\u2264\u2265]{1,2}\\s*$OBSERVED",
-    "(?<![A-Za-z0-9_])(?:t|F|r|[Zz]|Q|[\u03c7\u03a7](?:\u00b2|2)?|X2?)\\s*[=<>\u2264\u2265]{1,2}\\s*$OBSERVED\\s*[,;]\\s*p\\s*[=<>\u2264\u2265]{1,2}\\s*$OBSERVED"
+    "(?<![A-Za-z0-9_])(?:t|F|r|[Zz]|Q(?:w|b|within|between)?|[\u03c7\u03a7](?:\u00b2|2)?|X2?|(?i:chi)2)\\s*\\([^()]*\\)\\s*[=<>\u2264\u2265]{1,2}\\s*$OBSERVED(?:\\s*,\\s*p\\s*[=<>\u2264\u2265]{1,2}\\s*$OBSERVED)?",
+    "(?<![A-Za-z0-9_])(?:t|F|r|[Zz]|Q|[\u03c7\u03a7](?:\u00b2|2)?|X2?|(?i:chi)2)\\s*[=<>\u2264\u2265]{1,2}\\s*$OBSERVED[^\\d.;!?\\r\\n]*\\bdf\\s*=\\s*$NUMBER[^\\d.;!?\\r\\n]*\\bp\\s*[=<>\u2264\u2265]{1,2}\\s*$OBSERVED",
+    "(?<![A-Za-z0-9_])(?:t|F|r|[Zz]|Q|[\u03c7\u03a7](?:\u00b2|2)?|X2?|(?i:chi)2)\\s*[=<>\u2264\u2265]{1,2}\\s*$OBSERVED\\s*[,;]\\s*p\\s*[=<>\u2264\u2265]{1,2}\\s*$OBSERVED",
+    "(?i:\\b(?:reported\\s+)?(?:mean|average)\\s+(?:was|is|equals?)\\s*)$NUMBER",
+    "(?i:\\b(?:accounted for|represented|constituted|made up)\\s*)$NUMBER\\s*%"
   ],
   "chi_squared_pattern": "(?<=X)\\u00b2(?=\\s*\\()"
 }

@@ -14,7 +14,7 @@ const SHOWN_PARAM = "undecided_shown";
 const GROUPS_PARAM = "undecided_objectives_shown";
 
 type Item =
-  | { kind: "pair"; key: string; intentText: string; intentAnchor: string; outcomeText: string; outcomeAnchor: string; reason: string | null }
+  | { kind: "pair"; key: string; intentText: string; intentAnchor: string; outcomeText: string; outcomeAnchor: string; reason: string | null; comparisonMethod: string }
   | { kind: "legacy"; key: string; flagId: number; intentText: string; intentAnchor: string };
 
 type SavedPair = { intent_text: string; intent_anchor: string | null; outcome_text: string; outcome_anchor: string | null };
@@ -23,13 +23,14 @@ function itemsFrom(undetermined: UndeterminedPairsOut | null | undefined, legacy
   const pairs: Item[] = (undetermined?.pairs ?? []).map((pair, index) => ({
     kind: "pair", key: `pair-${index}`, intentText: pair.intent_text, intentAnchor: pair.intent_anchor,
     outcomeText: pair.outcome_text, outcomeAnchor: pair.outcome_anchor, reason: pair.reason ?? null,
+    comparisonMethod: pair.comparison_method ?? "unknown",
   }));
   // An older row whose saved pair is known shows both statements, like a
   // newer one; otherwise only its saved excerpt.
   const saved: Item[] = legacy.map((flag): Item => {
     const pair = legacyPairs?.get(flag.id);
     return pair
-      ? { kind: "pair", key: `flag-${flag.id}`, intentText: pair.intent_text, intentAnchor: pair.intent_anchor ?? "", outcomeText: pair.outcome_text, outcomeAnchor: pair.outcome_anchor ?? "", reason: null }
+      ? { kind: "pair", key: `flag-${flag.id}`, intentText: pair.intent_text, intentAnchor: pair.intent_anchor ?? "", outcomeText: pair.outcome_text, outcomeAnchor: pair.outcome_anchor ?? "", reason: null, comparisonMethod: "unknown" }
       : { kind: "legacy", key: `flag-${flag.id}`, flagId: flag.id, intentText: flag.evidence_excerpt, intentAnchor: flag.page_anchor };
   });
   return [...pairs, ...saved].sort((a, b) => pageOf(a.intentAnchor) - pageOf(b.intentAnchor));
@@ -40,8 +41,8 @@ function pageOf(anchor: string): number {
   return match ? Number(match[1]) : Number.MAX_SAFE_INTEGER;
 }
 
-/** Objective and result pairs the agreement check compared but could not
- * decide. They make no claim about the manuscript, so they are shown once,
+/** Selected objective and result pairs left unresolved.
+ * They make no claim about the manuscript, so they are shown once,
  * after the findings, and never counted as findings. */
 export function UndeterminedPairs({ checkRunId, undetermined, legacy, incomplete = false, shared = false, legacyPairs }: {
   /** Saved pairs for older rows, by record id, where the link carries them. */
@@ -69,8 +70,7 @@ export function UndeterminedPairs({ checkRunId, undetermined, legacy, incomplete
 
   if (items.length === 0) return null;
   const count = items.length;
-  // Older runs saved no compared count; the pairs listed are then all that is known.
-  const compared = undetermined ? Math.max(undetermined.compared_count, count) : null;
+
   const one = count === 1;
 
   function update(change: (next: URLSearchParams) => void) {
@@ -86,7 +86,7 @@ export function UndeterminedPairs({ checkRunId, undetermined, legacy, incomplete
 
   if (shared) {
     const groupsShown = Math.max(SHARED_GROUPS_SHOWN, Number(params.get(GROUPS_PARAM)) || SHARED_GROUPS_SHOWN);
-    return <SharedPairs listId={listId} items={items} open={open} shown={groupsShown}
+    return <SharedPairs listId={listId} items={items} undetermined={undetermined} open={open} shown={groupsShown}
       onToggle={() => update((next) => { if (open) { next.delete(OPEN_PARAM); next.delete(GROUPS_PARAM); } else next.set(OPEN_PARAM, "open"); })}
       onMore={() => {
         focusKey.current = `objective-${groupsShown}`;
@@ -95,10 +95,9 @@ export function UndeterminedPairs({ checkRunId, undetermined, legacy, incomplete
   }
   const visible = items.slice(0, shown);
   return <section className="signal-copy-flow signal-undecided-pairs" aria-labelledby={`${listId}-title`}>
-    <p id={`${listId}-title`}>{compared === null
-      ? `VERIDICAL could not decide on ${count} objective and result pair${one ? "" : "s"}.`
-      : `VERIDICAL could not decide on ${count} of ${compared} objective and result pair${compared === 1 ? "" : "s"} it compared.`}</p>
-    <p>For these pairs, the check could not tell whether the result answers the objective. This is not a problem found in the manuscript. {shared ? "They are listed here so you can read them." : "If objective coverage matters for this defense, read the pairs and decide yourself."}</p>
+    <p id={`${listId}-title`}>{count} selected pair{one ? "" : "s"} left unresolved</p>
+    <p>Review both statements and their surrounding text. These pairs are not manuscript findings and do not change readiness.</p>
+    <ComparisonCounts undetermined={undetermined} />
     {incomplete && <p>This check did not finish, so pairs it never reached are not listed.</p>}
     <Button variant="secondary" aria-expanded={open} aria-controls={listId}
       onClick={() => update((next) => { if (open) { next.delete(OPEN_PARAM); next.delete(SHOWN_PARAM); } else next.set(OPEN_PARAM, "open"); })}>
@@ -119,7 +118,7 @@ export function UndeterminedPairs({ checkRunId, undetermined, legacy, incomplete
                 <Statement label="Statement selected as a result" text={item.outcomeText} anchor={item.outcomeAnchor}
                   linkLabel={`Open result location, ${instructorAnchor(item.outcomeAnchor)}, ${number}`}
                   checkRunId={checkRunId} controlId={`${listId}-${item.key}-result`} location={location} link={!shared} />
-                {item.reason && <p className="signal-field-hint">Reason recorded by the check: {item.reason}</p>}
+                <PairAssessmentNote method={item.comparisonMethod} reason={item.reason} />
               </>
               : !shared && <ActionLink to={`/flags/${item.flagId}`} variant="quiet" aria-label={`Review this pair, ${number}`}>Review this pair</ActionLink>}
           </li>;
@@ -153,15 +152,16 @@ const SHARED_GROUPS_SHOWN = 4;
 
 /** The adviser's copy: each objective once, with the results it was compared
  * with under it, as compact cards a few at a time. Read-only. */
-function SharedPairs({ listId, items, open, shown, onToggle, onMore }: {
+function SharedPairs({ listId, items, undetermined, open, shown, onToggle, onMore }: {
+  undetermined?: UndeterminedPairsOut | null;
   listId: string; items: Item[]; open: boolean; shown: number;
   onToggle: () => void; onMore: () => void;
 }) {
-  const groups = new Map<string, { text: string; anchor: string; results: { text: string; anchor: string }[] }>();
+  const groups = new Map<string, { text: string; anchor: string; results: { text: string; anchor: string; method: string; reason: string | null }[] }>();
   for (const item of items) {
     const key = `${item.intentText}|${item.intentAnchor}`;
     const group = groups.get(key) ?? { text: item.intentText, anchor: item.intentAnchor, results: [] };
-    if (item.kind === "pair" && !group.results.some(result => result.text === item.outcomeText)) group.results.push({ text: item.outcomeText, anchor: item.outcomeAnchor });
+    if (item.kind === "pair" && !group.results.some(result => result.text === item.outcomeText && result.anchor === item.outcomeAnchor && result.method === item.comparisonMethod && result.reason === item.reason)) group.results.push({ text: item.outcomeText, anchor: item.outcomeAnchor, method: item.comparisonMethod, reason: item.reason });
     groups.set(key, group);
   }
   const all = [...groups.values()];
@@ -170,9 +170,10 @@ function SharedPairs({ listId, items, open, shown, onToggle, onMore }: {
   return <section className="signal-shared-pairs" aria-labelledby={`${listId}-title`}>
     <div className="signal-shared-pairs__head">
       <div>
-        <p id={`${listId}-title`} className="signal-shared-pairs__title">{count} {count === 1 ? "pair" : "pairs"} the check could not decide</p>
+        <p id={`${listId}-title`} className="signal-shared-pairs__title">{count} selected {count === 1 ? "pair" : "pairs"} left unresolved</p>
         <p className="signal-field-hint">{all.length} {all.length === 1 ? "objective" : "objectives"} involved. Not findings; they do not change readiness.</p>
       </div>
+      <ComparisonCounts undetermined={undetermined} />
       <Button variant="secondary" aria-expanded={open} aria-controls={listId} onClick={onToggle}>{open ? "Hide" : "Show"} the {all.length === 1 ? "objective" : "objectives"}</Button>
     </div>
     <div id={listId} hidden={!open}>
@@ -182,13 +183,33 @@ function SharedPairs({ listId, items, open, shown, onToggle, onMore }: {
           <blockquote className="signal-pair-card__quote">“{group.text}”</blockquote>
           {group.results.length > 0
             ? <div className="signal-pair-card__results">
-              <p className="signal-pair-card__tag">Compared with {group.results.length} {group.results.length === 1 ? "result" : "results"}</p>
-              <ul>{group.results.map(result => <li key={result.text}><span>“{result.text}”</span>{result.anchor.trim() && <cite>{instructorAnchor(result.anchor)}</cite>}</li>)}</ul>
+              <p className="signal-pair-card__tag">Selected {group.results.length === 1 ? "result" : "results"}: {group.results.length}</p>
+              <ul>{group.results.map(result => <li key={`${result.text}|${result.anchor}|${result.method}|${result.reason ?? ""}`}><span>“{result.text}”</span>{result.anchor.trim() && <cite>{instructorAnchor(result.anchor)}</cite>}<PairAssessmentNote method={result.method} reason={result.reason} /></li>)}</ul>
             </div>
-            : <p className="signal-field-hint">The result it was compared with was not saved with this link.</p>}
+            : <p className="signal-field-hint">The selected result was not saved with this link.</p>}
         </li>)}</ol>
         {visible.length < all.length && <Button variant="secondary" onClick={onMore}>Show {Math.min(SHARED_GROUPS_SHOWN, all.length - visible.length)} more</Button>}
       </>}
     </div>
   </section>;
+}
+
+function ComparisonCounts({ undetermined }: { undetermined?: UndeterminedPairsOut | null }) {
+  return <>
+    <p>{undetermined?.compared_count != null
+      ? `Pairs compared with AI: ${undetermined.compared_count}.`
+      : "The number of pairs compared with AI was not recorded."}</p>
+    {!!undetermined?.locally_unassessed_count && <p>Pairs left unassessed before AI comparison: {undetermined.locally_unassessed_count}.</p>}
+  </>;
+}
+
+const PAIR_ASSESSMENT_LABELS: Record<string, string> = {
+  phase_guard: "Left unassessed before AI comparison",
+  generation: "AI comparison was inconclusive",
+  unknown: "Comparison status not recorded",
+};
+
+function PairAssessmentNote({ method, reason }: { method: string; reason: string | null }) {
+  const label = PAIR_ASSESSMENT_LABELS[method] ?? PAIR_ASSESSMENT_LABELS.unknown;
+  return <p className="signal-field-hint">{label}{reason ? `: ${reason}` : "."}</p>;
 }

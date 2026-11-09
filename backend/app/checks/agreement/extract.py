@@ -14,12 +14,11 @@ manuscript" fixture (5/5 intents, 4/4 outcomes, with two planted
 distractors — a future-work and a scope-negation sentence — correctly
 excluded). Both measured at 100%, well above the 80% floor, so (V-006's own
 precedent: 17/17 regex -> skip the LLM fallback) augmentation was never
-built. If a future real manuscript drops rule recall below the 80% floor,
-add the Gemini pass here; don't build it speculatively against a floor
-nothing has failed yet.
+built. Those measurements cover their original formulations. Bare-infinitive
+objectives exposed a separate recognizer gap, handled below with a bounded
+objective-section rule rather than a generation pass.
 
-Two independent rule types, matching the ticket's own wording exactly
-("rule-based cues (objectives lists, modal verbs)"):
+Three complementary rule types, within intent/outcome extraction:
 1. **Objective/outcome LIST detection**: a numbered/bulleted list under a
    heading matching `cues.objective_heading_synonyms` /
    `outcome_heading_synonyms` (data file, ENGINEERING §8) — the strong
@@ -32,6 +31,10 @@ Two independent rule types, matching the ticket's own wording exactly
    "results showed..."): sentence-level, position-independent, the part
    of this ticket general contradiction-detection scope explicitly does
    NOT require chapter placement.
+3. **Objective-section prose**: complete bare-infinitive sentences under a
+   configured objective heading, including native Word list paragraphs whose
+   numbering is not part of the extracted text. This weaker cue requires
+   known unquoted source text and is withheld in excluded chapter roles.
 
 Guards (ticket edge cases): a sentence containing a future-work phrase
 ("future researchers", "could later...") or a scope-negation phrase ("is
@@ -40,7 +43,7 @@ as an intent — even if it also matches a modal cue.
 """
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from difflib import SequenceMatcher
 from typing import Literal
 
@@ -326,48 +329,240 @@ def _extract_modal_statements(
 
 
 def _extract_outcome_prose(
-    blocks: list[TextBlock], cues: AgreementCues, *, heading_max_words: int
+    blocks: list[TextBlock],
+    cues: AgreementCues,
+    *,
+    heading_max_words: int,
+    wrap_min_width_ratio: float,
 ) -> list[Statement]:
     """Recognize source-bound candidates, not verified roles or complete coverage."""
     if not cues.outcome_prose_enabled:
         return []
-    candidates = []
+    candidates: list[Statement] = []
     in_outcomes = False
+    # A sentence wraps across lines, and a PDF often gives each printed line
+    # as its own block. Sentences are therefore read from the run of prose
+    # blocks between headings and list items, not from one block at a time,
+    # which cut a result in the middle ("allowed patient records to be
+    # searched and managed, supported the review and processing of").
+    run: list[TextBlock] = []
+
+    def _flush() -> None:
+        if run:
+            candidates.extend(_outcome_sentences(run, cues))
+            run.clear()
+
+    content = [b for b in blocks if not b.is_furniture and b.text.strip()]
+    for index, block in enumerate(content):
+        text = block.text.strip()
+        if not _has_words(text) and not _ENDS_CLAUSE.search(text):
+            # A lone page number at a page break is skipped and the sentence
+            # carries on across it. Any other number line is a table cell:
+            # it is not prose and ends the sentence, so two table rows are
+            # never read as one. A number line that ends a sentence ("4.52.")
+            # is the sentence's last line and is read as prose.
+            following = content[index + 1] if index + 1 < len(content) else None
+            at_page_break = (following is None or following.page != block.page) or (
+                bool(run) and run[-1].page != block.page
+            )
+            if not (_PAGE_NUMBER.fullmatch(text) and at_page_break):
+                _flush()
+            continue
+        if any(re.search(p, text, re.I) for p in cues.caption_patterns):
+            # A caption is not prose and does not open a new section; a
+            # sentence never continues through it. "Table 4.2 shows that ..."
+            # is prose: the patterns leave out a reporting verb after the number.
+            _flush()
+            continue
+        if _is_heading_like(text, max_words=heading_max_words):
+            _flush()
+            in_outcomes = _heading_section(text, cues) == "outcomes"
+            continue
+        if not in_outcomes or _LIST_MARKER.match(text):
+            _flush()
+            continue
+        if parse_reference(text, order_index=0).parse_status == CitationParseStatus.parsed:
+            _flush()
+            continue
+        if run and not _continues(run, block, wrap_min_width_ratio):
+            _flush()
+        run.append(block)
+    _flush()
+    return candidates
+
+
+_WORD_OF_LETTERS = re.compile(r"[^\W\d_]{2,}")
+_PAGE_NUMBER = re.compile(r"\d{1,4}")
+_ENDS_CLAUSE = re.compile(r"[.!?:][\"'”’)\]]*$")
+
+
+def _has_words(text: str) -> bool:
+    return _WORD_OF_LETTERS.search(text) is not None
+
+
+def _continues(run: list[TextBlock], block: TextBlock, wrap_min_width_ratio: float) -> bool:
+    """Whether `block` is the next printed line of the sentence in `run`, not
+    a new paragraph. A line that ends a sentence or a lead-in ("shown below:")
+    ends the paragraph. Otherwise a line that opens in lower case continues
+    it; one that opens in capitals continues it only when the line before
+    ran (nearly) the full width, as a wrapped line does: a short line with no
+    closing punctuation before a capital is a subheading or a caption."""
+    previous = run[-1]
+    if _ENDS_CLAUSE.search(previous.text.rstrip()):
+        return False
+    first = block.text.lstrip("\"'“‘([")[:1]
+    if first.islower():
+        return True
+    widths = [b.bbox[2] - b.bbox[0] for b in (*run, block) if b.bbox]
+    if not previous.bbox or not widths:
+        return False
+    return previous.bbox[2] - previous.bbox[0] >= wrap_min_width_ratio * max(widths)
+
+
+def _outcome_sentences(run: list[TextBlock], cues: AgreementCues) -> list[Statement]:
+    """Result sentences in one run of prose blocks, each anchored to the block
+    it starts in. A sentence that still lacks its start (it opens in lower
+    case) or its end (no closing punctuation) after the run is joined is a
+    fragment: the comparison cannot read it, so it is not offered."""
+    joined, ranges = _joined_with_offsets(run)
+    out = []
+    for start, end in _sentence_spans(joined):
+        span = joined[start:end]
+        if cues.leading_note_pattern:
+            # "(Appendix 5)" closing the previous sentence is not part of this
+            # one, and the sentence is anchored where it starts after the note.
+            note = re.match(cues.leading_note_pattern, span.lstrip())
+            if note:
+                start += len(span) - len(span.lstrip()) + note.end()
+                span = joined[start:end]
+        sentence = _normalize(span)
+        if not sentence or not _is_whole_sentence(sentence):
+            continue
+        lowered = sentence.lower()
+        if not any(re.search(pattern, lowered) for pattern in cues.outcome_prose_patterns):
+            continue
+        if any(
+            phrase in lowered
+            for phrase in (*cues.future_work_guard_phrases, *cues.scope_negation_phrases)
+        ):
+            continue
+        offset = start + (len(joined[start:end]) - len(joined[start:end].lstrip()))
+        block = next((b for s, e, b in ranges if s <= offset < e), ranges[0][2])
+        out.append(
+            Statement(
+                kind="outcome",
+                text=sentence,
+                anchor=_anchor_for(block),
+                page=block.page,
+                paragraph=block.paragraph,
+                cue="outcome_section_prose",
+            )
+        )
+    return out
+
+
+_SENTENCE_END = re.compile(r"[.!?][\"'”’)\]]*$")
+
+
+def _is_whole_sentence(sentence: str) -> bool:
+    first = sentence.lstrip("\"'“‘([")[:1]
+    return bool(first) and not first.islower() and _SENTENCE_END.search(sentence) is not None
+
+
+# --- dedup --------------------------------------------------------------------
+
+
+def _extract_objective_prose(
+    blocks, cues, *, source, sections, heading_keys, heading_max_words, settings
+) -> list[Statement]:
+    """Recognize explicit aims without extending a heading across omitted source."""
+    if not cues.objective_prose_enabled:
+        return []
+    from app.checks.agreement.evidence_policy import assertion_policy
+    from app.ingest.quotations import located_quote_status
+
+    candidates = []
+    in_objectives = False
+    quotation_cache = {}
     for block in blocks:
         if block.is_furniture or not block.text.strip():
             continue
         text = block.text.strip()
-        if _is_heading_like(text, max_words=heading_max_words):
-            in_outcomes = _heading_section(text, cues) == "outcomes"
+        key = (block.page, block.paragraph, _normalize(text))
+        if key in heading_keys or _is_heading_like(text, max_words=heading_max_words):
+            in_objectives = _heading_section(text, cues) == "objectives" and not any(
+                re.search(pattern, text, re.IGNORECASE)
+                for pattern in cues.objective_heading_exclusion_patterns
+            )
             continue
-        if not in_outcomes or _LIST_MARKER.match(text):
+        if not in_objectives or _LIST_MARKER.match(text):
             continue
         if parse_reference(text, order_index=0).parse_status == CitationParseStatus.parsed:
             continue
-        for start, end in _sentence_spans(text):
+        spans = _sentence_spans(text)
+        for span_index, (start, end) in enumerate(spans):
             sentence = _normalize(text[start:end])
-            lowered = sentence.lower()
-            if not any(re.search(pattern, lowered) for pattern in cues.outcome_prose_patterns):
+            if not any(
+                re.fullmatch(pattern, sentence, re.IGNORECASE)
+                for pattern in cues.objective_prose_patterns
+            ):
                 continue
-            if not sentence or any(
-                phrase in lowered
+            if any(
+                phrase in sentence.lower()
                 for phrase in (*cues.future_work_guard_phrases, *cues.scope_negation_phrases)
             ):
                 continue
+            where = sections.locate(sentence, _anchor_for(block), block.page)
+            kept_chapter = where.chapter_number in sections.roles.objectives_kept_chapters
+            if (
+                where.chapter_role in sections.roles.objectives_excluded and not kept_chapter
+            ) or where.heading_role in sections.roles.objectives_excluded:
+                continue
+            quotation = located_quote_status(
+                source, sentence, settings, _scope_cache=quotation_cache
+            )
+            if quotation is None or quotation[1]:
+                continue
+            # A completed-work claim immediately beside an aim belongs to the
+            # same source passage, just as it does in a numbered objective.
+            # Keep it only with its own unquoted, complete assertion evidence.
+            if span_index + 1 < len(spans):
+                _, following_end = spans[span_index + 1]
+                following = _normalize(text[end:following_end])
+                policy = assertion_policy()
+                if (
+                    any(
+                        re.search(pattern, following, re.IGNORECASE)
+                        for pattern in policy["factual_assertion_patterns"]
+                    )
+                    and not any(
+                        re.search(pattern, following, re.IGNORECASE)
+                        for pattern in policy["factual_scope_veto_patterns"]
+                    )
+                    and len(text[start:following_end]) <= settings.agreement_context_max_chars
+                ):
+                    passage = _normalize(text[start:following_end])
+                    passage_quote = located_quote_status(
+                        source, passage, settings, _scope_cache=quotation_cache
+                    )
+                    passage_location = sections.locate(passage, _anchor_for(block), block.page)
+                    if (
+                        passage_quote is not None
+                        and not passage_quote[1]
+                        and passage_location == where
+                    ):
+                        sentence = passage
             candidates.append(
                 Statement(
-                    kind="outcome",
+                    kind="intent",
                     text=sentence,
                     anchor=_anchor_for(block),
                     page=block.page,
                     paragraph=block.paragraph,
-                    cue="outcome_section_prose",
+                    cue="intent_section_prose",
                 )
             )
     return candidates
-
-
-# --- dedup --------------------------------------------------------------------
 
 
 def _dedupe(statements: list[Statement], *, threshold: float) -> list[Statement]:
@@ -430,10 +625,29 @@ def extract_statements(
 ) -> ExtractionOutcome:
     settings = settings or get_settings()
     cues = cues or load_cues(settings.agreement_cues_file)
+    from app.checks.section_roles import SectionMap, load_section_roles
     from app.ingest.analytical_source import analytical_source
+    from app.ingest.blockquotes import block_quote_ids_in_scope
 
     statements = []
-    for scope in analytical_source(extraction).scopes:
+    source = analytical_source(extraction)
+    sections = (
+        SectionMap(
+            extraction,
+            load_section_roles(settings.section_roles_file),
+            heading_max_words=settings.agreement_heading_max_words,
+            locate_chars=settings.agreement_context_locate_chars,
+        )
+        if cues.objective_prose_enabled
+        else None
+    )
+    heading_keys = set()
+    pending = list(extraction.section_tree.nodes)
+    while pending:
+        node = pending.pop()
+        heading_keys.add((node.page, node.paragraph, _normalize(node.title)))
+        pending.extend(node.children)
+    for scope in source.scopes:
         scoped = extraction.model_copy(update={"blocks": list(scope)})
         statements.extend(
             _extract_list_statements(
@@ -453,9 +667,42 @@ def extract_statements(
         )
         statements.extend(
             _extract_outcome_prose(
-                list(scope), cues, heading_max_words=settings.agreement_heading_max_words
+                list(scope),
+                cues,
+                heading_max_words=settings.agreement_heading_max_words,
+                wrap_min_width_ratio=settings.agreement_wrap_line_min_width_ratio,
             )
         )
+        if sections is not None:
+            # PDF quotation inference needs actual page geometry; legacy text
+            # without that provenance cannot support this weaker cue.
+            quote_ids = None
+            if source.state != "not_applicable" or all(
+                block.page is not None and block.bbox is not None
+                for block in scope
+                if not block.is_furniture and block.text.strip()
+            ):
+                quote_ids = frozenset(block_quote_ids_in_scope(list(scope), settings))
+            scoped_source = replace(source, scopes=(scope,), quotation_block_ids=quote_ids)
+            candidates = _extract_objective_prose(
+                list(scope),
+                cues,
+                source=scoped_source,
+                sections=sections,
+                heading_keys=heading_keys,
+                heading_max_words=settings.agreement_heading_max_words,
+                settings=settings,
+            )
+            statements.extend(
+                candidate
+                for candidate in candidates
+                if not any(
+                    existing.kind == candidate.kind
+                    and existing.anchor == candidate.anchor
+                    and existing.text == candidate.text
+                    for existing in statements
+                )
+            )
     threshold = settings.agreement_dedup_similarity_threshold
     # Deduped per-kind (not across the combined list) — an intent and an
     # outcome should never merge into each other even if their wording

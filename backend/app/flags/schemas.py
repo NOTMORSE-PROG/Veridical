@@ -38,6 +38,7 @@ class PassagePairOut(BaseModel):
     # None for a supporting excerpt below standalone passage thresholds or
     # historical support whose classification was not stored.
     level: str | None
+    literal_overlap: dict | None = None
 
 
 class CitationSourceKeyOut(BaseModel):
@@ -54,6 +55,9 @@ class CitationSourceKeyOut(BaseModel):
 class CitationSourceLinkOut(BaseModel):
     kind: Literal["doi_as_cited", "url_as_cited", "doi_recorded_lookup"]
     url: HttpUrl
+    # The reference's own printed text for this link, shown in place of the
+    # address; absent when it could not be found in the reference as printed.
+    text: str | None = Field(default=None, min_length=1)
 
 
 class CitationSourceLocatorOut(BaseModel):

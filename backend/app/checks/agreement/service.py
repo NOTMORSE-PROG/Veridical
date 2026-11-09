@@ -84,6 +84,16 @@ async def run_internal_agreement_check(
                 "n_intents": 0,
                 "n_outcomes": 0,
                 "n_flags": 0,
+                "assessment_ledger": {
+                    "version": "v1",
+                    "recognition_complete": False,
+                    "recognition_reason": "statement_extraction_unassessed",
+                    "selected_pair_count": 0,
+                    "disposition_counts": {},
+                    "pairs": [],
+                    "unmatched_objectives": [],
+                    "unselected_outcomes": [],
+                },
                 "note": (
                     "No objective/finding-style statements were detected in the available source. "
                     "Native Word source coverage is incomplete; this does not establish absence."
@@ -167,6 +177,7 @@ async def run_internal_agreement_check(
                 "The retained comparisons are review leads, not readiness deductions."
             ),
             "n_outcomes": len(outcomes),
+            "n_locally_unassessed": pairing.n_locally_unassessed,
             "n_flags": len(pairing.flags),
             "n_unmatched_outcomes": pairing.n_unmatched_outcomes,
             "n_unmatched_intents": pairing.n_unmatched_intents,
@@ -176,11 +187,13 @@ async def run_internal_agreement_check(
             "n_skipped_ai_not_configured": pairing.n_skipped_ai_not_configured,
             "n_skipped_ai_key_rejected": pairing.n_skipped_ai_key_rejected,
             "prompt_version": PROMPT_VERSION,
+            "assessment_ledger": pairing.assessment_ledger,
             # Pairs the judge could not decide are coverage, shown once on the
             # report beside the findings, not one finding row each.
             "undetermined": {
                 "count": len(pairing.undetermined),
                 "compared_count": pairing.n_compared,
+                "locally_unassessed_count": pairing.n_locally_unassessed,
                 "pairs": pairing.undetermined,
             },
             "verdict_counts": pairing.verdict_counts,

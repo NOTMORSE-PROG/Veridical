@@ -431,7 +431,21 @@ def namespaced_storage_key(settings: Settings, key: str) -> str:
     return key
 
 
-def ensure_local_file(settings: Settings, storage: Storage, file_ref: str) -> Path:
+class _BoundedCacheWriter:
+    def __init__(self, target, limit):
+        self.target, self.limit, self.written = target, limit, 0
+
+    def write(self, data):
+        if self.written + len(data) > self.limit:
+            raise OverflowError("Retained source exceeds the comparison read limit")
+        count = self.target.write(data)
+        self.written += count
+        return count
+
+
+def ensure_local_file(
+    settings: Settings, storage: Storage, file_ref: str, *, max_bytes: int | None = None
+) -> Path:
     """Guarantee the local cache copy at `file_ref` exists, fetching it from
     durable storage first if it doesn't -- this is what lets a manuscript
     survive Render's ephemeral-disk wipe (BUG-138): the FIRST read after a
@@ -443,6 +457,8 @@ def ensure_local_file(settings: Settings, storage: Storage, file_ref: str) -> Pa
     local-only code raised before this existed)."""
     local_path = Path(file_ref)
     if local_path.exists():
+        if max_bytes is not None and local_path.stat().st_size > max_bytes:
+            raise OverflowError("Retained source exceeds the comparison read limit")
         return local_path
     key = storage_key_for(settings, file_ref)
     local_path.parent.mkdir(parents=True, exist_ok=True)
@@ -450,31 +466,34 @@ def ensure_local_file(settings: Settings, storage: Storage, file_ref: str) -> Pa
     # Publish only a closed, complete file on the same filesystem; the caller's
     # source transaction still owns serialization against manuscript deletion.
     with NamedTemporaryFile(mode="wb", dir=local_path.parent, delete_on_close=False) as staged:
-        download = getattr(storage, "download_to", None)
-        if download is None:
-            # Compatibility for existing small-object adapters. Both production
-            # backends implement download_to and never enter this bytes path.
-            staged.write(storage.get_bytes(key))
-        else:
-            download(key, staged, chunk_bytes=settings.storage_download_chunk_bytes)
-        staged.close()
         try:
-            # Both operations refuse an existing destination. Never replace the
-            # winner while another consumer may be opening its complete bytes.
-            if os.name == "nt":
-                os.rename(staged.name, local_path)
+            download = getattr(storage, "download_to", None)
+            if download is None:
+                if max_bytes is not None:
+                    raise OverflowError("Bounded source reads require streamed storage")
+                staged.write(storage.get_bytes(key))
             else:
-                os.link(staged.name, local_path)
-        except FileExistsError as publication_error:
-            # Accept a competing fill only after verifying all downloaded bytes.
+                target = staged if max_bytes is None else _BoundedCacheWriter(staged, max_bytes)
+                download(key, target, chunk_bytes=settings.storage_download_chunk_bytes)
+            staged.close()
             try:
-                already_complete = _published_matches(
-                    local_path, Path(staged.name), settings.storage_download_chunk_bytes
-                )
-            except OSError:
-                raise publication_error from None
-            if not already_complete:
-                raise
+                # Refuse an existing destination; verify a competing publication.
+                if os.name == "nt":
+                    os.rename(staged.name, local_path)
+                else:
+                    os.link(staged.name, local_path)
+            except FileExistsError as publication_error:
+                try:
+                    already_complete = _published_matches(
+                        local_path, Path(staged.name), settings.storage_download_chunk_bytes
+                    )
+                except OSError:
+                    raise publication_error from None
+                if not already_complete:
+                    raise
+        finally:
+            staged.close()
+            Path(staged.name).unlink(missing_ok=True)
     return local_path
 
 

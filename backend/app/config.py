@@ -732,6 +732,7 @@ class Settings(BaseSettings):
     external_http_timeout_seconds: float = 15.0
     external_max_retries: int = 2
     external_retry_base_seconds: float = 1.0
+    external_rate_limit_cooldown_seconds: float = Field(default=300.0, gt=0, allow_inf_nan=False)
     # CrossRef polite-pool rates changed 2025-12-01 (RESEARCH.md §2) — two
     # different endpoints, two different limits: single-DOI lookup vs.
     # metadata search.
@@ -750,7 +751,7 @@ class Settings(BaseSettings):
     # needed to build against); set the env var once a key is issued
     # (V-028's own pending action item) for a higher ceiling, no code change.
     semantic_scholar_api_key: str | None = None
-    semantic_scholar_rps: float = 1.0
+    semantic_scholar_rps: float = Field(default=1.0, gt=0, allow_inf_nan=False)
     # OpenAlex (BUG-610, checked live 2026-10-31): keyless use shares a $0.10
     # daily budget per network address, about 100 title searches; a free key
     # from openalex.org/settings/api gives $1 a day. Documented ceiling is 10
@@ -856,21 +857,29 @@ class Settings(BaseSettings):
     # Exact-DOI metadata title policy. Packaged default if unset; changing a
     # custom policy requires a process restart. Each comparison saves its hash.
     citation_metadata_title_policy_file: Path | None = None
+    # When a differing title is so unlike the registry's that the DOI leads to a
+    # different work, and how that is worded (BUG-664). Packaged default if unset.
+    citation_metadata_different_work_file: Path | None = None
     citation_doi_source_url_template: str = "https://doi.org/{doi}"
     citation_registry_record_url_templates: dict[str, str] = {
         "crossref": "https://api.crossref.org/works/{doi}",
         "datacite": "https://api.datacite.org/dois/{doi}",
     }
     citation_cache_stale_days: int = 30
-    # Citation recency note (V-092). Defaults for a format that does not set
-    # its own; a format's saved setting (`rubric.citation_recency`) wins per
-    # field. A source is outside the window when its year is earlier than
+    # Citation recency is required for new checks. Formats may set the
+    # window, year basis and readiness treatment. A source is outside the
+    # window when its year is earlier than
     # the reference year minus the window. The reference year is the year on
     # the manuscript's title page, or the check date when that is not clear.
-    # Off unless a format (or this default) turns it on: an existing format
-    # should not start showing new notes on its reports without the
-    # instructor choosing it.
-    citation_recency_enabled: bool = False
+    citation_recency_enabled: bool = True
+
+    @field_validator("citation_recency_enabled")
+    @classmethod
+    def require_citation_recency(cls, value: bool) -> bool:
+        if not value:
+            raise ValueError("Citation recency is required and cannot be disabled.")
+        return value
+
     citation_recency_window_years: int = Field(default=5, ge=1, le=100)
     citation_recency_reference_year_basis: Literal["manuscript_year", "check_date"] = (
         "manuscript_year"
@@ -897,6 +906,10 @@ class Settings(BaseSettings):
     forensics_sprite_policy_file: Path | None = None
     # When a table's percentages are held to "sum to 100%"; empty = packaged default.
     forensics_percentage_policy_file: Path | None = None
+    forensics_table_context_file: Path | None = None
+    forensics_prose_mean_policy_file: Path | None = None
+    forensics_grimmer_max_observations: int = Field(default=1000000, ge=2)
+    forensics_grimmer_max_candidate_means: int = Field(default=10000, ge=1)
     forensics_sprite_max_rows: int = Field(default=3, ge=1)
     forensics_sprite_max_input_rows: int = Field(default=50, ge=1)
     forensics_sprite_max_receipt_rows: int = Field(default=50, ge=1)
@@ -927,6 +940,10 @@ class Settings(BaseSettings):
     # the owner's own proposal top out at 6 words ("General Objective of the
     # Study"); generous headroom above that.
     agreement_heading_max_words: int = 12
+    # A printed line that opens in capitals continues the sentence before it
+    # only when that line ran at least this share of the widest line in the
+    # paragraph, as a wrapped line does (BUG-626).
+    agreement_wrap_line_min_width_ratio: float = Field(default=0.8, gt=0, le=1)
     # difflib.SequenceMatcher ratio above which two statements are treated as
     # the same restated objective/finding (ticket edge case: Ch1 vs Ch3
     # wording drift) rather than two distinct ones.
@@ -1200,6 +1217,24 @@ class Settings(BaseSettings):
     # match of the pattern in the recorded text ("2024-2025") is its start.
     reuse_school_year_start_month: int = Field(default=8, ge=1, le=12)
     reuse_school_year_pattern: str = r"(?:19|20)\d{2}"
+    reuse_literal_enabled: bool = True
+    reuse_literal_min_words: int = Field(default=40, ge=2)
+    reuse_literal_probe_words: int = Field(default=8, ge=1)
+    reuse_literal_probe_stride: int = Field(default=16, ge=1)
+    reuse_literal_max_probes: int = Field(default=64, ge=1)
+    reuse_literal_passage_max_chars: int = Field(default=32768, ge=1)
+    reuse_literal_candidate_max_chars: int = Field(default=65536, ge=1)
+    reuse_literal_candidate_limit: int = Field(default=64, ge=1)
+    reuse_literal_span_limit: int = Field(default=16, ge=1)
+    reuse_literal_dedup_work_limit: int = Field(default=2000000, ge=1)
+    reuse_literal_token_work_limit: int = Field(default=2000000, ge=1)
+    reuse_literal_query_timeout_ms: int = Field(default=2000, ge=1)
+    reuse_literal_max_queries: int = Field(default=128, ge=1)
+    reuse_literal_time_budget_seconds: float = Field(default=8.0, gt=0, allow_inf_nan=False)
+    reuse_quotation_policy_file: str | None = None
+    reuse_source_read_max_bytes: int = Field(default=2097152, ge=1)
+    reuse_source_cache_max_bytes: int = Field(default=16777216, ge=1)
+    reuse_source_cache_max_entries: int = Field(default=16, ge=1)
 
     # --- Library (V-066, F7.1/F7.2 surfaces) -----------------------------------
     # How many chapters' worth of passage excerpt the library shows for a
@@ -1456,6 +1491,9 @@ class Settings(BaseSettings):
         "forensics_sprite_policy_file",
         "forensics_percentage_policy_file",
         "reuse_same_work_names_file",
+        "forensics_table_context_file",
+        "forensics_prose_mean_policy_file",
+        "reuse_quotation_policy_file",
         mode="before",
     )
     @classmethod
@@ -1467,6 +1505,12 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _weight_importance_ratios_are_ordered(self) -> "Settings":
+        if (
+            self.reuse_literal_probe_words > self.reuse_literal_min_words
+            or self.reuse_literal_probe_stride
+            > self.reuse_literal_min_words - self.reuse_literal_probe_words + 1
+        ):
+            raise ValueError("literal probes must cover the configured minimum contiguous span")
         if (
             2 * (self.pipeline_claim_renew_seconds + self.pipeline_coordination_timeout_seconds)
             >= self.pipeline_claim_stale_seconds

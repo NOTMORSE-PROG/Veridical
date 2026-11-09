@@ -60,7 +60,11 @@ def test_percentages_within_tolerance_no_flag():
 
 
 def test_percentages_beyond_tolerance_flagged_low_severity():
-    stats = [_pct(40.0, "40", group_label="A"), _pct(55.0, "55", group_label="B")]
+    stats = [
+        _pct(40.0, "40", group_label="A"),
+        _pct(55.0, "55", group_label="B"),
+        _pct(100.0, "100", group_label="Total"),
+    ]
     flags = evaluate_percentage_sums(stats)
     assert len(flags) == 1
     assert flags[0].severity == FlagSeverity.low
@@ -112,6 +116,7 @@ def test_different_tables_evaluated_independently():
         _pct(60.0, "60", anchor="p. 1", group_label="B"),  # sums to 100, fine
         _pct(40.0, "40", anchor="p. 2", group_label="C"),
         _pct(55.0, "55", anchor="p. 2", group_label="D"),  # sums to 95, off
+        _pct(100.0, "100", anchor="p. 2", group_label="Total"),
     ]
     flags = evaluate_percentage_sums(stats)
     assert len(flags) == 1
@@ -159,13 +164,14 @@ def test_distribution_with_frequencies_summing_to_104_is_flagged():
             ["Agree", "10", "25%"],
             ["Disagree", "10", "25%"],
             ["Strongly disagree", "10", "25%"],
+            ["Total", "40", "100%"],
         ]
     )
     flags = evaluate_percentage_sums(stats, tables=[table])
     assert len(flags) == 1 and flags[0].detail["total"] == 104.0
 
 
-def test_frequencies_that_reproduce_the_shares_make_a_short_sum_checkable():
+def test_frequencies_alone_cannot_establish_an_exhaustive_distribution():
     table, stats = _table_stats(
         [
             ["Year level", "f", "%"],
@@ -175,9 +181,10 @@ def test_frequencies_that_reproduce_the_shares_make_a_short_sum_checkable():
             ["Fourth", "40", "30%"],
         ]
     )
-    # 90% in total, but the counts say the shares should be 10/20/30/40.
-    flags = evaluate_percentage_sums(stats, tables=[table])
-    assert len(flags) == 1 and flags[0].detail["whole_basis"] == "frequencies_match"
+    # Matching most frequencies does not establish that no category was omitted.
+    records = []
+    flags = evaluate_percentage_sums(stats, tables=[table], assessment_records=records)
+    assert not flags and records[0]["state"] == "unassessed"
 
 
 def test_independent_rates_stay_silent_in_the_reviewed_shapes():

@@ -38,7 +38,53 @@ def found_line(scope: AgreementScopeOut) -> str | None:
         if results == 0
         else f"{results} possible {_plural(results, 'result', 'results')}"
     )
+    extracted, set_aside = scope.n_objectives_extracted, scope.n_objectives_set_aside
+    if extracted is not None and set_aside:
+        # BUG-639: what was found, then what was kept and set aside, so the
+        # count matches the objectives listed.
+        e = f"{extracted} possible {_plural(extracted, 'objective', 'objectives')}"
+        return (
+            f"Found {e} and {r}. Of the objectives, {objectives} "
+            f"{_plural(objectives, 'was', 'were')} kept to compare and {set_aside} "
+            f"{_plural(set_aside, 'was', 'were')} set aside."
+        )
     return f"Found {o} and {r}."
+
+
+def objective_set_aside_lines(scope: AgreementScopeOut) -> list[str]:
+    """BUG-639: one sentence per part of the paper objectives were set aside
+    from, or why none was; nothing for a run saved before it recorded them."""
+    copy = agreement_scope_copy()
+    if scope.n_objectives_kept_despite_role:
+        return [copy["objectives_kept_despite_role"].replace("{n}", str(scope.n_objectives or 0))]
+    if scope.objectives_section_identified is False:
+        return [copy["objectives_not_identified"]]
+    roles = scope.objectives_set_aside_by_role
+    if not roles:
+        return [copy["objectives_set_aside_unlisted"]] if scope.n_objectives_set_aside else []
+    folding = copy["role_folding"]
+    fold = len(roles) >= folding["fold_at"]
+    lines = []
+    for item in roles[: folding["shown"]] if fold else roles:
+        place = (
+            copy["roles"].get(item.role, [""])[0] or copy["objective_places"].get(item.role) or None
+        )
+        reason = copy["objective_roles"].get(item.role, copy["objective_other"])
+        subject = f"{item.count} possible {_plural(item.count, 'objective', 'objectives')}"
+        verb = _plural(item.count, "was", "were")
+        where = f"the {place}" if place else "another part of the paper"
+        lines.append(
+            f"{subject} from {where} {verb} set aside, because that part of a paper usually "
+            f"{reason}."
+            if place
+            else f"{subject} from {where} {verb} set aside, because that part {reason}."
+        )
+    if fold:
+        rest = sum(item.count for item in roles[folding["shown"] :])
+        lines.append(
+            f"{rest} more {_plural(rest, 'was', 'were')} set aside from other parts of the paper."
+        )
+    return lines
 
 
 def set_aside_lines(scope: AgreementScopeOut) -> list[str]:
@@ -100,71 +146,24 @@ def outcome_lines(
     compared: int | None,
     interrupted: bool = False,
 ) -> list[str]:
-    """The comparison's outcome for the PDF. The compared count is coverage,
-    never a count of agreeing pairs."""
-    if compared is None:
-        # With no objectives or no results, nothing could have been compared.
-        if scope.n_objectives == 0 or scope.n_results == 0:
-            return [
-                _nothing_compared(scope),
-                "This does not mean the objectives and results agree.",
-            ]
-        lines = ["This report did not record how many pairs were compared."]
-        if findings:
-            lines.append(
-                f"It found {findings} possible "
-                f"{_plural(findings, 'inconsistency', 'inconsistencies')}, listed under Findings."
-            )
-        if undecided:
-            lines.append(
-                f"{undecided} {_plural(undecided, 'pair', 'pairs')} could not be decided; "
-                f"{_plural(undecided, 'it is', 'they are')} listed under Pairs to read yourself."
-            )
-        return lines
+    """Record coverage and leads independently; unresolved pairs may be local."""
+    copy = agreement_scope_copy()
+    lines = [
+        copy["comparison_unknown"]
+        if compared is None
+        else copy["compared_count"].format(n=compared)
+    ]
     if compared == 0:
-        return [_nothing_compared(scope), "This does not mean the objectives and results agree."]
-    pairs = f"{compared} {_plural(compared, 'pair', 'pairs')}"
-    base = (
-        f"The check was interrupted. Among the {pairs} it compared before then"
-        if interrupted
-        else f"Among the {pairs} VERIDICAL matched"
-    )
-    if findings > 0:
-        lines = [
-            f"{base}, the comparison found {findings} possible "
-            f"{_plural(findings, 'inconsistency', 'inconsistencies')}. "
-            f"{_plural(findings, 'It is', 'They are')} listed under Findings."
-        ]
-        if undecided > 0:
-            lines.append(
-                f"{undecided} other {_plural(undecided, 'pair', 'pairs')} could not be decided. "
-                f"{_plural(undecided, 'It is', 'They are')} listed under Pairs to read yourself."
-            )
-    elif undecided == 0:
-        lines = [f"{base}, the comparison found no possible inconsistency."]
-    elif undecided >= compared:
-        # Interrupted, the outcome still names the interruption here.
-        lead = "The check was interrupted. " if interrupted else ""
-        which = "it compared before then" if interrupted else "VERIDICAL matched"
-        lines = [
-            (
-                f"{lead}The comparison could not decide on the one pair {which}, so it makes "
-                "no finding. The pair is listed under Pairs to read yourself."
-            )
-            if compared == 1
-            else (
-                f"{lead}The comparison could not decide on any of the {pairs} {which}, so it "
-                "makes no finding. The pairs are listed under Pairs to read yourself."
-            )
-        ]
-    else:
-        lines = [
-            f"{base}, the comparison found no possible inconsistency in the pairs it could decide.",
-            f"{undecided} {_plural(undecided, 'pair', 'pairs')} could not be decided. "
-            f"{_plural(undecided, 'It is', 'They are')} listed under Pairs to read yourself.",
-        ]
+        lines.extend([_nothing_compared(scope), copy["no_agreement_inference"]])
+    if findings:
+        label = copy["review_lead"] if findings == 1 else copy["review_leads"]
+        lines.append(f"{findings} {label}. Listed under Findings.")
+    elif compared is not None and compared > 0:
+        lines.append(copy["no_review_leads"])
+    if undecided:
+        lines.append(copy["unresolved_count"].format(n=undecided))
     if interrupted:
-        lines.append(agreement_scope_copy()["interrupted_tail"])
+        lines.extend([copy["interrupted"], copy["interrupted_tail"]])
     return lines
 
 
@@ -183,13 +182,11 @@ def scope_paragraphs(
         scope, findings=findings, undecided=undecided, compared=compared, interrupted=interrupted
     ):
         lines.append(" ".join(outcome))
-    # With pairs compared, the outcome already names the interruption; with
-    # every pair skipped, the nothing-compared reason does.
-    if interrupted and not compared and not (compared == 0 and scope.n_pairs_skipped):
-        lines.append(f"{copy['interrupted']} {copy['interrupted_tail']}")
     found = " ".join(line for line in (found_line(scope), matched_line(scope)) if line)
     if found:
         lines.append(found)
+    if objectives := objective_set_aside_lines(scope):
+        lines.append(" ".join(objectives))
     setaside = set_aside_lines(scope)
     if scope.results_section_identified is False:
         # No section was found, so nothing was set aside by its part; only
@@ -208,17 +205,5 @@ def scope_paragraphs(
 
 
 def _nothing_compared(scope: AgreementScopeOut) -> str:
-    """Why no pair was compared, said only as far as the record shows it."""
-    if scope.n_pairs_skipped:
-        return "The check was interrupted before it compared any pair, so it makes no finding."
-    if scope.n_objectives == 0:
-        return "No objectives were found, so nothing was compared and the check makes no finding."
-    if scope.n_results == 0:
-        return "No results were left to compare, so the check makes no finding."
-    if scope.n_results_set_aside is None or scope.n_results_too_short is None:
-        return "No pair was compared, so the check makes no finding."
-    if scope.n_results is not None and scope.n_results <= (
-        scope.n_results_set_aside + scope.n_results_too_short
-    ):
-        return "No results were left to compare, so the check makes no finding."
-    return "No result was close enough to an objective to compare, so the check makes no finding."
+    """A zero comparison count does not establish a failed candidate match."""
+    return agreement_scope_copy()["no_ai_comparison"]

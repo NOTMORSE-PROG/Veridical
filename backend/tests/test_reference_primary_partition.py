@@ -99,7 +99,7 @@ async def test_primary_metadata_runs_without_linkage_or_absence_claims(monkeypat
     assert result.detail["claim_support_inventory_status"] == "not_captured"
 
 
-def test_document_body_is_available_but_unknown_passage_inventory_stays_withheld(monkeypatch):
+def test_body_passages_are_compared_while_the_protected_tail_is_never_matched(monkeypatch):
     from app.checks.reuse import embed
     from app.config import Settings
 
@@ -116,4 +116,60 @@ def test_document_body_is_available_but_unknown_passage_inventory_stays_withheld
     assert inputs and all(
         "Which part" not in text and "secondary appendix" not in text for text in inputs
     )
-    assert embed._passage_drafts(extraction, Settings(_env_file=None)) is None
+    drafts = embed._passage_drafts(extraction, Settings(_env_file=None))
+    # The body is compared; text whose membership in the list is unresolved
+    # is either left out or tagged as reference list, never matched as body.
+    assert drafts is not None
+    assert any("The body describes" in d["text"] and not d["is_reference_list"] for d in drafts)
+    for draft in drafts:
+        if "secondary appendix" in draft["text"] or "Which part" in draft["text"]:
+            assert draft["is_reference_list"]
+
+
+def test_a_chapter_structured_thesis_keeps_its_body_passages_beside_a_protected_tail():
+    """The same unresolved appendix in a thesis with a chapter tree: its body
+    passages are compared, and the appendix text is tagged as reference list."""
+    from app.checks.reuse import embed
+    from app.config import Settings
+
+    extraction = source(secondary=True)
+    extraction.section_tree = SectionTree(
+        source="heuristics",
+        nodes=[
+            SectionNode(title="CHAPTER 1", level=1, page=1),
+            SectionNode(title="REFERENCES", level=1, page=2),
+            SectionNode(title="APPENDIX A", level=1, page=3),
+        ],
+    )
+    assert select_references(
+        extraction, load_patterns(Settings(_env_file=None).ingest_patterns_file)
+    ).membership_issues
+    drafts = embed._passage_drafts(extraction, Settings(_env_file=None))
+    assert drafts is not None
+    assert any("The body describes" in d["text"] and not d["is_reference_list"] for d in drafts)
+    tail = [d for d in drafts if "secondary appendix" in d["text"]]
+    assert tail and all(d["is_reference_list"] for d in tail)
+
+
+def test_a_library_record_with_a_protected_tail_is_measured_and_its_tail_tagged():
+    """The Library side of BUG-622: the record's passages are prepared
+    ("measured", not refused), and the unresolved tail is stored tagged."""
+    from app.checks.reuse import embed
+    from app.config import Settings
+
+    extraction = source(secondary=True)
+    extraction.section_tree = SectionTree(
+        source="heuristics",
+        nodes=[
+            SectionNode(title="CHAPTER 1", level=1, page=1),
+            SectionNode(title="REFERENCES", level=1, page=2),
+            SectionNode(title="APPENDIX A", level=1, page=3),
+        ],
+    )
+    inventory = embed.compute_library_passage_embeddings(extraction, Settings(_env_file=None))
+    assert inventory.inventory_state == "measured"
+    tail = [p for p in inventory.passages if "secondary appendix" in p.text]
+    assert tail and all(p.is_reference_list for p in tail)
+    assert any(
+        "The body describes" in p.text and not p.is_reference_list for p in inventory.passages
+    )

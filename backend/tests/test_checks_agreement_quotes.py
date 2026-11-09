@@ -44,7 +44,7 @@ def _verdict(objective_quote, finding_quote):
         index=0,
         verdict="contradictory",
         reasoning="r",
-        reason_category="stated_target_missed",
+        reason_category="incompatible_descriptive_claims",
         objective_quote=objective_quote,
         finding_quote=finding_quote,
     )
@@ -83,18 +83,18 @@ def test_a_quote_the_manuscript_does_not_contain_is_refused(finding, quote):
 
 def test_the_flag_shows_the_manuscript_words_not_the_model_copy():
     problem, quotes = _check(
-        "To build an envi- ronmental “smart” monitor for the campus.",
+        "To build a campus monitor. The envi- ronmental “smart” monitor was implemented.",
         "The environmental monitor was not built in time.",
-        'build an environmental "smart" monitor',
+        'environmental "smart" monitor was implemented',
         "the environmental monitor was not built",
     )
     assert problem is None
-    assert quotes.objective == "build an envi- ronmental “smart” monitor"
+    assert quotes.objective == "envi- ronmental “smart” monitor was implemented"
     assert quotes.finding == "The environmental monitor was not built"
     assert quotes.finding_source == "finding"
 
 
-def test_a_finding_quote_from_the_surrounding_text_is_recorded_as_such():
+def test_a_finding_quote_outside_the_selected_statement_is_withheld():
     context = PairContext(before="", after="The kiosk was not deployed to any campus.")
     problem, quotes = _check(
         "To deploy the kiosk to every campus.",
@@ -103,7 +103,7 @@ def test_a_finding_quote_from_the_surrounding_text_is_recorded_as_such():
         "kiosk was not deployed to any campus",
         context,
     )
-    assert problem is None and quotes.finding_source == "text_after"
+    assert problem == "finding_quote_outside_selected_statement" and quotes is None
 
 
 def test_a_shared_technology_word_does_not_hide_two_different_systems():
@@ -119,15 +119,18 @@ def test_a_shared_technology_word_does_not_hide_two_different_systems():
 
 def test_a_component_technology_does_not_count_as_another_system():
     problem, _ = _check(
-        "To build AgriTrack, which sends flood alerts to farmers.",
+        "To build AgriTrack. The flood alert module was implemented.",
         "The LoRa gateway did not send flood alerts to farmers.",
-        "sends flood alerts to farmers",
+        "flood alert module was implemented",
         "did not send flood alerts to farmers",
     )
     assert problem is None
 
 
-LOGIN_INTENT = "To build a login module using school credentials."
+LOGIN_INTENT = (
+    "To build a login module using school credentials. "
+    "The login module was implemented using school credentials."
+)
 LOGIN_OUTCOME = "The login module was not implemented due to time constraints."
 ANSWER = {
     "verdicts": [
@@ -135,8 +138,8 @@ ANSWER = {
             "index": 0,
             "verdict": "contradictory",
             "reasoning": "Not implemented.",
-            "reason_category": "objective_reported_not_done",
-            "objective_quote": "build a login module",
+            "reason_category": "incompatible_descriptive_claims",
+            "objective_quote": "The login module was implemented",
             "finding_quote": "The login module was not implemented",
         }
     ]
@@ -220,7 +223,16 @@ def test_the_context_comes_from_the_finding_own_page_not_an_earlier_repeat():
 
 
 def _verdict_only(verdict):
-    return {"verdicts": [{"index": 0, "verdict": verdict, "reasoning": "r"}]}
+    return {
+        "verdicts": [
+            {
+                "index": 0,
+                "verdict": verdict,
+                "reasoning": "r",
+                "reported_attainment": verdict if verdict in ("unmet", "partial") else "unknown",
+            }
+        ]
+    }
 
 
 async def _majority_run(*answers, majority=True, confirmations=1):
@@ -244,14 +256,14 @@ async def _majority_run(*answers, majority=True, confirmations=1):
 async def test_majority_of_three_stops_once_two_readings_agree():
     result, llm = await _majority_run(ANSWER)
     assert len(llm.calls) == 2
-    assert [f.detail["kind"] for f in result.flags] == ["agreement_contradictory"]
+    assert [f.detail["kind"] for f in result.flags] == ["agreement_factual_conflict"]
 
 
 async def test_majority_of_three_lets_a_third_reading_settle_a_disagreement():
     result, llm = await _majority_run(_verdict_only("consistent"), ANSWER)
     assert len(llm.calls) == 3
     assert llm.calls[1] != llm.calls[2], "every reading is a different request"
-    assert [f.detail["kind"] for f in result.flags] == ["agreement_contradictory"]
+    assert [f.detail["kind"] for f in result.flags] == ["agreement_factual_conflict"]
 
 
 async def test_majority_of_three_withholds_one_answer_out_of_three():

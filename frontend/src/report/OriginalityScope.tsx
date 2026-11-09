@@ -63,6 +63,7 @@ export function OriginalityScope({
         : `Originality and reuse: compared against ${count} stored ${noun} when this check ran, before the Library became a separate collection.`}
     </p>
     <LibraryPassageScope summary={scope.library_passage_indexing} />
+    {!!scope.literal_unassessed_passages && <p className="signal-originality-scope">Short-passage comparison was incomplete for {scope.literal_unassessed_passages} manuscript passages when this check ran. Some shared wording may not be listed.</p>}
     </>
   );
 }

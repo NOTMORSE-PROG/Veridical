@@ -1939,11 +1939,13 @@ async def test_a_section_with_no_passage_evidence_keeps_its_existing_path(sessio
     assert any(not kind.endswith("_passage") for kind in kinds)
 
 
-async def test_a_nearer_topic_match_does_not_hide_the_real_source(session_factory):
+@pytest.mark.parametrize("literal_enabled", [False, True])
+async def test_a_nearer_topic_match_does_not_hide_the_real_source(session_factory, literal_enabled):
     """BUG-620: the nearest Library passage holds every word in another order
     (the same vector, no shared runs); the real source ranks below it. The
     real source is found when the next candidates are tried, and lost when
-    only the nearest is."""
+    only the nearest is tried by the vector route. Independent literal
+    retrieval still finds the copied text with either vector bound."""
     copied = (
         "The clinic queue prototype sent each patient a text message when their turn was "
         "near, and the nurses reported that the waiting room was calmer during the trial "
@@ -1952,7 +1954,12 @@ async def test_a_nearer_topic_match_does_not_hide_the_real_source(session_factor
     tokens = copied.split()
     shuffled = " ".join(tokens[1::2] + tokens[0::2])
     source_text = copied + " Patients also asked for reminders in Filipino as well as English."
-    settings = get_settings().model_copy(update={"reuse_passage_high_similarity_threshold": 0.5})
+    settings = get_settings().model_copy(
+        update={
+            "reuse_passage_high_similarity_threshold": 0.5,
+            "reuse_literal_enabled": literal_enabled,
+        }
+    )
 
     decoy_id, _ = await _seed_manuscript_and_run(session_factory, group_label="Shuffled")
     await _add_to_library(session_factory, decoy_id, _extraction(shuffled, CH2))
@@ -1984,7 +1991,10 @@ async def test_a_nearer_topic_match_does_not_hide_the_real_source(session_factor
                 ).all()
             )
     assert source_id in found[5] and decoy_id not in found[5]
-    assert source_id not in found[1]
+    if literal_enabled:
+        assert source_id in found[1] and decoy_id not in found[1]
+    else:
+        assert source_id not in found[1]
 
 
 # --- BUG-662: another upload of the same work ---------------------------------
@@ -2618,3 +2628,92 @@ async def test_the_same_file_is_the_same_work_even_when_its_records_disagree(ses
     assert audit["same_work_excluded_ids"] == [record]
     assert audit["same_work_name_rules"]["file"] == "packaged"
     assert len(audit["same_work_name_rules"]["sha256"]) == 64
+
+
+def _thesis_with_unresolved_appendix(body_copy: str, tail_copy: str) -> ExtractionResult:
+    """A body page, a clear reference list, then an appendix whose own
+    numbered entry leaves the text after the list unresolved."""
+    blocks = [
+        _block("Chapter 1: Introduction", page=1),
+        _block(body_copy, page=1),
+        _block("REFERENCES", page=2),
+        _block("Reyes, J. (2024). First complete source. Journal of Examples.", page=2),
+        _block("Santos, M. (2023). Second complete source. Journal of Examples.", page=2),
+        _block("APPENDIX A", page=3),
+        _block("[1] Cruz, A. (2022). A secondary appendix source. Example Journal.", page=3),
+        _block(tail_copy, page=3),
+    ]
+    return ExtractionResult(
+        page_count=3,
+        anchor_kind="page",
+        image_only=False,
+        text_chars=sum(len(b.text) for b in blocks),
+        blocks=blocks,
+        images=[],
+        section_tree=SectionTree(
+            source="heuristics",
+            nodes=[
+                SectionNode(title="Chapter 1: Introduction", level=1, page=1),
+                SectionNode(title="REFERENCES", level=1, page=2),
+                SectionNode(title="APPENDIX A", level=1, page=3),
+            ],
+        ),
+    )
+
+
+async def test_a_copy_in_the_body_is_raised_but_one_in_the_unresolved_appendix_is_not(
+    session_factory,
+):
+    """BUG-622 end to end: with the text after the reference list unresolved,
+    the body is compared and its copied passage raised; the same kind of copy
+    inside the unresolved appendix is tagged and never matched."""
+    body_copy = (
+        "The clinic booking prototype reduced the average waiting time at the front desk "
+        "from forty minutes to twelve minutes during the four-week pilot with patients."
+    )
+    tail_copy = (
+        "The interview guide asked each respondent to describe how they booked a clinic "
+        "appointment before the system existed and what they found most frustrating."
+    )
+    library = _extraction(body_copy, tail_copy)
+    own = _thesis_with_unresolved_appendix(body_copy, tail_copy)
+    source_id, _ = await _seed_manuscript_and_run(session_factory, group_label="Clinic source")
+    await _add_to_library(session_factory, source_id, library)
+    own_id, own_run = await _seed_manuscript_and_run(session_factory, group_label="Clinic copy")
+    async with session_factory() as session:
+        result = await _run_with_saved_source(session, own_id, own_run, own, get_settings())
+        rows = (
+            await session.execute(
+                text(
+                    "SELECT detail->>'kind' AS kind, page_anchor FROM flag "
+                    "WHERE check_result_id = :id"
+                ),
+                {"id": result.id},
+            )
+        ).all()
+    passage_pages = {row.page_anchor for row in rows if row.kind.endswith("_passage")}
+    assert result.detail["coverage_reason"] == "reference_membership_partial"
+    assert result.detail["pages_not_compared"] == [3]
+    assert "p. 1" in passage_pages and "p. 3" not in passage_pages
+
+
+async def test_both_left_out_regions_are_named_when_both_apply(session_factory, monkeypatch):
+    """An unclear list end and unresolved text after the list can apply to one
+    thesis; the pages of both are named, not only those after the unclear end."""
+    from app.checks.reuse import service as reuse_service
+    from app.ingest.references import RegionNotAssessed
+
+    monkeypatch.setattr(
+        reuse_service,
+        "reference_region_not_assessed",
+        lambda extraction, selection: RegionNotAssessed(start="p. 2", pages=[2]),
+    )
+    own = _thesis_with_unresolved_appendix(
+        "The clinic booking prototype shortened the queue at the front desk.",
+        "The interview guide asked each respondent how they booked an appointment.",
+    )
+    own_id, own_run = await _seed_manuscript_and_run(session_factory, group_label="Both regions")
+    async with session_factory() as session:
+        result = await _run_with_saved_source(session, own_id, own_run, own, get_settings())
+    assert result.detail["coverage_reason"] == "reference_membership_partial"
+    assert result.detail["pages_not_compared"] == [2, 3]

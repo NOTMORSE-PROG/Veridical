@@ -30,8 +30,9 @@ function show(undetermined: UndeterminedPairsOut | null, old: FlagSummaryOut[] =
 
 it("states the undecided pairs once, collapsed, without calling them a problem", () => {
   show(pairs(3));
-  expect(screen.getByText("VERIDICAL could not decide on 3 of 20 objective and result pairs it compared.")).toBeInTheDocument();
-  expect(screen.getByText(/This is not a problem found in the manuscript/)).toBeInTheDocument();
+  expect(screen.getByText("3 selected pairs left unresolved")).toBeInTheDocument();
+  expect(screen.getByText("Pairs compared with AI: 20.")).toBeInTheDocument();
+  expect(screen.getByText(/These pairs are not manuscript findings and do not change readiness/)).toBeInTheDocument();
   const toggle = screen.getByRole("button", { name: "Show 3 pairs" });
   expect(toggle).toHaveAttribute("aria-expanded", "false");
   expect(screen.queryByText("Pairs to read yourself")).not.toBeInTheDocument();
@@ -44,7 +45,7 @@ it("opens to a numbered list with unique location links and the recorded reason"
   const list = screen.getByRole("list");
   expect(within(list).getAllByRole("listitem")).toHaveLength(2);
   expect(screen.getByRole("link", { name: /Open result location, .*pair 2 of 2/ })).toBeInTheDocument();
-  expect(screen.getAllByText("Reason recorded by the check: The texts do not say.")).toHaveLength(2);
+  expect(screen.getAllByText("Comparison status not recorded: The texts do not say.")).toHaveLength(2);
 });
 
 it("pages a long list and says how many are shown", () => {
@@ -59,14 +60,69 @@ it("pages a long list and says how many are shown", () => {
 it("folds saved rows from older runs into the same list, each linking to its record", () => {
   show(null, [legacy(41)]);
   // That run saved no compared count, so none is invented from the list.
-  expect(screen.getByText("VERIDICAL could not decide on 1 objective and result pair.")).toBeInTheDocument();
+  expect(screen.getByText("1 selected pair left unresolved")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Show the pair" }));
   expect(screen.getByRole("link", { name: "Review this pair, pair 1 of 1" })).toHaveAttribute("href", "/flags/41");
+  expect(screen.getByText("The number of pairs compared with AI was not recorded.")).toBeInTheDocument();
+});
+
+it("keeps a pair declined before comparison separate from actual AI comparisons", () => {
+  show({ ...pairs(1), compared_count: 0, locally_unassessed_count: 1 });
+  expect(screen.getByText("Pairs compared with AI: 0.")).toBeInTheDocument();
+  expect(screen.getByText("Pairs left unassessed before AI comparison: 1.")).toBeInTheDocument();
+  expect(screen.queryByText(/of 1.*it compared/)).not.toBeInTheDocument();
 });
 
 it("shows nothing when there is nothing undecided", () => {
   const { container } = show(pairs(0));
   expect(container).toBeEmptyDOMElement();
+});
+
+it.each([false, true])("retains independent comparison and local-abstention counts on shared=%s", (shared) => {
+  const saved = pairs(2);
+  saved.compared_count = 2;
+  saved.locally_unassessed_count = 1;
+  saved.pairs[0] = { ...saved.pairs[0], comparison_method: "phase_guard", reason: "Different releases." };
+  saved.pairs[1] = { ...saved.pairs[1], comparison_method: "generation", reason: "The subject is unclear." };
+  render(<MemoryRouter><UndeterminedPairs shared={shared} checkRunId={7} undetermined={saved} legacy={[]} /></MemoryRouter>);
+  expect(screen.getByText("Pairs compared with AI: 2.")).toBeInTheDocument();
+  expect(screen.getByText("Pairs left unassessed before AI comparison: 1.")).toBeInTheDocument();
+  expect(screen.getByText("2 selected pairs left unresolved")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: shared ? "Show the objectives" : "Show 2 pairs" }));
+  expect(screen.getByText("Left unassessed before AI comparison: Different releases.")).toBeInTheDocument();
+  expect(screen.getByText("AI comparison was inconclusive: The subject is unclear.")).toBeInTheDocument();
+  if (shared) {
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+    expect(screen.getAllByText("Selected result: 1")).toHaveLength(2);
+    expect(screen.queryByText(/Compared with/)).not.toBeInTheDocument();
+  }
+});
+
+it("keeps a zero AI count and a selected local pair in the shared report", () => {
+  const saved = { ...pairs(1), compared_count: 0, locally_unassessed_count: 1 };
+  saved.pairs[0].comparison_method = "phase_guard";
+  render(<MemoryRouter><UndeterminedPairs shared checkRunId={7} undetermined={saved} legacy={[]} /></MemoryRouter>);
+  expect(screen.getByText("Pairs compared with AI: 0.")).toBeInTheDocument();
+  expect(screen.getByText("Pairs left unassessed before AI comparison: 1.")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Show the objective" }));
+  expect(screen.getByText("Selected result: 1")).toBeInTheDocument();
+  expect(screen.queryByRole("link")).not.toBeInTheDocument();
+  expect(screen.queryByText(/close enough|Compared with/)).not.toBeInTheDocument();
+});
+
+it("does not invent a local count when that count was not recorded", () => {
+  show({ ...pairs(1), compared_count: 2, locally_unassessed_count: null });
+  expect(screen.getByText("Pairs compared with AI: 2.")).toBeInTheDocument();
+  expect(screen.queryByText(/Pairs left unassessed before AI comparison/)).not.toBeInTheDocument();
+});
+
+it("shows recovered legacy statements with unknown comparison status and no private shared links", () => {
+  const saved = new Map([[41, { intent_text: "Legacy objective", intent_anchor: "p. 3", outcome_text: "Legacy result", outcome_anchor: "p. 5" }]]);
+  render(<MemoryRouter><UndeterminedPairs shared checkRunId={7} undetermined={null} legacy={[legacy(41)]} legacyPairs={saved} /></MemoryRouter>);
+  fireEvent.click(screen.getByRole("button", { name: "Show the objective" }));
+  expect(screen.getByText("Comparison status not recorded.")).toBeInTheDocument();
+  expect(screen.getByText("“Legacy result”")).toBeInTheDocument();
+  expect(screen.queryByRole("link")).not.toBeInTheDocument();
 });
 
 it("recognises only agreement rows that could not be decided as legacy undecided rows", () => {

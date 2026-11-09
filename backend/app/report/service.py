@@ -36,8 +36,9 @@ from app.checks.reuse.query import (
     passage_archive_size,
     query_similar_passages,
 )
+from app.checks.reuse.scope import literal_unassessed_count
 from app.checks.reuse.service import NO_TEXT_NOTE
-from app.checks.reuse.source import passage_match_supported
+from app.checks.reuse.source import SourceCache, passage_match_supported
 from app.checks.support import (
     SOURCE_SCOPE_POLICY_VERSION,
     later_scope_note,
@@ -1055,6 +1056,9 @@ async def report_out_for_check_run(
         compared = originality_detail.get("archive_size_n")
         ran = originality_detail.get("comparison_ran", "note" not in originality_detail)
         originality_scope = OriginalityScopeOut(
+            literal_unassessed_passages=literal_unassessed_count(
+                originality_detail.get("literal_retrieval")
+            ),
             library_passage_indexing=(
                 summary.model_dump(mode="json")
                 if (
@@ -1660,7 +1664,7 @@ async def list_reuse_passage_matches(
             else m
             for m in excluded
         ]
-    source_cache = {}
+    source_cache = SourceCache()
     supported_excluded = []
     for match in excluded:
         if await passage_match_supported(session, manuscript.id, match, settings, source_cache):
@@ -1723,6 +1727,7 @@ async def list_reuse_passage_matches(
                     context_words_each_side=settings.reuse_passage_context_words,
                     similarity=round(m.similarity, 3),
                     level=m.level,
+                    literal_overlap=m.literal_overlap,
                     excluded_reason=reasons,
                 )
             )
@@ -1734,6 +1739,7 @@ async def list_reuse_passage_matches(
         passage_archive_size_n=query_result.passage_archive_size_n,
         matches=results,
         n_source_candidates_withheld=withheld,
+        literal_retrieval=query_result.literal_scope,
     )
 
 

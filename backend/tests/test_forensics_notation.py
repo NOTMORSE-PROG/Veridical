@@ -105,10 +105,31 @@ def test_observed_unsupported_notation_is_not_not_applicable():
     assert coverage["coverage_reason"] == "statistical_notation_unassessed"
     assert coverage["analysis_coverage"] == "unsupported"
     assert coverage["statistical_notation_unassessed"] is True
-    assert coverage["statistical_notation_coverage"]["version"] == "v1"
+    assert coverage["statistical_notation_coverage"]["version"] == "v3"
     items = coverage["statistical_notation_coverage"]["items"]
     assert items and all(
         NARRATIVE[item["source_start"] : item["source_end"]] == item["raw_text"] for item in items
+    )
+
+
+@pytest.mark.parametrize(
+    "prose",
+    [
+        "Seven respondents rated one item. The reported mean was 4.10.",
+        "Online accounted for 60% and paper accounted for 50%.",
+        "Selected categories only: online accounted for 60% and paper accounted for 30%.",
+    ],
+)
+def test_unsupported_descriptive_prose_keeps_neutral_source_bound_coverage(prose):
+    result = _compute_forensics_findings(document(prose))
+    assert result.outcome == ResultOutcome.escalated
+    assert result.n_descriptive == 0 and result.flag_drafts == []
+    coverage = result.image_coverage
+    assert coverage["analysis_coverage"] == "unsupported"
+    items = coverage["statistical_notation_coverage"]["items"]
+    assert items and all(item["anchor"] == "p. 7" for item in items)
+    assert all(
+        prose[item["source_start"] : item["source_end"]] == item["raw_text"] for item in items
     )
 
 

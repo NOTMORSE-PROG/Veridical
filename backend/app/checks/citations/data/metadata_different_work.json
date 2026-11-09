@@ -1,0 +1,37 @@
+{
+  "_source": "BUG-664 (2026-11-01). When an exact-DOI comparison finds a different title, how little of the title it must share before the entry is said to lead to a different work. Measured on the 20 valid F5 lane entries compared with another entry's DOI record: shared title words over the shorter title's words were 0.00 to 0.21. Every drift case, seeded (year off by one, subtitle dropped) or in production (17 stored mismatch findings, 5 references), shared 1.0. The threshold sits well inside that gap, so a DOI typo that lands on a paper in the same field is still more likely to stay a Low mismatch than to be called a different work.",
+  "max_title_word_overlap": 0.5,
+  "_min_title_words_note": "Titles with fewer content words than this never establish a different work: a short registry title says too little.",
+  "min_title_words": 3,
+  "_ignored_words_note": "Words that carry no subject. They are left out of the overlap, so two unrelated titles do not look alike through 'the' and 'of'.",
+  "ignored_words": [
+    "a",
+    "an",
+    "the",
+    "of",
+    "and",
+    "or",
+    "in",
+    "on",
+    "for",
+    "to",
+    "with",
+    "by",
+    "at",
+    "from",
+    "as",
+    "its",
+    "their",
+    "using",
+    "based",
+    "via"
+  ],
+  "_author_note": "A different work needs the first author to differ as well, as the registry records it (BUG-664 review): an author the registry does not record, cannot separate, or supports as a sequence keeps the finding a Low mismatch, and so does a name variant that shares a surname word once accents are left off ('Dela Cruz' and 'Cruz', 'García' and 'Garcia'). The statuses that count as differing:",
+  "author_statuses": [
+    "differs"
+  ],
+  "severity": "med",
+  "reason": "The DOI in this entry appears to lead to a different work ('{title}', {first_author}, {year}). Possible typo in the DOI; please check the entry. Source existence does not establish claim support.",
+  "unknown_author": "author not recorded",
+  "unknown_year": "year not recorded"
+}

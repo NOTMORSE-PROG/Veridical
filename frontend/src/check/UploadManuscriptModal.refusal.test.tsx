@@ -23,8 +23,14 @@ function serve(manuscriptId: number | null) {
   }));
 }
 
-async function upload() {
-  await renderWithUploadProviders(<BackgroundUploadsProvider><UploadManuscriptModal onClose={vi.fn()} onUploadSuccess={vi.fn()} /></BackgroundUploadsProvider>);
+function UploadFlow({ background }: { background: boolean }) {
+  const [show, setShow] = useState(true);
+  const dialog = show ? <UploadManuscriptModal onClose={() => setShow(false)} onUploadSuccess={vi.fn()} /> : null;
+  return background ? <BackgroundUploadsProvider>{dialog}</BackgroundUploadsProvider> : dialog;
+}
+
+async function upload(background: boolean) {
+  await renderWithUploadProviders(<UploadFlow background={background} />);
   fireEvent.change(document.querySelector('input[type="file"]') as HTMLInputElement,
     { target: { files: [new File(["%PDF"], "OnlineRetail-KSA-PhD-2014.pdf", { type: "application/pdf" })] } });
   fireEvent.click(screen.getByRole("button", { name: "Upload manuscript" }));
@@ -34,21 +40,26 @@ describe("a file the server prepared and refused", () => {
   beforeEach(() => { vi.stubEnv("VITE_DIRECT_MANUSCRIPT_UPLOAD_ENABLED", "true"); });
   afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
-  it("shows the server's reason and the kept record, never an unconfirmed result", async () => {
+  it.each([true, false])("shows the server's reason and kept record with background=%s", async background => {
     serve(77);
-    await upload();
-    expect(await screen.findByRole("alert")).toHaveTextContent(REFUSAL);
+    await upload(background);
+    expect(await screen.findByText(REFUSAL)).toBeInTheDocument();
+    if (background) expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    else expect(screen.getByRole("alert")).toHaveTextContent(REFUSAL);
     expect(screen.getByText(/A record of this upload was kept\. Open it in Review Desk to see its state\./)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Open Review Desk" })).toHaveAttribute("href", "/dashboard");
     expect(screen.queryByText(/remain unconfirmed/)).not.toBeInTheDocument();
     expect(screen.queryByText(/could not confirm whether these attempts saved a record/)).not.toBeInTheDocument();
   });
 
-  it("says no record was saved when the server kept none", async () => {
+  it.each([true, false])("says no record was saved when the server kept none with background=%s", async background => {
     serve(null);
-    await upload();
-    expect(await screen.findByRole("alert")).toHaveTextContent(REFUSAL);
+    await upload(background);
+    expect(await screen.findByText(REFUSAL)).toBeInTheDocument();
+    if (background) expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    else expect(screen.getByRole("alert")).toHaveTextContent(REFUSAL);
     expect(screen.getByText("No record of this upload was saved.")).toBeInTheDocument();
     expect(screen.queryByText(/remain unconfirmed/)).not.toBeInTheDocument();
   });
 });
+import { useState } from "react";

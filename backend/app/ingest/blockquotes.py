@@ -88,7 +88,7 @@ def block_quote_block_ids(extraction: ExtractionResult, settings: Settings) -> s
     `references.py`'s `non_reference_blocks` -- callers test membership by
     object identity against `extraction.blocks`."""
     if extraction.anchor_kind != "page":
-        return set()  # DOCX: no bbox, no signal -- honest absence, not a guess
+        return block_quote_ids_in_scope(extraction.blocks, settings)
 
     quote_ids: set[int] = set()
     for start, end in _chapter_spans(extraction):
@@ -113,15 +113,19 @@ def block_quote_ids_in_scope(blocks: list[TextBlock], settings: Settings) -> set
     No geometry means no indentation signal, not proof that text is unquoted.
     Returned identities refer to the supplied views, including source fragments.
     """
+    from app.ingest.quotations import quotation_policy
+
+    styles = quotation_policy(settings.reuse_quotation_policy_file)["paragraph_styles"]
+    styled = {id(block) for block in blocks if (block.paragraph_style or "").casefold() in styles}
     supported = [
         b for b in blocks if not b.is_furniture and b.bbox is not None and b.page is not None
     ]
     if len(supported) < 2:
-        return set()
+        return styled
     # Round to the nearest point to group ordinary PDF rendering jitter.
     rounded = [round(b.bbox[0]) for b in supported]
     body_x0 = Counter(rounded).most_common(1)[0][0]
-    return {
+    return styled | {
         id(b)
         for b, x0 in zip(supported, rounded, strict=True)
         if x0 > body_x0 + settings.block_quote_indent_threshold_points

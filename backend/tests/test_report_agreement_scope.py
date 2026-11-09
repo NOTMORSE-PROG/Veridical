@@ -5,7 +5,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.report.agreement_scope import outcome_lines, scope_paragraphs, set_aside_lines
+from app.report.agreement_scope import (
+    objective_set_aside_lines,
+    outcome_lines,
+    scope_paragraphs,
+    set_aside_lines,
+)
 from app.report.export import _agreement_scope_flowables, _styles
 from app.report.schemas import AgreementScopeOut, IntegrityModuleOut, UndeterminedPairsOut
 
@@ -60,9 +65,7 @@ def test_report_44_says_what_was_covered_and_no_agreeing_count():
     )
     assert "2 results were set aside as too short to compare." in whole
     # The outcome comes first, with the compared count as coverage.
-    assert texts[1] == (
-        "Among the 31 pairs VERIDICAL matched, the comparison found no possible inconsistency."
-    )
+    assert texts[1] == "Pairs compared with AI: 31. No internal agreement review lead was recorded."
     assert "so this check does not change readiness." in whole
     assert "An objective with no matching result is not reported here." in whole
     assert (
@@ -100,10 +103,10 @@ def test_findings_and_undecided_pairs_are_named_where_they_are_listed():
     )
     whole = " ".join(texts)
     assert (
-        "Among the 10 pairs VERIDICAL matched, the comparison found 2 possible "
-        "inconsistencies. They are listed under Findings." in whole
+        "Pairs compared with AI: 10. 2 internal agreement review leads. Listed under Findings."
+        in whole
     )
-    assert "1 other pair could not be decided. It is listed under Pairs to read yourself." in whole
+    assert "Selected pairs left unresolved: 1." in whole
 
 
 def test_an_interrupted_run_says_so():
@@ -120,12 +123,12 @@ def test_an_interrupted_run_says_so():
         )
     )
     assert (
-        "The check was interrupted. Among the 5 pairs it compared before then, the comparison "
-        "found no possible inconsistency. Pairs it did not compare are not treated as passed."
-        in some
+        "Pairs compared with AI: 5. No internal agreement review lead was recorded. "
+        "The check was interrupted before it compared every pair. "
+        "Pairs it did not compare are not treated as passed." in some
     )
     assert some.count("interrupted") == 1
-    # Every compared pair undecided: the outcome still names the interruption.
+    # Equal counts do not establish that every AI comparison was unresolved.
     undecided = " ".join(
         _render(
             scope=skipped,
@@ -133,8 +136,8 @@ def test_an_interrupted_run_says_so():
         )
     )
     assert (
-        "The check was interrupted. The comparison could not decide on any of the 2 pairs it "
-        "compared before then, so it makes no finding." in undecided
+        "Pairs compared with AI: 2. No internal agreement review lead was recorded. "
+        "Selected pairs left unresolved: 2." in undecided
     )
     assert undecided.count("interrupted") == 1
 
@@ -147,7 +150,8 @@ def test_pairs_never_judged_are_not_read_as_nothing_close_enough():
         scope=skipped, undetermined=UndeterminedPairsOut(count=0, compared_count=0, pairs=[])
     )
     whole = " ".join(texts)
-    assert "The check was interrupted before it compared any pair, so it makes no finding." in whole
+    assert "Pairs compared with AI: 0. No pair was compared with AI." in whole
+    assert "The check was interrupted before it compared every pair." in whole
     assert "close enough" not in whole
     assert whole.count("interrupted") == 1
 
@@ -158,11 +162,8 @@ def test_an_injection_warning_is_not_counted_as_an_inconsistency():
         flags=[_flag("agreement_injection_suspected")],
     )
     whole = " ".join(texts)
-    assert (
-        "Among the 8 pairs VERIDICAL matched, the comparison found no possible inconsistency."
-        in whole
-    )
-    assert "1 possible inconsistency" not in whole
+    assert "Pairs compared with AI: 8. No internal agreement review lead was recorded." in whole
+    assert "1 internal agreement review lead" not in whole
 
 
 def test_an_early_exit_run_is_not_called_old_or_a_comparison():
@@ -171,7 +172,8 @@ def test_an_early_exit_run_is_not_called_old_or_a_comparison():
     empty = AgreementScopeOut(n_objectives=0, n_results=0, absence_leads_withheld=True)
     lines = scope_paragraphs(empty, findings=0, undecided=0, compared=0, interrupted=False)
     whole = " ".join(lines)
-    assert "No objectives were found, so nothing was compared" in whole
+    assert "Found no possible objectives and no possible results." in whole
+    assert "No pair was compared with AI." in whole
     assert "made before" not in whole
 
 
@@ -179,9 +181,12 @@ def test_an_unknown_set_aside_count_gives_no_guessed_reason():
     unknown = AgreementScopeOut(
         n_objectives=4, n_results=3, n_results_set_aside=None, n_results_too_short=None
     )
-    assert outcome_lines(unknown, findings=0, undecided=0, compared=0)[0] == (
-        "No pair was compared, so the check makes no finding."
-    )
+    lines = outcome_lines(unknown, findings=0, undecided=0, compared=0)
+    assert lines == [
+        "Pairs compared with AI: 0.",
+        "No pair was compared with AI.",
+        "This does not mean the objectives and results agree.",
+    ]
 
 
 def test_too_short_results_are_still_counted_when_no_results_section_was_found():
@@ -215,9 +220,9 @@ def _scope(**fields):
             3,
             10,
             [
-                "Among the 10 pairs VERIDICAL matched, the comparison found no possible "
-                "inconsistency in the pairs it could decide.",
-                "3 pairs could not be decided. They are listed under Pairs to read yourself.",
+                "Pairs compared with AI: 10.",
+                "No internal agreement review lead was recorded.",
+                "Selected pairs left unresolved: 3.",
             ],
         ),
         (
@@ -226,9 +231,9 @@ def _scope(**fields):
             1,
             1,
             [
-                "The comparison could not decide on the one pair VERIDICAL matched, so it makes "
-                "no "
-                "finding. The pair is listed under Pairs to read yourself."
+                "Pairs compared with AI: 1.",
+                "No internal agreement review lead was recorded.",
+                "Selected pairs left unresolved: 1.",
             ],
         ),
         (
@@ -237,7 +242,8 @@ def _scope(**fields):
             0,
             0,
             [
-                "No objectives were found, so nothing was compared and the check makes no finding.",
+                "Pairs compared with AI: 0.",
+                "No pair was compared with AI.",
                 "This does not mean the objectives and results agree.",
             ],
         ),
@@ -247,7 +253,8 @@ def _scope(**fields):
             0,
             0,
             [
-                "No results were left to compare, so the check makes no finding.",
+                "Pairs compared with AI: 0.",
+                "No pair was compared with AI.",
                 "This does not mean the objectives and results agree.",
             ],
         ),
@@ -257,20 +264,19 @@ def _scope(**fields):
             0,
             0,
             [
-                "No result was close enough to an objective to compare, so the check makes no "
-                "finding.",
+                "Pairs compared with AI: 0.",
+                "No pair was compared with AI.",
                 "This does not mean the objectives and results agree.",
             ],
         ),
-        (_scope(), 0, 0, None, ["This report did not record how many pairs were compared."]),
+        (_scope(), 0, 0, None, ["The number of pairs compared with AI was not recorded."]),
         (
             _scope(n_results=0),
             0,
             0,
             None,
             [
-                "No results were left to compare, so the check makes no finding.",
-                "This does not mean the objectives and results agree.",
+                "The number of pairs compared with AI was not recorded.",
             ],
         ),
         (
@@ -279,9 +285,9 @@ def _scope(**fields):
             1,
             None,
             [
-                "This report did not record how many pairs were compared.",
-                "It found 2 possible inconsistencies, listed under Findings.",
-                "1 pair could not be decided; it is listed under Pairs to read yourself.",
+                "The number of pairs compared with AI was not recorded.",
+                "2 internal agreement review leads. Listed under Findings.",
+                "Selected pairs left unresolved: 1.",
             ],
         ),
         (
@@ -290,8 +296,9 @@ def _scope(**fields):
             4,
             4,
             [
-                "The comparison could not decide on any of the 4 pairs VERIDICAL matched, so it "
-                "makes no finding. The pairs are listed under Pairs to read yourself."
+                "Pairs compared with AI: 4.",
+                "No internal agreement review lead was recorded.",
+                "Selected pairs left unresolved: 4.",
             ],
         ),
     ],
@@ -300,6 +307,44 @@ def test_outcome_wording(scope, findings, undecided, compared, expected):
     assert (
         outcome_lines(scope, findings=findings, undecided=undecided, compared=compared) == expected
     )
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [
+        "agreement_contradictory",
+        "agreement_factual_conflict",
+        "agreement_unmet",
+        "agreement_partial",
+    ],
+)
+def test_each_review_lead_kind_is_counted_without_calling_it_a_factual_contradiction(kind):
+    whole = " ".join(
+        _render(
+            flags=[_flag(kind)],
+            undetermined=UndeterminedPairsOut(count=0, compared_count=1, pairs=[]),
+        )
+    )
+    assert "1 internal agreement review lead." in whole
+    assert "possible inconsistency" not in whole
+    assert "factual contradiction" not in whole
+
+
+@pytest.mark.parametrize("compared, unresolved", [(0, 1), (2, 2)])
+def test_local_abstentions_never_inflate_comparisons_or_explain_a_failed_match(
+    compared, unresolved
+):
+    whole = " ".join(
+        _render(
+            undetermined=UndeterminedPairsOut(
+                count=unresolved, compared_count=compared, locally_unassessed_count=1, pairs=[]
+            )
+        )
+    )
+    assert f"Pairs compared with AI: {compared}." in whole
+    assert f"Selected pairs left unresolved: {unresolved}." in whole
+    assert "close enough" not in whole
+    assert "could not decide on any" not in whole
 
 
 def test_set_aside_sentences_name_each_part_and_fold_the_rest():
@@ -415,3 +460,88 @@ async def test_a_share_snapshot_never_carries_set_aside_statements(monkeypatch):
     assert module["agreement_scope"]["n_results_set_aside"] == 3
     assert module["agreement_scope"]["set_aside"] == []
     assert "Smith found" not in str(payload)
+
+
+def test_the_pdf_says_how_many_objectives_were_set_aside_and_why():
+    # BUG-639: the found count matches what was kept plus what was set aside,
+    # and each part of the paper gives its reason, in the same words as the screen.
+    scope = AgreementScopeOut.model_validate(
+        SCOPE_44.model_dump()
+        | {
+            "n_objectives": 5,
+            "n_objectives_extracted": 9,
+            "n_objectives_set_aside": 4,
+            "objectives_section_identified": True,
+            "objectives_set_aside_by_role": [
+                {"role": "literature", "count": 3},
+                {"role": "appendix", "count": 1},
+            ],
+        }
+    )
+    text = " ".join(
+        scope_paragraphs(scope, findings=0, undecided=0, compared=31, interrupted=False)
+    )
+    assert (
+        "Found 9 possible objectives and 34 possible results. Of the objectives, 5 were kept "
+        "to compare and 4 were set aside."
+    ) in text
+    assert (
+        "3 possible objectives from the literature review were set aside, because that part "
+        "of a paper usually describes other studies."
+    ) in text
+    assert "1 possible objective from the appendices was set aside" in text
+
+
+def test_objectives_kept_despite_their_place_and_older_runs():
+    kept = SCOPE_44.model_copy(update={"n_objectives": 4, "n_objectives_kept_despite_role": 4})
+    assert objective_set_aside_lines(kept) == [
+        "Every possible objective was in a part of the paper that usually does not state this "
+        "study's objectives, so all 4 were kept and compared anyway. Some may be other studies' "
+        "aims or steps of the method."
+    ]
+    assert objective_set_aside_lines(SCOPE_44) == []
+    assert "Of the objectives" not in " ".join(
+        scope_paragraphs(SCOPE_44, findings=0, undecided=0, compared=31, interrupted=False)
+    )
+
+
+def test_every_part_objectives_are_set_aside_from_has_a_place_and_a_reason():
+    # Every chapter role the gate can set an objective aside from is named and
+    # explained, so no line falls back to "another part of the paper".
+    from app.checks.section_roles import load_section_roles
+    from app.report.agreement_scope import agreement_scope_copy
+
+    copy = agreement_scope_copy()
+    for role in load_section_roles().objectives_excluded:
+        assert role in copy["roles"] or role in copy["objective_places"], role
+        assert role in copy["objective_roles"], role
+
+
+def test_objective_lines_fold_and_word_an_unknown_part_like_the_screen():
+    # Same sentences as agreementScope.test.ts's objective folding test.
+    roles = ["literature", "methodology", "appendix", "zzz", "front_matter"]
+    folded = AgreementScopeOut.model_validate(
+        SCOPE_44.model_dump()
+        | {
+            "n_objectives_set_aside": 5,
+            "objectives_set_aside_by_role": [{"role": r, "count": 1} for r in roles],
+        }
+    )
+    assert objective_set_aside_lines(folded) == [
+        "1 possible objective from the literature review was set aside, because that part of "
+        "a paper usually describes other studies.",
+        "1 possible objective from the methodology was set aside, because that part of a "
+        "paper usually describes how the study was done.",
+        "3 more were set aside from other parts of the paper.",
+    ]
+    unknown = AgreementScopeOut.model_validate(
+        SCOPE_44.model_dump()
+        | {
+            "n_objectives_set_aside": 1,
+            "objectives_set_aside_by_role": [{"role": "zzz", "count": 1}],
+        }
+    )
+    assert objective_set_aside_lines(unknown) == [
+        "1 possible objective from another part of the paper was set aside, because that part "
+        "does not state this study's own objectives."
+    ]

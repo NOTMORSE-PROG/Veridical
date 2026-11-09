@@ -24,6 +24,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.service import write_audit_event
+from app.checks.citations.different_work import (
+    different_work_reason,
+    leads_to_different_work,
+    load_different_work_policy,
+)
 from app.checks.citations.extract import (
     CitationFlagDraft,
     ScanGapSite,
@@ -54,10 +59,10 @@ from app.checks.citations.numbered import (
 from app.checks.citations.projection import SOURCE_FIELDS, project_quoted_metadata
 from app.checks.citations.recency import (
     RecencyAssessment,
+    RecencyPolicy,
     assess_recency,
     check_year_of,
     load_grammar,
-    off_summary,
     resolve_policy,
     unassessed_summary,
 )
@@ -71,7 +76,7 @@ from app.checks.citations.support import (
 from app.checks.citations.title_policy import TitlePolicy, load_title_policy
 from app.checks.citations.unread_pages import split_by_unread_pages, unread_page_leads
 from app.checks.source_quality import persist_source_limitation, source_limitation_detail
-from app.config import Settings
+from app.config import Settings, get_settings
 from app.errors import ApiDownError
 from app.external import cache
 from app.external import crossref as crossref_client
@@ -597,7 +602,9 @@ def _verdict_from_result(
     return CitationVerdict(VerdictKind.existence_confirmed, result)
 
 
-def _verdict_flag_draft(citation: Citation, verdict: CitationVerdict) -> CitationFlagDraft | None:
+def _verdict_flag_draft(
+    citation: Citation, verdict: CitationVerdict, settings: Settings | None = None
+) -> CitationFlagDraft | None:
     if verdict.kind in (
         VerdictKind.existence_confirmed,
         VerdictKind.instructor_confirmed,
@@ -608,17 +615,41 @@ def _verdict_flag_draft(citation: Citation, verdict: CitationVerdict) -> Citatio
         return None
     anchor = f"reference #{citation.order_index + 1}"
     if verdict.kind == VerdictKind.metadata_mismatch:
+        severity, reason, other_work = (
+            FlagSeverity.low,
+            (
+                "The DOI identifies a registered source, but its published metadata differs "
+                "from this reference. Compare the author, title and year before relying on it. "
+                "Source existence does not establish claim support."
+            ),
+            {},
+        )
+        policy, overlap = None, None
+        comparison = verdict.metadata_comparison
+        if comparison is not None and comparison.title_status == "differs":
+            try:
+                policy = load_different_work_policy(
+                    (settings or get_settings()).citation_metadata_different_work_file
+                )
+            except (OSError, ValueError, UnicodeError):
+                # Without its policy the check cannot tell a different work
+                # from drift, so it stays the Low mismatch below.
+                policy = None
+            if policy is not None:
+                overlap = leads_to_different_work(comparison, policy)
+        if overlap is not None:
+            # The registry record is another paper, not drift; usually a DOI typo.
+            severity = FlagSeverity(policy.severity)
+            reason = different_work_reason(verdict.metadata_comparison, policy)
+            other_work = {"leads_to_different_work": True, "title_word_overlap": round(overlap, 2)}
         return CitationFlagDraft(
-            severity=FlagSeverity.low,
+            severity=severity,
             evidence_excerpt=citation.raw_text,
             page_anchor=anchor,
             detail={
                 "kind": "possible_metadata_mismatch",
-                "reason": (
-                    "The DOI identifies a registered source, but its published metadata differs "
-                    "from this reference. Compare the author, title and year before relying on it. "
-                    "Source existence does not establish claim support."
-                ),
+                "reason": reason,
+                **other_work,
                 "provider": verdict.result.provider,
                 "differing_fields": list(verdict.metadata_comparison.differing_fields)
                 if verdict.metadata_comparison
@@ -712,7 +743,7 @@ async def _citation_recency(
     blocked_reason: str | None,
     scope_limit_reason: str | None = None,
 ) -> RecencyAssessment:
-    """The recency note (V-092) under the format's setting for this run.
+    """Required recency check using this run's window and readiness choices.
 
     Runs only on a reference list whose entries are bound to the source; a
     list that could not be established is reported as unassessed rather
@@ -723,25 +754,33 @@ async def _citation_recency(
         .join(CheckRun, CheckRun.rubric_id == Rubric.id)
         .where(CheckRun.id == check_run_id)
     )
+    created_at = await session.scalar(
+        select(CheckRun.created_at).where(CheckRun.id == check_run_id)
+    )
+    try:
+        check_year = check_year_of(created_at or datetime.now(UTC), settings)
+    except (ValueError, ZoneInfoNotFoundError):
+        check_year = None
+
+    def incomplete(reason: str, policy: RecencyPolicy | None = None) -> RecencyAssessment:
+        return RecencyAssessment({**unassessed_summary(reason, policy), "check_year": check_year})
+
     try:
         policy = resolve_policy(stored, settings)
     except ValueError:
-        return RecencyAssessment(unassessed_summary("format_setting_invalid"))
-    if not policy.enabled:
-        return RecencyAssessment(off_summary(policy))
+        return incomplete("format_setting_invalid")
+    if check_year is None:
+        return incomplete("recency_policy_unavailable", policy)
     if blocked_reason:
-        return RecencyAssessment(unassessed_summary(blocked_reason, policy))
+        return incomplete(blocked_reason, policy)
     try:
         grammar = load_grammar(settings.citation_recency_grammar_file)
-        created_at = await session.scalar(
-            select(CheckRun.created_at).where(CheckRun.id == check_run_id)
-        )
-        check_year = check_year_of(created_at or datetime.now(UTC), settings)
     except (OSError, ValueError, UnicodeError, ZoneInfoNotFoundError):
-        return RecencyAssessment(unassessed_summary("recency_policy_unavailable", policy))
+        return incomplete("recency_policy_unavailable", policy)
     assessment = assess_recency(citations, extraction, policy, grammar, check_year)
     if scope_limit_reason and assessment.summary.get("status") == "assessed":
         assessment.summary["scope_limit_reason"] = scope_limit_reason
+        assessment.summary["assessment_coverage"] = "partial"
     return assessment
 
 
@@ -1267,7 +1306,7 @@ async def _run_citation_integrity_check(
                 else "unassessed",
             }
         )
-        draft = _verdict_flag_draft(citation, verdict)
+        draft = _verdict_flag_draft(citation, verdict, settings)
         if draft is not None:
             draft = with_reference_locator(draft, citation)
             if citation.order_index in source_projections:
@@ -1419,8 +1458,8 @@ async def _run_citation_integrity_check(
     else:
         outcome = ResultOutcome.passed
 
-    # Recency notes are low-severity observations about the reference list
-    # itself; they never change the check's coverage outcome above.
+    # Older sources remain notes. Missing dates or reading rules mean the
+    # required check is incomplete, independently of any note's severity.
     recency = await _citation_recency(
         session,
         check_run_id,
@@ -1437,6 +1476,11 @@ async def _run_citation_integrity_check(
         # not be told apart from the list; the summary says it was left out.
         scope_limit_reason="reference_membership_partial" if membership_partial else None,
     )
+    recency_incomplete = recency.summary.get("assessment_coverage") != "complete"
+    if recency_incomplete:
+        coverage_reason = coverage_reason or "citation_recency_incomplete"
+        if outcome == ResultOutcome.passed:
+            outcome = ResultOutcome.escalated
     for draft in recency.flags:
         citation = references_by_index.get(draft.detail["order_index"])
         flag_drafts.append(
@@ -1453,6 +1497,7 @@ async def _run_citation_integrity_check(
         detail={
             **native_source.detail(),
             **inventory_detail,
+            **({"analysis_coverage": "partial"} if recency_incomplete else {}),
             **(
                 {
                     "assessment_scope": "reference_metadata_only",

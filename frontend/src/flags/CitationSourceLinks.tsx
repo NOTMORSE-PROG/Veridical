@@ -13,6 +13,12 @@ function navigableUrl(raw: string): string | undefined {
   } catch { return undefined; }
 }
 
+// The reference's own printed text for a link, when the saved record has it;
+// otherwise the link shows its address.
+function printedText(link: { url: string; text?: string | null }): string | undefined {
+  return link.text || undefined;
+}
+
 export function CitationSourceLinks({ flag }: { flag: Finding }) {
   const heading = useId();
   const saved = flag.citation_source_locator;
@@ -37,7 +43,8 @@ export function CitationSourceLinks({ flag }: { flag: Finding }) {
     <h3 id={heading}>{lookup ? "Saved source lookup" : "Source links from this reference"}</h3>
     <ul>{links.map(link => <li key={`${link.kind}:${link.url}`}>
       <strong>{link.kind === "doi_recorded_lookup" ? "DOI used in the saved lookup" : link.kind === "doi_as_cited" ? "DOI as cited" : "URL as cited"}</strong>
-      <a href={link.url} target="_blank" rel="noopener noreferrer">{link.url} <span>(opens in a new tab)</span></a>
+      <a href={link.url} target="_blank" rel="noopener noreferrer">{printedText(link) ?? link.url} <span>(opens in a new tab)</span></a>
+      {printedText(link) && printedText(link) !== link.url && <span className="signal-field-hint"> Opens through {new URL(link.url).hostname}.</span>}
     </li>)}</ul>
     <p className="signal-field-hint">{lookup
       ? "This identifier was used in the recorded lookup. Opening its current external destination does not update the saved result or confirm the source."

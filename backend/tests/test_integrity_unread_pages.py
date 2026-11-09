@@ -163,7 +163,12 @@ async def _citations(monkeypatch, extraction):
     kinds = [
         row.detail["kind"] for row in flags if row.detail.get("affects_readiness") is not False
     ]
-    leads = [row.detail for row in flags if row.detail.get("affects_readiness") is False]
+    leads = [
+        row.detail
+        for row in flags
+        if row.detail.get("affects_readiness") is False
+        and row.detail.get("kind") != "outside_recency_window"
+    ]
     return result, kinds, leads
 
 

@@ -232,6 +232,43 @@ def table_statistical_cells_complete(
     return True
 
 
+def descriptive_table_coverage(extraction: ExtractionResult) -> list[dict]:
+    """Inventory skipped or partial statistical tables, independently of flags."""
+    keywords = load_keywords()
+    records = []
+    safe = {id(table) for table in analytical_source(extraction).tables}
+    for index, table in enumerate(extraction.tables):
+        if not table.rows:
+            continue
+        columns = _match_columns(table.rows[0], keywords)
+        if not columns:
+            continue
+        reason = None
+        if id(table) not in safe or table.low_confidence:
+            reason = "source_or_confidence_unavailable"
+        elif sum(bool(_match_columns([cell], keywords)) for cell in table.rows[0]) != len(columns):
+            reason = "ambiguous_statistical_columns"
+        elif not table_statistical_cells_complete(table, keywords):
+            reason = "incomplete_statistical_cells"
+        elif "mean" in columns and "n" not in columns:
+            reason = "missing_sample_size"
+        elif "n" in columns and any(
+            (value := _parse_number(row[columns["n"]])) is not None
+            and (value <= 0 or not value.is_integer())
+            for row in table.rows[1:]
+        ):
+            reason = "invalid_sample_size"
+        records.append(
+            {
+                "table_index": index,
+                "state": "unassessed" if reason else "parsed",
+                "reason": reason,
+                "columns": columns,
+            }
+        )
+    return records
+
+
 def extract_descriptive_stats(
     tables: list[TableBlock], keywords: ForensicsKeywords | None = None
 ) -> list[ReportedStat]:
@@ -244,6 +281,9 @@ def extract_descriptive_stats(
             continue
         header = table.rows[0]
         col_map = _match_columns(header, keywords)
+        # Competing headers do not identify which mean or denominator is intended.
+        if sum(bool(_match_columns([cell], keywords)) for cell in header) != len(col_map):
+            continue
         if not col_map:
             continue
         anchor = _anchor_for(page=table.page, paragraph=table.paragraph)

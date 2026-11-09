@@ -47,6 +47,16 @@ function props(overrides: Partial<Props> = {}): Props {
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe("V-081: passage comparison display (BUG-434)", () => {
+  it.each(["ready", "loading", "error"])("keeps partial coverage separate from empty or stale results (%s)", (state) => {
+    render(<ReuseExplorePanel {...props({ excludedMatchesQuery: query({
+      data: { passage_archive_size_n: 4, matches: [], literal_retrieval: { method: "casefold_whitespace_tokens_v1", unassessed: [
+        { passage_index: 2, reason: "probe_limit" }, { passage_index: 2, reason: "candidate_limit" }, { passage_index: 8, reason: "time_budget" },
+      ] } }, isFetching: state === "loading", isError: state === "error", isSuccess: state === "ready",
+    }) })} />);
+    const limits = screen.queryByText(/Short-passage comparison was incomplete for 2 manuscript passages in this request/);
+    if (state === "ready") expect(limits).toBeVisible();
+    else expect(limits).not.toBeInTheDocument();
+  });
   it.each([0, 1, 4])("counts %s stored comparison passages without asserting Library manuscript count", (count) => {
     render(<ReuseExplorePanel {...props({ excludedMatchesQuery: query({ data: { passage_archive_size_n: count, matches: [] } }) })} />);
     expect(screen.getByText(`Comparison coverage: ${count} stored comparison passage${count === 1 ? "" : "s"}. This counts passages, not Library manuscripts.`)).toBeVisible();

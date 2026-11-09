@@ -1,0 +1,95 @@
+{
+  "schema_version": "backend-acceptance-v4",
+  "max_skips_default": 5,
+  "scope": "Mandatory recency policy acceptance; three original metadata/numerical diagnostics remain failed, and new policy, history, API and incomplete-coverage controls must pass. Not accuracy, UAT or live-provider coverage.",
+  "frozen_artifact_sha256": {
+    "backend/tests/test_v4_seeded_regression.py": "e8414424f3c30d2e0a8ca16ec503689009d8d8cd84f9f284a1326da679e033cb",
+    "backend/tests/test_v4_source_validated_control.py": "f75f07f166b842f3088b2dcdf8b2c2882a3ad888e9d67bcd5769674649293448",
+    "backend/tests/fixtures/v4_source_control_v2/recipe.json": "b68531ffbdf86b70cf501894a2f826400fb7a092a5f50e293975ed95867c2cd3",
+    "backend/tests/fixtures/v4_source_control_v2/provenance.json": "d30bf14aae0c211b5f9718d49b2916381479552b301e1d952e78e95c2a43f2a4",
+    "backend/tests/fixtures/v4_source_control_v2/control.docx": "0357cbfd0be8d2e1ffa7d611b355e0fedd48f9cb3a936c889c291d01d63d7db1",
+    "backend/tests/fixtures/v4_source_control_v2/source_validated_control_acceptance_v1.py.txt": "479b69685c0be1eb641a2a00cb6ecc4e69a17644dfd1684c6ab235a23556e9e7",
+    "tools/data/backend_acceptance_v1.json": "a1f4a2ce4539f35c23ed38a8ff3e7449b80969303d71a3720be067a164671d48",
+    "tools/data/backend_acceptance_v2.json": "c29629054b72cc0f8e33c314fad2e4a1494afc0fbfaabb1b2b3af0bbe873c6ec",
+    "backend/tests/test_numerical_applicability_pipeline.py": "94f6e3437258045721bb90da161ed26094a9ce0186ae1b87aa80db615d9b495b",
+    "backend/tests/fixtures/recency_policy_v1/test_v4_seeded_regression.py.before.txt": "d7b9ad98d68a43d95ca3bb3778070aa6da83af561865b3812cfb037a860177c1",
+    "backend/tests/fixtures/recency_policy_v1/test_v4_source_validated_control.py.before.txt": "adad0d2bee2866d7a3e2e71a10626904b457e5414f68fb2db2171eae5d706e35",
+    "tools/data/backend_acceptance_v3.json": "e96eb5701e8ac1c9b9319bca73244b65eb69603076f2c6185e3efedbbfa8c4d5",
+    "backend/tests/test_citation_recency_live.py": "0f432d365b6068f40d915ca0a9bc2f194c4e7b7b6d9f670da54882592f6276eb",
+    "backend/tests/test_citation_recency_partial_list.py": "01353239903eb9c0fe8ee271b0b2f4645d8e4a6861d1a4a5dc5e2692104a668d"
+  },
+  "gating_selectors": [
+    "tests/test_numerical_applicability_pipeline.py::test_declared_integer_seed_keeps_all_four_detections",
+    "tests/test_v4_seeded_regression.py::test_retraction_flag_is_high_severity_with_honest_wording",
+    "tests/test_numerical_applicability_pipeline.py::test_declared_integer_seed_retains_exact_arithmetic",
+    "tests/test_v4_seeded_regression.py::test_wrong_p_value_flagged",
+    "tests/test_v4_source_validated_control.py::test_frozen_source_and_provenance_remain_identifiable",
+    "tests/test_v4_source_validated_control.py::test_recipe_build_is_deterministic",
+    "tests/test_v4_source_validated_control.py::test_source_validated_control_runs_actual_metadata_and_numerical_checks",
+    "tests/test_v4_source_validated_control.py::test_historical_wrong_reference_is_a_positive_metadata_mismatch_control",
+    "tests/test_numerical_applicability_pipeline.py::test_undeclared_original_mean_remains_unassessed",
+    "tests/test_numerical_applicability_pipeline.py::test_continuous_mean_does_not_receive_an_integer_warning",
+    "tests/test_numerical_applicability_pipeline.py::test_multi_item_mean_does_not_receive_a_single_item_warning",
+    "tests/test_citation_recency_live.py::test_api_refuses_disable_and_preserves_legacy_setting",
+    "tests/test_citation_recency_live.py::test_new_check_and_recheck_do_not_reuse_historical_off_result",
+    "tests/test_citation_recency_partial_list.py::test_required_recency_gaps_are_incomplete_in_the_whole_module[none]",
+    "tests/test_citation_recency_partial_list.py::test_required_recency_gaps_are_incomplete_in_the_whole_module[grammar]",
+    "tests/test_citation_recency_partial_list.py::test_required_recency_gaps_are_incomplete_in_the_whole_module[conflicting]"
+  ],
+  "retained_diagnostics": [
+    {
+      "selector": "tests/test_v4_seeded_regression.py::test_clean_control_manuscript_produces_zero_false_positives",
+      "trace_contains": [
+        "assert flags == []",
+        "tests/test_v4_seeded_regression.py:246: AssertionError"
+      ],
+      "message_contains": [
+        "Left contains one more item"
+      ]
+    },
+    {
+      "selector": "tests/test_v4_seeded_regression.py::test_seeded_manuscript_flags_all_four_planted_errors",
+      "trace_contains": [
+        "assert \"grim_inconsistent\" in kinds",
+        "tests/test_v4_seeded_regression.py:232: AssertionError"
+      ],
+      "message_contains": [
+        "assert 'grim_inconsistent' in"
+      ]
+    },
+    {
+      "selector": "tests/test_v4_seeded_regression.py::test_grim_impossible_mean_flagged_with_arithmetic",
+      "trace_contains": [
+        "assert len(grim_flags) >= 1",
+        "tests/test_v4_seeded_regression.py:267: AssertionError"
+      ],
+      "message_contains": [
+        "assert 0 >= 1"
+      ]
+    }
+  ],
+  "transition": {
+    "parent_manifest": "tools/data/backend_acceptance_v3.json",
+    "parent_manifest_sha256": "e96eb5701e8ac1c9b9319bca73244b65eb69603076f2c6185e3efedbbfa8c4d5",
+    "updated_tests": [
+      {
+        "test_path": "backend/tests/test_v4_seeded_regression.py",
+        "prior_test_archive": "backend/tests/fixtures/recency_policy_v1/test_v4_seeded_regression.py.before.txt",
+        "reason": "Mandatory source-age notes now run for every new assessment; exclude only these explicitly non-scoring notes from prior metadata/numerical warning oracles, preserving their original assertions and exact failed diagnostic identities."
+      },
+      {
+        "test_path": "backend/tests/test_v4_source_validated_control.py",
+        "prior_test_archive": "backend/tests/fixtures/recency_policy_v1/test_v4_source_validated_control.py.before.txt",
+        "reason": "Mandatory source-age notes now run for every new assessment; exclude only these explicitly non-scoring notes from prior metadata/numerical warning oracles, preserving their original assertions and exact failed diagnostic identities."
+      }
+    ],
+    "additional_controls": [
+      "tests/test_citation_recency_live.py::test_api_refuses_disable_and_preserves_legacy_setting",
+      "tests/test_citation_recency_live.py::test_new_check_and_recheck_do_not_reuse_historical_off_result",
+      "tests/test_citation_recency_partial_list.py::test_required_recency_gaps_are_incomplete_in_the_whole_module[none]",
+      "tests/test_citation_recency_partial_list.py::test_required_recency_gaps_are_incomplete_in_the_whole_module[grammar]",
+      "tests/test_citation_recency_partial_list.py::test_required_recency_gaps_are_incomplete_in_the_whole_module[conflicting]"
+    ],
+    "reason": "Owner explicitly mandates citation recency and supersedes optional-policy expectations. Preserve all prior manifests, original test bytes, diagnostic failures and positive/negative source controls; require the new mandatory policy and non-scoring/incomplete behavior."
+  }
+}
