@@ -9064,6 +9064,15 @@
   .signal-agreement-scope__list { display: grid; gap: var(--signal-space-4); margin: 0; padding-inline-start: 0; list-style: none; }
   .signal-agreement-scope__list li { display: grid; gap: var(--signal-space-2); min-inline-size: 0; justify-items: start; }
   .signal-agreement-scope blockquote { overflow-wrap: anywhere; }
+  /* Each set-aside list: heading, intro, items and paging, spaced like the card. */
+  .signal-agreement-scope__set-aside { display: grid; gap: var(--signal-space-3); justify-items: start; min-inline-size: 0; }
+  .signal-agreement-scope__set-aside[hidden] { display: none; }
+  .signal-agreement-scope__set-aside :is(h4, h5) { font-weight: var(--signal-weight-semibold); }
+  .signal-agreement-scope__set-aside > ol { justify-self: stretch; }
+  .signal-agreement-scope__list .signal-button--quiet { padding-inline: 0; }
+  /* Items sit further apart than their parts, and every quote shares one right edge. */
+  .signal-agreement-scope__set-aside .signal-agreement-scope__list { gap: var(--signal-space-5); }
+  .signal-agreement-scope__list .signal-evidence-quote { box-sizing: border-box; inline-size: 100%; max-inline-size: var(--signal-prose-width); margin: 0; }
   .signal-integrity-review-notes { display: grid; gap: var(--signal-space-3); min-inline-size: 0; }
   .signal-integrity-review-notes summary { cursor: pointer; font-size: var(--signal-type-label); color: var(--color-signal-ink-secondary); }
 

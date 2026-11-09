@@ -24,6 +24,8 @@ const EXPECTED_REACHABLE_KINDS = [
   // F5 citation integrity (checks/citations/verify.py, extract.py, support.py)
   "possible_metadata_mismatch",
   "retracted_source",
+  "possible_retraction_unconfirmed",
+  "retraction_notice_cited",
   "corrected_source",
   "unverifiable_api_down",
   "unverifiable_not_found",

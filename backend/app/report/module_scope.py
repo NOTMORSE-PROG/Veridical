@@ -152,6 +152,7 @@ def _agreement_scope(detail) -> AgreementScopeOut | None:
             }
         )
     roles = Counter(entry["role"] for entry in entries or [])
+    objectives = _objective_sections(detail)
     try:
         return AgreementScopeOut(
             n_objectives=_count(detail.get("n_intents")),
@@ -168,9 +169,60 @@ def _agreement_scope(detail) -> AgreementScopeOut | None:
             set_aside=entries or [],
             absence_leads_withheld=detail.get("absence_leads_withheld") is True,
             n_pairs_skipped=_skipped(detail),
+            **objectives,
         )
     except ValidationError:
         return None
+
+
+def _set_aside_entries(raw, role_of) -> list[dict] | None:
+    """Saved set-aside statements as panel entries; a malformed entry makes
+    the whole list unknown rather than silently shorter."""
+    entries = []
+    for item in raw if isinstance(raw, list) else []:
+        if not isinstance(item, dict) or not isinstance(item.get("text"), str):
+            return None
+        role = role_of(item)
+        anchor, chapter = item.get("anchor"), item.get("chapter")
+        entries.append(
+            {
+                "text": item["text"],
+                "page_anchor": anchor if isinstance(anchor, str) else None,
+                "role": role if isinstance(role, str) and role else "other",
+                "chapter": chapter if isinstance(chapter, str) and chapter.strip() else None,
+            }
+        )
+    return entries
+
+
+def _objective_sections(detail: dict) -> dict:
+    """BUG-639: the objectives the check set aside before pairing, read from
+    its saved `objective_sections`; nothing for a run saved before it."""
+    sections = detail.get("objective_sections")
+    if not isinstance(sections, dict):
+        return {}
+    identified = sections.get("objectives_section_identified")
+    entries = _set_aside_entries(sections.get("set_aside"), lambda item: item.get("chapter_role"))
+    despite = sections.get("kept_despite_role")
+    # The saved count is what the found line adds up to. The statements are
+    # listed only when they account for that count exactly; otherwise where
+    # they came from is unknown, and the panel says so rather than listing
+    # some of them under a total they do not reach.
+    count = _count(sections.get("n_objectives_set_aside"))
+    listed = entries if entries is not None and count is not None and len(entries) == count else []
+    roles = Counter(entry["role"] for entry in listed)
+    return {
+        "n_objectives_extracted": _count(detail.get("n_intents_extracted")),
+        "objectives_section_identified": identified if isinstance(identified, bool) else None,
+        "n_objectives_set_aside": count,
+        "objectives_set_aside_by_role": [
+            {"role": role, "count": count} for role, count in roles.most_common()
+        ],
+        "objectives_set_aside": listed,
+        "n_objectives_kept_despite_role": len(despite)
+        if isinstance(despite, list) and despite
+        else None,
+    }
 
 
 _SKIP_FIELDS = (
@@ -214,7 +266,11 @@ def public_modules(modules: list[IntegrityModuleOut]) -> list[IntegrityModuleOut
     statements or their locations."""
     return [
         module.model_copy(
-            update={"agreement_scope": module.agreement_scope.model_copy(update={"set_aside": []})}
+            update={
+                "agreement_scope": module.agreement_scope.model_copy(
+                    update={"set_aside": [], "objectives_set_aside": []}
+                )
+            }
         )
         if module.agreement_scope is not None
         else module
