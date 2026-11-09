@@ -25,6 +25,8 @@ RETRACTION_NOTICE = "retraction_notice_cited"
 
 _REASON_FIELDS = {"title": "t", "link": "l"}
 _LINK_FIELDS = {"url": "u"}
+_DOI_NOTICE_FIELDS = {"title": "t", "retracted": "r"}
+_RETRACTED_LINK_FIELDS = {"doi": "d"}
 
 
 class _PolicyData(BaseModel):
@@ -38,6 +40,9 @@ class _PolicyData(BaseModel):
     link_doi: str = Field(min_length=1)
     link_record: str = Field(min_length=1)
     link_unknown: str = Field(min_length=1)
+    doi_notice_reason: str = Field(min_length=1)
+    retracted_link: str = Field(min_length=1)
+    retracted_link_separator: str
 
     @model_validator(mode="after")
     def templates_fill(self):
@@ -51,6 +56,10 @@ class _PolicyData(BaseModel):
                 self.notice_reason,
             )
         ] + [(t, _LINK_FIELDS) for t in (self.link_doi, self.link_record, self.link_unknown)]
+        templates += [
+            (self.doi_notice_reason, _DOI_NOTICE_FIELDS),
+            (self.retracted_link, _RETRACTED_LINK_FIELDS),
+        ]
         for template, fields in templates:
             # Filled with empty values too, as an empty title would be.
             for values in (fields, dict.fromkeys(fields, "")):
@@ -77,6 +86,9 @@ class RetractionLeadPolicy:
     link_doi: str
     link_record: str
     link_unknown: str
+    doi_notice_reason: str
+    retracted_link: str
+    retracted_link_separator: str
 
 
 @lru_cache(maxsize=4)
@@ -94,6 +106,9 @@ def load_retraction_lead_policy(path: Path | None = None) -> RetractionLeadPolic
         raw.link_doi,
         raw.link_record,
         raw.link_unknown,
+        raw.doi_notice_reason,
+        raw.retracted_link,
+        raw.retracted_link_separator,
     )
 
 
@@ -134,5 +149,22 @@ def openalex_retraction_lead(result, policy: RetractionLeadPolicy) -> dict | Non
         "registry_record_url": url,
         "registry_record_type": record_type or None,
         "openalex_is_retracted": raw.get("is_retracted") is True,
+        "affects_readiness": False,
+    }
+
+
+def doi_notice_lead(result, retracted_dois, policy: RetractionLeadPolicy) -> dict:
+    """The lead for an entry whose DOI leads to a retraction notice: the same
+    kind as a notice OpenAlex lists, never the counted retracted finding."""
+    title = registry_plain_title(result.title) if isinstance(result.title, str) else ""
+    retracted = policy.retracted_link_separator.join(
+        policy.retracted_link.format(doi=doi) for doi in retracted_dois
+    )
+    return {
+        "kind": RETRACTION_NOTICE,
+        "reason": policy.doi_notice_reason.format(title=title, retracted=retracted),
+        "provider": result.provider,
+        "registry_title": title or None,
+        "retracted_dois": list(retracted_dois),
         "affects_readiness": False,
     }
