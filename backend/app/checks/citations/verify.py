@@ -59,10 +59,10 @@ from app.checks.citations.numbered import (
 from app.checks.citations.projection import SOURCE_FIELDS, project_quoted_metadata
 from app.checks.citations.recency import (
     RecencyAssessment,
+    RecencyPolicy,
     assess_recency,
     check_year_of,
     load_grammar,
-    off_summary,
     resolve_policy,
     unassessed_summary,
 )
@@ -743,7 +743,7 @@ async def _citation_recency(
     blocked_reason: str | None,
     scope_limit_reason: str | None = None,
 ) -> RecencyAssessment:
-    """The recency note (V-092) under the format's setting for this run.
+    """Required recency check using this run's window and readiness choices.
 
     Runs only on a reference list whose entries are bound to the source; a
     list that could not be established is reported as unassessed rather
@@ -754,25 +754,33 @@ async def _citation_recency(
         .join(CheckRun, CheckRun.rubric_id == Rubric.id)
         .where(CheckRun.id == check_run_id)
     )
+    created_at = await session.scalar(
+        select(CheckRun.created_at).where(CheckRun.id == check_run_id)
+    )
+    try:
+        check_year = check_year_of(created_at or datetime.now(UTC), settings)
+    except (ValueError, ZoneInfoNotFoundError):
+        check_year = None
+
+    def incomplete(reason: str, policy: RecencyPolicy | None = None) -> RecencyAssessment:
+        return RecencyAssessment({**unassessed_summary(reason, policy), "check_year": check_year})
+
     try:
         policy = resolve_policy(stored, settings)
     except ValueError:
-        return RecencyAssessment(unassessed_summary("format_setting_invalid"))
-    if not policy.enabled:
-        return RecencyAssessment(off_summary(policy))
+        return incomplete("format_setting_invalid")
+    if check_year is None:
+        return incomplete("recency_policy_unavailable", policy)
     if blocked_reason:
-        return RecencyAssessment(unassessed_summary(blocked_reason, policy))
+        return incomplete(blocked_reason, policy)
     try:
         grammar = load_grammar(settings.citation_recency_grammar_file)
-        created_at = await session.scalar(
-            select(CheckRun.created_at).where(CheckRun.id == check_run_id)
-        )
-        check_year = check_year_of(created_at or datetime.now(UTC), settings)
     except (OSError, ValueError, UnicodeError, ZoneInfoNotFoundError):
-        return RecencyAssessment(unassessed_summary("recency_policy_unavailable", policy))
+        return incomplete("recency_policy_unavailable", policy)
     assessment = assess_recency(citations, extraction, policy, grammar, check_year)
     if scope_limit_reason and assessment.summary.get("status") == "assessed":
         assessment.summary["scope_limit_reason"] = scope_limit_reason
+        assessment.summary["assessment_coverage"] = "partial"
     return assessment
 
 
@@ -1450,8 +1458,8 @@ async def _run_citation_integrity_check(
     else:
         outcome = ResultOutcome.passed
 
-    # Recency notes are low-severity observations about the reference list
-    # itself; they never change the check's coverage outcome above.
+    # Older sources remain notes. Missing dates or reading rules mean the
+    # required check is incomplete, independently of any note's severity.
     recency = await _citation_recency(
         session,
         check_run_id,
@@ -1468,6 +1476,11 @@ async def _run_citation_integrity_check(
         # not be told apart from the list; the summary says it was left out.
         scope_limit_reason="reference_membership_partial" if membership_partial else None,
     )
+    recency_incomplete = recency.summary.get("assessment_coverage") != "complete"
+    if recency_incomplete:
+        coverage_reason = coverage_reason or "citation_recency_incomplete"
+        if outcome == ResultOutcome.passed:
+            outcome = ResultOutcome.escalated
     for draft in recency.flags:
         citation = references_by_index.get(draft.detail["order_index"])
         flag_drafts.append(
@@ -1484,6 +1497,7 @@ async def _run_citation_integrity_check(
         detail={
             **native_source.detail(),
             **inventory_detail,
+            **({"analysis_coverage": "partial"} if recency_incomplete else {}),
             **(
                 {
                     "assessment_scope": "reference_metadata_only",

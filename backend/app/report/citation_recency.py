@@ -35,6 +35,10 @@ def recency_summary(detail: dict[str, Any] | None) -> CitationRecencySummaryOut 
     try:
         return CitationRecencySummaryOut(
             status=saved["status"],
+            policy_version=_text(saved.get("policy_version")),
+            enabled=saved.get("enabled") if type(saved.get("enabled")) is bool else None,
+            check_year=_year(saved.get("check_year")),
+            assessment_coverage=saved.get("assessment_coverage"),
             unassessed_reason=_text(saved.get("unassessed_reason")),
             enabled_source=sources.get("enabled") if isinstance(sources, dict) else None,
             window_years=_year(saved.get("window_years")),

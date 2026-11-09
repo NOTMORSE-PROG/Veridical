@@ -8,6 +8,7 @@ from app.checks.agreement.sections import NOT_OWN_RESULTS
 from app.models.enums import CheckKind, ResultOutcome
 from app.models.run import CheckResult
 from app.report.schemas import (
+    COVERAGE_REASONS,
     AgreementScopeOut,
     IntegrityModuleOut,
     UndeterminedPairsOut,
@@ -87,12 +88,18 @@ def integrity_modules(
             if kind == CheckKind.internal_agreement and len(saved) == 1
             else None
         )
+        reason = (
+            saved[0].detail.get("coverage_reason")
+            if len(saved) == 1 and isinstance(saved[0].detail, dict)
+            else None
+        )
         output.append(
             IntegrityModuleOut(
                 check_kind=kind.value,
                 state=state,
                 undetermined=undetermined,
                 agreement_scope=agreement_scope,
+                coverage_reason=reason if reason in COVERAGE_REASONS else None,
             )
         )
     return output
@@ -187,6 +194,19 @@ def _skipped(detail: dict) -> int | None:
     if not counts or None in counts:
         return None
     return sum(counts)
+
+
+def module_states(modules: list[IntegrityModuleOut]) -> list[IntegrityModuleOut]:
+    """Each check's state and coverage code only: what a shared link may show
+    when it holds no saved detail of its own. No counts, pairs or statements."""
+    return [
+        IntegrityModuleOut(
+            check_kind=module.check_kind,
+            state=module.state,
+            coverage_reason=module.coverage_reason,
+        )
+        for module in modules
+    ]
 
 
 def public_modules(modules: list[IntegrityModuleOut]) -> list[IntegrityModuleOut]:

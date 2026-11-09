@@ -212,7 +212,7 @@ async def _seed_and_run(session_factory, tmp_path, monkeypatch, docx_path_fn):
         results = (await verify.execute(result_query)).scalars().all()
         flag_query = select(Flag).join(CheckResult).where(CheckResult.check_run_id == check_run_id)
         flags = (await verify.execute(flag_query)).scalars().all()
-    return results, flags
+    return results, [f for f in flags if f.detail.get("kind") != "outside_recency_window"]
 
 
 async def test_seeded_manuscript_flags_all_four_planted_errors(

@@ -149,7 +149,6 @@ function QueueCount({
 function FirstUse({ onUpload }: { onUpload: () => void }) {
   return (
     <section className="signal-first-use" aria-labelledby="first-use-heading">
-      <div className="signal-first-use__mark" aria-hidden="true"><span /></div>
       <p className="signal-eyebrow">Prepare · Step 1</p>
       <h2 id="first-use-heading">No required format yet</h2>
       <p>

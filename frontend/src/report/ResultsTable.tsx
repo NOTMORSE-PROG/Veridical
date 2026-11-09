@@ -231,20 +231,20 @@ export function resultDisplay(
       };
     case "escalated":
       return {
-        label: "Awaiting review",
+        label: "Needs review",
         tone: "neutral",
         caption: "The instructor has not resolved this criterion yet.",
       };
     case "quota_exhausted":
       return {
-        label: "Awaiting review",
+        label: "Needs review",
         tone: "neutral",
         caption:
           "VERIDICAL couldn't grade this criterion today. The instructor will resolve it manually or re-run later.",
       };
     case "api_down":
       return {
-        label: "Awaiting review",
+        label: "Needs review",
         tone: "neutral",
         caption:
           "VERIDICAL couldn't reach its AI service to grade this criterion. The instructor will resolve it manually or re-run later.",
@@ -404,7 +404,7 @@ function ResultRow({ row }: { row: ResultRowCommon }) {
  * Report.tsx passes the NEEDS_REVIEW_OUTCOMES-filtered subset (it has a
  * separate EscalatedPanel for those); AdviserView.tsx passes the full,
  * unfiltered array (it has no separate panel, so `resultDisplay()`'s own
- * "Awaiting review" cases carry that state instead). */
+ * "Needs review" cases carry that state instead). */
 export function ResultsTable({
   results,
   totalCount,

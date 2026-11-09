@@ -16,6 +16,8 @@ const EXPECTED_REACHABLE_KINDS = [
   // F4 internal agreement (checks/agreement/pair.py)
   "agreement_unmatched_intent",
   "agreement_contradictory",
+  "agreement_factual_conflict",
+  "agreement_unmet",
   "agreement_partial",
   "agreement_cannot_determine",
   "agreement_injection_suspected",
@@ -44,6 +46,7 @@ const EXPECTED_REACHABLE_KINDS = [
   "reuse_high_similarity",
   "reuse_high_similarity_chapter",
   "reuse_high_similarity_passage",
+  "reuse_literal_overlap_passage",
   "reuse_same_instructor_resubmission",
 ];
 

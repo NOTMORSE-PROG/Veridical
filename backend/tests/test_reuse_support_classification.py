@@ -9,7 +9,7 @@ from app.checks.reuse.query import best_supporting_passage
 from app.checks.reuse.service import _supporting_passage_detail
 from app.config import get_settings
 from app.flags.service import _passage_pair_from_detail
-from app.ingest.schemas import ExtractionResult, SectionTree
+from app.ingest.schemas import ExtractionResult, SectionTree, TextBlock
 from app.models.manuscript import Manuscript
 
 
@@ -47,11 +47,19 @@ async def test_actual_scoped_factory_preserves_threshold_classification(
 
     async def read_pdf(*args):
         return ExtractionResult(
-            page_count=1,
+            page_count=4,
             anchor_kind="page",
             image_only=False,
-            text_chars=0,
-            blocks=[],
+            text_chars=len(archive.context_text),
+            blocks=[
+                TextBlock(
+                    page=4,
+                    bbox=(10, 20, 200, 40),
+                    text=archive.context_text,
+                    max_font_size=12,
+                    bold_ratio=0,
+                )
+            ],
             images=[],
             section_tree=SectionTree(source="none", nodes=[]),
         )

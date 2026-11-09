@@ -202,34 +202,44 @@ def bracket_numbers_in_text(
     bridges ("[3]-[6]" is 3 to 6). Also says whether some mark could not be
     read, so a caller that only withholds can treat that text as citing
     anything (BUG-619)."""
+    numbers, unreadable_kinds = _read_marks(text, max_range_span=max_range_span, context=context)
+    return numbers, bool(unreadable_kinds)
+
+
+def _read_marks(
+    text: str, *, max_range_span: int, context: NumericContext
+) -> tuple[set[int], set[str]]:
+    """The numbers every bracket mark in `text` could cite, body, glued
+    ("compared[7-10]") and locator ("[8, p. 3]") marks alike, read in text
+    order so a bridge works whichever kind starts it ("compared[7]-[10]" is 7
+    to 10). Also the kinds of mark that could not be read."""
+    marks = [(m.start(), m.end(), m.group(), "body") for m in _BODY_BRACKET.finditer(text)] + [
+        (m.start(), m.end(), m.group(), "glued") for m in _GLUED_BRACKET.finditer(text)
+    ]
+    marks += [
+        (m.start(), m.end(), f"[{m.group('numbers')}]", "locator")
+        for m in _LOCATOR_BRACKET.finditer(text)
+    ]
     numbers: set[int] = set()
-    unreadable = False
+    unreadable: set[str] = set()
     prior: tuple[int, ...] | None = None
     prior_end = -1
-    for match in _BODY_BRACKET.finditer(text):
-        found = _numbers_in_mark(match.group(0), max_range_span=max_range_span, context=context)
+    for start, end, raw, kind in sorted(marks):
+        found = _numbers_in_mark(raw, max_range_span=max_range_span, context=context)
         if found is None:
-            unreadable = True
+            # An unreadable mark in a non-citation context ("Table[1-99]") is
+            # not a citation the scan missed, as for a body mark.
+            prefix = text[max(0, start - context.lookback_chars) : start]
+            if not any(p.search(prefix) for p in context.noncitation_prefix_patterns):
+                unreadable.add(kind)
             prior = None
             continue
-        if prior and _BETWEEN_RANGE_MARKS.fullmatch(text[prior_end : match.start()]):
+        if prior and _BETWEEN_RANGE_MARKS.fullmatch(text[prior_end:start]):
             low, high = prior[-1], found[0]
             if low < high and high - low <= max_range_span:
                 numbers.update(range(low + 1, high))
         numbers.update(found)
-        prior, prior_end = found, match.end()
-    # Marks glued to the word before them ("compared[7-10]") and marks with a
-    # locator ("[8, p. 3]") count as possibly cited on a readable page too.
-    for match in _GLUED_BRACKET.finditer(text):
-        found = _numbers_in_mark(match.group(), max_range_span=max_range_span, context=context)
-        unreadable = unreadable or found is None
-        numbers.update(found or ())
-    for match in _LOCATOR_BRACKET.finditer(text):
-        found = _numbers_in_mark(
-            f"[{match.group('numbers')}]", max_range_span=max_range_span, context=context
-        )
-        unreadable = unreadable or found is None
-        numbers.update(found or ())
+        prior, prior_end = found, end
     return numbers, unreadable
 
 
@@ -409,24 +419,25 @@ def _body_marks(
 
 def _possibly_cited_numbers(
     blocks: list[TextBlock], *, max_range_span: int, context: NumericContext
-) -> set[int]:
-    """Numbers in glued or locator marks, bounded like the main scan."""
+) -> tuple[set[int], bool]:
+    """Numbers a mark may cite outside the main scan's reading, bounded like
+    it: glued and locator marks, and the bridges any mark starts
+    ("compared[7]-[10]" also covers 8 and 9). Also whether a glued or locator
+    mark in a citation context could not be read, which leaves every entry
+    possibly cited, as an unreadable body mark in a citation context does
+    (BUG-654)."""
     numbers: set[int] = set()
+    unreadable = False
     remaining = context.max_body_scan_chars
     for block in blocks:
         text = (block.text or "")[: max(0, remaining)]
         remaining -= len(text)
-        for match in _GLUED_BRACKET.finditer(text):
-            found = _numbers_in_mark(match.group(), max_range_span=max_range_span, context=context)
-            numbers.update(found or ())
-        for match in _LOCATOR_BRACKET.finditer(text):
-            found = _numbers_in_mark(
-                f"[{match.group('numbers')}]", max_range_span=max_range_span, context=context
-            )
-            numbers.update(found or ())
+        found, unreadable_kinds = _read_marks(text, max_range_span=max_range_span, context=context)
+        numbers.update(found)
+        unreadable = unreadable or bool(unreadable_kinds & {"glued", "locator"})
         if remaining <= 0:
             break
-    return numbers
+    return numbers, unreadable
 
 
 def _reference_inventory(
@@ -496,12 +507,15 @@ def analyze_numbered_citations(
     # Uncertainty never becomes an absence claim: a number seen in a
     # non-citation context ("Gini Index [42]"), a glued mark or a locator
     # mark may still be cited, so it is never reported as unused.
+    outside_scan, outside_unreadable = _possibly_cited_numbers(
+        blocks, max_range_span=max_range_span, context=context
+    )
     possibly_cited = {
         number
         for mark in marks
         if mark.classification == "noncitation" and mark.numbers
         for number in mark.numbers
-    } | _possibly_cited_numbers(blocks, max_range_span=max_range_span, context=context)
+    } | outside_scan
     if not complete or scan_limited:
         return NumberedCitationAssessment(
             n_numbered_reference_entries=n_numbered,
@@ -553,6 +567,9 @@ def analyze_numbered_citations(
     # A bibliography with no confirmed bracketed body citation may instead
     # use a style this parser does not recognize. Do not assert absence.
     if strong_links == 0:
+        shield_all = True
+    # A glued or locator mark that cannot be read could cite any entry.
+    if outside_unreadable:
         shield_all = True
     # A list mostly linked by strong marks shows the paper cites in brackets;
     # a sparse one may cite in a form this parser does not read.

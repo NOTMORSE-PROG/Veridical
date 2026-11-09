@@ -35,14 +35,16 @@ describe("source availability actions", () => {
     const fetch = stubFetchByPath({ [`/shared/test-link/evidence/${own.reference_id}/page`]: new Response(JSON.stringify({ error: { code: "gone", message: "This source is no longer available." } }), { status: 410 }) });
     vi.stubGlobal("fetch", fetch);
     renderWithProviders(<SharedEvidencePacket token="test-link" manifest={manifest} references={[own, foreign]} />);
-    expect(await screen.findByText("This source is no longer available.")).toBeVisible();
+    // A page that is gone offers no Retry and no upload: the adviser can do neither.
+    expect(await screen.findByText(/The original page is not available in this shared report/)).toBeVisible();
+    expect(screen.queryByRole("button", { name: /Retry original page/ })).not.toBeInTheDocument();
     expect(screen.getByText(new RegExp(own.quote))).toBeVisible();
     expect(screen.getByText(new RegExp(foreign.quote))).toBeVisible();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(String(fetch.mock.calls[0][0])).toContain(own.reference_id);
     expect(fetch.mock.calls[0][1]).toMatchObject({ credentials: "omit" });
-    expect(screen.getAllByRole("button", { name: /Open original page/ })).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: /Open original page/ })).not.toBeInTheDocument();
   });
 
   it("aborts an in-flight preview when its selected source session is unmounted", async () => {
@@ -76,4 +78,14 @@ describe("source availability actions", () => {
     expect(fetch.mock.calls[0][1]).toMatchObject({ credentials: "omit" });
     expect(screen.queryByText(/page 1\b/i)).not.toBeInTheDocument();
   });
+});
+
+it("starts every page preview closed when asked, leaving the page one click away", () => {
+  const own = { ...reference, quote: "This report follows the structure below.", anchor: "page 23" };
+  const fetch = vi.fn(() => new Promise<Response>(() => {}));
+  vi.stubGlobal("fetch", fetch);
+  renderWithProviders(<SharedEvidencePacket embedded previewClosed token="test-link" manifest={manifest} references={[own]} />);
+  expect(screen.getByRole("button", { name: "Show page preview" })).toHaveAttribute("aria-expanded", "false");
+  expect(screen.getByRole("button", { name: /^Open original page/ })).toBeInTheDocument();
+  expect(fetch).not.toHaveBeenCalled();
 });

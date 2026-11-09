@@ -29,7 +29,10 @@ def _get_governor(settings: Settings) -> RateGovernor:
         # Self-throttled regardless of key (module docstring / RESEARCH.md
         # §2): the "5,000/5min unauthenticated" ceiling is real but shared
         # globally, so 1 rps is the good-citizen default either way.
-        _governor = RateGovernor(rpm=max(1, round(settings.semantic_scholar_rps * 60)))
+        _governor = RateGovernor(
+            rpm=max(1, round(settings.semantic_scholar_rps * 60)),
+            min_interval_seconds=1 / settings.semantic_scholar_rps,
+        )
     return _governor
 
 

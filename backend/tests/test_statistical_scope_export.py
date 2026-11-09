@@ -11,10 +11,10 @@ from tests.test_statistical_scope_surfaces import scope_report
 @pytest.mark.parametrize(
     ("state", "label", "qualification"),
     [
-        ("completed", "Statistical checks: Completion recorded.", "verify the raw data"),
-        ("not_applicable", "Statistical checks: Not applicable.", "contains no statistics"),
-        ("incomplete", "Statistical checks: Not fully assessed.", "not treated as passed"),
-        ("not_recorded", "Statistical checks: Not recorded.", "Do not infer"),
+        ("completed", "Statistical checks: Completed.", "does not check the raw data"),
+        ("not_applicable", "Statistical checks: Not applicable.", "has no statistics"),
+        ("incomplete", "Statistical checks: Not fully run.", "not treated as correct"),
+        ("not_recorded", "Statistical checks: Not recorded.", "do not assume it ran"),
     ],
 )
 def test_pdf_keeps_status_and_qualification_when_no_flag_exists(

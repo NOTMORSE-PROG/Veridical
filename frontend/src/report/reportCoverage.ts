@@ -18,6 +18,11 @@ const INTEGRITY_LABEL: Record<IntegrityCheckStatusOut["check_kind"], string> = {
   originality_reuse: "Originality/reuse",
 };
 
+/** The plain sentence for a recorded coverage code, or undefined. */
+export function coverageCopy(reason: string): string | undefined {
+  return Object.prototype.hasOwnProperty.call(COVERAGE_COPY, reason) ? COVERAGE_COPY[reason] : undefined;
+}
+
 const COVERAGE_COPY: Record<string, string> = {
   ai_not_configured: "AI-dependent parts of this check were not assessed because no usable AI configuration was available. Any independently completed results remain available. Unassessed comparisons or claims are not treated as passed. This is a system limit, not a finding against the manuscript.",
   ai_key_rejected: "AI-dependent parts of this check were not assessed because the configured AI key was rejected during an AI request and no applicable alternative completed that request. Any independently completed results remain available. Unassessed comparisons or claims are not treated as passed. This is a system limit, not a finding against the manuscript.",
@@ -159,8 +164,8 @@ function baseIntegrityCoverageItem(status: IntegrityCheckStatusOut, manuscriptId
     return { key: `${status.check_kind}:${reason}`, label: `${label} · ${note.none ? "Not compared" : "Partly compared"}`, detail: note.sentence,
       subIssues: note.also ? [note.also] : [], detailsLabel: "originality assessment details" };
   }
-  const coverageCopy = COVERAGE_COPY;
-  if (reason && coverageCopy[reason]) {
+  const coverageLabels = COVERAGE_COPY;
+  if (reason && coverageLabels[reason]) {
     const imageDetails = status.check_kind === "statistical_forensics" &&
       (status.n_images_unassessed || status.n_image_occurrences_omitted || status.n_equations_unassessed ||
         status.n_recovery_figures_unassessed || status.n_recovery_tables_unassessed)
@@ -174,7 +179,7 @@ function baseIntegrityCoverageItem(status: IntegrityCheckStatusOut, manuscriptId
     if (status.n_linkage_unassessed) subIssues.push(`${status.n_linkage_unassessed} reference ${status.n_linkage_unassessed === 1 ? "link" : "links"} unassessed`);
     if (status.n_claim_support_unassessed) subIssues.push(`${status.n_claim_support_unassessed} cited ${status.n_claim_support_unassessed === 1 ? "source" : "sources"} with unassessed claim support`);
     return {
-      key: `${status.check_kind}:${reason}`, label, detail: coverageCopy[reason],
+      key: `${status.check_kind}:${reason}`, label, detail: coverageLabels[reason],
       subIssues: [...subIssues, ...(imageDetails?.subIssues ?? []), ...(native?.subIssues ?? [])],
       sources: [...(imageDetails?.sources ?? []), ...(native?.sources ?? [])],
       detailsLabel: native ? "source assessment details" : imageDetails ? "source and image assessment details" : undefined,

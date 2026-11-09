@@ -116,6 +116,21 @@ def test_physical_merged_and_nested_cells_count_once_and_fence_only_affected_tab
     assert source.excluded_paragraphs == (0,)
     computation = _compute_forensics_findings(result)
     assert computation.n_descriptive == 2
+    assert not computation.flag_drafts
+    # A bare mean does not establish a single integer response per person.
+    result.tables[1].caption = "This table reports one integer response per respondent."
+    computation = _compute_forensics_findings(result)
+    assert not computation.flag_drafts
+    # Unbound caption metadata cannot supply a source declaration. The safe
+    # table's own cells can declare its unit and item count independently.
+    from docx.shared import Inches
+
+    for header, value in [("Item response unit", "integer"), ("Number of items", "1")]:
+        column = safe.add_column(Inches(1))
+        column.cells[0].text = header
+        column.cells[1].text = value
+    result = _extract(tmp_path, document)
+    computation = _compute_forensics_findings(result)
     assert [flag.detail["kind"] for flag in computation.flag_drafts] == ["grim_inconsistent"]
     payload = result.model_dump(mode="json")
     payload["native_math_inventory"]["containers"][0]["cell_path"] = []

@@ -456,7 +456,6 @@
   --signal-desk-loading-width: 14rem;
   --signal-desk-line-width: 68%;
   --signal-first-use-measure: 44rem;
-  --signal-first-use-rail-height: 7rem;
   --signal-dialog-width: min(34rem, calc(100vw - 2rem));
   --signal-dialog-wide-width: min(48rem, calc(100vw - 2rem));
   --signal-evidence-dialog-width: min(var(--signal-workbench-width), calc(100vw - var(--signal-space-4) - var(--signal-space-4)));
@@ -497,6 +496,11 @@
   --signal-comparison-page-gap: var(--signal-space-2);
   --signal-review-selected-ring-width: var(--signal-focus-ring-width);
   --signal-review-detail-measure: 42rem;
+  /* Adviser check panel: pair cards, count tiles, labelled fact rows. */
+  --signal-pair-card-min: 18rem;
+  --signal-fact-tile-min: 9rem;
+  --signal-fact-row-label-min: 10rem;
+  --signal-fact-row-label-max: 14rem;
   --signal-review-queue-row-min-height: 4.5rem;
   --signal-border-hairline: 1px;
   --signal-border-emphasis: 2px;

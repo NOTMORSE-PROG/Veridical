@@ -58,8 +58,8 @@ def test_missing_history_is_not_a_recorded_empty_coverage(detail, expected):
 
 def test_preserved_historical_scope_does_not_assert_absence_of_statistics():
     _, body = statistical_scope_copy(StatisticalCheckScopeOut(state="not_applicable"))
-    assert "saved applicability result" in body
-    assert "does not establish that the manuscript contains no statistics" in body
+    assert "found no statistics it could test" in body
+    assert "does not mean the paper has no statistics" in body
 
 
 def test_private_report_and_pdf_notation_copy_match():

@@ -36,24 +36,23 @@ _SAVED_STATES = {
 
 STATISTICAL_SCOPE_COPY = {
     "completed": (
-        "Statistical checks: Completion recorded.",
-        "The saved check records completed statistical processing. This does not establish "
-        "that every reported value is correct or verify the raw data.",
+        "Statistical checks: Completed.",
+        "The check ran on the statistics it could read. This does not mean every reported "
+        "value is correct, and it does not check the raw data.",
     ),
     "not_applicable": (
         "Statistical checks: Not applicable.",
-        "This is the saved applicability result for the extracted content the check supports. "
-        "It does not establish that the manuscript contains no statistics.",
+        "The check found no statistics it could test in the text it could read. "
+        "This does not mean the paper has no statistics.",
     ),
     "incomplete": (
-        "Statistical checks: Not fully assessed.",
-        "The saved statistical assessment is incomplete. "
-        "Unassessed content is not treated as passed.",
+        "Statistical checks: Not fully run.",
+        "Some statistics could not be checked. Anything not checked is not treated as correct.",
     ),
     "not_recorded": (
         "Statistical checks: Not recorded.",
-        "This run has no usable saved statistical status. "
-        "Do not infer that the check ran or was not applicable.",
+        "No usable status was saved for this check, so do not assume it ran or that it did "
+        "not apply.",
     ),
 }
 
@@ -212,21 +211,24 @@ def statistical_scope_copy(scope: StatisticalCheckScopeOut) -> tuple[str, str]:
         )
     if scope.reconstruction:
         reconstruction = scope.reconstruction
+        # Same plain sentences as the report screen.
+        rows = "table row" if reconstruction.compatible_rows == 1 else "table rows"
+        unchecked = "table row" if reconstruction.unassessed_rows == 1 else "table rows"
         if reconstruction.state == "candidate_found":
             detail += (
-                " SPRITE found compatible candidate distributions for "
-                f"{reconstruction.compatible_rows} "
-                "declared rows. These are possible reconstructions under the reported assumptions, "
-                "not recovered or verified original data."
+                f" Score reconstruction: for {reconstruction.compatible_rows} {rows}, it found at "
+                "least one set of whole-number answers that gives the reported average and "
+                "spread. That shows the numbers are possible, not that they are the real data."
             )
         elif reconstruction.state == "incomplete":
             detail += (
-                f" SPRITE reconstruction remains unassessed for {reconstruction.unassessed_rows} "
-                "rows. Required scale assumptions may be missing or a bounded search did not "
-                "produce a verified candidate. Search failure is not proof of inconsistency."
+                f" Score reconstruction: it could not check {reconstruction.unassessed_rows} "
+                f"{unchecked}, usually because the score scale was not stated. Not finding a "
+                "match is not proof of an error."
             )
         elif reconstruction.state == "not_recorded":
             detail += (
-                " No SPRITE reconstruction receipt was recorded for these descriptive statistics."
+                " Score reconstruction: no record of whether this step ran was saved, so do not "
+                "assume it did."
             )
     return label, detail

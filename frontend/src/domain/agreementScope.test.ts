@@ -20,6 +20,14 @@ describe("agreement scope copy", () => {
     expect(AGREEMENT_SCOPE_COPY.olderNoScope).toBe(copy.older_no_scope);
     expect(AGREEMENT_SCOPE_COPY.matchingHeading).toBe(copy.matching_heading);
     expect(AGREEMENT_SCOPE_COPY.matchingCaveat).toBe(copy.matching_caveat);
+    expect(AGREEMENT_SCOPE_COPY.reviewLead).toBe(copy.review_lead);
+    expect(AGREEMENT_SCOPE_COPY.reviewLeads).toBe(copy.review_leads);
+    expect(AGREEMENT_SCOPE_COPY.noReviewLeads).toBe(copy.no_review_leads);
+    expect(AGREEMENT_SCOPE_COPY.comparisonUnknown).toBe(copy.comparison_unknown);
+    expect(AGREEMENT_SCOPE_COPY.comparedCount).toBe(copy.compared_count);
+    expect(AGREEMENT_SCOPE_COPY.unresolvedCount).toBe(copy.unresolved_count);
+    expect(AGREEMENT_SCOPE_COPY.noAiComparison).toBe(copy.no_ai_comparison);
+    expect(AGREEMENT_SCOPE_COPY.noAgreementInference).toBe(copy.no_agreement_inference);
     for (const [role, [phrase]] of Object.entries(copy.roles)) expect(rolePhrase(role)).toBe(phrase);
     const folded = scope({ set_aside_by_role: Array.from({ length: copy.role_folding.fold_at }, (_, i) => ({ role: `part${i}`, count: 1 })), n_results_too_short: 0 });
     expect(setAsideLines(folded)).toHaveLength(copy.role_folding.shown + 1);
@@ -32,7 +40,7 @@ describe("agreement scope copy", () => {
       "2 results were set aside as too short to compare.",
     ]);
     const outcome = outcomeLines(scope(), { findings: 0, undecided: 0, compared: 31, surface: "screen" });
-    expect(outcome).toEqual(["Among the 31 pairs VERIDICAL matched, the comparison found no possible inconsistency."]);
+    expect(outcome).toEqual(["Pairs compared with AI: 31.", "No internal agreement review lead was recorded."]);
     expect(outcome.join(" ")).not.toMatch(/consistent pair|agreed|agree with/);
   });
 
@@ -51,79 +59,97 @@ describe("agreement scope copy", () => {
       "1 result was set aside as too short to compare.",
     ]);
     expect(outcomeLines(scope(), { findings: 1, undecided: 0, compared: 1, surface: "screen" })).toEqual([
-      "Among the 1 pair VERIDICAL matched, the comparison found 1 possible inconsistency. It is listed below.",
+      "Pairs compared with AI: 1.",
+      "1 internal agreement review lead. It is listed below.",
     ]);
   });
 
   it("says where findings and undecided pairs are, by surface", () => {
     expect(outcomeLines(scope(), { findings: 1, undecided: 2, compared: 9, surface: "screen" })).toEqual([
-      "Among the 9 pairs VERIDICAL matched, the comparison found 1 possible inconsistency. It is listed below.",
-      "2 other pairs could not be decided. They are listed after the findings.",
+      "Pairs compared with AI: 9.",
+      "1 internal agreement review lead. It is listed below.",
+      "Selected pairs left unresolved: 2. They are listed after the findings.",
     ]);
     expect(outcomeLines(scope(), { findings: 0, undecided: 2, compared: 9, surface: "screen" })).toEqual([
-      "Among the 9 pairs VERIDICAL matched, the comparison found no possible inconsistency in the pairs it could decide.",
-      "2 pairs could not be decided. They are listed below for you to read.",
+      "Pairs compared with AI: 9.",
+      "No internal agreement review lead was recorded.",
+      "Selected pairs left unresolved: 2. They are listed below for you to read.",
     ]);
-    expect(outcomeLines(scope(), { findings: 0, undecided: 2, compared: 9, surface: "adviser" })[1])
-      .toBe("2 pairs could not be decided. They are not findings; the instructor's report lists them.");
-    expect(outcomeLines(scope(), { findings: 0, undecided: 2, compared: 9, surface: "document" })[1])
-      .toBe("2 pairs could not be decided. Read them on the readiness report.");
+    expect(outcomeLines(scope(), { findings: 0, undecided: 2, compared: 9, surface: "adviser" })[2])
+      .toBe("Selected pairs left unresolved: 2. They are not findings and do not change readiness.");
+    expect(outcomeLines(scope(), { findings: 0, undecided: 2, compared: 9, surface: "document" })[2])
+      .toBe("Selected pairs left unresolved: 2. Read them on the readiness report.");
     expect(outcomeLines(scope(), { findings: 0, undecided: 2, compared: 2, surface: "screen" })).toEqual([
-      "The comparison could not decide on any of the 2 pairs VERIDICAL matched, so it makes no finding. They are listed below for you to read.",
+      "Pairs compared with AI: 2.",
+      "No internal agreement review lead was recorded.",
+      "Selected pairs left unresolved: 2. They are listed below for you to read.",
     ]);
   });
 
   it("names an interruption once, in the outcome when pairs were compared", () => {
     expect(outcomeLines(scope({ n_pairs_skipped: 3 }), { findings: 0, undecided: 0, compared: 5, interrupted: true, surface: "screen" })).toEqual([
-      "The check was interrupted. Among the 5 pairs it compared before then, the comparison found no possible inconsistency.",
+      "Pairs compared with AI: 5.",
+      "No internal agreement review lead was recorded.",
+      "The check was interrupted before it compared every pair.",
       "Pairs it did not compare are not treated as passed.",
     ]);
     expect(interruptedLine(scope({ n_pairs_skipped: 3 }), { compared: 5, interrupted: true, outcomeShown: true })).toBeNull();
-    // Every compared pair undecided: the outcome still says it was interrupted.
+    // Unresolved pairs can include local abstentions, so no subset is inferred.
     expect(outcomeLines(scope({ n_pairs_skipped: 2 }), { findings: 0, undecided: 2, compared: 2, interrupted: true, surface: "screen" })).toEqual([
-      "The check was interrupted. The comparison could not decide on any of the 2 pairs it compared before then, so it makes no finding. They are listed below for you to read.",
+      "Pairs compared with AI: 2.",
+      "No internal agreement review lead was recorded.",
+      "Selected pairs left unresolved: 2. They are listed below for you to read.",
+      "The check was interrupted before it compared every pair.",
       "Pairs it did not compare are not treated as passed.",
     ]);
-    // Every pair skipped: the reason itself names the interruption.
-    expect(outcomeLines(scope({ n_pairs_skipped: 6 }), { findings: 0, undecided: 0, compared: 0, interrupted: true, surface: "screen" })[0])
-      .toBe("The check was interrupted before it compared any pair, so it makes no finding.");
+    const none = outcomeLines(scope({ n_pairs_skipped: 6 }), { findings: 0, undecided: 0, compared: 0, interrupted: true, surface: "screen" });
+    expect(none).toContain("No pair was compared with AI.");
+    expect(none).toContain("The check was interrupted before it compared every pair.");
     expect(interruptedLine(scope({ n_pairs_skipped: 6 }), { compared: 0, interrupted: true, outcomeShown: true })).toBeNull();
-    // Unknown compared count, or the outcome still loading: said on its own line.
+    // Even an unknown count has the interruption in a shown outcome.
     expect(interruptedLine(scope({ n_pairs_skipped: 2 }), { compared: null, interrupted: true, outcomeShown: true }))
-      .toBe("The check was interrupted before it compared every pair. Pairs it did not compare are not treated as passed.");
+      .toBeNull();
     expect(interruptedLine(scope(), { compared: 5, interrupted: true, outcomeShown: false })).not.toBeNull();
   });
 
   it("never claims agreement when nothing was compared", () => {
     expect(outcomeLines(scope({ n_objectives: 0 }), { findings: 0, undecided: 0, compared: 0, surface: "screen" })).toEqual([
-      "No objectives were found, so nothing was compared and the check makes no finding.",
+      "Pairs compared with AI: 0.",
+      "No pair was compared with AI.",
       "This does not mean the objectives and results agree.",
     ]);
-    expect(outcomeLines(scope({ n_results_set_aside: null }), { findings: 0, undecided: 0, compared: 0, surface: "screen" })[0])
-      .toBe("No pair was compared, so the check makes no finding.");
-    expect(outcomeLines(scope({ n_results: 5 }), { findings: 0, undecided: 0, compared: 0, surface: "screen" })[0])
-      .toBe("No results were left to compare, so the check makes no finding.");
+    for (const value of [scope({ n_results_set_aside: null }), scope({ n_results: 5 })]) {
+      const lines = outcomeLines(value, { findings: 0, undecided: 0, compared: 0, surface: "screen" });
+      expect(lines).toContain("No pair was compared with AI.");
+      expect(lines.join(" ")).not.toMatch(/no results were left|close enough/i);
+    }
   });
 
   it("says when a report did not record how many pairs were compared", () => {
     expect(outcomeLines(scope(), { findings: 0, undecided: 0, compared: null, surface: "screen" }))
-      .toEqual(["This report did not record how many pairs were compared."]);
+      .toEqual(["The number of pairs compared with AI was not recorded."]);
     expect(outcomeLines(scope({ n_results: 0 }), { findings: 0, undecided: 0, compared: null, surface: "screen" })[0])
-      .toBe("No results were left to compare, so the check makes no finding.");
+      .toBe("The number of pairs compared with AI was not recorded.");
     expect(outcomeLines(scope(), { findings: 2, undecided: 1, compared: null, surface: "screen" })).toEqual([
-      "This report did not record how many pairs were compared.",
-      "It found 2 possible inconsistencies. They are listed below.",
-      "1 pair could not be decided. It is listed after the findings.",
+      "The number of pairs compared with AI was not recorded.",
+      "2 internal agreement review leads. They are listed below.",
+      "Selected pairs left unresolved: 1. It is listed after the findings.",
     ]);
   });
 
-  it("counts only contradictions and partial matches as possible inconsistencies", () => {
+  it("counts factual and attainment leads without folding in unresolved or injection records", () => {
     expect(countInconsistencies([
       { check_kind: "internal_agreement", problem_kind: "agreement_contradictory" },
       { check_kind: "internal_agreement", problem_kind: "agreement_partial" },
+      { check_kind: "internal_agreement", problem_kind: "agreement_factual_conflict" },
+      { check_kind: "internal_agreement", problem_kind: "agreement_unmet" },
+      { check_kind: "internal_agreement", problem_kind: "agreement_cannot_determine" },
       { check_kind: "internal_agreement", problem_kind: "agreement_injection_suspected" },
       { check_kind: "internal_agreement", problem_kind: null },
       { check_kind: "citation_integrity", problem_kind: "agreement_partial" },
-    ])).toBe(2);
+    ])).toBe(4);
+    for (const kind of copy.review_lead_kinds) {
+      expect(countInconsistencies([{ check_kind: "internal_agreement", problem_kind: kind }])).toBe(1);
+    }
   });
 });
