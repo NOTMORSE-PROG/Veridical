@@ -218,6 +218,8 @@ class CrossMatchResult:
     ambiguous: list[InTextCitation]  # several sources fit one in-text mark
     possibly_cited: list[ReferenceLike] = field(default_factory=list)
     confidently_uncited: list[ReferenceLike] = field(default_factory=list)
+    # Links made only because a surname was spelled differently (BUG-696).
+    linked_by_spelling: list[tuple[InTextCitation, ReferenceLike]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

@@ -260,6 +260,11 @@ async def test_hyphen_dropped_from_a_surname_links_the_citation(monkeypatch):
     assert linkage(flags) == set()
     assert result.detail["n_orphans_unassessed"] == 0
     assert result.detail["uncited_unassessed"] == []
+    # The link is reported as one made by spelling, not as an exact match.
+    assert [
+        (row["citation"], row["reference_order_index"])
+        for row in result.detail["linked_by_spelling"]
+    ] == [("Xiongbin (2017)", 1)]
 
 
 async def test_a_respelt_surname_with_two_possible_entries_still_withholds_both(monkeypatch):

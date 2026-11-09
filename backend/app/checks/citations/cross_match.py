@@ -212,99 +212,55 @@ def load_name_variant_policy(path: Path | None = None) -> dict:
     return json.loads((path or _NAME_VARIANTS_FILE).read_text(encoding="utf-8"))
 
 
-def _known_expansions(name: str) -> set[str]:
-    key = " ".join(name.split()).casefold()
-    keys = {key, key.replace(".", "").replace(" ", "")}
-    return {alias.casefold() for k in keys for alias in _KNOWN_ACRONYMS.get(k, ())}
-
-
-def _link_name_variants(orphans, references, linked, cited, possibly_cited):
-    """Link a citation left without an entry to the one entry it names in another
-    spelling (BUG-696): the same surname with hyphens or spaces dropped, or an
-    organisation's short and long forms. A citation is linked only when exactly
-    one same-year entry fits it by name. An organisation form also needs an
-    entry nothing else cites and the entry's title in the citing sentence,
-    counting only words that are not part of either name. Anything else stays
-    an orphan."""
-    from app.checks.citations.extract import _is_corporate_author_name
-
+def _link_name_variants(orphans, references, linked, cited):
+    """Link a citation left without an entry to the one same-year entry whose
+    first surname is the citation's spelled differently: hyphens, spaces,
+    apostrophes or periods dropped ("Xiongbin" for "Xiong-Bin, W."). BUG-696.
+    Anything else stays an orphan, including two entries that fit. Returns
+    the remaining orphans and the links made, so each one can be reported as
+    a link by spelling."""
+    made = []
     if not linked:
         # When the main matching linked nothing, the citations were not read,
         # not respelt; the whole list is withheld for that elsewhere.
-        return orphans
+        return orphans, made
     try:
         policy = load_name_variant_policy(get_settings().citation_name_variant_policy_file)
-        enabled = bool(policy["enabled"])
+        enabled = policy["enabled"]
+        if not isinstance(enabled, bool):
+            raise TypeError(f"'enabled' must be true or false, not {enabled!r}")
         fold = re.compile(policy["fold_pattern"])
-        word = re.compile(policy["title_word_pattern"])
-        min_chars = int(policy["organisation_prefix_min_chars"])
-        min_words = int(policy["title_evidence_min_words"])
-        min_share = float(policy["title_evidence_min_share"])
-        ignored = {w.casefold() for w in policy.get("title_ignored_words", ())}
     except (OSError, ValueError, KeyError, TypeError, re.error) as exc:
         logger.warning("Citation name-variant policy unusable, variant linking skipped: %s", exc)
-        return orphans
+        return orphans, made
     if not enabled:
-        return orphans
-    # Entries cited before this pass; every citation is judged against the same set.
-    taken = set(cited) | set(possibly_cited)
+        return orphans, made
 
     def folded(name):
         return fold.sub("", (name or "").casefold())
 
-    def words(text):
-        return {w for w in word.findall((text or "").casefold()) if w not in ignored}
-
-    def name_fit(cited_name, entry_name):
-        if folded(cited_name) and folded(cited_name) == folded(entry_name):
-            return "surname" if cited_name.casefold() != entry_name.casefold() else None
-        short, long_ = sorted(
-            (cited_name.casefold().split(), entry_name.casefold().split()), key=len
-        )
-        if (
-            len(long_) <= len(short)
-            or long_[: len(short)] != short
-            or len("".join(short)) < min_chars
-        ):
-            return None
-        if not _is_corporate_author_name(" ".join(long_)):
-            # Only an organisation has a short and a long form: "Garcia" and
-            # "Garcia Lopez M." are two different people.
-            return None
-        known = _known_expansions(cited_name)
-        if known and " ".join(entry_name.casefold().split()) not in known:
-            # The acronym table says this short form names another body.
-            return None
-        return "organisation"
-
-    def title_in_sentence(cite, ref, entry_name):
-        names = words(cite.surnames[0]) | words(entry_name)
-        title = words(getattr(ref, "title", None)) - names
-        shared = title & (words(cite.claim_sentence) - names)
-        return bool(title) and len(shared) >= min_words and len(shared) / len(title) >= min_share
-
     remaining = []
     for cite in orphans:
+        name = cite.surnames[0] if cite.surnames else ""
         fitting = []
-        if cite.surnames and cite.year:
+        if folded(name) and cite.year:
             for ref in references:
                 if reference_date_key(ref) != citation_date_key(cite.year):
                     continue
                 author = next((a for a in ref.authors or [] if a and a.strip()), "")
                 entry_name = author.split(",", 1)[0].strip()
-                kind = name_fit(cite.surnames[0], entry_name)
-                if kind:
-                    fitting.append((ref, kind, entry_name))
-        if len(fitting) == 1:
-            ref, kind, entry_name = fitting[0]
-            if kind == "surname" or (
-                ref.order_index not in taken and title_in_sentence(cite, ref, entry_name)
-            ):
-                linked.append((cite, [ref]))
-                cited.add(ref.order_index)
-                continue
-        remaining.append(cite)
-    return remaining
+                if folded(entry_name) == folded(name):
+                    fitting.append((ref, entry_name))
+        # The same name, spelled the same, is one the main matching declined
+        # for a reason of its own; it is not a respelling.
+        if len(fitting) == 1 and fitting[0][1].casefold() != name.casefold():
+            ref = fitting[0][0]
+            linked.append((cite, [ref]))
+            cited.add(ref.order_index)
+            made.append((cite, ref))
+        else:
+            remaining.append(cite)
+    return remaining, made
 
 
 def cross_match(in_text: list[InTextCitation], references: list[ReferenceLike]) -> CrossMatchResult:
@@ -456,7 +412,7 @@ def cross_match(in_text: list[InTextCitation], references: list[ReferenceLike]) 
         else:
             orphans.append(cite)
 
-    orphans = _link_name_variants(orphans, references, linked, cited_order_indexes, possibly_cited)
+    orphans, by_spelling = _link_name_variants(orphans, references, linked, cited_order_indexes)
     uncited = [r for r in references if r.order_index not in cited_order_indexes]
     return CrossMatchResult(
         in_text=in_text,
@@ -466,4 +422,5 @@ def cross_match(in_text: list[InTextCitation], references: list[ReferenceLike]) 
         ambiguous=ambiguous,
         possibly_cited=[r for r in references if r.order_index in possibly_cited],
         confidently_uncited=[r for r in uncited if r.order_index not in possibly_cited],
+        linked_by_spelling=by_spelling,
     )
