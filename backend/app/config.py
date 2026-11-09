@@ -794,6 +794,10 @@ class Settings(BaseSettings):
     citation_title_search_budget_providers: list[Literal["crossref", "openalex", "s2"]] = [
         "openalex"
     ]
+    # How OpenAlex's retraction flag is offered when a title search reaches it:
+    # a Low lead to verify that never counts, with retraction notices told
+    # apart from retracted works (BUG-640). Packaged default if unset.
+    citation_openalex_retraction_lead_file: Path | None = None
     # Other failures, usually brief, only cost the reference being looked up,
     # unless this many happen in a row for one registry.
     citation_title_search_failures_before_skip: int = Field(default=3, ge=1, le=20)

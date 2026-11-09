@@ -66,6 +66,10 @@ from app.checks.citations.recency import (
     resolve_policy,
     unassessed_summary,
 )
+from app.checks.citations.retraction_lead import (
+    load_retraction_lead_policy,
+    openalex_retraction_lead,
+)
 from app.checks.citations.search_identity import SearchIdentity, search_identity
 from app.checks.citations.source_locator import with_reference_locator
 from app.checks.citations.support import (
@@ -605,6 +609,23 @@ def _verdict_from_result(
 def _verdict_flag_draft(
     citation: Citation, verdict: CitationVerdict, settings: Settings | None = None
 ) -> CitationFlagDraft | None:
+    if verdict.kind == VerdictKind.existence_confirmed and verdict.search_identity is not None:
+        # Found by title search. When that answer came from OpenAlex, its
+        # retraction flag is a lead to verify, never a counted finding.
+        try:
+            policy = load_retraction_lead_policy(
+                (settings or get_settings()).citation_openalex_retraction_lead_file
+            )
+        except (OSError, ValueError, UnicodeError):
+            policy = None
+        lead = openalex_retraction_lead(verdict.result, policy) if policy else None
+        if lead is not None:
+            return CitationFlagDraft(
+                severity=FlagSeverity(policy.severity),
+                evidence_excerpt=citation.raw_text,
+                page_anchor=f"reference #{citation.order_index + 1}",
+                detail=lead,
+            )
     if verdict.kind in (
         VerdictKind.existence_confirmed,
         VerdictKind.instructor_confirmed,
