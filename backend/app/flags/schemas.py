@@ -38,6 +38,7 @@ class PassagePairOut(BaseModel):
     # None for a supporting excerpt below standalone passage thresholds or
     # historical support whose classification was not stored.
     level: str | None
+    literal_overlap: dict | None = None
 
 
 class CitationSourceKeyOut(BaseModel):

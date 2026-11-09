@@ -1,0 +1,46 @@
+{
+  "version": "prose_mean_v1",
+  "max_source_chars": 1800,
+  "max_receipts": 100,
+  "max_sample_size": 1000000000,
+  "max_mean_precision": 20,
+  "small_numbers": {"zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14, "fifteen": 15, "sixteen": 16, "seventeen": 17, "eighteen": 18, "nineteen": 19},
+  "ones": ["one", "two", "three", "four", "five", "six", "seven", "eight", "nine"],
+  "tens": {"twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90},
+  "word_separator": "(?:-|\\s+)",
+  "digit_count_pattern": "(?:\\d{1,3}(?:,\\d{3})+|\\d+)",
+  "count_group_separator": ",",
+  "over_limit_candidate_pattern": "\\b(?:mean|sample|respondents?|participants?)\\b",
+  "sample_patterns": [
+    "(?:^|[.;!?]\\s+)(?P<count>$COUNT)\\s+(?:respondents?|participants?)\\b",
+    "(?:^|[.;!?]\\s+)(?P<assignment>(?:the\\s+)?(?:sample\\s+size(?:\\s+(?:was|is|of)\\s+|\\s*[=:]\\s*|\\s+)|n(?:\\s+(?:was|is)\\s+|\\s*[=:]\\s*)))(?P<count>$COUNT)(?!\\w|[.,]\\d)"
+  ],
+  "assignment_end_pattern": "\\s*(?:(?:respondents?|participants?)\\s*)?(?:[.;!?](?=\\s|$)|$)",
+  "count_continuation_pattern": "\\s*(?:[\u2013\u2014\u2212\u00b1/:%\u2030*^+-]|\\.\\d|,\\d|(?:to|through)(?=\\s|\\d)|\\b(?:and|or|of|out of|plus|minus|times|divided by|hundred|thousand|million|billion|dozen|point|about|around|approximately|roughly|nearly)\\b)",
+  "sample_context_patterns": [
+    "(?<!\\w)$COUNT\\s+(?:and|or|to|through|of|out of|plus|minus)\\s+$COUNT\\s+(?:respondents?|participants?)\\b",
+    "(?<![\\w.,])$DIGITS\\s*[-\u2013\u2014\u2212]\\s*$DIGITS\\s+(?:respondents?|participants?)\\b",
+    "(?<!\\w)$COUNT\\s+[-\u2013\u2014\u2212]\\s+$COUNT\\s+(?:respondents?|participants?)\\b",
+    "\\b(?:about|around|approximately|roughly|nearly|at least|at most|more than|fewer than|less than|over|under|minus|negative)\\s+$COUNT\\s+(?:respondents?|participants?)\\b",
+    "\\b(?:sample size|n)\\s*(?:was|is|of|=|:)\\s*$COUNT\\s+(?:and|or|to|through|of|out of)\\s+$COUNT\\b",
+    "(?<!\\w)$COUNT\\s+(?:completed|responded|returned|finished|were included|were excluded)\\b"
+  ],
+  "uncertain_context_patterns": ["\\b(?:not|no|never|neither|without|if|unless|whether|would|could|might|may|assuming|hypothetical|planned|estimated|proposed|target|excluded|removed|missing|subset|subsample|dropouts?|attrition|approx(?:imate(?:ly)?)?|about|around|roughly|nearly)\\b", "n['\u2019]t\\b", "\\b(?:of whom|of which|among whom)\\b"],
+  "mean_pattern": "\\b(?:reported\\s+)?mean\\s+(?:was|is|equals?)\\s*(?P<mean>[-+]?(?:\\d+(?:\\.\\d+)?|\\.\\d+))(?![\\w%\u2030*/^]|,\\d|\\.\\d)",
+  "mean_continuation_pattern": "\\s*(?:[\u2013\u2014\u2212\u00b1]|\\.\\.|[*/^%\u2030]|[+-]\\s*\\d|[eE][-+]?\\d|\\.\\d|,\\d|\\b(?:to|through)\\s+\\d)",
+  "integer_patterns": [
+    "\\b(?:respondents?|participants?)\\s+each\\s+(?:provided|provides?|gave|gives?|contributed|contributes?)\\s+(?:exactly\\s+)?one\\s+integer\\s+(?:rating|response)\\b",
+    "\\b(?:each|every)\\s+(?:respondent|participant)\\s+(?:provided|provides?|gave|gives?|supplied|supplies)\\s+(?:exactly\\s+)?one\\s+integer\\s+(?:rating|response)\\b"
+  ],
+  "single_item_patterns": ["\\b(?:a\\s+single|one|1)\\s+(?:survey\\s+|questionnaire\\s+)?item\\b"],
+  "veto_patterns": {
+    "continuous": ["\\bcontinuous (?:measurement|value|score|response)s?\\b", "\\bnot integer (?:rating|response)s?\\b", "\\bnon[- ]integer\\b"],
+    "composite": ["\\bcomposite (?:mean|average|score)\\b", "\\b(?:across|over|averages?) (?!one\\b|1\\b)(?:[a-z]+|\\d+) items\\b"],
+    "weighted": ["\\bweighted (?:arithmetic )?(?:mean|average)\\b", "\\bunequal (?:survey )?weights\\b"],
+    "non_arithmetic_mean": ["\\b(?:trimmed|winsori[sz]ed|geometric|harmonic|adjusted|estimated|model[- ]based) (?:mean|average)\\b"],
+    "negated_integer_design": ["\\bnot (?:exactly )?one integer\\b", "\\bnot (?:a )?single item\\b"]
+  },
+  "table_reference_patterns": ["\\btables?\\b", "\\brows?\\b"],
+  "sd_patterns": ["\\b(?:SD|standard deviation)\\s*(?:was|is|=|:)\\s*[-+]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)"],
+  "unperformed_checks": ["integer_standard_deviation", "distribution_reconstruction", "declared_scale_bounds"]
+}

@@ -28,7 +28,6 @@ a bug -- check the actual rendered page before treating one as real.
 
 import contextlib
 import json
-import re
 from datetime import UTC, datetime
 from functools import lru_cache
 from io import BytesIO
@@ -78,6 +77,7 @@ from app.report.schemas import (
 )
 from app.report.source_coverage import project_source_coverage
 from app.report.source_inventory import NativeSourceNote, group_native_source_notes
+from app.report.source_location import display_anchor as _display_anchor
 from app.report.source_print import source_evidence_flowables, source_image_size, source_image_store
 from app.report.statistical_scope import statistical_scope_copy
 from app.report.text import Paragraph, clusters, draw_right_text, register_fonts, text_width
@@ -183,11 +183,11 @@ def _agreement_scope_flowables(report, module, listed_flags, undecided_legacy, s
     scope = module.agreement_scope
     if scope is None:
         return []
-    # Only these two are possible inconsistencies; an injection warning sits
-    # on a pair that read as consistent and is a finding of another kind.
+    # Attainment and factual leads share this aggregate; unresolved pairs and
+    # injection warnings remain separate records.
     findings = sum(
         flag.check_kind == "internal_agreement"
-        and flag.problem_kind in {"agreement_contradictory", "agreement_partial"}
+        and flag.problem_kind in set(agreement_scope_copy()["review_lead_kinds"])
         for flag in listed_flags
     )
     undecided = (module.undetermined.count if module.undetermined else 0) + len(undecided_legacy)
@@ -225,42 +225,58 @@ def _agreement_scope_flowables(report, module, listed_flags, undecided_legacy, s
 def _undecided_pairs_flowables(
     report, legacy: list[FlagSummaryOut], styles: dict[str, ParagraphStyle]
 ) -> list:
-    """Objective/result pairs the agreement check compared but could not
-    decide, as one list after the module's findings rather than a page each."""
+    """Unresolved selected pairs, without implying that every pair was compared."""
     module = next(
         (m for m in report.integrity_modules if m.check_kind == "internal_agreement"), None
     )
     saved = module.undetermined if module and module.undetermined else None
     pairs = [
-        (pair.intent_text, pair.intent_anchor, pair.outcome_text, pair.outcome_anchor)
+        (
+            pair.intent_text,
+            pair.intent_anchor,
+            pair.outcome_text,
+            pair.outcome_anchor,
+            pair.reason,
+            pair.comparison_method,
+        )
         for pair in (saved.pairs if saved else [])
-    ] + [(flag.evidence_excerpt, flag.page_anchor, None, None) for flag in legacy]
+    ] + [(flag.evidence_excerpt, flag.page_anchor, None, None, None, "unknown") for flag in legacy]
     if not pairs:
         return []
-    # Older runs saved no compared count; the pairs listed are then all that is known.
-    lead = (
-        f"VERIDICAL could not decide on {len(pairs)} of "
-        f"{max(saved.compared_count, len(pairs))} objective and result pairs it compared."
-        if saved
-        else f"VERIDICAL could not decide on {len(pairs)} objective and result "
-        f"{'pair' if len(pairs) == 1 else 'pairs'}."
-    )
+
     items = [
         Paragraph("Pairs to read yourself", styles["h3"]),
         Paragraph(
             escape(
-                f"{lead} This is not a problem found in the manuscript. If "
-                "objective coverage matters for this defense, read the pairs and decide "
-                "yourself."
+                f"{len(pairs)} selected {'pair' if len(pairs) == 1 else 'pairs'} left unresolved. "
+                "Review both statements and their surrounding text. These pairs are not "
+                "manuscript findings and do not change readiness."
             ),
             styles["body"],
         ),
     ]
-    for number, (intent, intent_at, outcome, outcome_at) in enumerate(pairs, start=1):
+    if saved is not None and saved.compared_count is not None:
+        items.append(Paragraph(f"Pairs compared with AI: {saved.compared_count}.", styles["body"]))
+    else:
+        items.append(Paragraph(agreement_scope_copy()["comparison_unknown"], styles["body"]))
+    if saved is not None and saved.locally_unassessed_count:
+        items.append(
+            Paragraph(
+                f"Pairs left unassessed before AI comparison: {saved.locally_unassessed_count}.",
+                styles["body"],
+            )
+        )
+    for number, (intent, intent_at, outcome, outcome_at, reason, method) in enumerate(
+        pairs, start=1
+    ):
         text = f"{number}. Objective ({_display_anchor(intent_at)}): “{intent}”"
         if outcome is not None:
             text += f" Result ({_display_anchor(outcome_at)}): “{outcome}”"
         items.append(Paragraph(escape(text), styles["body"]))
+        labels = agreement_scope_copy()["pair_assessment_labels"]
+        label = labels.get(method, labels["unknown"])
+        note = f"{label}: {reason}" if reason else f"{label}."
+        items.append(Paragraph(escape(note), styles["body"]))
     return items
 
 
@@ -769,6 +785,15 @@ def _originality_scope_flowables(data: ReportExportData, styles: dict[str, Parag
         Spacer(1, 10),
     ]
     if scope and scope.compared_count and not scope.not_compared_reason:
+        if scope.literal_unassessed_passages:
+            items.append(
+                Paragraph(
+                    "Short-passage comparison was incomplete for "
+                    f"{scope.literal_unassessed_passages} manuscript passages when this check ran. "
+                    "Some shared wording may not be listed.",
+                    styles["caption"],
+                )
+            )
         sentences = indexing_scope_sentences(scope.library_passage_indexing)
         if sentences and scope.library_passage_indexing is not None:
             items.append(Paragraph("Passage comparison limits", styles["h3"]))
@@ -830,11 +855,6 @@ def _result_display(row: CriterionResultOut) -> tuple[str, str]:
         "not_applicable": ("Not applicable", "neutral"),
         "unverifiable": ("Unverifiable", "neutral"),
     }.get(row.outcome, (row.outcome, "neutral"))
-
-
-def _display_anchor(anchor: str) -> str:
-    match = re.fullmatch(r"(?:¶|Â¶|paragraph\s+)(\d+)", anchor.strip(), flags=re.I)
-    return f"Extracted paragraph {int(match[1]) + 1}" if match else anchor
 
 
 def _source_caption(row: CriterionResultOut) -> str:
@@ -2219,6 +2239,8 @@ def _build_report_pdf(data: ReportExportData, image_path) -> bytes:
                 )
                 if f.overridden:
                     caption_text += " · Overridden"
+                elif f.finding_confirmed:
+                    caption_text += " · Confirmed"
                 if f.affects_readiness is False and not optional:
                     caption_text += " · Not scored"
                 header = Paragraph(caption_text, caption_style)
@@ -2314,6 +2336,24 @@ def _build_report_pdf(data: ReportExportData, image_path) -> bytes:
                         Paragraph(
                             "<b>Recorded instructor judgment:</b> "
                             + escape(detail.override_reason),
+                            styles["body"],
+                        )
+                    )
+                elif f.finding_confirmed and not f.overridden:
+                    judgment = "Confirmed"
+                    if detail.finding_confirmed_at is not None:
+                        recorded_at = detail.finding_confirmed_at
+                        timestamp = (
+                            _format_date(recorded_at.astimezone(UTC), with_time=True)
+                            if recorded_at.utcoffset() is not None
+                            else recorded_at.isoformat()
+                        )
+                        judgment += f" ({timestamp})"
+                    if detail.finding_confirm_note:
+                        judgment += ". " + detail.finding_confirm_note
+                    explanation.append(
+                        Paragraph(
+                            "<b>Recorded instructor judgment:</b> " + escape(judgment),
                             styles["body"],
                         )
                     )

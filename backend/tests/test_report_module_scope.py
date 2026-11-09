@@ -96,6 +96,24 @@ def test_undecided_agreement_pairs_reach_the_report_as_coverage():
     assert module.undetermined.count == 1
     assert module.undetermined.compared_count == 9
     assert module.undetermined.pairs[0].outcome_anchor == "p. 40"
+    assert module.undetermined.locally_unassessed_count is None
+    assert module.undetermined.pairs[0].comparison_method == "unknown"
+
+
+def test_locally_declined_pair_retains_actual_zero_comparisons_and_source_method():
+    module = agreement(
+        {
+            "undetermined": {
+                "count": 1,
+                "compared_count": 0,
+                "locally_unassessed_count": 1,
+                "pairs": [dict(PAIR, comparison_method="phase_guard")],
+            }
+        }
+    )
+    assert module.undetermined.compared_count == 0
+    assert module.undetermined.locally_unassessed_count == 1
+    assert module.undetermined.pairs[0].comparison_method == "phase_guard"
 
 
 @pytest.mark.parametrize(
@@ -243,3 +261,103 @@ def test_a_shared_copy_keeps_the_counts_but_not_the_statements():
         ("literature", 3)
     ]
     assert shared.agreement_scope.set_aside == []
+
+
+@pytest.mark.parametrize(
+    "reason, expected",
+    [
+        ("source_reading_order_unresolved", "source_reading_order_unresolved"),
+        ("free text", None),
+        (None, None),
+    ],
+)
+def test_a_check_carries_its_coverage_reason_as_a_known_code_only(reason, expected):
+    rows = [
+        SimpleNamespace(
+            kind=CheckKind.citation_integrity,
+            criterion_id=None,
+            outcome=ResultOutcome.escalated,
+            detail={"coverage_reason": reason},
+        )
+    ]
+    [module] = [
+        row for row in integrity_modules(rows, set()) if row.check_kind == "citation_integrity"
+    ]
+    assert module.coverage_reason == expected
+
+
+def test_states_alone_carry_no_counts_pairs_or_statements():
+    from app.report.module_scope import module_states
+
+    full = integrity_modules(
+        [
+            SimpleNamespace(
+                kind=CheckKind.internal_agreement,
+                criterion_id=None,
+                outcome=ResultOutcome.escalated,
+                detail={
+                    **REPORT_44,
+                    "undetermined": {"count": 1, "compared_count": 2, "pairs": []},
+                },
+            )
+        ],
+        set(),
+    )
+    states = module_states(full)
+    assert [(m.check_kind, m.state) for m in states] == [(m.check_kind, m.state) for m in full]
+    for module in states:
+        assert module.agreement_scope is None and module.undetermined is None
+        assert set(module.model_dump(exclude_none=True)) <= {
+            "check_kind",
+            "state",
+            "coverage_reason",
+        }
+
+
+async def test_a_link_without_saved_detail_still_says_whether_each_check_ran(monkeypatch):
+    """A stale or unrecorded share snapshot falls back to the live report's
+    check states, and to nothing else from the report."""
+    from datetime import UTC, datetime, timedelta
+    from unittest.mock import AsyncMock
+
+    from app.report.schemas import AgreementScopeOut, IntegrityModuleOut, UndeterminedPairsOut
+    from app.share import service as share
+
+    live = [
+        IntegrityModuleOut(
+            check_kind="internal_agreement",
+            state="partial",
+            undetermined=UndeterminedPairsOut(count=1, compared_count=2, pairs=[]),
+            agreement_scope=AgreementScopeOut(n_objectives=3, n_results=4),
+        ),
+        IntegrityModuleOut(
+            check_kind="citation_integrity",
+            state="partial",
+            coverage_reason="source_reading_order_unresolved",
+        ),
+    ]
+    report = SimpleNamespace(integrity_modules=live)
+    link = SimpleNamespace(
+        revoked_at=None, expires_at=datetime.now(UTC) + timedelta(days=1), check_run_id=7
+    )
+    run = SimpleNamespace(id=7)
+    session = SimpleNamespace(
+        get=AsyncMock(side_effect=lambda model, key: link if key == "tok" else run)
+    )
+    public = SimpleNamespace(integrity_modules=[], subject=None)
+    monkeypatch.setattr(share, "lock_assessment", AsyncMock())
+    monkeypatch.setattr(share, "report_out_for_check_run", AsyncMock(return_value=report))
+    monkeypatch.setattr(share, "flags_for_check_run", AsyncMock(return_value=[]))
+    monkeypatch.setattr(share, "_public_details", AsyncMock(return_value=(None, "stale")))
+    monkeypatch.setattr(share, "_to_public_report", lambda _report: public)
+    import app.report.evidence_service as evidence
+
+    monkeypatch.setattr(evidence, "authorize_evidence_run", AsyncMock(return_value=run))
+    monkeypatch.setattr(share, "SharedReportOut", lambda **fields: SimpleNamespace(**fields))
+    out = await share.get_shared_report(session, "tok")
+    states = out.report.integrity_modules
+    assert [(m.check_kind, m.state, m.coverage_reason) for m in states] == [
+        ("internal_agreement", "partial", None),
+        ("citation_integrity", "partial", "source_reading_order_unresolved"),
+    ]
+    assert all(m.undetermined is None and m.agreement_scope is None for m in states)

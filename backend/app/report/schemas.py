@@ -145,6 +145,7 @@ COVERAGE_REASONS = frozenset(
         "reference_source_projection_unbound",
         "metadata_comparison_policy_unavailable",
         "citation_metadata_comparison_unassessed",
+        "citation_recency_incomplete",
         "author_year_citation_parse_unassessed",
         "numeric_citation_style_unassessed",
         "numeric_citation_scan_limit",
@@ -251,6 +252,10 @@ class CitationRecencySummaryOut(BaseModel):
     has no readable year, and the last group is never judged."""
 
     status: Literal["assessed", "unassessed", "off"]
+    policy_version: str | None = None
+    enabled: bool | None = None
+    check_year: int | None = None
+    assessment_coverage: Literal["complete", "partial", "unsupported"] | None = None
     # Why the list was not read for dates ("reference_list_not_bound",
     # "reference_membership_partial", "reference_list_unavailable",
     # "source_unavailable", "no_references", "format_setting_invalid",
@@ -291,6 +296,7 @@ class CitationRecencySummaryOut(BaseModel):
 
 class OriginalityScopeOut(BaseModel):
     library_passage_indexing: LibraryPassageIndexingSummary | None = None
+    literal_unassessed_passages: int | None = Field(default=None, ge=0)
     """V-077 (D-028): what the originality check compared against, shown on
     screen so an empty result over an empty Library can never read as
     evidence of originality. `compared_count` is the check's own recorded
@@ -325,14 +331,15 @@ class UndeterminedPairOut(BaseModel):
     outcome_text: str
     outcome_anchor: str
     reason: str | None = None
+    comparison_method: Literal["generation", "phase_guard", "unknown"] = "unknown"
 
 
 class UndeterminedPairsOut(BaseModel):
-    """Objective/result pairs the agreement check compared but could not
-    decide. Coverage, not findings: shown once beside the findings."""
+    """Selected pairs left unresolved, including those not compared with AI."""
 
     count: int
     compared_count: int
+    locally_unassessed_count: int | None = Field(default=None, ge=0)
     pairs: list[UndeterminedPairOut]
 
 
@@ -383,6 +390,9 @@ class IntegrityModuleOut(BaseModel):
     undetermined: UndeterminedPairsOut | None = None
     # internal_agreement only; None for runs saved before it was recorded.
     agreement_scope: AgreementScopeOut | None = None
+    # Why the check covered less than everything, as a code from
+    # COVERAGE_REASONS only (never free text); None when none was recorded.
+    coverage_reason: str | None = None
 
 
 class ReportOut(BaseModel):
@@ -917,6 +927,7 @@ class ExcludedReuseMatchOut(BaseModel):
     context_words_each_side: int
     similarity: float
     level: str
+    literal_overlap: dict | None = None
     excluded_reason: list[Literal["reference_list", "block_quote"]]
 
 
@@ -930,6 +941,7 @@ class ReuseMatchesOut(BaseModel):
     passage_archive_size_n: int
     matches: list[ExcludedReuseMatchOut]
     n_source_candidates_withheld: int = Field(default=0, ge=0)
+    literal_retrieval: dict | None = None
 
 
 class PageEvidenceImageOut(BaseModel):
@@ -964,6 +976,8 @@ class FlagExportDetailOut(BaseModel):
     source_identifier: str | None = None
     comparisons: list[ExportComparisonOut] = Field(default_factory=list)
     override_reason: str | None = None
+    finding_confirm_note: str | None = None
+    finding_confirmed_at: datetime | None = None
     evidence_unavailable: bool = False
     evidence_is_summary: bool = False
     current_guidance: str | None = None

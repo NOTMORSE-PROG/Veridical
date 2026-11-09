@@ -178,7 +178,11 @@ def test_high_confidence_source_linked_table_can_feed_existing_checks(tmp_path):
     )
     computation = _compute_forensics_findings(result)
     assert computation.outcome.value == "escalated"
-    assert len(computation.flag_drafts) == 1
+    assert computation.flag_drafts == []
+    applicability = computation.image_coverage["table_mean_applicability"][0]
+    assert applicability["state"] == "unassessed"
+    assert applicability["reason"] == "integer_granularity_unassessed"
+    assert computation.image_coverage["numerical_assessment_counts"]["integer_mean_checked"] == 0
     assert computation.image_coverage["n_images_unassessed"] == 0
     assert computation.image_coverage["n_image_tables_with_stats"] == 1
     reconstruction = computation.reconstruction
@@ -213,7 +217,8 @@ def test_partial_statistical_cells_do_not_clear_the_whole_image(tmp_path, rows):
     assert actual.n_descriptive == expected.n_descriptive
     assert actual.outcome.value == "escalated"
     assert actual.image_coverage["n_images_unassessed"] == 1
-    assert actual.image_coverage["image_coverage_items"][0]["reason"] == "table_partly_parsed"
+    expected_reason = "table_not_checked" if rows[0].count("M") > 1 else "table_partly_parsed"
+    assert actual.image_coverage["image_coverage_items"][0]["reason"] == expected_reason
 
 
 @pytest.mark.parametrize("n,mean", [("NaN", "3.30"), ("inf", "3.30"), ("10", "NaN")])

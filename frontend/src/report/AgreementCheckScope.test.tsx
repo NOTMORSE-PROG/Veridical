@@ -21,7 +21,7 @@ it("leads with the outcome, then says what the check covered, with no agreeing c
   show(scope({ n_objectives_matched: 9 }));
   const card = screen.getByRole("region", { name: "What this check compared" });
   const first = card.querySelector("h3 + p");
-  expect(first).toHaveTextContent("Among the 31 pairs VERIDICAL matched, the comparison found no possible inconsistency.");
+  expect(first).toHaveTextContent("Pairs compared with AI: 31. No internal agreement review lead was recorded.");
   expect(first?.querySelector("strong")).not.toBeNull();
   expect(within(card).getByText("Found 17 possible objectives and 34 possible results. 9 of the 17 objectives were matched to at least one result. One objective can be paired with more than one result.")).toBeInTheDocument();
   expect(within(card).getByText(/10 results from the literature review were set aside/)).toBeInTheDocument();
@@ -65,7 +65,7 @@ it("names an interruption once when pairs were compared", () => {
   show(scope({ n_pairs_skipped: 2 }), { compared: 5, interrupted: true });
   const card = screen.getByRole("region", { name: "What this check compared" });
   expect(card.textContent?.match(/interrupted/g)).toHaveLength(1);
-  expect(within(card).getByText(/Among the 5 pairs it compared before then/)).toBeInTheDocument();
+  expect(within(card).getByText(/Pairs compared with AI: 5\./)).toBeInTheDocument();
 });
 
 it("keeps only the too-short count when no results section was found", () => {
@@ -79,14 +79,14 @@ it("keeps only the too-short count when no results section was found", () => {
 
 it("says when the report did not record how many pairs were compared", () => {
   show(scope(), { compared: null, undecided: 2 });
-  expect(screen.getByText("This report did not record how many pairs were compared. 2 pairs could not be decided. They are listed below for you to read.")).toBeInTheDocument();
+  expect(screen.getByText("The number of pairs compared with AI was not recorded. Selected pairs left unresolved: 2. They are listed below for you to read.")).toBeInTheDocument();
 });
 
 it("gives the adviser the counts without the statements or list controls", () => {
   render(<AgreementScopeSummary scope={scope({ set_aside: [] })} findings={0} undecided={2} compared={9} interrupted={false} />);
   expect(screen.getByRole("heading", { level: 4, name: "What this check compared" })).toBeInTheDocument();
-  expect(screen.getByText(/The instructor's report lists the results set aside/)).toBeInTheDocument();
-  expect(screen.getByText("Among the 9 pairs VERIDICAL matched, the comparison found no possible inconsistency in the pairs it could decide. "
-    + "2 pairs could not be decided. They are not findings; the instructor's report lists them.")).toBeInTheDocument();
+  expect(screen.getByText(/This link counts these statements but does not quote them/)).toBeInTheDocument();
+  expect(screen.getByText("Pairs compared with AI: 9. No internal agreement review lead was recorded. "
+    + "Selected pairs left unresolved: 2. They are not findings and do not change readiness.")).toBeInTheDocument();
   expect(screen.queryByRole("button")).not.toBeInTheDocument();
 });

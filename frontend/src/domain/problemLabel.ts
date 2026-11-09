@@ -22,13 +22,16 @@ export const PROBLEM_LABEL: Partial<Record<string, string>> = {
   reuse_high_similarity: "High textual similarity",
   reuse_high_similarity_chapter: "High section similarity",
   reuse_high_similarity_passage: "High passage similarity",
+  reuse_literal_overlap_passage: "Shared contiguous wording",
   // BUG-168: extended past the original 14 -- these 12 kinds are real,
   // reachable outcomes of the F4-F7 checks (confirmed via `grep '"kind":'`
   // across `backend/app/checks/`) that had no label at all, falling
   // through to the generic "Possible inconsistency" default. Each derived
   // from its own check's `*_WORDING` constant, never invented copy.
   agreement_contradictory: "Objective and result may contradict each other",
-  agreement_partial: "Objective may be only partially addressed",
+  agreement_factual_conflict: "Two reported claims may conflict",
+  agreement_unmet: "Objective reported as not achieved",
+  agreement_partial: "Objective appears partly achieved",
   agreement_cannot_determine: "Could not determine if the result addresses the objective",
   agreement_injection_suspected: "Objective or result text may address an automated grader",
   claim_possibly_unsupported: "Citation may not support the attached claim",

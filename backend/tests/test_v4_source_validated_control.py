@@ -64,7 +64,9 @@ def test_frozen_source_and_provenance_remain_identifiable():
     manifest, recipe = load_manifest(), load_recipe()
     assert _sha(FIXTURE_DIR / "recipe.json") == manifest["recipe_sha256"]
     assert _sha(FIXTURE_DIR / "control.docx") == manifest["docx_sha256"]
-    original = Path(__file__).with_name("test_v4_seeded_regression.py")
+    original = (
+        Path(__file__).parent / "fixtures/recency_policy_v1/test_v4_seeded_regression.py.before.txt"
+    )
     assert _sha(original) == manifest["original_frozen_test_sha256"]
     with ZipFile(FIXTURE_DIR / "control.docx") as archive:
         assert (
@@ -449,7 +451,17 @@ async def test_source_validated_control_runs_actual_metadata_and_numerical_check
         results[kind]["id"]
         for kind in (CheckKind.citation_integrity, CheckKind.statistical_forensics)
     }
-    assert not [row for row in evidence["flags"] if row["check_result_id"] in selected_ids]
+    notes = [
+        row for row in evidence["flags"] if row["detail"].get("kind") == "outside_recency_window"
+    ]
+    assert len(notes) == 2
+    assert all(row["detail"].get("affects_readiness") is False for row in notes)
+    assert not [
+        row
+        for row in evidence["flags"]
+        if row["check_result_id"] in selected_ids
+        and row["detail"].get("kind") != "outside_recency_window"
+    ]
     # Aggregate F5 and canned claim-support counters remain in evidence.json.
     # They do not certify semantic support or a complete readiness assessment.
 

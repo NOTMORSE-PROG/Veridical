@@ -12,6 +12,8 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    func,
+    literal_column,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -287,6 +289,11 @@ class ManuscriptPassageArchive(Base, PkCreatedMixin):
     manuscript: Mapped["Manuscript"] = relationship(back_populates="passage_archives")
 
     __table_args__ = (
+        Index(
+            "ix_passage_literal_search",
+            func.to_tsvector(literal_column("'simple'::regconfig"), text),
+            postgresql_using="gin",
+        ),
         UniqueConstraint(
             "manuscript_id",
             "passage_index",

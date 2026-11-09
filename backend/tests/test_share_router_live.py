@@ -726,7 +726,20 @@ def test_new_link_details_are_allowlisted_and_revision_bound(
     stale = client.get(f"/shared/{token}/report").json()
     assert stale["detail_snapshot"] == "stale"
     assert stale["finding_details"] == []
-    assert stale["report"]["integrity_modules"] == []
+    # A stale link still says whether each check ran, but only that: the
+    # state and a coverage code, never the counts, pairs or statements.
+    stale_modules = stale["report"]["integrity_modules"]
+    assert len(stale_modules) == 4
+    for module in stale_modules:
+        assert set(module) == {
+            "check_kind",
+            "state",
+            "undetermined",
+            "agreement_scope",
+            "coverage_reason",
+        }
+        assert module["undetermined"] is None
+        assert module["agreement_scope"] is None
     assert stale["report"]["subject"]["basis"] == "not_recorded"
 
 

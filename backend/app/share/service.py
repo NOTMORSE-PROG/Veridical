@@ -18,7 +18,7 @@ from app.models.run import CheckResult, CheckRun, Flag
 from app.models.share import ShareLink
 from app.pipeline.service import get_check_run
 from app.report.assessment import lock_assessment
-from app.report.module_scope import public_modules
+from app.report.module_scope import module_states, public_modules
 from app.report.schemas import (
     CriterionResultOut,
     PublicCriterionResultOut,
@@ -354,6 +354,10 @@ async def get_shared_report(session: AsyncSession, token: str) -> SharedReportOu
     if snapshot is not None:
         public.subject = snapshot.subject
         public.integrity_modules = snapshot.integrity_modules
+    else:
+        # Without saved detail the link still says whether each check ran,
+        # from the live report, and nothing more: no counts, pairs or quotes.
+        public.integrity_modules = module_states(report.integrity_modules)
     # Recheck after every asynchronous projection; revocation can win in flight.
     from app.report.evidence_service import authorize_evidence_run
 

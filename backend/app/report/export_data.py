@@ -158,6 +158,12 @@ def flag_export_detail(
         source_identifier=f"{source.kind}: {source.value}" if source else None,
         comparisons=comparisons,
         override_reason=flag.override_reason if flag.overridden else None,
+        finding_confirm_note=flag.finding_confirm_note
+        if flag.finding_confirmed and not flag.overridden
+        else None,
+        finding_confirmed_at=flag.finding_confirmed_at
+        if flag.finding_confirmed and not flag.overridden
+        else None,
         evidence_unavailable=flag.evidence_unavailable
         or (evidence_is_summary and flag.passage_pair is None),
         evidence_is_summary=evidence_is_summary,

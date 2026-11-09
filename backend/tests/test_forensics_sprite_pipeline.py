@@ -335,7 +335,7 @@ def test_public_scope_only_projects_safe_reconstruction_counts():
     assert scope.reconstruction.state == "candidate_found"
     public = scope.model_dump()
     assert "histogram" not in json.dumps(public) and "cells" not in json.dumps(public)
-    assert "not recovered or verified original data" in statistical_scope_copy(scope)[1]
+    assert "not that they are the real data" in statistical_scope_copy(scope)[1]
     legacy = statistical_check_scope(["passed"], [{"n_descriptive_stats": 3}])
     assert legacy.state == "incomplete" and legacy.reconstruction.state == "not_recorded"
 
@@ -398,7 +398,15 @@ def test_child_scientific_thread_limit_does_not_change_parent_environment(monkey
 
 
 def _plain_table(page, rows):
-    return TableBlock(page=page, rows=[["Respondents", "N", "Mean"], *rows], source="native")
+    return TableBlock(
+        page=page,
+        rows=[
+            ["Respondents", "N", "Mean", "Item response unit", "Number of items"],
+            *[[*row, "integer", "1"] for row in rows],
+        ],
+        source="native",
+        caption="Each participant supplies exactly one integer rating.",
+    )
 
 
 def test_grim_still_runs_on_tables_after_the_sprite_input_budget_is_used_up():

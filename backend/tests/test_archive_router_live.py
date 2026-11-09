@@ -941,9 +941,9 @@ def test_inflight_source_hydration_cannot_restore_bytes_after_purge(
     refill_finished = threading.Event()
     original_ensure = source_module.ensure_local_file
 
-    def observed_refill(*args):
+    def observed_refill(*args, **kwargs):
         try:
-            return original_ensure(*args)
+            return original_ensure(*args, **kwargs)
         finally:
             refill_finished.set()
 

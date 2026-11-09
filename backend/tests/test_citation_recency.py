@@ -33,16 +33,26 @@ def grammar():
 
 
 def _settings(**overrides) -> Settings:
-    # The note is off by default; these tests exercise it switched on.
+    # Recency is built in; window and readiness choices remain configurable.
     return Settings(_env_file=None, **{"citation_recency_enabled": True, **overrides})
 
 
-def test_the_note_is_off_unless_turned_on(monkeypatch):
+def test_recency_is_required_for_default_and_legacy_formats(monkeypatch):
     monkeypatch.delenv("CITATION_RECENCY_ENABLED", raising=False)
     defaults = Settings(_env_file=None)
-    assert defaults.citation_recency_enabled is False
-    assert resolve_policy(None, defaults).enabled is False
-    assert resolve_policy({"enabled": True}, defaults).enabled is True
+    assert defaults.citation_recency_enabled is True
+    for stored in (None, {}, {"enabled": False}, {"enabled": True}):
+        policy = resolve_policy(stored, defaults)
+        assert policy.enabled is True
+        assert policy.record()["policy_version"] == "mandatory-recency-v1"
+        assert effective_settings(stored, defaults)["enabled"] is True
+
+
+def test_configuration_cannot_disable_recency():
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="cannot be disabled"):
+        Settings(_env_file=None, citation_recency_enabled=False)
 
 
 def _read(grammar, raw, year=None, status=FAILED):
@@ -322,13 +332,15 @@ def test_counting_toward_readiness_is_a_format_choice():
     )
 
 
-def test_turning_the_note_off_reads_nothing():
+def test_legacy_disabled_setting_still_reads_dates():
     policy = resolve_policy({"enabled": False}, _settings())
     assessment = assess_recency(
         [_citation(0, "A, B. (2010). Old. J.", 2010, PARSED)], None, policy, load_grammar(), 2026
     )
-    assert assessment.flags == []
-    assert assessment.summary["status"] == "off"
+    assert len(assessment.flags) == 1
+    assert assessment.summary["status"] == "assessed"
+    assert assessment.summary["enabled"] is True
+    assert assessment.flags[0].detail["affects_readiness"] is False
 
 
 def test_an_invalid_saved_setting_is_refused_not_replaced_by_defaults():
@@ -562,3 +574,21 @@ def test_counted_recency_notes_make_one_low_deduction_however_many_sources():
     assert scored.status == ReadinessStatus.ready
     # A single note deducts the same as fourteen.
     assert score_check_run(results, notes[:1], settings).flag_deduction == scored.flag_deduction
+
+
+@pytest.mark.parametrize(
+    "raw, reason",
+    [
+        ("A, B. (n.d.). Undated. J.", "no_date"),
+        ("A, B. (2017). Title. Journal, 2018, 12(3), 1-4.", "conflicting_years"),
+        ("", "no_text"),
+    ],
+)
+def test_unreadable_dates_remain_incomplete_and_are_never_old(raw, reason):
+    assessment = _assess([_citation(0, raw)])
+    summary = assessment.summary
+    assert summary["assessment_coverage"] == "partial"
+    assert summary["n_year_not_readable"] == 1
+    assert summary["year_not_readable_reasons"] == {reason: 1}
+    assert summary["n_dated"] == summary["n_outside_window"] == 0
+    assert assessment.flags == []
