@@ -7,7 +7,10 @@ IEEE, ACM, CHED, DOST, etc.) and numbered bracket citations ([1], [1]-[3]).
 
 from __future__ import annotations
 
+import json
 import re
+from functools import lru_cache
+from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 from app.checks.citations.numbered import explicit_reference_label
@@ -25,6 +28,7 @@ class ReferenceLike(Protocol):
     year: int | str | None
 
 
+_NAME_VARIANTS_FILE = Path(__file__).parent / "data" / "name_variants.json"
 _INITIALS_TOKEN = re.compile(r"(?:[^\W\d_]\.)+(?:-[^\W\d_]\.)*")
 
 # Bidirectional known alias dictionary for prominent global & Philippine technical/academic bodies
@@ -200,6 +204,80 @@ def _build_reference_number_index(references: list[ReferenceLike]) -> dict[int, 
     return by_number
 
 
+@lru_cache(maxsize=4)
+def load_name_variant_policy(path: Path | None = None) -> dict:
+    return json.loads((path or _NAME_VARIANTS_FILE).read_text(encoding="utf-8"))
+
+
+def _link_name_variants(orphans, references, linked, cited, possibly_cited):
+    """Link a citation left without an entry to the one entry it names in another
+    spelling (BUG-696): the same surname with hyphens or spaces dropped, or an
+    organisation's short and long forms backed by the entry's title in the citing
+    sentence (and then only an entry nothing else cites). Only a single fitting
+    entry is linked; anything else stays an orphan."""
+    try:
+        policy = load_name_variant_policy(get_settings().citation_name_variant_policy_file)
+        fold = re.compile(policy["fold_pattern"])
+        word = re.compile(policy["title_word_pattern"])
+    except (OSError, ValueError, KeyError, re.error):
+        return orphans
+    if not policy.get("enabled"):
+        return orphans
+    ignored = {w.casefold() for w in policy.get("title_ignored_words", ())}
+
+    def folded(name):
+        return fold.sub("", (name or "").casefold())
+
+    def title_words(text):
+        return {w for w in word.findall((text or "").casefold()) if w not in ignored}
+
+    def fits(cite, ref):
+        cited_name = cite.surnames[0]
+        author = next((a for a in ref.authors or [] if a and a.strip()), "")
+        entry_name = author.split(",", 1)[0].strip()
+        if folded(cited_name) and folded(cited_name) == folded(entry_name):
+            return cited_name.casefold() != entry_name.casefold()
+        if ref.order_index in cited or ref.order_index in possibly_cited:
+            # The organisation form is weaker evidence: only an entry nothing
+            # else cites can be the one meant.
+            return False
+        if "," in author:
+            # A person, written "Surname, Initials": never an organisation form.
+            return False
+        short, long_ = sorted(
+            (cited_name.casefold().split(), entry_name.casefold().split()), key=len
+        )
+        if (
+            len(long_) <= len(short)
+            or long_[: len(short)] != short
+            or len("".join(short)) < policy["organisation_prefix_min_chars"]
+        ):
+            return False
+        title = title_words(getattr(ref, "title", None))
+        shared = title & title_words(cite.claim_sentence)
+        return bool(title) and (
+            len(shared) >= policy["title_evidence_min_words"]
+            and len(shared) / len(title) >= policy["title_evidence_min_share"]
+        )
+
+    remaining = []
+    for cite in orphans:
+        same_year = [
+            ref
+            for ref in references
+            if cite.surnames
+            and cite.year
+            and reference_date_key(ref) == citation_date_key(cite.year)
+        ]
+        fitting = [ref for ref in same_year if fits(cite, ref)]
+        if len(fitting) == 1:
+            linked.append((cite, fitting))
+            cited.add(fitting[0].order_index)
+        else:
+            remaining.append(cite)
+    return remaining
+
+
 def cross_match(in_text: list[InTextCitation], references: list[ReferenceLike]) -> CrossMatchResult:
     from app.checks.citations.extract import (
         CrossMatchResult,
@@ -349,6 +427,7 @@ def cross_match(in_text: list[InTextCitation], references: list[ReferenceLike]) 
         else:
             orphans.append(cite)
 
+    orphans = _link_name_variants(orphans, references, linked, cited_order_indexes, possibly_cited)
     uncited = [r for r in references if r.order_index not in cited_order_indexes]
     return CrossMatchResult(
         in_text=in_text,

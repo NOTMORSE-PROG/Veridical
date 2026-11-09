@@ -853,6 +853,10 @@ class Settings(BaseSettings):
     # Which uncited claims a page left unread could change, and how the lead
     # for the ones it could is worded (BUG-619). Packaged default if unset.
     citation_unread_pages_policy_file: Path | None = None
+    # When a citation that names its source in another spelling (a hyphen dropped,
+    # an organisation's short or long form) is linked to its entry instead of
+    # being reported missing (BUG-696). Packaged default if unset.
+    citation_name_variant_policy_file: Path | None = None
 
     # Exact-DOI metadata title policy. Packaged default if unset; changing a
     # custom policy requires a process restart. Each comparison saves its hash.

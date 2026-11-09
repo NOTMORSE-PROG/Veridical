@@ -245,7 +245,7 @@ async def test_entry_a_withheld_orphan_may_cite_is_not_called_unused(monkeypatch
     ]
 
 
-async def test_hyphen_dropped_from_a_surname_withholds_both_sides(monkeypatch):
+async def test_hyphen_dropped_from_a_surname_links_the_citation(monkeypatch):
     xiong = (
         "Xiong-Bin, W., Guan, H., & Ma, J. (2017). A tour route planning model. "
         "Journal of Tours, 3(2), 1-9."
@@ -255,9 +255,27 @@ async def test_hyphen_dropped_from_a_surname_withholds_both_sides(monkeypatch):
         "Prior work (Reyes, 2024) is discussed. Xiongbin (2017) planned tour routes.",
         [LINKED, xiong],
     )
+    # The same surname written without its hyphen names the entry: linked,
+    # so nothing is left unassessed on either side.
+    assert linkage(flags) == set()
+    assert result.detail["n_orphans_unassessed"] == 0
+    assert result.detail["uncited_unassessed"] == []
+
+
+async def test_a_respelt_surname_with_two_possible_entries_still_withholds_both(monkeypatch):
+    first = (
+        "Xiong-Bin, W., Guan, H., & Ma, J. (2017). A tour route planning model. "
+        "Journal of Tours, 3(2), 1-9."
+    )
+    second = "Xiong-Bin, W. (2017). Hotel pricing over a season. Journal of Stays, 1(1), 2-8."
+    result, flags, _ = await run(
+        monkeypatch,
+        "Prior work (Reyes, 2024) is discussed. Xiongbin (2017) planned tour routes.",
+        [LINKED, first, second],
+    )
+    # Two entries fit, so neither is linked; the guard keeps every side quiet.
     assert linkage(flags) == set()
     assert result.detail["n_orphans_unassessed"] == 1
-    # The entry is both the orphan's possible source and named beside its year.
     assert {row["reason"] for row in result.detail["uncited_unassessed"]} == {
         WITHHELD_POSSIBLE_TARGET
     }

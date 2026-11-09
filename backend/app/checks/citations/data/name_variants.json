@@ -1,0 +1,26 @@
+{
+  "_source": "BUG-696 (2026-11-09): an author-year citation that names its source in another spelling than the reference entry was reported missing from the reference list. Measured on the stored dev theses: DESTAMP cites 'Xiongbin (2017)' for the entry 'Xiong-Bin, W. et al. (2017)' and 'Statista Research Department (2023)' for 'Statista. (2023)'; two blind raters judged both the same work. Only a citation the main matching left without an entry is considered, only against an entry nothing else cites, and only when exactly one entry fits.",
+  "enabled": true,
+  "_fold_note": "Characters dropped before two names are compared: 'Xiong-Bin' and 'Xiongbin' are one name.",
+  "fold_pattern": "[\\s\\-\\u2010-\\u2015'\\u2019.]+",
+  "_organisation_note": "An organisation written in a short and a long form ('Statista', 'Statista Research Department'): one name's words begin the other's. Only when the entry's author is written as an organisation (no 'Surname, Initials' comma), and only when the citing sentence carries the entry's title: at least title_evidence_min_words of its title words, and at least title_evidence_min_share of them. A personal surname never matches this way.",
+  "organisation_prefix_min_chars": 4,
+  "title_evidence_min_words": 3,
+  "title_evidence_min_share": 0.5,
+  "title_word_pattern": "[^\\W\\d_]{4,}",
+  "title_ignored_words": [
+    "with",
+    "from",
+    "into",
+    "using",
+    "based",
+    "through",
+    "their",
+    "this",
+    "that",
+    "among",
+    "study",
+    "toward",
+    "towards"
+  ]
+}
