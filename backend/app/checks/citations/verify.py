@@ -24,6 +24,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.service import write_audit_event
+from app.checks.citations.different_work import (
+    different_work_reason,
+    leads_to_different_work,
+    load_different_work_policy,
+)
 from app.checks.citations.extract import (
     CitationFlagDraft,
     ScanGapSite,
@@ -71,7 +76,7 @@ from app.checks.citations.support import (
 from app.checks.citations.title_policy import TitlePolicy, load_title_policy
 from app.checks.citations.unread_pages import split_by_unread_pages, unread_page_leads
 from app.checks.source_quality import persist_source_limitation, source_limitation_detail
-from app.config import Settings
+from app.config import Settings, get_settings
 from app.errors import ApiDownError
 from app.external import cache
 from app.external import crossref as crossref_client
@@ -597,7 +602,9 @@ def _verdict_from_result(
     return CitationVerdict(VerdictKind.existence_confirmed, result)
 
 
-def _verdict_flag_draft(citation: Citation, verdict: CitationVerdict) -> CitationFlagDraft | None:
+def _verdict_flag_draft(
+    citation: Citation, verdict: CitationVerdict, settings: Settings | None = None
+) -> CitationFlagDraft | None:
     if verdict.kind in (
         VerdictKind.existence_confirmed,
         VerdictKind.instructor_confirmed,
@@ -608,17 +615,41 @@ def _verdict_flag_draft(citation: Citation, verdict: CitationVerdict) -> Citatio
         return None
     anchor = f"reference #{citation.order_index + 1}"
     if verdict.kind == VerdictKind.metadata_mismatch:
+        severity, reason, other_work = (
+            FlagSeverity.low,
+            (
+                "The DOI identifies a registered source, but its published metadata differs "
+                "from this reference. Compare the author, title and year before relying on it. "
+                "Source existence does not establish claim support."
+            ),
+            {},
+        )
+        policy, overlap = None, None
+        comparison = verdict.metadata_comparison
+        if comparison is not None and comparison.title_status == "differs":
+            try:
+                policy = load_different_work_policy(
+                    (settings or get_settings()).citation_metadata_different_work_file
+                )
+            except (OSError, ValueError, UnicodeError):
+                # Without its policy the check cannot tell a different work
+                # from drift, so it stays the Low mismatch below.
+                policy = None
+            if policy is not None:
+                overlap = leads_to_different_work(comparison, policy)
+        if overlap is not None:
+            # The registry record is another paper, not drift; usually a DOI typo.
+            severity = FlagSeverity(policy.severity)
+            reason = different_work_reason(verdict.metadata_comparison, policy)
+            other_work = {"leads_to_different_work": True, "title_word_overlap": round(overlap, 2)}
         return CitationFlagDraft(
-            severity=FlagSeverity.low,
+            severity=severity,
             evidence_excerpt=citation.raw_text,
             page_anchor=anchor,
             detail={
                 "kind": "possible_metadata_mismatch",
-                "reason": (
-                    "The DOI identifies a registered source, but its published metadata differs "
-                    "from this reference. Compare the author, title and year before relying on it. "
-                    "Source existence does not establish claim support."
-                ),
+                "reason": reason,
+                **other_work,
                 "provider": verdict.result.provider,
                 "differing_fields": list(verdict.metadata_comparison.differing_fields)
                 if verdict.metadata_comparison
@@ -1275,7 +1306,7 @@ async def _run_citation_integrity_check(
                 else "unassessed",
             }
         )
-        draft = _verdict_flag_draft(citation, verdict)
+        draft = _verdict_flag_draft(citation, verdict, settings)
         if draft is not None:
             draft = with_reference_locator(draft, citation)
             if citation.order_index in source_projections:
