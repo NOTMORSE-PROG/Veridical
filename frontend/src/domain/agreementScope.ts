@@ -74,7 +74,7 @@ export const AGREEMENT_SCOPE_COPY = {
   interruptedTail: "Pairs it did not compare are not treated as passed.",
   notIdentified: "The results section could not be found, so possible results were taken from every part of the paper. Some of them may describe other studies.",
   olderNoScope: "This report was made before VERIDICAL recorded what this check compared.",
-  adviserSetAside: "This link counts these statements but does not quote them.",
+  adviserSetAside: "This link counts the statements set aside but does not quote them.",
   matchingHeading: "About these pairs",
   matchingCaveat: "VERIDICAL matches each objective with the results most like it. Some matched pairs may not belong together, and this matching is being improved. A matched pair is not proof that both statements are about the same thing.",
 } as const;

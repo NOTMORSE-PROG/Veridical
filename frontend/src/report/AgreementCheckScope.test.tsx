@@ -85,7 +85,7 @@ it("says when the report did not record how many pairs were compared", () => {
 it("gives the adviser the counts without the statements or list controls", () => {
   render(<AgreementScopeSummary scope={scope({ set_aside: [] })} findings={0} undecided={2} compared={9} interrupted={false} />);
   expect(screen.getByRole("heading", { level: 4, name: "What this check compared" })).toBeInTheDocument();
-  expect(screen.getByText(/This link counts these statements but does not quote them/)).toBeInTheDocument();
+  expect(screen.getByText(/This link counts the statements set aside but does not quote them/)).toBeInTheDocument();
   expect(screen.getByText("Pairs compared with AI: 9. No internal agreement review lead was recorded. "
     + "Selected pairs left unresolved: 2. They are not findings and do not change readiness.")).toBeInTheDocument();
   expect(screen.queryByRole("button")).not.toBeInTheDocument();
@@ -120,7 +120,7 @@ it("gives the adviser the objective counts without the statements", () => {
   render(<AgreementScopeSummary scope={{ ...objectives, set_aside: [], objectives_set_aside: [] }} findings={0} undecided={0} compared={9} interrupted={false} />);
   expect(screen.getByText(/^3 possible objectives from the literature review were set aside/)).toBeInTheDocument();
   // Said once, after both counts.
-  expect(screen.getAllByText("This link counts these statements but does not quote them.")).toHaveLength(1);
+  expect(screen.getAllByText("This link counts the statements set aside but does not quote them.")).toHaveLength(1);
   expect(screen.queryByText(/Smith aimed/)).not.toBeInTheDocument();
   expect(screen.queryByRole("button")).not.toBeInTheDocument();
 });
