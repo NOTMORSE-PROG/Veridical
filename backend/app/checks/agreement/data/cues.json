@@ -292,7 +292,7 @@
     "end_section_patterns": [
       "^(?:references|bibliography|appendi(?:x|ces)|methodology|methods|research\\s+design|literature|theoretical|conceptual|synthesis|acknowledge?ments?|abstract|table\\s+of\\s+contents|list\\s+of\\s+(?:tables|figures))\\b",
       "^(?:background|introduction)(?:\\s+of\\s+the\\s+(?:study|research|project))?\\s*:?$",
-      "\\b(?:recommendations?|suggestions?|(?:de)?limitations?)\\b",
+      "\\b(?:recommend\\w*|suggest\\w*|(?:de)?limitations?|improvements?|enhancements?|next\\s+steps?)\\b",
       "\\brelated\\s+(?:works?|studies|systems|literature)\\b",
       "\\bexisting\\s+(?:systems?|studies|works?|applications?)\\b",
       "\\bimplications?\\b",
@@ -312,14 +312,14 @@
       "\\bimplications?\\b",
       "\\brecommendations?\\b"
     ],
-    "_end_section_note": "A heading that names a section ending the results. Recommendations, suggestions and limitations end it wherever they appear in the heading ('Summary and Recommendations', 'Scope and Delimitation'), as do distinctive phrases. Other section words count at the start of the heading, after its numbering or chapter prefix; 'Background' and 'Introduction' count only as the whole heading, so 'Background Noise Reduction' stays inside Results. A 'Chapter N' heading always ends it.",
+    "_end_section_note": "A heading that names a section ending the results. Recommendations, suggestions, limitations, improvements, enhancements and next steps end it wherever they appear in the heading, in any word form ('Recommended Actions:', 'Areas for Improvement', 'Scope and Delimitation'), as do distinctive phrases. Other section words count at the start of the heading, after its numbering or bullet; 'Background' and 'Introduction' count only as the whole heading, so 'Background Noise Reduction' stays inside Results. A 'Chapter N' or 'Part N' heading always ends it.",
     "label_exclusion_patterns": [
       "^(?:notes?|sources?|legend|key|remarks?)\\s*:",
       "\\bsources?\\b"
     ],
     "_label_note": "A label line keeps Results on only when it names a result ('Budget:', '1. Box Loss:'); a note, source or legend line does not ('1. Note:', 'Data Source:'). A label with a section number ('4.10 Project Plan:') is judged as a numbered heading.",
-    "heading_prefix_pattern": "^\\s*(?:chapter\\s+(?:\\d+|[ivxlc]+)\\s*[:.\\u2013\\u2014-]?\\s*|\\(?(?:\\d+(?:\\.\\d+)*\\.?|[ivxlc]+|[a-z])[.)]\\s+|\\d+(?:\\.\\d+)*\\s+)",
-    "_heading_prefix_note": "Removed from a heading before end_section_patterns and label_exclusion_patterns are matched: '4.5.3. ', '4.5.3 ', 'Chapter 5: ', 'A. ', 'IV. ', '(a) ', '1) '.",
-    "new_chapter_pattern": "^\\s*chapter\\s+(?:\\d+|[ivxlc]+)\\b"
+    "heading_prefix_pattern": "^\\s*(?:[\\u2022\\u25cf\\u25aa\\u2023\\u25e6\\u2013-]\\s*|\\(?(?:\\d+(?:\\.\\d+)*\\.?|[ivxlc]+|[a-z])[.)]\\s+|\\d+(?:\\.\\d+)*\\s+)",
+    "_heading_prefix_note": "Removed from a heading before end_section_patterns and label_exclusion_patterns are matched: a bullet, '4.5.3. ', '4.5.3 ', 'A. ', 'IV. ', '(a) ', '1) '. A 'Chapter N' or 'Part N' heading is caught first by new_chapter_pattern.",
+    "new_chapter_pattern": "^\\s*(?:chapter|part)\\s+(?:\\d+|[ivxlc]+|one|two|three|four|five|six|seven|eight|nine|ten)\\b"
   }
 }

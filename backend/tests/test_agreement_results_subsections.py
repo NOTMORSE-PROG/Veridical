@@ -98,7 +98,26 @@ def test_a_subheading_inside_results_keeps_results_reading_on(opener, subheading
         (("RESULTS", 16.0, 1.0), ("IV. RECOMMENDATIONS", 13.0, 1.0)),
         (("2.7. Conclusion", 15.1, 1.0), ("Chapter 2: Background", 12.0, 1.0)),
         (("4.5 Key Findings", 14.0, 1.0), ("Chapter 5:", 14.0, 1.0)),
-        # Recommendations, suggestions and limitations anywhere in the heading.
+        (("RESULTS", 16.0, 1.0), ("CHAPTER FIVE", 13.0, 1.0)),
+        (("RESULTS", 16.0, 1.0), ("Part II: Methodology", 13.0, 1.0)),
+        (("RESULTS", 16.0, 1.0), ("A. Methodology", 13.0, 1.0)),
+        (("RESULTS", 16.0, 1.0), ("IV. Synthesis", 13.0, 1.0)),
+        (("RESULTS", 16.0, 1.0), ("(a) Literature Review", 13.0, 1.0)),
+        (("RESULTS", 16.0, 1.0), ("1) References", 13.0, 1.0)),
+        (("RESULTS", 16.0, 1.0), ("• Methodology", 13.0, 1.0)),
+        # Distinctive phrases anywhere in the heading.
+        (("Results and Evaluation", 17.2, 1.0), ("System Overview", 14.0, 1.0)),
+        (("Results and Evaluation", 17.2, 1.0), ("Comparison With Previous Studies", 14.0, 1.0)),
+        (("Results and Evaluation", 17.2, 1.0), ("Contributions to Practice", 14.0, 1.0)),
+        # Recommendation-type words anywhere in the heading, in any form.
+        (("Results", 12.0, 1.0), ("Recommended Actions:", 12.0, 1.0)),
+        (("Results", 12.0, 1.0), ("Suggested Improvements:", 12.0, 1.0)),
+        (("Results", 12.0, 1.0), ("Areas for Improvement:", 12.0, 1.0)),
+        (("Results", 12.0, 1.0), ("Proposed Enhancements:", 12.0, 1.0)),
+        (("Results", 12.0, 1.0), ("Next Steps:", 12.0, 1.0)),
+        (("4.5 Key Findings", 14.0, 1.0), ("4.5.3 Recommended Enhancements", 13.0, 1.0)),
+        (("Results and Evaluation", 17.2, 1.0), ("Recommended Improvements", 14.0, 1.0)),
+        (("CONCLUSION", 16.0, 1.0), ("Areas for Improvement", 13.0, 1.0)),
         (("Results and Evaluation", 17.2, 1.0), ("Summary and Recommendations", 14.0, 1.0)),
         (("Results and Evaluation", 17.2, 1.0), ("Proposed Recommendations", 14.0, 1.0)),
         (("4.5 Key Findings", 14.0, 1.0), ("4.5.4 Scope and Delimitation", 13.0, 1.0)),
@@ -108,6 +127,10 @@ def test_a_subheading_inside_results_keeps_results_reading_on(opener, subheading
         (("Results", 12.0, 1.0), ("Source:", 12.0, 1.0)),
         (("Results", 12.0, 1.0), ("1. Note:", 12.0, 1.0)),
         (("Results", 12.0, 1.0), ("Data Source:", 12.0, 1.0)),
+        (("Results", 12.0, 1.0), ("Legend:", 12.0, 1.0)),
+        (("Results", 12.0, 1.0), ("Key:", 12.0, 1.0)),
+        (("Results", 12.0, 1.0), ("Remarks:", 12.0, 1.0)),
+        (("Results", 12.0, 1.0), ("• Note:", 12.0, 1.0)),
         # A section number with a colon is still judged as a numbered heading.
         (("4.1 Key Findings", 14.0, 1.0), ("4.10 Project Plan:", 14.0, 1.0)),
         (("4.5 Key Findings", 14.0, 1.0), ("5.1 Deployment Plan:", 14.0, 1.0)),
@@ -121,6 +144,9 @@ def test_a_subheading_inside_results_keeps_results_reading_on(opener, subheading
         (("Results and Evaluation", 17.2, 1.0), ("Model Performance Comparison", 14.3, 0.4)),
         # Results opened together with another kind of section is not extended.
         (("4 Results and Discussion", 14.0, 1.0), ("4.1 Project Plan", 13.0, 1.0)),
+        (("Results and Implications", 17.2, 1.0), ("Model Performance Comparison", 14.0, 1.0)),
+        (("Results and Recommendations", 17.2, 1.0), ("Model Performance Comparison", 14.0, 1.0)),
+        (("Results and Future Work", 17.2, 1.0), ("Model Performance Comparison", 14.0, 1.0)),
         (
             ("Discussion, Future Work, and Conclusion", 24.7, 1.0),
             ("Model Performance Comparison", 17.2, 1.0),
@@ -135,7 +161,7 @@ def test_a_results_heading_inside_a_mixed_chapter_does_not_lift_it():
     rows = [
         ("4 Results and Discussion", 14.0, 1.0),
         ("4.1 Summary of Findings", 13.0, 1.0),
-        ("4.1.3 Proposed Enhancements", 12.0, 1.0),
+        ("4.1.3 Model Performance Comparison", 12.0, 1.0),
         (RESULT, 12.0, 0.0),
     ]
     assert results(rows) == []
@@ -182,3 +208,15 @@ def _default_cues_path():
     import app.checks.agreement.cues as module
 
     return Path(module.__file__).parent / "data" / "cues.json"
+
+
+def test_a_policy_without_a_bold_ratio_does_not_keep_smaller_headings():
+    cues = load_cues(Settings(_env_file=None).agreement_cues_file)
+    policy = {k: v for k, v in cues.results_subsection_policy.items() if k != "min_bold_ratio"}
+    rows = [
+        ("Results and Evaluation", 17.2, 1.0),
+        ("Model Performance Comparison", 14.3, 1.0),
+        (RESULT, 12.0, 0.0),
+    ]
+    assert results(rows, cues) == [RESULT]
+    assert results(rows, replace(cues, results_subsection_policy=policy)) == []

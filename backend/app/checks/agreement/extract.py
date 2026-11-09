@@ -479,11 +479,13 @@ def _results_subsection(block: TextBlock, opener: TextBlock | None, cues: Agreem
         parent = re.match(number, opener.text.strip())
         return bool(parent and child.group(1).startswith(parent.group(1) + separator))
     margin = policy.get("smaller_type_points")
+    bold = policy.get("min_bold_ratio")
     return bool(
         margin is not None
+        and bold is not None
         and block.max_font_size
         and opener.max_font_size
-        and (block.bold_ratio or 0) >= policy.get("min_bold_ratio", 0.5)
+        and (block.bold_ratio or 0) >= bold
         and block.max_font_size <= opener.max_font_size - margin
     )
 
