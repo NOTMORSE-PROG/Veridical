@@ -128,8 +128,10 @@
     "\\b(?:achieved|attained|reduced|increased|decreased|improved|measured|recorded|observed|demonstrated|performed|yielded|implemented|supported|rejected|deployed|delivered|allowed|supports?|operates?|permits?|lacks?|accept(?:s|ed)?|stores?|deletes?|works?|took|triggered)\\b"
   ],
   "outcome_heading_exclusion_patterns": [
-    "\\b(?:prior|previous|earlier|related|cited)\\b"
+    "\\b(?:prior|previous|earlier|related|cited)\\b",
+    "^\\s*recommendations?\\b"
   ],
+  "_outcome_heading_exclusion_note": "BUG-695 (2026-11-09): a heading whose subject is a recommendation ('1. Recommendation for Conclusion 1') is not a results heading, even when it names a conclusion; recommendations are not results. Anchored at the start of the heading (after its numbering), so chapter titles such as 'Summary, Conclusions, and Recommendations' or 'Chapter 6: Conclusions and Recommendations' stay results headings.",
   "_source_v094": "2026-10-31 (V-094): scope/limitation/revision cues so the judge sees a manuscript's own delimitations; explicit 'objective not met' patterns that always reach the judge; the named-system guard for a contradiction between two different named systems (BUG-593). Precision-biased and data, like the rest of this file.",
   "scope_heading_synonyms": [
     "scope and delimitation",
