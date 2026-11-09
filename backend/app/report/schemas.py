@@ -350,6 +350,9 @@ class AgreementSetAsideOut(BaseModel):
     text: str
     page_anchor: str | None = None
     role: str
+    # BUG-639: the chapter it sits in, as titled in the manuscript; None
+    # where the run did not record it.
+    chapter: str | None = None
 
 
 class AgreementRoleCountOut(BaseModel):
@@ -380,6 +383,18 @@ class AgreementScopeOut(BaseModel):
     # Pairs the check could not judge (AI unavailable, capacity, a rejected
     # key, an unreadable answer). None when the run recorded none of these.
     n_pairs_skipped: int | None = Field(default=None, ge=0)
+    # BUG-639: aim-like statements found before objectives in other studies,
+    # methods or appendices were set aside (`n_objectives` is those kept).
+    # All None or empty on runs saved before the check recorded them.
+    n_objectives_extracted: int | None = Field(default=None, ge=0)
+    objectives_section_identified: bool | None = None
+    n_objectives_set_aside: int | None = Field(default=None, ge=0)
+    objectives_set_aside_by_role: list[AgreementRoleCountOut] = Field(default_factory=list)
+    # The statements themselves; left out of shared (adviser) copies.
+    objectives_set_aside: list[AgreementSetAsideOut] = Field(default_factory=list)
+    # Every aim would have been set aside, so none was: how many the chapter
+    # map would have set aside. None when that did not happen.
+    n_objectives_kept_despite_role: int | None = Field(default=None, ge=0)
 
 
 class IntegrityModuleOut(BaseModel):
