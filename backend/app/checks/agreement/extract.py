@@ -377,9 +377,13 @@ def _extract_outcome_prose(
             continue
         if _is_heading_like(text, max_words=heading_max_words):
             _flush()
-            if _heading_section(text, cues) == "outcomes":
+            section = _heading_section(text, cues)
+            if section == "outcomes":
                 in_outcomes, opener = True, block
-            elif not (in_outcomes and _results_subsection(block, opener, cues)):
+            elif not (
+                in_outcomes and section == "other" and _results_subsection(block, opener, cues)
+            ):
+                # An objectives heading always ends Results, whatever its shape.
                 in_outcomes = False
             continue
         if not in_outcomes or _LIST_MARKER.match(text):
@@ -426,19 +430,30 @@ def _continues(run: list[TextBlock], block: TextBlock, wrap_min_width_ratio: flo
 def _results_subsection(block: TextBlock, opener: TextBlock | None, cues: AgreementCues) -> bool:
     """Whether a heading inside Results is one of its own subheadings, so
     Results reading carries on through it: a numbered child of the heading
-    that opened Results ("4.5" then "4.5.1"), a bold heading in clearly
-    smaller type than that heading, or a label line ("Budget:"). A heading
-    naming a section that ends the results (recommendations, limitations,
-    references ...) never is. The rules are data (BUG-673)."""
+    that opened Results ("4.5" then "4.5.1"), an unnumbered bold heading in
+    clearly smaller type than that heading, a label line ("Budget:") or a note
+    in brackets ("(Appendix 5)"). A heading naming a section that ends the
+    results (recommendations, limitations, related studies ...) never is, and
+    nothing extends Results opened by a heading that also names another kind
+    of section ("Discussion, Future Work, and Conclusion"). The rules are data
+    (BUG-673)."""
     policy = cues.results_subsection_policy
     if not policy.get("enabled") or opener is None:
         return False
-    text = block.text.strip()
-    if any(re.search(p, text, re.IGNORECASE) for p in policy.get("end_section_patterns", ())):
+    opener_text = _strip_numbering(opener.text.strip())
+    if any(re.search(p, opener_text, re.I) for p in policy.get("mixed_opener_patterns", ())):
         return False
+    text = block.text.strip()
+    if any(
+        re.search(p, _strip_numbering(text), re.I) for p in policy.get("end_section_patterns", ())
+    ):
+        return False
+    note = policy.get("note_line_pattern")
+    if note and re.fullmatch(note, text):
+        return True
     label = policy.get("label_line_pattern")
     if label and re.search(label, text):
-        return True
+        return not any(re.search(p, text, re.I) for p in policy.get("label_exclusion_patterns", ()))
     number = policy.get("section_number_pattern")
     child = re.match(number, text) if number else None
     if child:
@@ -446,13 +461,14 @@ def _results_subsection(block: TextBlock, opener: TextBlock | None, cues: Agreem
         # the heading that opened it; "6.1 Summary ..." under an unnumbered
         # chapter title is a section of its own, whatever its type size.
         parent = re.match(number, opener.text.strip())
-        return bool(parent and child.group(1).startswith(parent.group(1) + "."))
+        separator = policy.get("child_separator", ".")
+        return bool(parent and child.group(1).startswith(parent.group(1) + separator))
     margin = policy.get("smaller_type_points")
     return bool(
         margin is not None
         and block.max_font_size
         and opener.max_font_size
-        and (block.bold_ratio or 0) >= policy.get("min_bold_ratio", 1.0)
+        and (block.bold_ratio or 0) >= policy.get("min_bold_ratio", 0.5)
         and block.max_font_size <= opener.max_font_size - margin
     )
 
