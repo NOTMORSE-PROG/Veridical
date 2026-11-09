@@ -59,6 +59,10 @@ def results(rows, cues=None):
         (("Results and Evaluation", 15.5, 1.0), ("Model Performance Comparison", 14.0, 1.0)),
         # Bold for half the line is enough.
         (("Results and Evaluation", 17.2, 1.0), ("Model Performance Comparison", 14.3, 0.5)),
+        # A list label with a single number is a label, not a section heading.
+        (("5.2 Training Results", 14.0, 1.0), ("2. Class Loss:", 12.0, 1.0)),
+        # A numbered child with a trailing dot.
+        (("4.5. Key Findings", 14.0, 1.0), ("4.5.1. Performance in the Field", 13.0, 1.0)),
     ],
 )
 def test_a_subheading_inside_results_keeps_results_reading_on(opener, subheading):
@@ -86,8 +90,27 @@ def test_a_subheading_inside_results_keeps_results_reading_on(opener, subheading
         (("Results and Evaluation", 17.2, 1.0), ("Related Systems", 14.0, 1.0)),
         (("4.5 Key Findings", 14.0, 1.0), ("4.5.3 Comparison with Existing Systems", 13.0, 1.0)),
         (("Results and Evaluation", 17.2, 1.0), ("Implications for Practice", 14.0, 1.0)),
+        # Whatever numbering or chapter prefix comes before the section word.
+        (("4.5. Key Findings", 14.0, 1.0), ("4.5.3. Recommendations", 13.0, 1.0)),
+        (("4.5. Key Findings", 14.0, 1.0), ("4.5.3. Methodology", 13.0, 1.0)),
+        (("FINDINGS", 19.9, 1.0), ("Chapter 5: Recommendations", 12.0, 1.0)),
+        (("CONCLUSIONS", 16.0, 1.0), ("A. Recommendations", 13.0, 1.0)),
+        (("RESULTS", 16.0, 1.0), ("IV. RECOMMENDATIONS", 13.0, 1.0)),
+        (("2.7. Conclusion", 15.1, 1.0), ("Chapter 2: Background", 12.0, 1.0)),
+        (("4.5 Key Findings", 14.0, 1.0), ("Chapter 5:", 14.0, 1.0)),
+        # Recommendations, suggestions and limitations anywhere in the heading.
+        (("Results and Evaluation", 17.2, 1.0), ("Summary and Recommendations", 14.0, 1.0)),
+        (("Results and Evaluation", 17.2, 1.0), ("Proposed Recommendations", 14.0, 1.0)),
+        (("4.5 Key Findings", 14.0, 1.0), ("4.5.4 Scope and Delimitation", 13.0, 1.0)),
+        (("4.5 Key Findings", 14.0, 1.0), ("4.5.4 Study Limitations", 13.0, 1.0)),
+        (("Results", 12.0, 1.0), ("Suggestions:", 12.0, 1.0)),
         # A note, source or legend label is not a result's label.
         (("Results", 12.0, 1.0), ("Source:", 12.0, 1.0)),
+        (("Results", 12.0, 1.0), ("1. Note:", 12.0, 1.0)),
+        (("Results", 12.0, 1.0), ("Data Source:", 12.0, 1.0)),
+        # A section number with a colon is still judged as a numbered heading.
+        (("4.1 Key Findings", 14.0, 1.0), ("4.10 Project Plan:", 14.0, 1.0)),
+        (("4.5 Key Findings", 14.0, 1.0), ("5.1 Deployment Plan:", 14.0, 1.0)),
         # An objectives heading ends Results, whatever its shape.
         (("4.3 Results", 14.0, 1.0), ("Objective 1:", 12.0, 1.0)),
         (("4.3 Results", 14.0, 1.0), ("4.3.1 Objective 1", 13.0, 1.0)),
@@ -98,11 +121,34 @@ def test_a_subheading_inside_results_keeps_results_reading_on(opener, subheading
         (("Results and Evaluation", 17.2, 1.0), ("Model Performance Comparison", 14.3, 0.4)),
         # Results opened together with another kind of section is not extended.
         (("4 Results and Discussion", 14.0, 1.0), ("4.1 Project Plan", 13.0, 1.0)),
-        (("Discussion, Future Work, and Conclusion", 24.7, 1.0), ("Synthesis", 17.2, 1.0)),
+        (
+            ("Discussion, Future Work, and Conclusion", 24.7, 1.0),
+            ("Model Performance Comparison", 17.2, 1.0),
+        ),
     ],
 )
 def test_a_new_section_still_ends_results(opener, heading):
     assert results([opener, heading, (RESULT, 12.0, 0.0)]) == []
+
+
+def test_a_results_heading_inside_a_mixed_chapter_does_not_lift_it():
+    rows = [
+        ("4 Results and Discussion", 14.0, 1.0),
+        ("4.1 Summary of Findings", 13.0, 1.0),
+        ("4.1.3 Proposed Enhancements", 12.0, 1.0),
+        (RESULT, 12.0, 0.0),
+    ]
+    assert results(rows) == []
+
+
+def test_a_wrapped_line_starting_with_a_decimal_is_not_a_child_heading():
+    rows = [
+        ("4 Results", 14.0, 1.0),
+        ("The respondents rated the booking module with an overall weighted mean of", 12.0, 0.0),
+        ("4.52 interpreted as Strongly Agree, while the", 12.0, 0.0),
+        (RESULT, 12.0, 0.0),
+    ]
+    assert all(not text.startswith("The kiosk") for text in results(rows))
 
 
 def test_a_result_before_the_subheading_is_still_read():
