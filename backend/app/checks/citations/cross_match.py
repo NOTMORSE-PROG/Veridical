@@ -8,6 +8,7 @@ IEEE, ACM, CHED, DOST, etc.) and numbered bracket citations ([1], [1]-[3]).
 from __future__ import annotations
 
 import json
+import logging
 import re
 from functools import lru_cache
 from pathlib import Path
@@ -27,6 +28,8 @@ class ReferenceLike(Protocol):
     authors: list[str] | None
     year: int | str | None
 
+
+logger = logging.getLogger(__name__)
 
 _NAME_VARIANTS_FILE = Path(__file__).parent / "data" / "name_variants.json"
 _INITIALS_TOKEN = re.compile(r"(?:[^\W\d_]\.)+(?:-[^\W\d_]\.)*")
@@ -209,72 +212,98 @@ def load_name_variant_policy(path: Path | None = None) -> dict:
     return json.loads((path or _NAME_VARIANTS_FILE).read_text(encoding="utf-8"))
 
 
+def _known_expansions(name: str) -> set[str]:
+    key = " ".join(name.split()).casefold()
+    keys = {key, key.replace(".", "").replace(" ", "")}
+    return {alias.casefold() for k in keys for alias in _KNOWN_ACRONYMS.get(k, ())}
+
+
 def _link_name_variants(orphans, references, linked, cited, possibly_cited):
     """Link a citation left without an entry to the one entry it names in another
     spelling (BUG-696): the same surname with hyphens or spaces dropped, or an
-    organisation's short and long forms backed by the entry's title in the citing
-    sentence (and then only an entry nothing else cites). Only a single fitting
-    entry is linked; anything else stays an orphan."""
+    organisation's short and long forms. A citation is linked only when exactly
+    one same-year entry fits it by name. An organisation form also needs an
+    entry nothing else cites and the entry's title in the citing sentence,
+    counting only words that are not part of either name. Anything else stays
+    an orphan."""
+    from app.checks.citations.extract import _is_corporate_author_name
+
+    if not linked:
+        # When the main matching linked nothing, the citations were not read,
+        # not respelt; the whole list is withheld for that elsewhere.
+        return orphans
     try:
         policy = load_name_variant_policy(get_settings().citation_name_variant_policy_file)
+        enabled = bool(policy["enabled"])
         fold = re.compile(policy["fold_pattern"])
         word = re.compile(policy["title_word_pattern"])
-    except (OSError, ValueError, KeyError, re.error):
+        min_chars = int(policy["organisation_prefix_min_chars"])
+        min_words = int(policy["title_evidence_min_words"])
+        min_share = float(policy["title_evidence_min_share"])
+        ignored = {w.casefold() for w in policy.get("title_ignored_words", ())}
+    except (OSError, ValueError, KeyError, TypeError, re.error) as exc:
+        logger.warning("Citation name-variant policy unusable, variant linking skipped: %s", exc)
         return orphans
-    if not policy.get("enabled"):
+    if not enabled:
         return orphans
-    ignored = {w.casefold() for w in policy.get("title_ignored_words", ())}
+    # Entries cited before this pass; every citation is judged against the same set.
+    taken = set(cited) | set(possibly_cited)
 
     def folded(name):
         return fold.sub("", (name or "").casefold())
 
-    def title_words(text):
+    def words(text):
         return {w for w in word.findall((text or "").casefold()) if w not in ignored}
 
-    def fits(cite, ref):
-        cited_name = cite.surnames[0]
-        author = next((a for a in ref.authors or [] if a and a.strip()), "")
-        entry_name = author.split(",", 1)[0].strip()
+    def name_fit(cited_name, entry_name):
         if folded(cited_name) and folded(cited_name) == folded(entry_name):
-            return cited_name.casefold() != entry_name.casefold()
-        if ref.order_index in cited or ref.order_index in possibly_cited:
-            # The organisation form is weaker evidence: only an entry nothing
-            # else cites can be the one meant.
-            return False
-        if "," in author:
-            # A person, written "Surname, Initials": never an organisation form.
-            return False
+            return "surname" if cited_name.casefold() != entry_name.casefold() else None
         short, long_ = sorted(
             (cited_name.casefold().split(), entry_name.casefold().split()), key=len
         )
         if (
             len(long_) <= len(short)
             or long_[: len(short)] != short
-            or len("".join(short)) < policy["organisation_prefix_min_chars"]
+            or len("".join(short)) < min_chars
         ):
-            return False
-        title = title_words(getattr(ref, "title", None))
-        shared = title & title_words(cite.claim_sentence)
-        return bool(title) and (
-            len(shared) >= policy["title_evidence_min_words"]
-            and len(shared) / len(title) >= policy["title_evidence_min_share"]
-        )
+            return None
+        if not _is_corporate_author_name(" ".join(long_)):
+            # Only an organisation has a short and a long form: "Garcia" and
+            # "Garcia Lopez M." are two different people.
+            return None
+        known = _known_expansions(cited_name)
+        if known and " ".join(entry_name.casefold().split()) not in known:
+            # The acronym table says this short form names another body.
+            return None
+        return "organisation"
+
+    def title_in_sentence(cite, ref, entry_name):
+        names = words(cite.surnames[0]) | words(entry_name)
+        title = words(getattr(ref, "title", None)) - names
+        shared = title & (words(cite.claim_sentence) - names)
+        return bool(title) and len(shared) >= min_words and len(shared) / len(title) >= min_share
 
     remaining = []
     for cite in orphans:
-        same_year = [
-            ref
-            for ref in references
-            if cite.surnames
-            and cite.year
-            and reference_date_key(ref) == citation_date_key(cite.year)
-        ]
-        fitting = [ref for ref in same_year if fits(cite, ref)]
+        fitting = []
+        if cite.surnames and cite.year:
+            for ref in references:
+                if reference_date_key(ref) != citation_date_key(cite.year):
+                    continue
+                author = next((a for a in ref.authors or [] if a and a.strip()), "")
+                entry_name = author.split(",", 1)[0].strip()
+                kind = name_fit(cite.surnames[0], entry_name)
+                if kind:
+                    fitting.append((ref, kind, entry_name))
         if len(fitting) == 1:
-            linked.append((cite, fitting))
-            cited.add(fitting[0].order_index)
-        else:
-            remaining.append(cite)
+            ref, kind, entry_name = fitting[0]
+            if kind == "surname" or (
+                ref.order_index not in taken and title_in_sentence(cite, ref, entry_name)
+            ):
+                linked.append((cite, [ref]))
+                cited.add(ref.order_index)
+                continue
+        remaining.append(cite)
     return remaining
 
 
