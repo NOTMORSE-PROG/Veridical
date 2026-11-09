@@ -967,7 +967,7 @@ export interface FlagOut {
   citation_source_locator?: {
     basis: "saved_reference";
     order_index: number;
-    links: { kind: "doi_as_cited" | "url_as_cited"; url: string }[];
+    links: { kind: "doi_as_cited" | "url_as_cited"; url: string; text?: string | null }[];
   } | {
     basis: "recorded_source_key";
     order_index: null;

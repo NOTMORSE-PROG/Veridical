@@ -89,11 +89,14 @@ class MetadataComparison:
         }
 
 
-def _record_url(template, doi):
+def _record_url(template, doi, *, keep_slashes=False):
     if not template or not isinstance(doi, str) or not re.fullmatch(r"10\.\d{4,9}/\S+", doi):
         return None
+    # A DOI resolver link reads as the DOI does ("https://doi.org/10.1016/j.x");
+    # registry record templates take the whole DOI as one encoded segment.
+    safe = "/" if keep_slashes else ""
     try:
-        return str(TypeAdapter(HttpUrl).validate_python(template.format(doi=quote(doi, safe=""))))
+        return str(TypeAdapter(HttpUrl).validate_python(template.format(doi=quote(doi, safe=safe))))
     except (ValueError, KeyError, IndexError, AttributeError, ValidationError):
         return None
 
@@ -269,7 +272,9 @@ def compare_metadata(
         policy.version,
         policy.sha256,
         result.provider,
-        _record_url(settings.citation_doi_source_url_template, citation.doi) if settings else None,
+        _record_url(settings.citation_doi_source_url_template, citation.doi, keep_slashes=True)
+        if settings
+        else None,
         _record_url(
             settings.citation_registry_record_url_templates.get(result.provider),
             returned_doi(result),
