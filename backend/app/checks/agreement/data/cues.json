@@ -281,5 +281,26 @@
   "caption_patterns": [
     "^\\s*(?:table|figure|fig\\.|chart|graph)\\s*\\d+(?:\\.\\d+)*[.:]?\\s+(?!\\s)(?!(?:(?:above|below)\\s+)?(?:shows?|showed|presents?|presented|illustrates?|illustrated|reveals?|revealed|indicates?|indicated|summari[sz]e[sd]?|lists?|listed|displays?|displayed|compares?|compared|demonstrates?|demonstrated|contains?|contained|gives?|gave|provides?|provided|reports?|reported|depicts?|depicted|describes?|described|highlights?|highlighted|confirms?|confirmed|suggests?|suggested)\\b)"
   ],
-  "leading_note_pattern": "^\\([^()]{1,40}\\)\\s+(?=[A-Z])"
+  "leading_note_pattern": "^\\([^()]{1,40}\\)\\s+(?=[A-Z])",
+  "_results_subsection_note": "BUG-673 (2026-11-09): a heading inside Results that is one of its own subheadings keeps Results reading on, instead of switching it off like a new section. Measured on the stored dev theses: 'Budget:' (DESTAMP), '4.5.1 System Performance ...' and 'Model Performance Comparison' (MIT) and '5.2.1 Training Loss' (AugmentedRL) cut off real results. A subheading is a numbered child of the heading that opened Results, a bold heading at least smaller_type_points smaller than it, or a label line. A heading matching end_section_patterns always ends Results, so recommendations and limitations are never read as results. Same-size unnumbered headings ('Major Finding 1: ...') are not recognised: precision first.",
+  "results_subsection_policy": {
+    "enabled": true,
+    "section_number_pattern": "^\\s*(\\d+(?:\\.\\d+)*)\\.?\\s",
+    "smaller_type_points": 1.5,
+    "min_bold_ratio": 0.5,
+    "label_line_pattern": "^[^:\\n]{1,40}:\\s*$",
+    "end_section_patterns": [
+      "\\brecommendations?\\b",
+      "\\blimitations?\\b",
+      "\\bfuture\\s+(?:work|research|studies)\\b",
+      "\\breferences\\b",
+      "\\bbibliography\\b",
+      "\\bappendi(?:x|ces)\\b",
+      "\\bdiscussion\\b",
+      "\\bintroduction\\b",
+      "\\bmethodology\\b",
+      "\\bliterature\\b",
+      "\\bbackground\\b"
+    ]
+  }
 }
