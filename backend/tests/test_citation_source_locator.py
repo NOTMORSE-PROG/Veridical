@@ -67,7 +67,8 @@ def test_claim_snapshot_keeps_own_reference_when_current_citation_changes(kind):
     assert result["basis"] == "saved_reference" and result["order_index"] == 2
     assert result["links"][0] == {
         "kind": "doi_as_cited",
-        "url": "https://doi.org/10.1234%2Fexample",
+        "url": "https://doi.org/10.1234/example",
+        "text": "10.1234/example",
     }
     assert draft.evidence_excerpt == "This manuscript claim needs source comparison."
     assert "reference_text" not in result
@@ -159,7 +160,11 @@ def test_saved_reference_is_immutable_when_current_citation_changes():
     result = project(draft)
     assert result["basis"] == "saved_reference" and result["order_index"] == 0
     assert result["links"] == [
-        {"kind": "doi_as_cited", "url": "https://doi.org/10.1234%2Fexample"},
+        {
+            "kind": "doi_as_cited",
+            "url": "https://doi.org/10.1234/example",
+            "text": "10.1234/example",
+        },
         {"kind": "url_as_cited", "url": "https://example.org/reference"},
     ]
 
@@ -276,7 +281,7 @@ def test_snapshot_requires_exact_full_reference_text_and_order():
     assert legacy == {
         "basis": "recorded_source_key",
         "order_index": None,
-        "links": [{"kind": "doi_recorded_lookup", "url": "https://doi.org/10.1234%2Fexample"}],
+        "links": [{"kind": "doi_recorded_lookup", "url": "https://doi.org/10.1234/example"}],
     }
 
 
@@ -354,7 +359,7 @@ def test_lookup_is_not_relabelled_as_cited_and_keeps_balanced_punctuation():
     dto = CitationSourceLocatorOut.model_validate(result)
     assert dto.basis == "recorded_source_key" and dto.order_index is None
     assert dto.links[0].kind == "doi_recorded_lookup"
-    assert str(dto.links[0].url) == "https://doi.org/10.1234%2Fexample%282026%29"
+    assert str(dto.links[0].url) == "https://doi.org/10.1234/example%282026%29"
 
 
 @pytest.mark.parametrize(
@@ -378,7 +383,7 @@ def test_output_contract_rejects_misleading_basis_combinations(basis, index, kin
             {
                 "basis": basis,
                 "order_index": index,
-                "links": [{"kind": kind, "url": "https://doi.org/10.1234%2Fexample"}],
+                "links": [{"kind": kind, "url": "https://doi.org/10.1234/example"}],
             }
         )
 
@@ -419,3 +424,92 @@ async def test_flag_assembly_never_inherits_another_flags_parent_lookup(owns_det
         assert dto.citation_source_locator.order_index is None
     else:
         assert dto.citation_source_locator is None
+
+
+@pytest.mark.parametrize(
+    "printed",
+    [
+        "https://doi.org/10.1016/j.micpro.2020.103768",
+        "http://dx.doi.org/10.1016/j.micpro.2020.103768",
+        "https://doi.org/10.1016%2Fj.micpro.2020.103768",
+    ],
+)
+def test_a_printed_doi_link_is_shown_once_exactly_as_printed(printed):
+    raw = f"Author. A source. Microprocessors, 75. {printed}"
+    _, draft = saved(raw=raw, doi="10.1016/j.micpro.2020.103768", url=printed)
+    links = project(draft)["links"]
+    assert len(links) == 1
+    assert links[0]["kind"] == "doi_as_cited"
+    assert links[0]["text"] == printed
+    assert "%2F" not in links[0]["url"] or "%2F" in printed
+
+
+def test_a_plain_doi_is_shown_as_printed_and_linked_through_the_resolver():
+    raw = "Author. A source. doi:10.1016/J.MICPRO.2020.103768"
+    _, draft = saved(raw=raw, doi="10.1016/j.micpro.2020.103768")
+    assert project(draft)["links"] == [
+        {
+            "kind": "doi_as_cited",
+            "url": "https://doi.org/10.1016/j.micpro.2020.103768",
+            "text": "10.1016/J.MICPRO.2020.103768",
+        }
+    ]
+
+
+def test_a_separate_printed_url_keeps_its_own_line():
+    raw = "Author. A source. Retrieved from https://example.org/reference DOI 10.1234/example"
+    _, draft = saved(raw=raw, url="https://example.org/reference")
+    assert project(draft)["links"] == [
+        {
+            "kind": "doi_as_cited",
+            "url": "https://doi.org/10.1234/example",
+            "text": "10.1234/example",
+        },
+        {
+            "kind": "url_as_cited",
+            "url": "https://example.org/reference",
+            "text": "https://example.org/reference",
+        },
+    ]
+
+
+def test_a_doi_link_for_another_doi_is_not_merged():
+    raw = "Author. A source. DOI 10.1234/example https://doi.org/10.5678/other"
+    _, draft = saved(raw=raw, url="https://doi.org/10.5678/other")
+    kinds = [link["kind"] for link in project(draft)["links"]]
+    assert kinds == ["doi_as_cited", "url_as_cited"]
+
+
+def test_a_doi_wrapped_across_a_line_is_shown_as_printed_without_the_break():
+    raw = "Author. A source. Microprocessors. doi:10.1016/J.MIC PRO.2020.103768"
+    _, draft = saved(raw=raw, doi="10.1016/j.micpro.2020.103768")
+    assert project(draft)["links"] == [
+        {
+            "kind": "doi_as_cited",
+            "url": "https://doi.org/10.1016/j.micpro.2020.103768",
+            "text": "10.1016/J.MICPRO.2020.103768",
+        }
+    ]
+
+
+def test_a_doi_not_found_in_the_reference_is_shown_as_the_doi_not_our_address():
+    from app.checks.citations.source_locator import _as_cited
+
+    link = _as_cited("doi_as_cited", "https://doi.org/10.1/x", "No identifier here", "10.1/x")
+    assert link["text"] == "10.1/x"
+    assert "text" not in _as_cited("url_as_cited", "https://a.org/", "No address", "https://a.org/")
+
+
+def test_a_look_alike_letter_elsewhere_is_not_taken_for_the_doi():
+    raw = "Author. Earlier 10.1234/\u212aey note. A source. DOI 10.1234/key"
+    _, draft = saved(raw=raw, doi="10.1234/KEY")
+    assert project(draft)["links"][0]["text"] == "10.1234/key"
+
+
+def test_a_doi_link_on_another_port_is_not_merged_into_the_doi_line():
+    printed = "https://doi.org:8443/10.1016/j.micpro.2020.103768"
+    raw = f"Author. A source. {printed}"
+    _, draft = saved(raw=raw, doi="10.1016/j.micpro.2020.103768", url=printed)
+    links = project(draft)["links"]
+    assert links[0]["url"] == "https://doi.org/10.1016/j.micpro.2020.103768"
+    assert [link["kind"] for link in links] == ["doi_as_cited", "url_as_cited"]

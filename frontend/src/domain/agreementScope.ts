@@ -22,6 +22,31 @@ const ROLE_PHRASES: Record<string, [string, string]> = {
   future_work: ["recommendations", "does not report the study's own results"],
 };
 
+// BUG-639: why each part of a paper usually does not state the study's own
+// objectives (same words as agreement_scope.json's objective_roles).
+const OBJECTIVE_ROLE_REASONS: Record<string, string> = {
+  literature: "describes other studies",
+  introduction: "gives background",
+  methodology: "describes how the study was done",
+  front_matter: "summarizes the study",
+  table_of_contents: "lists headings only",
+  biography: "describes the researchers",
+  references: "lists other works",
+  appendix: "holds supporting material",
+  future_work: "suggests later studies",
+  results: "reports what the study found",
+  conclusion: "sums up what the study found",
+};
+
+// Parts objectives can be set aside from but results never are, so
+// ROLE_PHRASES does not name them (agreement_scope.json's objective_places).
+const OBJECTIVE_PLACES: Record<string, string> = { results: "results chapter", conclusion: "conclusion" };
+
+/** Where a set-aside objective sat, in words. */
+export function objectivePlace(role: string): string {
+  return ROLE_PHRASES[role]?.[0] ?? OBJECTIVE_PLACES[role] ?? "another part of the paper";
+}
+
 // With this many parts or more, the first few are named and the rest summed.
 const ROLE_FOLDING = { foldAt: 4, shown: 2 } as const;
 
@@ -37,13 +62,19 @@ export const AGREEMENT_SCOPE_COPY = {
   noAgreementInference: "This does not mean the objectives and results agree.",
   setAsideListHeading: "Results set aside",
   setAsideListIntro: "These statements read like results but are in parts of the paper that usually do not report this study's own results. Open one to check it yourself.",
+  objectiveOther: "does not state this study's own objectives",
+  objectiveSetAsideListHeading: "Objectives set aside",
+  objectiveSetAsideListIntro: "These statements read like objectives but are in parts of the paper that usually do not state this study's own objectives. Open one to check it yourself.",
+  objectivesKeptDespiteRole: "Every possible objective was in a part of the paper that usually does not state this study's objectives, so all {n} were kept and compared anyway. Some may be other studies' aims or steps of the method.",
+  objectivesSetAsideUnlisted: "Where these were set aside from was not recorded, so they cannot be listed here.",
+  objectivesNotIdentified: "The chapter that states the objectives could not be found, so possible objectives were taken from every part of the paper. Some may be other studies' aims.",
   limit: `Partly assessed: ${READINESS_EXCLUSION_COPY.statement_roles_unverified.replace(/\.$/, "")}, so this check does not change readiness.`,
   absence: "An objective with no matching result is not reported here.",
   interrupted: "The check was interrupted before it compared every pair.",
   interruptedTail: "Pairs it did not compare are not treated as passed.",
   notIdentified: "The results section could not be found, so possible results were taken from every part of the paper. Some of them may describe other studies.",
   olderNoScope: "This report was made before VERIDICAL recorded what this check compared.",
-  adviserSetAside: "This link counts these statements but does not quote them.",
+  adviserSetAside: "This link counts the statements set aside but does not quote them.",
   matchingHeading: "About these pairs",
   matchingCaveat: "VERIDICAL matches each objective with the results most like it. Some matched pairs may not belong together, and this matching is being improved. A matched pair is not proof that both statements are about the same thing.",
 } as const;
@@ -66,7 +97,37 @@ export function foundLine(scope: AgreementScopeOut): string | null {
   if (objectives == null || results == null) return null;
   const o = objectives === 0 ? "no possible objectives" : `${objectives} possible ${plural(objectives, "objective", "objectives")}`;
   const r = results === 0 ? "no possible results" : `${results} possible ${plural(results, "result", "results")}`;
+  const extracted = scope.n_objectives_extracted, setAside = scope.n_objectives_set_aside;
+  if (extracted != null && setAside) {
+    // BUG-639: found, then kept and set aside, so the count matches the list.
+    const e = `${extracted} possible ${plural(extracted, "objective", "objectives")}`;
+    return `Found ${e} and ${r}. Of the objectives, ${objectives} ${plural(objectives, "was", "were")} kept to compare and ${setAside} ${plural(setAside, "was", "were")} set aside.`;
+  }
   return `Found ${o} and ${r}.`;
+}
+
+/** BUG-639: one sentence per part of the paper objectives were set aside
+ * from, or why none was; nothing for a run saved before it recorded them. */
+export function objectiveSetAsideLines(scope: AgreementScopeOut): string[] {
+  if (scope.n_objectives_kept_despite_role) return [AGREEMENT_SCOPE_COPY.objectivesKeptDespiteRole.replace("{n}", String(scope.n_objectives ?? 0))];
+  if (scope.objectives_section_identified === false) return [AGREEMENT_SCOPE_COPY.objectivesNotIdentified];
+  const roles = scope.objectives_set_aside_by_role ?? [];
+  if (!roles.length) return scope.n_objectives_set_aside ? [AGREEMENT_SCOPE_COPY.objectivesSetAsideUnlisted] : [];
+  const fold = roles.length >= ROLE_FOLDING.foldAt;
+  const lines = roles.slice(0, fold ? ROLE_FOLDING.shown : roles.length).map(({ role, count }) => {
+    const place = ROLE_PHRASES[role]?.[0] ?? OBJECTIVE_PLACES[role];
+    const reason = OBJECTIVE_ROLE_REASONS[role] ?? AGREEMENT_SCOPE_COPY.objectiveOther;
+    const subject = `${count} possible ${plural(count, "objective", "objectives")}`;
+    const verb = plural(count, "was", "were");
+    return place
+      ? `${subject} from the ${place} ${verb} set aside, because that part of a paper usually ${reason}.`
+      : `${subject} from another part of the paper ${verb} set aside, because that part ${reason}.`;
+  });
+  if (fold) {
+    const rest = roles.slice(ROLE_FOLDING.shown).reduce((sum, { count }) => sum + count, 0);
+    lines.push(`${rest} more ${plural(rest, "was", "were")} set aside from other parts of the paper.`);
+  }
+  return lines;
 }
 
 /** Said only when fewer objectives were matched than found, so "found 17"

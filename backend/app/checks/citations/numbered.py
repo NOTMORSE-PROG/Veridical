@@ -34,8 +34,11 @@ _SINGLE_BRACKET = re.compile(r"\[\s*[1-9]\d*\s*\]")
 # them ("software[25]", "GPT Codex[4]"), or carrying a locator
 # ("[13, Introduction]", "[7, p. 12]"). Their numbers are never "unused".
 _GLUED_BRACKET = re.compile(r"(?<=[\w)])\[\s*[1-9]\d*(?:\s*[,;\-–]\s*[1-9]\d*)*\s*\]")
+# The numbers before a locator may be a list or a range ("[7-10, pp. 3-9]").
 _LOCATOR_BRACKET = re.compile(
-    r"\[\s*(?P<numbers>[1-9]\d*(?:\s*[,;]\s*[1-9]\d*)*)\s*[,;]\s*[^\]\d\s][^\]]{0,80}\]"
+    r"\[\s*(?P<numbers>[1-9]\d*(?:\s*[-–]\s*[1-9]\d*)?"
+    r"(?:\s*[,;]\s*[1-9]\d*(?:\s*[-–]\s*[1-9]\d*)?)*)"
+    r"\s*[,;]\s*[^\]\d\s][^\]]{0,80}\]"
 )
 _BETWEEN_RANGE_MARKS = re.compile(r"\s*[-–—]\s*")
 _RANGE = re.compile(r"([1-9]\d*)\s*[-\u2013]\s*([1-9]\d*)")
@@ -423,9 +426,11 @@ def _possibly_cited_numbers(
     """Numbers a mark may cite outside the main scan's reading, bounded like
     it: glued and locator marks, and the bridges any mark starts
     ("compared[7]-[10]" also covers 8 and 9). Also whether a glued or locator
-    mark in a citation context could not be read, which leaves every entry
-    possibly cited, as an unreadable body mark in a citation context does
-    (BUG-654)."""
+    mark that does not follow a known non-citation prefix ("Table") could not
+    be read, which leaves every entry possibly cited, as such an unreadable
+    body mark does (BUG-654). Any unreadable mark withholds unless a prefix
+    says it is not a citation, so an interval such as "aged [18-65, inclusive]"
+    withholds too: lost recall, never a false finding."""
     numbers: set[int] = set()
     unreadable = False
     remaining = context.max_body_scan_chars
