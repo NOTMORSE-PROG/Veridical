@@ -733,6 +733,20 @@ async def _source_lock_holds(session: AsyncSession, manuscript_id: int) -> bool:
     return purged_at is None
 
 
+def matched_refs(detail: dict | None) -> list[int]:
+    """BUG-674: every Library record a finding matched, in the order saved,
+    each once. Older findings saved only the first; anything not a positive
+    whole number is left out."""
+    detail = detail or {}
+    saved = detail.get("matched_manuscript_ids")
+    values = saved if isinstance(saved, list) else [detail.get("matched_manuscript_id")]
+    refs: list[int] = []
+    for value in values:
+        if type(value) is int and value > 0 and value not in refs:
+            refs.append(value)
+    return refs
+
+
 async def report_out_for_check_run(
     session: AsyncSession, check_run: CheckRun, settings: Settings | None = None
 ) -> ReportOut:
@@ -1319,6 +1333,7 @@ async def flags_for_check_run(session: AsyncSession, check_run_id: int) -> list[
             confirmed_citation_source=flag.confirmed_citation_source,
             problem_kind=problem_kind_of(flag.detail),
             matched_ref=(flag.detail or {}).get("matched_manuscript_id"),
+            matched_refs=matched_refs(flag.detail),
             finding_confirmed=bool(getattr(flag, "finding_confirmed", False)),
             **cited_work(flag.detail or {}, flag.evidence_excerpt),
         )

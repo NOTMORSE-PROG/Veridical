@@ -9288,6 +9288,11 @@
   .signal-fact-rows > div { display: grid; grid-template-columns: minmax(var(--signal-fact-row-label-min), var(--signal-fact-row-label-max)) minmax(0, 1fr); gap: var(--signal-space-4); padding-block: var(--signal-space-3); border-block-start: var(--signal-border-hairline) solid var(--color-signal-border); }
   .signal-fact-rows > div:first-child { border-block-start: 0; padding-block-start: var(--signal-space-1); }
   .signal-fact-rows dt { font-weight: var(--signal-weight-semibold); }
+  /* BUG-674: one link per matching Library record, stacked so they line up. */
+  /* One column as wide as the widest link, so every link ends at the same edge. */
+  .signal-matched-records { display: grid; grid-template-columns: minmax(0, max-content); gap: var(--signal-space-2); margin: 0; padding: 0; list-style: none; }
+  .signal-matched-records .signal-button { inline-size: 100%; }
+  .signal-matched-records__count { margin: 0; font-weight: var(--signal-weight-semibold); }
   .signal-fact-rows dd { margin: 0; max-inline-size: var(--signal-review-detail-measure); }
   @media (max-width: 1023px) {
     .signal-fact-rows > div { grid-template-columns: minmax(0, 1fr); gap: var(--signal-space-1); }
