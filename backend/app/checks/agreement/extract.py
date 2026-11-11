@@ -339,7 +339,8 @@ def _extract_outcome_prose(
     if not cues.outcome_prose_enabled:
         return []
     candidates: list[Statement] = []
-    in_outcomes = False
+    in_outcomes = mixed_run = False
+    opener: TextBlock | None = None
     # A sentence wraps across lines, and a PDF often gives each printed line
     # as its own block. Sentences are therefore read from the run of prose
     # blocks between headings and list items, not from one block at a time,
@@ -376,7 +377,20 @@ def _extract_outcome_prose(
             continue
         if _is_heading_like(text, max_words=heading_max_words):
             _flush()
-            in_outcomes = _heading_section(text, cues) == "outcomes"
+            section = _heading_section(text, cues)
+            if section == "outcomes":
+                # Once Results is opened by a heading that also names another
+                # kind of section, a results heading inside it does not clear that.
+                mixed_run = (in_outcomes and mixed_run) or _names_another_section(text, cues)
+                in_outcomes, opener = True, block
+            elif not (
+                in_outcomes
+                and section == "other"
+                and not mixed_run
+                and _results_subsection(block, opener, cues)
+            ):
+                # An objectives heading always ends Results, whatever its shape.
+                in_outcomes = False
             continue
         if not in_outcomes or _LIST_MARKER.match(text):
             _flush()
@@ -417,6 +431,63 @@ def _continues(run: list[TextBlock], block: TextBlock, wrap_min_width_ratio: flo
     if not previous.bbox or not widths:
         return False
     return previous.bbox[2] - previous.bbox[0] >= wrap_min_width_ratio * max(widths)
+
+
+def _names_another_section(text: str, cues: AgreementCues) -> bool:
+    policy = cues.results_subsection_policy
+    stripped = _strip_numbering(text.strip())
+    return any(re.search(p, stripped, re.I) for p in policy.get("mixed_opener_patterns", ()))
+
+
+def _results_subsection(block: TextBlock, opener: TextBlock | None, cues: AgreementCues) -> bool:
+    """Whether a heading inside Results is one of its own subheadings, so
+    Results reading carries on through it: a numbered child of the heading
+    that opened Results ("4.5" then "4.5.1"), an unnumbered bold heading in
+    clearly smaller type than that heading, a label line ("Budget:") or a note
+    in brackets ("(Appendix 5)"). A new chapter, or a heading naming a section
+    that ends the results (recommendations, limitations, related studies ...),
+    never is. The rules are data (BUG-673)."""
+    policy = cues.results_subsection_policy
+    if not policy.get("enabled") or opener is None:
+        return False
+    text = block.text.strip()
+    chapter = policy.get("new_chapter_pattern")
+    if chapter and re.match(chapter, text, re.I):
+        return False
+    prefix = policy.get("heading_prefix_pattern")
+    bare = re.sub(prefix, "", text, count=1, flags=re.I) if prefix else _strip_numbering(text)
+    if any(re.search(p, bare, re.I) for p in policy.get("end_section_patterns", ())):
+        return False
+    note = policy.get("note_line_pattern")
+    if note and re.fullmatch(note, text):
+        return True
+    number = policy.get("section_number_pattern")
+    child = re.match(number, text) if number else None
+    separator = policy.get("child_separator", ".")
+    label = policy.get("label_line_pattern")
+    # A list label ("2. Class Loss:") is a label; a section number with a
+    # colon ("4.10 Project Plan:") is still a numbered heading.
+    if label and re.search(label, text) and not (child and separator in child.group(1)):
+        return not any(re.search(p, bare, re.I) for p in policy.get("label_exclusion_patterns", ()))
+    if child:
+        if text[child.end() :].lstrip()[:1].islower():
+            # "4.52 interpreted as ..." is a wrapped line of prose, not a heading.
+            return False
+        # A numbered heading is inside Results only as a numbered child of
+        # the heading that opened it; "6.1 Summary ..." under an unnumbered
+        # chapter title is a section of its own, whatever its type size.
+        parent = re.match(number, opener.text.strip())
+        return bool(parent and child.group(1).startswith(parent.group(1) + separator))
+    margin = policy.get("smaller_type_points")
+    bold = policy.get("min_bold_ratio")
+    return bool(
+        margin is not None
+        and bold is not None
+        and block.max_font_size
+        and opener.max_font_size
+        and (block.bold_ratio or 0) >= bold
+        and block.max_font_size <= opener.max_font_size - margin
+    )
 
 
 def _outcome_sentences(run: list[TextBlock], cues: AgreementCues) -> list[Statement]:

@@ -36,6 +36,7 @@ class AgreementCues:
     objective_prose_patterns: tuple[str, ...] = ()
     objective_heading_exclusion_patterns: tuple[str, ...] = ()
     caption_patterns: tuple[str, ...] = ()
+    results_subsection_policy: dict = field(default_factory=dict)
     leading_note_pattern: str | None = None
 
 
@@ -68,5 +69,6 @@ def load_cues(path: Path | None = None) -> AgreementCues:
             raw.get("objective_heading_exclusion_patterns", ())
         ),
         caption_patterns=tuple(raw.get("caption_patterns", ())),
+        results_subsection_policy=raw.get("results_subsection_policy", {}),
         leading_note_pattern=raw.get("leading_note_pattern"),
     )

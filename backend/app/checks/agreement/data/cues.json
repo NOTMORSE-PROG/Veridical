@@ -281,5 +281,45 @@
   "caption_patterns": [
     "^\\s*(?:table|figure|fig\\.|chart|graph)\\s*\\d+(?:\\.\\d+)*[.:]?\\s+(?!\\s)(?!(?:(?:above|below)\\s+)?(?:shows?|showed|presents?|presented|illustrates?|illustrated|reveals?|revealed|indicates?|indicated|summari[sz]e[sd]?|lists?|listed|displays?|displayed|compares?|compared|demonstrates?|demonstrated|contains?|contained|gives?|gave|provides?|provided|reports?|reported|depicts?|depicted|describes?|described|highlights?|highlighted|confirms?|confirmed|suggests?|suggested)\\b)"
   ],
-  "leading_note_pattern": "^\\([^()]{1,40}\\)\\s+(?=[A-Z])"
+  "leading_note_pattern": "^\\([^()]{1,40}\\)\\s+(?=[A-Z])",
+  "_results_subsection_note": "BUG-673 (2026-11-09): a heading inside Results that is one of its own subheadings keeps Results reading on, instead of switching it off like a new section. Measured on the stored dev theses: '4.5.1 System Performance ...' and 'Model Performance Comparison' (MIT) and '5.2.1 Training Loss' (AugmentedRL) cut off real results. A subheading is a numbered child of the heading that opened Results, an unnumbered bold heading at least smaller_type_points smaller than it, a label line or a note in brackets; only headings read as neither objectives nor results are considered. A heading matching end_section_patterns ends Results unless it is itself read as a results heading first, and nothing extends Results opened by a heading matching mixed_opener_patterns. Same-size unnumbered headings ('Major Finding 1: ...') and table header cells ('Total', 'Mean') are not recognised: precision first.",
+  "results_subsection_policy": {
+    "enabled": true,
+    "section_number_pattern": "^\\s*(\\d+(?:\\.\\d+)*)\\.?\\s",
+    "smaller_type_points": 1.5,
+    "min_bold_ratio": 0.5,
+    "label_line_pattern": "^[^:\\n]{1,40}:\\s*$",
+    "end_section_patterns": [
+      "^(?:references|bibliography|appendi(?:x|ces)|methodology|methods|research\\s+design|literature|theoretical|conceptual|synthesis|acknowledge?ments?|abstract|table\\s+of\\s+contents|list\\s+of\\s+(?:tables|figures))\\b",
+      "^(?:background|introduction)(?:\\s+of\\s+the\\s+(?:study|research|project))?\\s*:?$",
+      "\\b(?:recommend\\w*|suggest\\w*|(?:de)?limitations?|improvements?|enhancements?|next\\s+steps?)\\b",
+      "\\brelated\\s+(?:works?|studies|systems|literature)\\b",
+      "\\bexisting\\s+(?:systems?|studies|works?|applications?)\\b",
+      "\\bimplications?\\b",
+      "\\bcontributions?\\s+to\\b",
+      "\\boverview\\b",
+      "\\bdiscussions?\\b",
+      "\\b(?:prior|previous|earlier|cited)\\b",
+      "\\bfuture\\b",
+      "\\blessons?\\s+learned\\b"
+    ],
+    "child_separator": ".",
+    "note_line_pattern": "\\([^()\\n]{1,40}\\)",
+    "_mixed_opener_note": "Results opened by a heading that also names another kind of section is never extended: its subsections may be discussion, implications or recommendations. A results heading inside that run does not lift this.",
+    "mixed_opener_patterns": [
+      "\\bdiscussions?\\b",
+      "\\bfuture\\s+(?:work|research|studies|directions)\\b",
+      "\\bimplications?\\b",
+      "\\brecommendations?\\b"
+    ],
+    "_end_section_note": "A heading that names a section ending the results. Recommendations, suggestions, limitations, improvements, enhancements and next steps end it wherever they appear in the heading, in any word form ('Recommended Actions:', 'Areas for Improvement', 'Scope and Delimitation'), as do distinctive phrases. Other section words count at the start of the heading, after its numbering or bullet; 'Background' and 'Introduction' count only as the whole heading, so 'Background Noise Reduction' stays inside Results. A 'Chapter N' or 'Part N' heading always ends it.",
+    "label_exclusion_patterns": [
+      "^(?:notes?|sources?|legend|key|remarks?)\\s*:",
+      "\\bsources?\\b"
+    ],
+    "_label_note": "A label line keeps Results on only when it names a result ('Budget:', '1. Box Loss:'); a note, source or legend line does not ('1. Note:', 'Data Source:'). A label with a section number ('4.10 Project Plan:') is judged as a numbered heading.",
+    "heading_prefix_pattern": "^\\s*(?:[\\u2022\\u25cf\\u25aa\\u2023\\u25e6\\u2013-]\\s*|\\(?(?:\\d+(?:\\.\\d+)*\\.?|[ivxlc]+|[a-z])[.)]\\s+|\\d+(?:\\.\\d+)*\\s+)",
+    "_heading_prefix_note": "Removed from a heading before end_section_patterns and label_exclusion_patterns are matched: a bullet, '4.5.3. ', '4.5.3 ', 'A. ', 'IV. ', '(a) ', '1) '. A 'Chapter N' or 'Part N' heading is caught first by new_chapter_pattern.",
+    "new_chapter_pattern": "^\\s*(?:chapter|part)\\s+(?:\\d+|[ivxlc]+|one|two|three|four|five|six|seven|eight|nine|ten)\\b"
+  }
 }
