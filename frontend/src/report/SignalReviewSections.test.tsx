@@ -178,8 +178,8 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
     renderSelected(item.criterion_id);
     await screen.findByRole("heading", { name: item.criterion_text });
     await waitFor(() => expect(fetch.mock.calls.some(([url]) => String(url).endsWith("/evidence"))).toBe(true));
-    if (epoch === 4) expect(await screen.findByRole("button", { name: "Open original page: page 3" })).toBeEnabled();
-    else expect(screen.queryByRole("button", { name: "Open original page: page 3" })).not.toBeInTheDocument();
+    if (epoch === 4) expect(await screen.findByRole("button", { name: "Open original page: PDF p. 3" })).toBeEnabled();
+    else expect(screen.queryByRole("button", { name: "Open original page: PDF p. 3" })).not.toBeInTheDocument();
     expect(screen.getByText(/The same quotation retained across revisions/)).toBeVisible();
     expect(fetch.mock.calls.some(([url]) => String(url).includes("/source-file"))).toBe(false);
   });
@@ -291,7 +291,7 @@ describe("SignalEscalatedPanel / SignalResolutionCard", () => {
     expect(screen.queryByText(/Split vote:/)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Accept AI suggestion/ })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Exemplary" })).toBeEnabled();
-    expectSelectedSource(screen.getByRole("link", { name: /Open in manuscript: page 3\./ }), item.criterion_id, "page 3");
+    expectSelectedSource(screen.getByRole("link", { name: /Open in manuscript: PDF p. 3\./ }), item.criterion_id, "page 3");
     if (status === "incomplete") expect(screen.getByText(/separate evidence review did not finish/)).toBeInTheDocument();
   });
   afterEach(() => vi.unstubAllGlobals());

@@ -97,7 +97,7 @@ function RecordedPageSession({ checkRunId, snapshot, reference, cachedPage, cont
         <Button variant="secondary" disabled={query.isFetching} onClick={() => { void query.refetch(); }}>Retry original page</Button></div>)}
     {current && wholeDocument && <p className="signal-field-hint">This comparison covers the whole document, so no single page image applies. Read the passage in the manuscript beside this review.</p>}
     {current && !wholeDocument && <figure className={enlarged ? "signal-evidence-dialog__page" : "signal-criterion-packet__preview"}>
-      {current.image_data_url ? <img src={current.image_data_url} alt={`Original source, ${instructorAnchor(reference.anchor ?? "")}`} /> : <p>No original-page image is available for this saved evidence.</p>}
+      {current.image_data_url ? <img src={current.image_data_url} alt={`Original source, ${instructorAnchor(reference.anchor ?? "", "long")}`} /> : <p>No original-page image is available for this saved evidence.</p>}
       <figcaption>{current.caption}</figcaption>
     </figure>}
   </>;
@@ -106,7 +106,7 @@ function RecordedPageSession({ checkRunId, snapshot, reference, cachedPage, cont
     <Button variant="secondary" aria-expanded={preview} onClick={() => setPreview(value => !value)}>{preview ? "Hide" : "Show"} page preview</Button>
     {preview && content(false)}
     {open && owner.isCurrent() && context && <CriterionEvidenceDialog run={checkRunId} request={{ snapshotId: snapshot, reference, actionId }} context={context} onClose={() => setOpen(false)} />}
-    {open && owner.isCurrent() && !context && <Dialog title={`Original source: ${instructorAnchor(reference.anchor ?? "") || "Saved source"}`} wide onClose={() => setOpen(false)}>
+    {open && owner.isCurrent() && !context && <Dialog title={`Original source: ${instructorAnchor(reference.anchor ?? "", "long") || "Saved source"}`} wide onClose={() => setOpen(false)}>
       <blockquote>{reference.quote}</blockquote><p>{instructorAnchor(reference.anchor ?? "")}</p>{content(true)}
     </Dialog>}
   </div>;

@@ -10,6 +10,7 @@ import { instructorAnchor } from "../domain/sourceAnchor";
 import { PassagePairPanel } from "./PassagePairPanel";
 import { COMPARISON_EXCERPT_PREVIEW_LENGTH } from "../config/ui";
 import { COMPARISON_LEAD_COPY, isOptionalComparisonLead } from "../domain/comparisonLeadIdentity";
+import { pdfPage } from "../domain/sourceAnchor";
 
 function SpinnerIcon() {
   return (
@@ -239,7 +240,7 @@ export function ReuseExplorePanel({
                         pair={match}
                         ownAnchor={
                           match.own_region.page !== null
-                            ? `p. ${match.own_region.page}`
+                            ? pdfPage(match.own_region.page)
                             : match.own_region.paragraph !== null
                               ? `Extracted paragraph ${match.own_region.paragraph + 1}`
                               : null

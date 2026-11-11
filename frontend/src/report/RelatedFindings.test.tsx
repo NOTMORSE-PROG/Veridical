@@ -40,7 +40,7 @@ describe("grades beside findings on the same pages", () => {
   it("says the grade did not use the findings and that readiness counts them", async () => {
     vi.stubGlobal("fetch", stubFetchByPath({ "/check-runs/3/flags": [flag(), flag({ id: 2 })] }));
     renderWithProviders(<SignalCriteriaResults checkRunId={3} results={[graded()]} />, { route: "/report/3" });
-    expect(await screen.findByText("2 integrity findings are on the page this grade quoted (p. 45).")).toBeInTheDocument();
+    expect(await screen.findByText("2 integrity findings are on the page this grade quoted (PDF p. 45).")).toBeInTheDocument();
     expect(screen.getByText("This grade does not use integrity findings. The overall readiness does count them.")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Inspect these findings for Quality of References" })).toHaveAttribute("href", "/report/3?section=findings");
   });

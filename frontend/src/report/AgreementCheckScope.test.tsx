@@ -43,7 +43,7 @@ it("lists the results set aside behind a disclosure, eight at a time, with uniqu
   expect(screen.getByRole("heading", { name: "Results set aside" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "Result 1 of 10, literature review" })).toBeInTheDocument();
   expect(screen.getByText("Showing 8 of 10 results set aside.")).toBeInTheDocument();
-  const link = screen.getByRole("link", { name: "Open location, p. 20, set-aside result 1 of 10" });
+  const link = screen.getByRole("link", { name: "Open location, PDF p. 20, set-aside result 1 of 10" });
   expect(link.getAttribute("href")).toContain("/report/7/document?anchor=p.%2020");
   fireEvent.click(screen.getByRole("button", { name: "Show 2 more" }));
   expect(screen.getByRole("heading", { name: "Result 9 of 10, literature review" })).toHaveFocus();

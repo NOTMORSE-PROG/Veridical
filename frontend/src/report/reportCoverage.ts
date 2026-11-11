@@ -10,6 +10,7 @@ import { originalityCoverageNote } from "./originalityCoverage";
 import { createElement } from "react";
 import { pageRanges } from "../domain/criterionSourceCoverage";
 import { PageRanges } from "./PageRanges";
+import { PDF_PAGE_NUMBERING_HINT, pdfPageList } from "../domain/sourceAnchor";
 
 const INTEGRITY_LABEL: Record<IntegrityCheckStatusOut["check_kind"], string> = {
   internal_agreement: "Internal agreement",
@@ -71,16 +72,16 @@ function withUnreadPages(item: CoverageStatementItem, status: IntegrityCheckStat
       ? `${noun(count)} could not be read reliably. This record does not say which; check the manuscript yourself.`
       : pages.length === allUnread.length
         ? `${noun(pages.length)} could not be read reliably, so this check left ${pages.length === 1 ? "it" : "them"} out. ${pages.length === 1 ? "It is" : "They are"} listed above, under ${UNREAD_PAGES_COPY.label}.`
-        : `${pages.length === 1 ? "Page" : "Pages"} ${pageRanges(pages)} could not be read reliably, so this check left ${pages.length === 1 ? "it" : "them"} out.`;
+        : `${pdfPageList(pageRanges(pages), pages.length === 1)} could not be read reliably, so this check left ${pages.length === 1 ? "it" : "them"} out.`;
   return { ...item, subIssues: [...(item.subIssues ?? []), line] };
 }
 
 export const UNREAD_PAGES_COPY = {
-  label: "Pages not read",
+  label: "PDF pages not read",
   detail: (pages: number[]) => [
-    `${pages.length === 1 ? "Page" : "Pages"} `,
+    `${pages.length === 1 ? "PDF page" : "PDF pages"} `,
     createElement(PageRanges, { key: "pages", pages }),
-    ` could not be read in a reliable order, so the checks listed below left ${pages.length === 1 ? "it" : "them"} out. Open ${pages.length === 1 ? "it" : "each one"} in manuscript review to check ${pages.length === 1 ? "it" : "them"} yourself.`,
+    ` could not be read in a reliable order, so the checks listed below left ${pages.length === 1 ? "it" : "them"} out. Open ${pages.length === 1 ? "it" : "each one"} in manuscript review to check ${pages.length === 1 ? "it" : "them"} yourself. ${PDF_PAGE_NUMBERING_HINT}`,
   ],
   detailsLabel: "links to the pages not read",
 };
@@ -96,7 +97,7 @@ function unreadPagesItem(statuses: IntegrityCheckStatusOut[], checkRunId: number
     detail: UNREAD_PAGES_COPY.detail(pages),
     detailsLabel: UNREAD_PAGES_COPY.detailsLabel,
     sources: pageRanges(pages).split(", ").map((range) => ({
-      label: `${range.includes("-") ? "Pages" : "Page"} ${range}`,
+      label: pdfPageList(range, !range.includes("-")),
       to: `/report/${checkRunId}/document?anchor=${encodeURIComponent(`page ${range.split("-")[0]}`)}`,
     })),
   };

@@ -6,7 +6,9 @@ describe("source positions and finding-specific guidance", () => {
   it("renders stored zero-based DOCX ordinals one-based without changing links", () => {
     expect(instructorAnchor("paragraph 70")).toBe("Extracted paragraph 71");
     expect(instructorAnchor("¶0")).toBe("Extracted paragraph 1");
-    expect(instructorAnchor("p. 4")).toBe("p. 4");
+    expect(instructorAnchor("p. 4")).toBe("PDF p. 4");
+    expect(instructorAnchor("page 45")).toBe("PDF p. 45");
+    expect(instructorAnchor("page 45", "long")).toBe("PDF page 45");
   });
   it("does not present an unsafe ordinal as a valid location", () => {
     expect(instructorAnchor("paragraph 99999999999999999999")).toContain("unavailable");
