@@ -53,6 +53,18 @@ class EvidenceManifestOut(BaseModel):
     references: tuple[PublicEvidenceReferenceOut, ...]
 
 
+class EvidenceMarkOut(BaseModel):
+    """Where a drawn mark sits on the returned image, as fractions of its
+    width and height (0 to 1). A position only, never text."""
+
+    model_config = ConfigDict(frozen=True, strict=True, extra="forbid")
+
+    x: float = Field(ge=0, le=1)
+    y: float = Field(ge=0, le=1)
+    width: float = Field(ge=0, le=1)
+    height: float = Field(ge=0, le=1)
+
+
 class EvidencePageOut(BaseModel):
     model_config = ConfigDict(frozen=True, strict=True, extra="forbid")
 
@@ -61,6 +73,9 @@ class EvidencePageOut(BaseModel):
     image_data_url: str | None
     image_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
     caption: str
+    # BUG-684: where the marks are on `image_data_url`, so the page can open
+    # scrolled to the excerpt. Empty without an image or a mark.
+    marks: tuple[EvidenceMarkOut, ...] = ()
 
 
 class EvidenceLocationOut(BaseModel):
@@ -300,6 +315,10 @@ async def _admitted_evidence_page(session, run, reference_id, snapshot_id, setti
             "data:image/png;base64," + base64.b64encode(image.image_png).decode("ascii")
             if image.image_png is not None
             else None
+        ),
+        marks=tuple(
+            EvidenceMarkOut(x=x, y=y, width=w, height=h)
+            for x, y, w, h in (image.marks if image.image_png is not None else ())
         ),
     )
 

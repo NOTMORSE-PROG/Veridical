@@ -171,8 +171,12 @@ def _render_page_png(
     settings: Settings,
     box_coordinates: Literal["legacy_region", "pdf_points"] = "legacy_region",
     print_content_width: float | None = None,
+    marks: list[tuple[float, float, float, float]] | None = None,
 ) -> bytes:
     """Render the visible source unchanged, with an optional external notice.
+
+    A caller that passes `marks` gets each drawn mark's rectangle in image
+    pixels (x0, y0, x1, y1), the same numbers used to draw it.
 
     Only finding marks shared by all consumers are added. The original page
     is rasterized with its own layer/annotation state, then marks are drawn
@@ -186,6 +190,7 @@ def _render_page_png(
             settings=settings,
             box_coordinates=box_coordinates,
             print_content_width=print_content_width,
+            marks=marks,
         )
     finally:
         # Each rendered page decodes its images into MuPDF's process-wide
@@ -201,6 +206,7 @@ def _render_marked_page(
     settings: Settings,
     box_coordinates: Literal["legacy_region", "pdf_points"],
     print_content_width: float | None,
+    marks: list[tuple[float, float, float, float]] | None = None,
 ) -> bytes:
     planned_page_image_pixels(
         page,
@@ -228,6 +234,15 @@ def _render_marked_page(
                 else _to_mupdf_rect(bbox, page.rect.height)
             )
             rect = native * transform
+            if marks is not None:
+                marks.append(
+                    (
+                        max(rect.x0, 0),
+                        max(rect.y0, 0),
+                        min(rect.x1, source.width),
+                        min(rect.y1, source.height),
+                    )
+                )
             border = (rect + (-stroke / 2, -stroke / 2, stroke / 2, stroke / 2)).irect
             for edge in (
                 (border.x0, border.y0, border.x1, border.y0 + stroke),
