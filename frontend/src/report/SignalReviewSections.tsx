@@ -758,6 +758,10 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, sourceTarget, 
   const saving = pending?.saving ?? false;
   const draftCurrent = pending ? review.isDraftCurrent(pending) : false;
   const [detailsOpen, setDetailsOpen] = useState(false);
+  // BUG-655: Cancel with a typed comment asks before throwing it away.
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const keepEditingRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => { if (confirmDiscard) keepEditingRef.current?.focus(); }, [confirmDiscard]);
   const reasonInvalid = attempted && requiresReason && reason.trim().length < RESOLUTION_REASON_MIN_LENGTH;
   const reasonErrorId = `signal-resolution-reason-${item.check_result_id}`;
   const criterionHeadingRef = useRef<HTMLHeadingElement>(null);
@@ -779,7 +783,14 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, sourceTarget, 
 
   function cancel(trigger: HTMLElement) {
     if (saving) return;
+    if (reason.trim() && !confirmDiscard) { setConfirmDiscard(true); return; }
+    setConfirmDiscard(false);
     followAction(trigger, () => review.cancel(item.check_result_id));
+  }
+
+  function keepEditing() {
+    setConfirmDiscard(false);
+    reasonRef.current?.focus();
   }
 
   function confirm() {
@@ -972,7 +983,12 @@ function SignalResolutionCard({ item, checkRunId, sharedReasonId, sourceTarget, 
           {saving && <p role="status">{REVIEW_DRAFT_COPY.saving}</p>}
           {Boolean(pending.error) && <Alert title="Saving could not be confirmed" tone="error" role="alert">Your entered reason is kept. Review the current criterion before trying again.</Alert>}
 
-          <div>{draftCurrent && <Button variant="secondary" disabled={saving || pending?.uncertainRevision !== undefined} onClick={event => cancel(event.currentTarget)}>Cancel</Button>}<Button data-criterion-confirm variant="brand" disabled={saving || !draftCurrent} aria-describedby={`${describedBy}${excluding ? ` ${exclusionConsequenceId}` : ""}`} busy={saving} onClick={confirm}>{excluding ? CRITERION_EXCLUSION_COPY.confirm : ordinaryGrade ? "Save grade" : "Confirm resolution"}</Button></div>
+          {confirmDiscard && draftCurrent && <div className="signal-copy-flow signal-discard-confirm" role="group" aria-labelledby={`signal-discard-${item.check_result_id}`}
+            onKeyDown={event => { if (event.key === "Escape") { event.stopPropagation(); keepEditing(); } }}>
+            <p id={`signal-discard-${item.check_result_id}`}><strong>Discard your {requiresReason ? "reason" : "comment"}?</strong> It has not been saved.</p>
+            <div><Button ref={keepEditingRef} variant="secondary" onClick={keepEditing}>Keep editing</Button><Button variant="quiet" onClick={event => cancel(event.currentTarget)}>Discard and cancel</Button></div>
+          </div>}
+          <div>{draftCurrent && !confirmDiscard && <Button variant="secondary" disabled={saving || pending?.uncertainRevision !== undefined} onClick={event => cancel(event.currentTarget)}>Cancel</Button>}<Button data-criterion-confirm variant="brand" disabled={saving || !draftCurrent || confirmDiscard} aria-describedby={`${describedBy}${excluding ? ` ${exclusionConsequenceId}` : ""}`} busy={saving} onClick={confirm}>{excluding ? CRITERION_EXCLUSION_COPY.confirm : ordinaryGrade ? "Save grade" : "Confirm resolution"}</Button></div>
         </div>
       )}
       </section>
@@ -1046,6 +1062,11 @@ export function SignalEscalatedPanel({ checkRunId, focused = false, sourceTarget
     setAnnouncement(completion.message);
   }, [completion]);
 
+  // BUG-656: after a save the next criterion is one step away, or the list
+  // when none is left.
+  const nextAfterSave = items === undefined ? null : items.length
+    ? <ActionLink variant="brand" state={location.state} to={reviewLink(items[0].criterion_id)} onClick={event => select(event, items[0].criterion_id)}><span className="signal-receipt-next__label">Next ungraded: {items[0].criterion_text}</span></ActionLink>
+    : <ActionLink variant="secondary" direction="back" state={location.state} to={reviewLink()} onClick={event => select(event)}>Back to the criteria list</ActionLink>;
   return (
     <section id="review-criteria" tabIndex={-1} data-tour="escalated-panel" className={focused ? "signal-review-section signal-review-section--attention signal-selected-criterion signal-selected-criterion--focused" : selectedView ? "signal-review-section signal-selected-criterion" : "signal-review-section signal-review-section--attention"} aria-labelledby="escalated-heading">
       <div className={selectedView && !focused ? "sr-only" : "signal-review-section__heading"}><div>{focused && !review.decision && <p className="signal-section-kicker">Rubric review</p>}{review.decision && <p className="signal-section-kicker">Preserved assessment</p>}<h2 id="escalated-heading" ref={headingRef} tabIndex={-1}>{review.decision === "returned" ? "Unresolved at time of return" : review.decision ? "Unresolved at time of decision" : "Criteria needing your judgment"}</h2></div>{(!selectedView || focused) && <span>{reviewListStatus}</span>}</div>
@@ -1053,18 +1074,18 @@ export function SignalEscalatedPanel({ checkRunId, focused = false, sourceTarget
         : <p id={`signal-review-instructions-${checkRunId}`} className={selectedView && !focused ? "sr-only" : "signal-review-section__intro"}>{selectedView ? "Read this criterion beside the manuscript, choose a grade, then save. Comments are optional for ordinary grades." : "Open a criterion to review its recorded passages beside the manuscript and record your judgment."} {!selectedView && <span>{RECORDED_GRADE_BASIS.qualification}</span>}</p>}
       {!selectedView && !assessmentContextExternal && <ReportAssessmentContext notices={review.assessmentNotices ?? []} />}
       <p ref={announcementRef} tabIndex={-1} aria-live="polite" className="signal-live-region">{announcement}</p>
-      {!accessUnavailable && !savedAccessExternal && <SavedJudgmentAccess checkRunId={checkRunId} hideEmpty />}
+      {!accessUnavailable && !savedAccessExternal && <SavedJudgmentAccess checkRunId={checkRunId} hideEmpty next={nextAfterSave} />}
       {selectedView && !focused && <InWorkspaceBar>
         <nav aria-label="Criterion review" className="signal-criterion-navigation signal-review-bar__nav">
           <ActionLink variant="secondary" direction="back" className="signal-workspace-back" state={location.state} to={reviewLink()} onClick={event => select(event)}>Back to criteria</ActionLink>
           <span role="status" className="signal-field-hint">{items && selectedIndex >= 0 && <><span>Criterion {selectedIndex + 1} of {items.length}</span>{" · "}</>}<span>{reviewListStatus}</span></span>
-          {selectedIndex > 0 && <ActionLink variant="secondary" aria-label="Previous criterion" state={location.state} to={reviewLink(items![selectedIndex - 1].criterion_id)} onClick={event => select(event, items![selectedIndex - 1].criterion_id)}>Previous</ActionLink>}
+          {selectedIndex > 0 && <ActionLink variant="secondary" direction="back" aria-label="Previous criterion" state={location.state} to={reviewLink(items![selectedIndex - 1].criterion_id)} onClick={event => select(event, items![selectedIndex - 1].criterion_id)}>Previous</ActionLink>}
           {items && selectedIndex >= 0 && selectedIndex < items.length - 1 && <ActionLink variant="secondary" aria-label="Next criterion" state={location.state} to={reviewLink(items[selectedIndex + 1].criterion_id)} onClick={event => select(event, items[selectedIndex + 1].criterion_id)}>Next</ActionLink>}
         </nav>
       </InWorkspaceBar>}
       {selectedView && focused && <nav aria-label="Criterion review" className="signal-criterion-navigation">
         {!focused && <ActionLink variant="quiet" state={location.state} to={reviewLink()} onClick={event => select(event)}>Back to criteria</ActionLink>}
-        {selectedIndex > 0 ? <ActionLink variant={focused ? "quiet" : "secondary"} aria-label="Previous criterion" state={location.state} to={reviewLink(items![selectedIndex - 1].criterion_id)} onClick={event => select(event, items![selectedIndex - 1].criterion_id)}>Previous</ActionLink> : focused && <Button variant={focused ? "quiet" : "secondary"} aria-label="Previous criterion" disabled>Previous</Button>}
+        {selectedIndex > 0 ? <ActionLink variant={focused ? "quiet" : "secondary"} direction="back" aria-label="Previous criterion" state={location.state} to={reviewLink(items![selectedIndex - 1].criterion_id)} onClick={event => select(event, items![selectedIndex - 1].criterion_id)}>Previous</ActionLink> : focused && <Button variant={focused ? "quiet" : "secondary"} aria-label="Previous criterion" disabled>Previous</Button>}
         <span role="status" className="signal-field-hint">{focused ? selectedIndex >= 0 ? `${selectedIndex + 1} of ${items?.length ?? 0} remaining` : selectedRecord ? "Grade recorded" : reviewListStatus : <>{items && selectedIndex >= 0 && <><span>Criterion {selectedIndex + 1} of {items.length}</span>{" · "}</>}<span>{reviewListStatus}</span></>}</span>
         {items && selectedIndex >= 0 && selectedIndex < items.length - 1 ? <ActionLink variant={focused ? "quiet" : "secondary"} aria-label="Next criterion" state={location.state} to={reviewLink(items[selectedIndex + 1].criterion_id)} onClick={event => select(event, items[selectedIndex + 1].criterion_id)}>Next</ActionLink> : focused && items?.length && selectedRecord ? <ActionLink variant={focused ? "quiet" : "secondary"} aria-label="Next criterion" state={location.state} to={reviewLink(items[0].criterion_id)} onClick={event => select(event, items[0].criterion_id)}>Next</ActionLink> : focused && <Button variant={focused ? "quiet" : "secondary"} aria-label="Next criterion" disabled>Next</Button>}
       </nav>}
@@ -1087,7 +1108,11 @@ export function SignalEscalatedPanel({ checkRunId, focused = false, sourceTarget
         : !isPending && fetchStatus === "idle" && !isError && <div className="signal-attached-flow" role="status">
           <h3 tabIndex={-1}>{selectedRecord ? selectedRecord.text : "Criterion not available"}</h3>
           <p>{selectedRecord ? "This criterion is no longer unresolved. Review its recorded outcome before making another judgment." : "That criterion is not in this report’s unresolved review list. Choose a criterion from the list."}</p>
-          {selectedRecord && <Button variant="secondary" onClick={event => review.viewSaved(selectedRecord.criterion_id, event.currentTarget)}>Review recorded judgment</Button>}
+          {selectedRecord && <div className="signal-control-cluster">
+            {/* Right after a save the receipt above already offers the way on. */}
+            {!completion && nextAfterSave}
+            <Button variant="secondary" onClick={event => review.viewSaved(selectedRecord.criterion_id, event.currentTarget)}>Review recorded judgment</Button>
+          </div>}
         </div>
         : <>
           {hasItems && <div className="signal-criterion-list">{items?.map(item => <article key={item.check_result_id} className="signal-criterion-list__row">
