@@ -39,7 +39,10 @@ class handler(BaseHTTPRequestHandler):
         self.wfile.write(payload)
 
     def do_GET(self):
-        self.respond(200, {"service": "native-compute", "version": "native-v1"})
+        # The commit lets a deploy check and the smoke test confirm the helper
+        # runs the same code as the API; it is set on the deployment itself.
+        commit = Settings(_env_file=None).deployed_commit or None
+        self.respond(200, {"service": "native-compute", "version": "native-v1", "commit": commit})
 
     def do_POST(self):
         settings = Settings(_env_file=None)
@@ -67,9 +70,7 @@ class handler(BaseHTTPRequestHandler):
                 200,
                 {
                     "receipt": receipt,
-                    "signature": signature(
-                        canonical_json(receipt), settings.native_compute_secret
-                    ),
+                    "signature": signature(canonical_json(receipt), settings.native_compute_secret),
                 },
             )
         except (FileMalformedError, FileTooLargeError) as exc:
@@ -85,9 +86,7 @@ class handler(BaseHTTPRequestHandler):
                 200,
                 {
                     "receipt": receipt,
-                    "signature": signature(
-                        canonical_json(receipt), settings.native_compute_secret
-                    ),
+                    "signature": signature(canonical_json(receipt), settings.native_compute_secret),
                 },
             )
         except Exception:

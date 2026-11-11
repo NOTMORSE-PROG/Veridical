@@ -128,6 +128,10 @@ jobs:
     concurrency:
       group: deploy-backend
       cancel-in-progress: false
+    outputs:
+      # The commit production was verified on; the helper deploy never goes
+      # ahead of it.
+      commit: ${{ steps.decide.outputs.target }}
     env:
       API_URL: ${{ vars.PROD_API_URL || 'https://veridical-api.onrender.com' }}
       RENDER_SERVICE_ID: ${{ vars.RENDER_SERVICE_ID }}
@@ -215,3 +219,76 @@ jobs:
           done
           echo "::error::production does not serve the latest backend commit $target"
           exit 1
+
+  helper:
+    # BUG-531: the native-compute helper runs its own bundled copy of
+    # backend/app and was deployed by hand, so merges reached the API but not
+    # the helper. On every pull request and push this stages exactly what would
+    # be deployed and runs both gates (imports with only the helper's pins, and
+    # three signed jobs through the real handler, accepted by the API's own
+    # client): the dry run of the deploy.
+    runs-on: ubuntu-latest
+    env:
+      HELPER_URL: ${{ vars.HELPER_URL || 'https://veridical-native-compute.vercel.app/api/native_extract' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          enable-cache: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Backend environment for the gates
+        working-directory: backend
+        run: uv sync --frozen
+      - name: Dry run of the helper deploy (stage, gates, decision; never deploys)
+        run: bash compute-helper/deploy.sh --dry-run
+        env:
+          BASE_PYTHON: python
+          WORK: ${{ runner.temp }}/helper-dry-run
+          # On a pull request the target is this branch's own helper files.
+          TARGET_REF: ${{ github.event_name == 'pull_request' && 'HEAD' || 'origin/main' }}
+
+  deploy-helper:
+    # Deploys the helper from main once the API is live on the same backend/app
+    # (an old API with a new helper can be unsafe). Off until the repository
+    # variable HELPER_DEPLOY_ENABLED is "true"; until then the helper job's
+    # dry run is the only part that runs.
+    needs: [helper, deploy-backend]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.HELPER_DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-helper
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          enable-cache: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - name: Backend environment for the gates
+        working-directory: backend
+        run: uv sync --frozen
+      - name: Gate, deploy, verify, promote and verify the helper
+        run: |
+          git fetch --quiet origin main
+          bash compute-helper/deploy.sh
+        env:
+          BASE_PYTHON: python
+          WORK: ${{ runner.temp }}/helper-deploy
+          API_URL: ${{ vars.PROD_API_URL || 'https://veridical-api.onrender.com' }}
+          API_COMMIT: ${{ needs.deploy-backend.outputs.commit }}
+          HELPER_URL: ${{ vars.HELPER_URL || 'https://veridical-native-compute.vercel.app/api/native_extract' }}
+          HELPER_ALIAS: ${{ vars.HELPER_ALIAS || 'veridical-native-compute.vercel.app' }}
+          VERCEL_TOKEN: ${{ secrets.HELPER_VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ vars.HELPER_VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ vars.HELPER_VERCEL_PROJECT_ID }}
